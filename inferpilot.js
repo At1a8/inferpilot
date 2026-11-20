@@ -80,7 +80,7 @@ const timeoutFor = (role) => GRANTED_MS[role]
   || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
-// One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
+// One task per GPU set (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
 // its longest agent call has died, and its lock may be taken over.
 const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
 const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;

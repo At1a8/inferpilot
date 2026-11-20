@@ -14,7 +14,8 @@ Inputs: `extra_gates` (mode gates such as `issue_repro` or `failing_test`), `rou
 (failures already proven pre-existing in this run), `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit).
 
-1. Launch the feature build and the baseline with the task's `server_script` as Setup did (the feature
+1. Check the pinned GPUs are free (`gpu_status.py --check`, `env_hygiene.md`), then launch the feature
+   build and the baseline with the task's `server_script` as Setup did (the feature
    arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; the run's own launch script when the
    task has none); confirm the effective flags from the `server_args=` line of each log.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling

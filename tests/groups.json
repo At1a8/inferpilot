@@ -4,7 +4,7 @@
     "shared": ["runtime/*", "tests/run_all.sh", "tests/groups.py", "tests/groups.json", "tests/dry_run.mjs", "tests/fixtures/*", ".github/workflows/*", ".github/actions/*"],
     "dry_run": ["agents", "setup", "lock", "image", "stop_after", "implement", "rollback", "review", "pr", "phases", "routes", "roles", "skills", "schemas", "arguments", "intake", "groups", "next", "spinoff"],
     "unittest": ["test_bootstrap", "test_claude_code_rules", "test_docs", "test_groups", "test_hygiene", "test_readme", "test_templates",
-                 "test_scripts.BaselineCacheTest", "test_scripts.LatestImageTest", "test_scripts.LeakScanTest", "test_scripts.ProposeKnowledgeTest", "test_scripts.RunInTmuxTest", "test_scripts.RunLockTest"]
+                 "test_scripts.BaselineCacheTest", "test_scripts.GpuStatusTest", "test_scripts.LatestImageTest", "test_scripts.LeakScanTest", "test_scripts.ProposeKnowledgeTest", "test_scripts.RunInTmuxTest", "test_scripts.RunLockTest"]
   },
   "feature": {
     "about": "bring an upstream feature to AMD",
