@@ -55,7 +55,7 @@ step "syntax: inferpilot.js, runtime, tests" tests/syntax.sh js
 step "syntax: shell scripts" tests/syntax.sh sh
 step "syntax: Python" tests/syntax.sh py
 if command -v shellcheck >/dev/null; then
-  step "shellcheck: shell scripts" shellcheck -S warning scripts/*.sh tests/*.sh
+  step "shellcheck: shell scripts" shellcheck -S warning scripts/*.sh templates/harness/*.sh tests/*.sh
 else
   echo "skip  shellcheck: not installed (CI's runners have it)"
 fi

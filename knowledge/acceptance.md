@@ -42,7 +42,10 @@ Two rules hold across the dimensions:
   compression), more runs or another budget by name; a determinism task, token equality (§1.4). No role
   decides it on its own: the Intake keeps what the user said in `goal`, and every role reads it there.
 - **Harness:** evalscope for every set, through `scripts/eval_accuracy.sh`, every run sampled afresh
-  (never evalscope's cache).
+  (never evalscope's cache). It runs through InferPilot's `accuracy.sh`, with the same settings for
+  every arm: the task's, else those the feature's source tests with (thinking off for PARD-2), else
+  `eval_accuracy.sh`'s own (`../templates/task_definition.md` §1.2). A task that brings an
+  `accuracy_script` is measured with it instead, as given, on the sets it measures.
 - **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3),
   reasoning (GPQA, AIME), tool calls, multimodal input.
 - **Parity with a reference**, for a new model, a new kernel or a refactor: logprobs or the KL

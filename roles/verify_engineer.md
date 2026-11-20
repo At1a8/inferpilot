@@ -24,15 +24,18 @@ Inputs: `extra_gates` (mode gates such as `issue_repro` or `failing_test`), `rou
 (failures already proven pre-existing in this run), `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit).
 
-1. Launch the feature build and the baseline with the task's `server_script` as Setup did (the feature
-   arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; the run's own launch script when the
-   task has none); confirm the effective flags from the `server_args=` line of each log. InferPilot
-   checked their GPUs just before the round (PHASE=gpus).
+1. Launch the feature build and the baseline with the run's `server_script` as Setup did (the task's,
+   InferPilot's template the user took, or the run's own launch script when the task has none; the
+   feature arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; for accuracy on the template
+   server, the `accuracy_server_env` of `RUN_DIR/scripts/harness.json` on top); confirm the effective
+   flags from the `server_args=` line of each log. InferPilot checked their GPUs just before the round
+   (PHASE=gpus).
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.
-   - **gsm8k (1319) first**, G2's first set, with `<inferpilot_dir>/scripts/eval_accuracy.sh`: once per
-     arm, at most 1 point below the baseline, with no token-level comparison.
+   - **gsm8k (1319) first**, G2's first set, with the run's `accuracy_script` (the task's own, or
+     InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's settings; the same
+     for both arms): once per arm, at most 1 point below the baseline, with no token-level comparison.
    - G0 feature off; every gate in `extra_gates`: `issue_repro` (the reproduction no longer fails),
      `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
      dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,

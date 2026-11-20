@@ -1177,6 +1177,48 @@ const scenarios = [
     const setupIns = plain.calls.find((c) => c.key === 'director:setup');
     check(setupIns && setupIns.ins.server_script === '/s/server.sh', 'the server script reaches the roles');
   }],
+  ['feature: InferPilot\'s templates run only where the user took them, and its client\'s numbers are reported, never claimed', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template']), `the questions offer the templates: ${JSON.stringify(none.result.questions)}`);
+    const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
+      accuracy_script: `${RUN}/scripts/accuracy.sh` };
+    const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
+      worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
+    const took = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: 'template', client_script: 'template',
+      harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
+    const setupIns = took.calls.find((c) => c.key === 'director:setup');
+    check(setupIns && setupIns.ins.server_script === 'template' && setupIns.ins.client_script === 'template'
+      && (typeof setupIns.ins.harness === 'string' ? JSON.parse(setupIns.ins.harness) : setupIns.ins.harness || {}).CONTEXT_LENGTH === 8192,
+      `Setup renders what the user took, with the task's values: ${JSON.stringify(setupIns && setupIns.ins.harness)}`);
+    const perf = took.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(took.result.status === 'ready_for_review' && perf && perf.ins.server_script === rendered.server_script
+      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script && !perf.ins.claim,
+      `the rendered scripts reach the performance engineer, and InferPilot's client claims nothing: ${took.result.status}, claim ${perf && perf.ins.claim}`);
+    const own = await run({ mode: 'feature', task: 't', accuracy_script: '/s/accuracy.sh' }, setup(rendered));
+    const ownIns = own.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.accuracy_script === '/s/accuracy.sh',
+      'the task\'s own scripts win over rendered ones');
+    const unrendered = await run({ mode: 'feature', task: 't', server_script: 'template' }, setup({}));
+    check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
+      && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
+  }],
+  ['perf: a perf task may take the server template, never the client\'s, and keeps its claim on its own client', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
+    check(eqList(question(none, 'server_script').options, ['template']) && asks(none, 'client_script')
+      && !question(none, 'client_script').options, `only the server's question offers a template: ${JSON.stringify(none.result.questions)}`);
+    check(asks(await run({ mode: 'perf', task: 'p', client_script: 'template' }), 'client_script'),
+      'a perf task that names the client template is asked for its own client');
+    const r = await run({ mode: 'perf', task: 'p', server_script: 'template' }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
+        gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+    });
+    const perf = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(perf && perf.ins.server_script === `${RUN}/scripts/server.sh` && perf.ins.client_script === '/s/client.sh' && perf.ins.claim,
+      `on the server template, measured with its own client, the claim stands: ${JSON.stringify(perf && [perf.ins.server_script, perf.ins.claim])}`);
+  }],
   ['perf: a profile of the wrong path stops before any plan', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
       'perf_engineer:profile': () => ({ analysis_path: `${RUN}/perf_analysis.md`, path_ok: false,

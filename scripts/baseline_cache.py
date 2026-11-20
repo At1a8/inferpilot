@@ -3,13 +3,15 @@
 those numbers, accuracy and performance alike, instead of measuring them again.
 
     python3 scripts/baseline_cache.py lookup --cache DIR --commit SHA --model DIR --server-script F \\
-        [--client-script F] [--workload TEXT] [--sets 'gsm8k ...'] --gpu 'ARCH PRODUCT' [--image IMAGE] \\
-        [--extra TEXT] [--max-age-days 7] [--restore-to RUN_DIR]
+        [--client-script F] [--accuracy-script F] [--workload TEXT] [--sets 'gsm8k ...'] --gpu 'ARCH PRODUCT' \\
+        [--image IMAGE] [--extra TEXT] [--max-age-days 7] [--restore-to RUN_DIR]
     python3 scripts/baseline_cache.py store --cache DIR <the same fingerprint> --run-dir RUN_DIR
 
 The fingerprint is everything the numbers depend on: the framework commit (a full SHA, never a ref that
 moves), the model directory (its small files by content, its weights by name and size), the contents of the
-server and client scripts, the workload, the accuracy sets with the contents of scripts/eval_accuracy.sh,
+server and client scripts, the workload, the accuracy sets with the contents of the run's accuracy script
+(templates/harness/accuracy.sh as rendered, with the settings written in, or the task's own) and of
+scripts/eval_accuracy.sh,
 the settings it reads from the environment that change a score (ENABLE_THINKING, REASONING_EFFORT,
 MAX_TOKENS, TOP_P, TOP_K, DATASET_HUB, JUDGE_MODEL, JUDGE_URL, LONGBENCH_LOCAL_PATH) and the version of the
 evalscope installed ($EVALSCOPE, else evalscope on PATH), the GPU (its architecture and product name), the
@@ -93,7 +95,8 @@ def key_of(a, env=os.environ) -> dict:
     sets = " ".join(sorted(a.sets.split()))
     return {"commit": a.commit, "model": a.model, "model_files": model_fingerprint(a.model),
             "server_script": sha_of(a.server_script), "client_script": sha_of(a.client_script),
-            "workload": a.workload, "sets": sets, "harness": sha_of(a.harness) if sets else "",
+            "workload": a.workload, "sets": sets, "accuracy_script": sha_of(a.accuracy_script) if sets else "",
+            "harness": sha_of(a.harness) if sets else "",
             "eval_env": {k: env.get(k, "") for k in EVAL_ENV} if sets else {},
             "evalscope": evalscope_version(a.evalscope) if sets else "",
             "gpu": a.gpu, "image": a.image, "extra": a.extra, "policy": POLICY}
@@ -235,6 +238,7 @@ def main(argv=None, env=os.environ) -> int:
         p.add_argument("--model", required=True, help="the local model directory")
         p.add_argument("--server-script", required=True)
         p.add_argument("--client-script", default="")
+        p.add_argument("--accuracy-script", default="", help="the run's accuracy script, rendered or the task's own")
         p.add_argument("--workload", default="")
         p.add_argument("--sets", default="", help="the accuracy sets measured, e.g. 'gsm8k gpqa_diamond simple_qa'")
         p.add_argument("--gpu", required=True, help="the GPU architecture and product name, e.g. 'gfx950 MI355X'")

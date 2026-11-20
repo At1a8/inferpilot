@@ -72,13 +72,41 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
-   stopped, and check the worktree is visible there at the same path. Every server
-   is started from the task's `server_script` (`task_definition.md` §1.1; copy it and `client_script`
-   to `RUN_DIR/scripts/` for the record): `PORT=<port> HIP_VISIBLE_DEVICES=<gpus>
-   PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature flags, empty for the baseline>' bash <server_script>`,
-   in the background, one log per launch, `RUN_DIR/logs/<tag>_<time>.log` with the same UTC time; poll
-   the health endpoint; read the effective `server_args=` line. A task without a `server_script` (issue,
-   ci) gets one launch script written by you, with the same variables.
+   stopped, and check the worktree is visible there at the same path. Every server is started from the
+   run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts
+   to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
+   `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
+   flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
+   `RUN_DIR/logs/<tag>_<time>.log` with the same UTC time; poll the health endpoint; read the effective
+   `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
+   you, with the same variables, from the reporter's or the job's own command as given: never with a
+   template's or the cookbook's flags.
+   - **InferPilot's templates** (`task_definition.md` §1.2). The scripts the task brings
+     (`server_script`, `client_script`, `accuracy_script`) run as given. From `templates/harness/` into
+     `RUN_DIR/scripts/`, render only the server or the client the user answered `template` for, and
+     `accuracy.sh` unless the task brings an `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
+     render --out RUN_DIR/scripts --scripts <those> --set MODEL_PATH=<model_path> --set TP=<the number of
+     GPUs in the set> --task '<harness>' --workload '<workload, when a JSON object>' [--feature
+     RUN_DIR/feature_params.json] [--cookbook RUN_DIR/scripts/cookbook.txt --cookbook-source '<page,
+     section or selection>']` (`harness.py show` lists every parameter). Each parameter takes the task's
+     value, else the feature's, else the cookbook's (the server's), else the template's.
+     - The cookbook recipe, for the template server: the page of the model in the framework checkout's
+       `docs/cookbook/` (docs.sglang.io/cookbook when the checkout has none), for the run's GPU
+       (its name: MI355X, MI300X) and the checkpoint's precision. Write its launch
+       command to `RUN_DIR/scripts/cookbook.txt` as the page gives it for that GPU (its environment
+       settings, then `sglang serve` or `python -m sglang.launch_server` with every flag): in an AMD
+       section, or the command its configurator builds for that selection (`docs/src/snippets/`). A
+       model or GPU the cookbook has no recipe for: no `--cookbook`, and the report says so.
+     - For a feature, write `RUN_DIR/feature_params.json` first: every template parameter the source's
+       own tests set (its reproduce commands, test settings and result tables), each as `{"value": ...,
+       "source": "<the words it comes from>"}`; vLLM's `--max-model-len 4096` is `CONTEXT_LENGTH`,
+       `--no-enable-prefix-caching` `PREFIX_CACHE=0`, `--max-num-seqs` `MAX_RUNNING_REQUESTS`,
+       `enable_thinking=false` `ENABLE_THINKING=0`. What the source does not set keeps the cookbook's or
+       the template's value.
+     - `RUN_DIR/scripts/harness.json` records every value and where it came from, and the recipe; on the
+       template server, an accuracy run adds its `accuracy_server_env` (a context the feature caps for its
+       speed tests cannot hold the answers). Return the scripts the run uses as `server_script`,
+       `client_script` and `accuracy_script`.
    - The server and every test command put the tree they run first on `PYTHONPATH` (sglang:
      `<tree>/python`): the worktree for the feature arm, `RUN_DIR/base` for the baseline arm when there
      is one. The first log shows `sglang.__file__` inside that tree (`env_hygiene.md`, *The code under
@@ -100,25 +128,28 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    - **A baseline measured before is reused**: when its fingerprint is the same, neither its accuracy nor
      its performance is measured again. `python3 <inferpilot_dir>/scripts/baseline_cache.py lookup --cache
      <exp_root>/baseline_cache --commit <the base commit's full SHA> --model <model_path> --server-script
-     <server_script> --client-script <client_script> --workload '<workload>' --sets '<the accuracy sets
-     the task needs>' --gpu '<gfx arch> <product name>' --extra 'gpus=<n>' --restore-to RUN_DIR`; the
-     running image comes from `$INFERPILOT_IMAGE` (give `--image` when InferPilot runs on the host), the
-     accuracy settings and the evalscope version from the environment. A hit restores
-     `RUN_DIR/baseline.json` and the results it names, and skips the measurements below; record the run
-     they came from in the ledger. The warm-up still runs, and on its server a probe of the accuracy
-     harness that counts for nothing: `API_URL=http://127.0.0.1:<port>/v1 LIMIT=2 TAG=probe
-     RESULT_ROOT=RUN_DIR/accuracy_probe bash <inferpilot_dir>/scripts/eval_accuracy.sh <the same sets>`,
-     a few minutes that show the judge, evalscope and the data sets work. A miss: measure as below and,
-     once the baseline passes, `store` with the same arguments, `--run-dir RUN_DIR` in place of
-     `--restore-to`. A baseline that failed or skipped a set is never stored; the script refuses one that
-     is incomplete.
+     <server_script> --client-script <client_script> --accuracy-script <accuracy_script> --workload
+     '<workload>' --sets '<the accuracy sets the task needs>' --gpu '<gfx arch> <product name>' --extra
+     'gpus=<n>' --restore-to RUN_DIR`, with the run's scripts (rendered ones hold no time, so the same
+     values give the same fingerprint); the running image comes from `$INFERPILOT_IMAGE` (give `--image`
+     when InferPilot runs on the host), the accuracy settings and the evalscope version from the
+     environment. A hit restores `RUN_DIR/baseline.json` and the results it names, and skips the
+     measurements below; record the run they came from in the ledger. The warm-up still runs, and on its
+     server a probe of the accuracy harness that counts for nothing: `API_URL=http://127.0.0.1:<port>/v1
+     LIMIT=2 TAG=probe RESULT_ROOT=RUN_DIR/accuracy_probe bash <accuracy_script> <the same sets>`, a few
+     minutes that show the judge, evalscope and the data sets work (a task's own accuracy script is not
+     probed). A miss: measure as below and, once the baseline passes, `store` with the same arguments,
+     `--run-dir RUN_DIR` in place of `--restore-to`. A baseline that failed or skipped a set is never
+     stored; the script refuses one that is incomplete.
    - `feature`, `perf`: accuracy is gsm8k on all 1319 questions, once
      (`API_URL=http://127.0.0.1:<port>/v1 TAG=baseline RESULT_ROOT=RUN_DIR/accuracy
-     bash <inferpilot_dir>/scripts/eval_accuracy.sh`, evalscope), and gpqa_diamond and simple_qa as
-     well when `goal` says the change may lose accuracy (`acceptance.md` §1.1; `eval_accuracy.sh gsm8k
-     gpqa_diamond simple_qa`; simple_qa needs the LLM judge, which the script probes before any
-     inference); other suites or more runs only when `goal` asks. Never decide it yourself.
-     Performance is the task's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
+     bash <accuracy_script>`: InferPilot's `accuracy.sh` runs `scripts/eval_accuracy.sh`, evalscope, with
+     the run's settings), and gpqa_diamond and simple_qa as well when `goal` says the change may lose
+     accuracy (`acceptance.md` §1.1; `<accuracy_script> gsm8k gpqa_diamond simple_qa`; simple_qa needs
+     the LLM judge, which the script probes before any inference); other suites or more runs only when
+     `goal` asks. Never decide it yourself. An `accuracy_script` of the task's runs instead, as given,
+     with the same variables, on the sets it measures.
+     Performance is the run's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
      run, at least twice, and the spread recorded (`validation_doctrine.md`), on a server started only
      after the warm-up's is stopped and `gpu_status.py --check all` finds the machine idle
      (`env_hygiene.md`; a GPU another job uses then fails the baseline, naming it). The baseline passes
@@ -126,10 +157,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
      cache keeps it.
-   - `perf`, and a feature with a workload: the `client_script` and `workload` are the task's fixed
-     benchmark. Record them in `RUN_DIR/run.json` as given; every later measurement runs them unchanged.
-     With `held_out` on, record the held-out operating point next to them (`perf_evaluation.md` §3:
-     half the concurrency, when the client reads `CONCURRENCY`), before any number is seen.
+   - `perf`, and a feature with a workload: the run's `client_script` and the task's `workload` are the
+     fixed benchmark. Record them in `RUN_DIR/run.json` as given; every later measurement runs them
+     unchanged. With `held_out` on, record the held-out operating point next to them
+     (`perf_evaluation.md` §3: half the concurrency, when the client reads `CONCURRENCY`), before any
+     number is seen.
    - `issue`, `ci`: prepare the environment the reproduction needs; run a baseline only if the task
      needs one now. Report `baseline_status: "skip"` with the reason otherwise.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
@@ -141,26 +173,33 @@ Return:
 {"lock": "acquired | busy", "run_dir": "/abs/RUN_DIR", "baseline_status": "pass | fail | skip",
  "baseline": "<suites, runs, spread; or why it failed or was skipped>",
  "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "gpu_ids": "0,1,2,3",
- "notes": "<pinned commit, image, versions>"}
+ "server_script": "/abs/RUN_DIR/scripts/server.sh", "client_script": "/abs/RUN_DIR/scripts/perf.sh",
+ "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
 ## PHASE=spec (feature)
 
 1. Identify the source of truth (upstream PR, design or paper) and its commit; list unmerged
    dependencies and the commits to cherry-pick. Write down the scenarios it reports: data sets, input
-   and output lengths, concurrency, sampling, thinking on or off, hardware and its numbers. **A port is
-   measured on the source's own scenarios, with the user's server and client.** Its claim is a gain
-   beyond the noise band there, with the source's numbers beside it for reference: the hardware differs,
-   and so may the size of the gain. The feature's own metric, which the hardware does not change (accept
-   length for speculative decoding), stays within a tolerance of the source's that the spec names.
+   and output lengths, concurrency, sampling, thinking on or off, hardware and its numbers. Check
+   `RUN_DIR/feature_params.json` (Setup) against them: a value it lacks or got wrong is fixed there, and
+   what Setup rendered and measured with it is rendered and measured again (Setup steps 3 and 4) before
+   anything else. **A port is measured on the source's own scenarios, with the user's server and
+   client.** Its claim is a gain beyond the noise band there, with the source's numbers beside it for
+   reference: the hardware differs, and so may the size of the gain. The feature's own metric, which the
+   hardware does not change (accept length for speculative decoding), stays within a tolerance of the
+   source's that the spec names.
    - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
      scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what
      the task's client runs, what is missing. The run then stops and asks the user; nothing is built on a
-     workload the user did not give. A client of your own for the source's scenarios is only a fallback
-     the user may take: write it to `RUN_DIR/scripts/fallback_client.sh` and return it as
-     `fallback_client`. It need not reproduce the source's numbers, so what it measures is reported,
-     never a claim; once the user takes it (`client_script`), there is no gap to return.
+     workload the user did not give. A client of InferPilot's for the source's scenarios is only a
+     fallback the user may take: `perf.sh` at those scenarios (`python3 <inferpilot_dir>/scripts/harness.py
+     render --out RUN_DIR/scripts --scripts perf --name fallback_client --task '<harness>' --feature
+     RUN_DIR/feature_params.json` writes `RUN_DIR/scripts/fallback_client.sh`), or, when its parameters
+     cannot express them, one you write there. Return it as `fallback_client`. It need not reproduce the
+     source's numbers, so what it measures is reported, never a claim; once the user takes it
+     (`client_script`), there is no gap to return.
    - **Out of scope by default.** A scenario the source did not consider, the task's own workload
      included, is not measured unless `goal` names it; it goes under Non-goals with the reason (the
      PARD-2 port: vLLM's PR measured 256-token answers at concurrency 1 and its drafts were trained on
@@ -213,7 +252,11 @@ produced so far.
   3 or 4: fix what it lists, then check again), and open the report with where it is and how to share
   it: as an issue titled `InferPilot daily report <the scan's UTC date>` on the new-issue page of InferPilot's
   repository (the origin of the InferPilot checkout), its whole file as the body.
-- List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them.
+- List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
+  and the scripts: which were the task's and which were InferPilot's templates the user took (numbers
+  of InferPilot's client are reported, never claimed), the cookbook recipe the template server
+  followed, and each rendered parameter's value and source (`RUN_DIR/scripts/harness.json`), the
+  feature's and the cookbook's with the words they came from.
 - A Design phase with the verdict `auto_approved` (`auto_approve_design`): no human approved the
   design. Say so near the top, with what the architect wanted a human to review, so the PR's reviewer
   checks it there.

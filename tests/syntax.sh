@@ -21,7 +21,7 @@ js() {
 
 sh() {
   local f
-  for f in scripts/*.sh tests/*.sh; do bash -n "$f" || return 1; done
+  for f in scripts/*.sh templates/harness/*.sh tests/*.sh; do bash -n "$f" || return 1; done
 }
 
 py() {

@@ -18,7 +18,8 @@
 #                     sglang retracts requests and the run slows down
 #   LIMIT             at most this many questions per subset: a smoke test, not a result
 #   WAIT_SERVER       seconds to wait for a server that is still starting (default 0)
-#   MAX_TOKENS        default 102400: a truncated reasoning trace leaves the answer empty
+#   MAX_TOKENS        default 102400: a truncated reasoning trace leaves the answer empty; at most the server's
+#                     context (max_model_len) less 2048 tokens for the question, and lowered to that
 #   REASONING_EFFORT  default max; ENABLE_THINKING default 1 (chat_template_kwargs.thinking and
 #                     .enable_thinking true; 0 sends both false). Thinking models score wrongly without
 #                     them; ENABLE_THINKING=0 REASONING_EFFORT= for others
@@ -100,8 +101,8 @@ if [ "${WAIT_SERVER}" -gt 0 ]; then
 fi
 
 # evalscope sends --model as the request's model and names its result directory after it.
-SERVED=$(curl -s --max-time 20 "${API_URL%/}/models" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null)
+MODELS=$(curl -s --max-time 20 "${API_URL%/}/models")
+SERVED=$(echo "${MODELS}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null)
 if [ -z "${SERVED}" ]; then
     echo "eval_accuracy: no server answers at ${API_URL} (WAIT_SERVER=<seconds> waits for one that is starting)" >&2
     exit 1
@@ -110,6 +111,20 @@ MODEL=${MODEL:-${SERVED}}
 if [ "${MODEL}" != "${SERVED}" ]; then
     echo "eval_accuracy: MODEL=${MODEL}, but the server serves ${SERVED}; every request would fail. Unset MODEL." >&2
     exit 1
+fi
+
+# sglang rejects a request whose question and max_tokens exceed the context, and --ignore-errors would drop
+# it from the score unseen: MAX_TOKENS keeps QUESTION_ROOM tokens of the server's context for the question.
+QUESTION_ROOM=2048
+CONTEXT=$(echo "${MODELS}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0].get("max_model_len") or "")' 2>/dev/null)
+if [ -n "${CONTEXT}" ] && [ "${MAX_TOKENS}" -gt $((CONTEXT - QUESTION_ROOM)) ]; then
+    if [ $((CONTEXT - QUESTION_ROOM)) -lt 1 ]; then
+        echo "eval_accuracy: the server's context (${CONTEXT} tokens) leaves no room for an answer" >&2
+        exit 1
+    fi
+    echo "eval_accuracy: MAX_TOKENS=${MAX_TOKENS} lowered to $((CONTEXT - QUESTION_ROOM)), what the server's" \
+         "${CONTEXT}-token context leaves beside a question"
+    MAX_TOKENS=$((CONTEXT - QUESTION_ROOM))
 fi
 
 # The judge is probed only when a requested set needs one, and before any inference: a bad key then
