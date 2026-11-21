@@ -89,16 +89,33 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
 4. **Baseline.**
    - First, one discarded warm-up per GPU set: a launch and a short run of the client, so the first
      launch in a fresh container, which compiles kernels and is slower, is not measured.
+   - **A baseline measured before is reused**: when its fingerprint is the same, neither its accuracy nor
+     its performance is measured again. `python3 <inferpilot_dir>/scripts/baseline_cache.py lookup --cache
+     <exp_root>/baseline_cache --commit <the base commit's full SHA> --model <model_path> --server-script
+     <server_script> --client-script <client_script> --workload '<workload>' --sets '<the accuracy sets
+     the task needs>' --gpu '<gfx arch> <product name>' --extra 'gpus=<n>' --restore-to RUN_DIR`; the
+     running image comes from `$INFERPILOT_IMAGE` (give `--image` when InferPilot runs on the host), the
+     accuracy settings and the evalscope version from the environment. A hit restores
+     `RUN_DIR/baseline.json` and the results it names, and skips the measurements below; record the run
+     they came from in the ledger. The warm-up still runs, and on its server a probe of the accuracy
+     harness that counts for nothing: `API_URL=http://127.0.0.1:<port>/v1 LIMIT=2 TAG=probe
+     RESULT_ROOT=RUN_DIR/accuracy_probe bash <inferpilot_dir>/scripts/eval_accuracy.sh <the same sets>`,
+     a few minutes that show the judge, evalscope and the data sets work. A miss: measure as below and,
+     once the baseline passes, `store` with the same arguments, `--run-dir RUN_DIR` in place of
+     `--restore-to`. A baseline that failed or skipped a set is never stored; the script refuses one that
+     is incomplete.
    - `feature`, `perf`: accuracy is gsm8k on all 1319 questions, once
      (`API_URL=http://127.0.0.1:<port>/v1 TAG=baseline RESULT_ROOT=RUN_DIR/accuracy
      bash <inferpilot_dir>/scripts/eval_accuracy.sh`, evalscope), and gpqa_diamond and simple_qa as
      well when `goal` says the change may lose accuracy (`acceptance.md` §1.1; `eval_accuracy.sh gsm8k
      gpqa_diamond simple_qa`; simple_qa needs the LLM judge, which the script probes before any
      inference); other suites or more runs only when `goal` asks. Never decide it yourself.
-     Performance is the task's `client_script` with `OUT_DIR=RUN_DIR/bench/<tag>`, at least twice, and
-     the spread recorded (`validation_doctrine.md`). The baseline passes when repeat runs agree within
-     the recorded spread. Record how long each launch, set and client run took: the verify engineer's
-     time limits come from them.
+     Performance is the task's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
+     run, at least twice, and the spread recorded (`validation_doctrine.md`). The baseline passes when
+     repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
+     (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
+     set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
+     cache keeps it.
    - `perf`, and a feature with a workload: the `client_script` and `workload` are the task's fixed
      benchmark. Record them in `RUN_DIR/run.json` as given; every later measurement runs them unchanged.
      With `held_out` on, record the held-out operating point next to them (`perf_evaluation.md` §3:

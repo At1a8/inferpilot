@@ -37,13 +37,13 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
      `failures` with `blocking: false`, never investigated, and `all_pass` counts the blocking ones only.
    - **Time comes from this run's measurements of healthy runs, never from a fixed cap, and never from the
      arm that fails.** A suite's reference is a healthy run of the same work: for a feature, the baseline
-     arm (at Setup, or in this round); for `failing_test`, the test where it last passed (Bisect's run at
-     the culprit's parent, or its CI history); for `issue_repro`, the reproduction on a configuration that
-     does not trigger the issue, when there is one. A suite without a reference gets one first: a short,
-     timed run of the same kind of work (a server launch and a few requests) on a configuration known to
-     be healthy. On the arm under test a suite may take three times its reference, scaled to its size;
-     past that it is stopped and its gate fails as `slow`, with both times: a regression, which is
-     investigated.
+     arm (at Setup, in `RUN_DIR/baseline.json`, or in this round); for `failing_test`, the test where it
+     last passed (Bisect's run at the culprit's parent, or its CI history); for `issue_repro`, the
+     reproduction on a configuration that does not trigger the issue, when there is one. A suite without
+     a reference gets one first: a short, timed run of the same kind of work (a server launch and a few
+     requests) on a configuration known to be healthy. On the arm under test a suite may take three times
+     its reference, scaled to its size; past that it is stopped and its gate fails as `slow`, with both
+     times: a regression, which is investigated.
    - **A hang is judged on progress.** A run that makes no progress (no request completes, its log and
      output add nothing) for three times the longest such pause in this run's healthy runs is hung, however
      much of the round is left: it is stopped, and its gate fails as a hang, with how far it got.

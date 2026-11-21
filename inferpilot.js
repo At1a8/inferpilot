@@ -419,7 +419,8 @@ function rolePrompt(role, sub, ins, attempt, takesLeads) {
   const writes = role === 'intake'
     ? 'No RUN_DIR exists yet: change nothing; every check you run is read-only. Never push, never post on GitHub.'
     : `Write artifacts only under RUN_DIR (code changes only in the
-task worktree named in the inputs). Never push, never post on GitHub. The one exception is the curator's knowledge pull request to
+task worktree named in the inputs; a baseline goes to the baseline cache only through scripts/baseline_cache.py).
+Never push, never post on GitHub. The one exception is the curator's knowledge pull request to
 InferPilot's own repository (scripts/propose_knowledge.py).
 Framework code runs from the tree under test, the task worktree (or a worktree at the base commit,
 RUN_DIR/base or RUN_DIR/spinoff/base, for a run there): put it first on PYTHONPATH (sglang:

@@ -2,6 +2,7 @@
 
     python3 -m unittest discover -s tests -p 'test_*.py'
 """
+import argparse
 import io
 import json
 import os
@@ -22,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import audit_host_syncs  # noqa: E402
 import audit_platform_gates  # noqa: E402
+import baseline_cache  # noqa: E402
 import check_framework_skills  # noqa: E402
 import latest_image  # noqa: E402
 import daily_report  # noqa: E402
@@ -554,6 +556,163 @@ class RunLockTest(unittest.TestCase):
             self.assertEqual(run_lock.main(["--lock", self.lock, "acquire", "--run-dir", self.b]), 1)
             self.assertEqual(run_lock.main(["--lock", self.lock, "status"]), 0)
         self.assertIn('"status": "busy"', out.getvalue())
+
+
+class BaselineCacheTest(unittest.TestCase):
+    """scripts/baseline_cache.py: what a fingerprint covers, what a store keeps and what a hit restores."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.model = self.root / "model"
+        self.model.mkdir()
+        (self.model / "config.json").write_text('{"num_hidden_layers": 36}')
+        (self.model / "model.safetensors").write_bytes(b"\0" * 64)
+        self.server = self.root / "server.sh"
+        self.server.write_text("python -m sglang.launch_server --tp 1\n")
+        self.client = self.root / "client.sh"
+        self.client.write_text("python -m sglang.bench_serving --num-prompts 64\n")
+        self.harness = self.root / "eval_accuracy.sh"
+        self.harness.write_text("evalscope eval --datasets gsm8k\n")
+        self.evalscope = self.install_evalscope("1.2.0")
+        self.env = {"INFERPILOT_IMAGE": "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261118", "JUDGE_MODEL": "Claude-Opus-5"}
+        self.run_dir = self.root / "run"
+        self.write_baseline(self.run_dir, ["gsm8k"], client=True)
+        self.cache = str(self.root / "cache")
+
+    def install_evalscope(self, version):
+        """An evalscope in a venv of its own, as the bootstrap installs it."""
+        venv = self.root / f"evalscope-{version}"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "lib" / "python3.10" / "site-packages" / f"evalscope-{version}.dist-info").mkdir(parents=True)
+        (venv / "bin" / "evalscope").write_text("#!/bin/sh\n")
+        return str(venv / "bin" / "evalscope")
+
+    def write_baseline(self, run_dir, sets, client, score=0.91):
+        (run_dir / "accuracy").mkdir(parents=True, exist_ok=True)
+        (run_dir / "accuracy" / "summary.txt").write_text("".join(
+            f"baseline {s}: accept_length=[None] aggregate={{'score': {score}}} dir=baseline_{s}/x\n" for s in sets))
+        summary = {"accuracy": {s: score for s in sets}, "times": {"launch_s": 400, "gsm8k_s": 500}}
+        if client:
+            (run_dir / "bench" / "baseline" / "1").mkdir(parents=True, exist_ok=True)
+            (run_dir / "bench" / "baseline" / "1" / "result.json").write_text('{"output_throughput": 1000}')
+            summary["perf"] = {"runs": [1000, 1010], "spread": "1%"}
+        (run_dir / "baseline.json").write_text(json.dumps(summary))
+
+    def key(self, env=None, **over):
+        a = {"commit": "a" * 40, "model": str(self.model), "server_script": str(self.server),
+             "client_script": str(self.client), "workload": "vllm-49406 c1", "sets": "gsm8k", "harness": str(self.harness),
+             "evalscope": self.evalscope, "gpu": "gfx950 MI355X", "image": self.env["INFERPILOT_IMAGE"], "extra": "gpus=1",
+             **over}
+        return baseline_cache.key_of(argparse.Namespace(**a), self.env if env is None else env)
+
+    def store(self, key=None, run_dir=None, now=1000.0, env=None):
+        return baseline_cache.store(self.cache, key or self.key(), str(run_dir or self.run_dir), now=now,
+                                    env=self.env if env is None else env)
+
+    def hit(self, key=None, now=2000.0):
+        return baseline_cache.lookup(self.cache, key or self.key(), 7, now=now)["hit"]
+
+    def published(self):
+        return list(Path(self.cache).rglob("meta.json")) if Path(self.cache).exists() else []
+
+    def test_a_hit_restores_accuracy_and_performance_at_their_paths(self):
+        self.assertTrue(self.store()["stored"])
+        again = self.root / "run2"
+        res = baseline_cache.lookup(self.cache, self.key(), 7, restore_to=str(again), now=2000.0)
+        self.assertTrue(res["hit"])
+        self.assertEqual(res["run_dir"], str(self.run_dir))
+        self.assertIn("0.91", (again / "accuracy" / "summary.txt").read_text())
+        self.assertTrue((again / "bench" / "baseline" / "1" / "result.json").exists(), "bench/baseline keeps its path")
+        self.assertEqual(json.loads((again / "baseline.json").read_text())["times"]["launch_s"], 400)
+
+    def test_the_fingerprint_covers_what_the_numbers_depend_on(self):
+        self.store()
+        self.assertTrue(self.hit())
+        for what, key in [
+            ("another GPU of the same architecture", self.key(gpu="gfx950 MI350X")),
+            ("more accuracy sets", self.key(sets="gsm8k gpqa_diamond simple_qa")),
+            ("another image", self.key(image="rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261120")),
+            ("another judge", self.key(env={**self.env, "JUDGE_MODEL": "gpt-5"})),
+            ("thinking off", self.key(env={**self.env, "ENABLE_THINKING": "0"})),
+            ("another evalscope", self.key(evalscope=self.install_evalscope("1.3.0"))),
+            ("another commit", self.key(commit="c" * 40)),
+        ]:
+            self.assertFalse(self.hit(key), what)
+        self.assertEqual(self.key(sets="gsm8k gpqa_diamond simple_qa"), self.key(sets="simple_qa gsm8k gpqa_diamond"),
+                         "the order of the sets does not matter")
+        for path, edit in [(self.model / "config.json", '{"num_hidden_layers": 48}'),  # another checkpoint, same path
+                           (self.server, "python -m sglang.launch_server --tp 2\n"),
+                           (self.harness, "sgl-eval gsm8k\n")]:
+            before = path.read_text()
+            path.write_text(edit)
+            self.assertFalse(self.hit(), f"{path.name} edited")
+            path.write_text(before)
+            self.assertTrue(self.hit(), f"{path.name} as it was")
+
+    def test_nothing_is_cached_without_a_known_image_or_evalscope_version(self):
+        for key, why in [(self.key(image=""), "the running image is unknown"),
+                         (self.key(evalscope=str(self.root / "no-evalscope")), "the evalscope version is unknown")]:
+            self.assertEqual(self.store(key)["reason"], why)
+            self.assertEqual(baseline_cache.lookup(self.cache, key, 7)["reason"], why)
+        self.assertEqual(self.published(), [])
+        self.assertTrue(self.store(self.key(sets="", evalscope=""))["stored"], "performance alone needs no evalscope")
+
+    def test_an_incomplete_or_failed_baseline_is_never_stored(self):
+        self.assertEqual(self.store(self.key(sets="gsm8k simple_qa"))["reason"], "no score for simple_qa",
+                         "a set the harness skipped (no judge) or that failed has no line in summary.txt")
+        self.assertEqual(self.store(env={**self.env, "LIMIT": "5"})["reason"], "LIMIT is set: a smoke test, not a baseline")
+        summary = json.loads((self.run_dir / "baseline.json").read_text())
+        (self.run_dir / "baseline.json").write_text(json.dumps({**summary, "perf": {"runs": [1000]}}))
+        self.assertEqual(self.store()["reason"], "baseline.json has fewer than two client runs")
+        (self.run_dir / "baseline.json").write_text(json.dumps({**summary, "times": {}}))
+        self.assertEqual(self.store()["reason"], "baseline.json has no times")
+        shutil.rmtree(self.run_dir / "bench")
+        self.assertEqual(self.store()["reason"], f"{os.path.join('bench', 'baseline')} is missing")
+        self.assertEqual(self.published(), [])
+
+    def test_a_task_without_a_client_stores_its_accuracy_alone(self):
+        run = self.root / "accuracy-only"
+        self.write_baseline(run, ["gsm8k"], client=False)
+        out = self.store(self.key(client_script=""), run_dir=run)
+        self.assertTrue(out["stored"], out)
+        self.assertEqual(out["files"], ["baseline.json", "accuracy"])
+
+    def test_a_store_that_fails_halfway_leaves_nothing(self):
+        with mock.patch.object(baseline_cache.shutil, "copytree", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.store()
+        self.assertEqual([p for p in Path(self.cache).rglob("*") if p.is_file()], [])
+
+    def test_two_stores_in_the_same_second_keep_their_own_files(self):
+        first = self.store()
+        self.write_baseline(self.run_dir, ["gsm8k"], client=True, score=0.92)
+        second = self.store()
+        self.assertNotEqual(first["dir"], second["dir"])
+        self.assertIn("0.91", (Path(first["dir"]) / "accuracy" / "summary.txt").read_text())
+        self.assertIn("0.92", (Path(second["dir"]) / "accuracy" / "summary.txt").read_text())
+        self.assertFalse(list(Path(self.cache).rglob("meta.json.part")))
+
+    def test_an_old_entry_is_not_used_and_goes_at_the_next_store(self):
+        old = self.store(now=1000.0)
+        self.assertFalse(self.hit(now=1000.0 + 8 * 86400))
+        self.store(now=1000.0 + 8 * 86400)
+        self.assertFalse(Path(old["dir"]).exists())
+
+    def test_the_command_line(self):
+        common = ["--cache", self.cache, "--commit", "b" * 40, "--model", str(self.model), "--server-script",
+                  str(self.server), "--client-script", str(self.client), "--sets", "gsm8k", "--gpu", "gfx950 MI355X",
+                  "--evalscope", self.evalscope]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(baseline_cache.main(["lookup", *common], env=self.env), 1)
+            self.assertEqual(baseline_cache.main(["store", *common, "--run-dir", str(self.run_dir)], env=self.env), 0)
+            self.assertEqual(baseline_cache.main(["lookup", *common, "--restore-to", str(self.root / "run3")], env=self.env), 0)
+        self.assertTrue((self.root / "run3" / "baseline.json").exists())
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit):
+            baseline_cache.main(["lookup", *["origin/main" if x == "b" * 40 else x for x in common]], env=self.env)
+        self.assertIn("full SHA", err.getvalue())
 
 
 class LeakScanTest(unittest.TestCase):
