@@ -505,7 +505,7 @@ step 3 too, cloning InferPilot to `/workspace/inferpilot` (pip shows the output 
 | `IMAGE_VARIANT`, `NAME`, `EXTRA_MOUNTS`, `MOUNT_HOME` | `scripts/run_docker.sh` | detected from gfx942/gfx950 (fallback MI35x), ROCm 10, else 7.2.4, else 7.2.0; a new container's `inferpilot_<you>_<MMDD>_<random>`; more directories to mount, space-separated; `0` leaves `/home` out |
 | `DOCKER_SOCKET` | `scripts/run_docker.sh` | unset; `1` also mounts the host's Docker socket and `docker` |
 | `DETACH`, `PRIVILEGED` | `scripts/run_docker.sh` | unset: in the background when there is no terminal, else an interactive shell; `PRIVILEGED=0` leaves out `--privileged` |
-| `INFERPILOT_LOCK_FILE` | `scripts/run_lock.py` | `/dev/shm/inferpilot-run.lock`, the machine's one-task lock |
+| `INFERPILOT_LOCK_FILE` | `scripts/run_lock.py` | `/dev/shm/inferpilot-run.lock`, the machine's lock of one task per GPU set |
 | `INFERPILOT_HOME` | bootstrap | `./inferpilot`, or the checkout you run from |
 | `INFERPILOT_KEYS` | bootstrap | root's `~/.inferpilot_env`, where run_docker.sh mounts yours: the keys file the container's shells load |
 | `INFERPILOT_HOST_HOME` | `scripts/run_docker.sh` (with `/home` mounted), bootstrap | in a container that mounts `/home`, your home there, where the bootstrap looks for the keys file (without it, the home of the user the container is named after) |
@@ -597,10 +597,13 @@ set before running it again with the rest unchanged (answers merge with those al
 runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
 post, the daily report to share.
 
-**One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
+**One task per GPU set.** A run takes its GPUs before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and
-frees it at the end of its report. While another task holds it, a new run ends at once as `busy` and
-names the holder. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
+frees them at the end of its report. Tasks in different containers run at once on GPUs they do not
+share (HIP numbers, from `scripts/gpu_status.py`, which also says who holds memory on each); a task
+that uses no GPU, such as a scan, takes the whole machine.
+While another task holds what a new run needs, the new run ends at once as `busy` and names the holder. A lock whose
+run finished, whose runner (`runtime/run.mjs`, seen from the same
 container) is gone, or which wrote nothing in its run directory for twice its longest agent call (12 h
 by default), is taken over by the next run. A run in another container is
 never taken over for silence, since its run directory is not visible from here; once that run is
@@ -630,6 +633,7 @@ GitHub allows 60 requests an hour and 10 searches a minute per IP address).
 | `scripts/audit_platform_gates.py` | platform gates to re-check on a new architecture (capability checks true on gfx1250, wave32 assumptions) |
 | `scripts/audit_host_syncs.py` | host-device sync and copy candidates on the hot path (leads for a profile) |
 | `scripts/baseline_cache.py` | baseline measurements kept for reuse in `<exp_root>/baseline_cache`, keyed by the framework commit, the model's files, the contents of the server and client scripts, the workload, the accuracy sets with the contents of `scripts/eval_accuracy.sh`, the settings it reads and the evalscope version, the GPU and the running image; Setup takes a hit from the last 7 days instead of measuring accuracy and performance again, stores only a baseline that passed, and on a hit still probes the accuracy harness with a few questions |
+| `scripts/gpu_status.py` | the GPUs by HIP number (the numbers `HIP_VISIBLE_DEVICES` takes, which can differ from rocm-smi's), each with the memory processes of any container hold on it; `--free <n>` names free ones, skipping those another InferPilot task holds (`scripts/run_lock.py`), `--check <ids>` fails when one is held |
 | `scripts/leak_scan.py` | what a branch would publish about this machine (local paths upstream does not already carry, host names, internal sites, `root` commits) in the lines each of its commits adds, its commit messages and PR description; the PR engineer runs it before handing a branch over |
 
 `scripts/restore_owner.sh` (POSIX sh) gives what root wrote in the container on a host mount back to
