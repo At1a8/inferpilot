@@ -622,10 +622,16 @@ class GpuStatusTest(unittest.TestCase):
 
     def test_what_it_cannot_tell_stops_it(self):
         for args, env, says in [(["--check", "0-3"], {}, "comma-separated"),
-                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": "1,2"}, "ROCR_VISIBLE_DEVICES=1,2")]:
+                                (["--check", "1 0"], {}, "comma-separated"),  # not "10", nor GPU 1 alone
+                                (["--check", ""], {}, "comma-separated"),
+                                (["--check", " "], {}, "comma-separated"),
+                                (["--check", "0,,2"], {}, "comma-separated"),
+                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": "1,2"}, "ROCR_VISIBLE_DEVICES is set ('1,2')"),
+                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": ""}, "ROCR_VISIBLE_DEVICES is set ('')")]:
             rc, out = self.run_main(*args, env=env)
             self.assertEqual(rc, 2, args)
             self.assertIn(says, out["error"])
+        self.assertEqual(self.run_main("--check", " 0, 2 ")[0], 0, "spaces around a number are fine")
         (self.kfd / "topology" / "nodes" / "3" / "gpu_id").write_text("")  # dropped, HIP 2 would become HIP 1
         rc, out = self.run_main("--check", "all")
         self.assertEqual(rc, 2)
@@ -771,6 +777,12 @@ class BaselineCacheTest(unittest.TestCase):
         self.assertIn("0.91", (Path(first["dir"]) / "accuracy" / "summary.txt").read_text())
         self.assertIn("0.92", (Path(second["dir"]) / "accuracy" / "summary.txt").read_text())
         self.assertFalse(list(Path(self.cache).rglob("meta.json.part")))
+
+    def test_an_entry_measured_under_an_older_rule_is_measured_again(self):
+        older = {k: v for k, v in self.key().items() if k != "policy"}  # stored before every GPU had to be idle
+        self.assertTrue(self.store(older)["stored"])
+        self.assertTrue(baseline_cache.lookup(self.cache, older, 7, now=2000.0)["hit"])
+        self.assertFalse(self.hit(), "the current rule misses it")
 
     def test_an_old_entry_is_not_used_and_goes_at_the_next_store(self):
         old = self.store(now=1000.0)

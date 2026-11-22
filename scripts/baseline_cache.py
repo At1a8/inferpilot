@@ -13,8 +13,10 @@ server and client scripts, the workload, the accuracy sets with the contents of 
 the settings it reads from the environment that change a score (ENABLE_THINKING, REASONING_EFFORT,
 MAX_TOKENS, TOP_P, TOP_K, DATASET_HUB, JUDGE_MODEL, JUDGE_URL, LONGBENCH_LOCAL_PATH) and the version of the
 evalscope installed ($EVALSCOPE, else evalscope on PATH), the GPU (its architecture and product name), the
-running image ($INFERPILOT_IMAGE unless --image is given), and --extra for anything else (the GPU count). Without a known image, or without a known evalscope version for a
-baseline with accuracy sets, nothing is looked up or stored.
+running image ($INFERPILOT_IMAGE unless --image is given), --extra for anything else (the GPU count), and the
+rule it was measured under (every GPU of the machine idle: an entry stored under an older one is measured
+again). Without a known image, or without a known evalscope version for a baseline with accuracy sets,
+nothing is looked up or stored.
 
 A stored baseline holds RUN_DIR/baseline.json (the scores, the client's runs and their spread, and how long
 each launch, set and client run took), RUN_DIR/accuracy/ when it measured sets and RUN_DIR/bench/baseline/
@@ -48,6 +50,8 @@ RESTORE_OWNER = os.path.join(HERE, "restore_owner.sh")
 # harness, whose contents are in the fingerprint.
 EVAL_ENV = ("ENABLE_THINKING", "REASONING_EFFORT", "MAX_TOKENS", "TOP_P", "TOP_K", "DATASET_HUB",
             "JUDGE_MODEL", "JUDGE_URL", "LONGBENCH_LOCAL_PATH")
+# The rule a baseline is measured under; a new one makes every entry measured under an older one miss.
+POLICY = "every GPU of the machine idle (scripts/gpu_status.py)"
 SMALL = 16 << 20  # a model file up to this size is fingerprinted by its contents, a larger one by its size
 
 
@@ -92,7 +96,7 @@ def key_of(a, env=os.environ) -> dict:
             "workload": a.workload, "sets": sets, "harness": sha_of(a.harness) if sets else "",
             "eval_env": {k: env.get(k, "") for k in EVAL_ENV} if sets else {},
             "evalscope": evalscope_version(a.evalscope) if sets else "",
-            "gpu": a.gpu, "image": a.image, "extra": a.extra}
+            "gpu": a.gpu, "image": a.image, "extra": a.extra, "policy": POLICY}
 
 
 def digest(key: dict) -> str:

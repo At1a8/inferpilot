@@ -17,10 +17,10 @@ idle GPU's own driver allocations stay far below that. Who holds memory on it co
 /sys/class/kfd/kfd/proc/<pid>/vram_<gpu id>, which lists the processes of every container on the host by host
 pid (so it cannot tell this run's own processes inside a container: check before this run's servers start);
 it names the holders and decides nothing. A GPU whose use cannot be read is in use too. ROCR_VISIBLE_DEVICES,
-which every server inherits, renumbers HIP's GPUs: while it is set the script stops (exit 2) rather than name
-GPUs the servers would see under other numbers, and so it does when KFD lists no GPU, when a GPU node's id
-cannot be read (the numbers after it would shift), and on a --check it cannot parse. Prints one JSON object;
---check exits 1 when one of its GPUs is in use, unknown or missing.
+which every server inherits, renumbers HIP's GPUs: while it is set, even empty, the script stops (exit 2)
+rather than name GPUs the servers would see under other numbers, and so it does when KFD lists no GPU, when a
+GPU node's id cannot be read (the numbers after it would shift), and on a --check it cannot parse, an empty
+one included. Prints one JSON object; --check exits 1 when one of its GPUs is in use, unknown or missing.
 """
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def holders(root: str = KFD) -> dict:
 
 def main(argv=None, env=os.environ) -> int:
     ap = argparse.ArgumentParser(description="GPUs by HIP number, how much of each is in use, and by whom.")
-    ap.add_argument("--check", default="", help="comma-separated HIP numbers that must be idle, e.g. 0,2, or all")
+    ap.add_argument("--check", default=None, help="comma-separated HIP numbers that must be idle, e.g. 0,2, or all")
     ap.add_argument("--max-vram-pct", type=float, default=5)
     ap.add_argument("--max-busy-pct", type=float, default=5)
     ap.add_argument("--samples", type=int, default=3, help="reads of GPU%%, 0.2 s apart; the highest counts")
@@ -119,12 +119,15 @@ def main(argv=None, env=os.environ) -> int:
         print(json.dumps({"error": error}, indent=1))
         return 2
 
-    if env.get("ROCR_VISIBLE_DEVICES"):
-        return stop("ROCR_VISIBLE_DEVICES=%s renumbers the GPUs every server sees; unset it where InferPilot runs"
-                    % env["ROCR_VISIBLE_DEVICES"])
-    check = a.check.replace(" ", "")
-    if check and check != "all" and not all(x.isdigit() for x in check.split(",")):
-        return stop("--check takes comma-separated HIP numbers (as HIP_VISIBLE_DEVICES does) or all, not %r" % a.check)
+    if "ROCR_VISIBLE_DEVICES" in env:
+        return stop("ROCR_VISIBLE_DEVICES is set (%r): it renumbers the GPUs every server sees; unset it where "
+                    "InferPilot runs" % env["ROCR_VISIBLE_DEVICES"])
+    want = None  # the HIP numbers --check names; None: all of them
+    if a.check is not None and a.check.strip() != "all":
+        tokens = [t.strip() for t in a.check.split(",")]
+        if not all(t.isdigit() for t in tokens):
+            return stop("--check takes comma-separated HIP numbers (as HIP_VISIBLE_DEVICES does) or all, not %r" % a.check)
+        want = {int(t) for t in tokens}
     try:
         gpus = kfd_gpus(a.kfd)
     except Unreadable as e:
@@ -139,8 +142,8 @@ def main(argv=None, env=os.environ) -> int:
                      "in_use": None if vram is None or busy is None else not free,
                      "pids": {str(p): m for p, m in sorted(held.get(g["gpu_id"], {}).items())}})
     out, rc = {"gpus": rows}, 0
-    if check:
-        want = {r["hip"] for r in rows} if check == "all" else {int(x) for x in check.split(",")}
+    if a.check is not None:
+        want = {r["hip"] for r in rows} if want is None else want
         out["busy"] = [r for r in rows if r["hip"] in want and r["in_use"]]
         out["unknown"] = [r["hip"] for r in rows if r["hip"] in want and r["in_use"] is None]
         out["missing"] = sorted(want - {r["hip"] for r in rows})

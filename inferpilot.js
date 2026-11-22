@@ -650,10 +650,11 @@ const VERIFY = S({
   // blocking false: a report-only item of the acceptance matrix, which is reported and never investigated
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
   needs_min: num, // the round stopped before a suite that would not fit: the limit it needs, from its start
-  gpu_warning: str, // another job held a pinned GPU when the round started: who held which; the round ran on
   ledger_path: str,
   summary: str,
 }, ['all_pass', 'failures']);
+// in_use: '' when the pinned GPUs are idle; otherwise each one another job uses, its VRAM%, GPU% and pids
+const GPU_CHECK = S({ in_use: str }, ['in_use']);
 const INVESTIGATE = S({
   verdict: { type: 'string', enum: ['fix_needed', 'baseline_bug', 'kernel_regression', 'inconclusive'] },
   work_packages: WPS,
@@ -912,7 +913,8 @@ async function setup(requireBaseline) {
     return 'busy';
   }
   if (!s || !s.run_dir) {
-    note('Setup', 'fail', 'the director returned no run directory');
+    // a check that could not run (gpu_status.py exit 2) stops here with its reason: waiting would not fix it
+    note('Setup', 'fail', (s && s.baseline_status === 'fail' && s.baseline) || 'the director returned no run directory');
     return false;
   }
   // GPUs the user gave win; otherwise every later role uses the set Setup pinned.
@@ -1013,6 +1015,15 @@ async function implementAll(wps) {
 async function verifyLoop(extraGates) {
   for (let round = 0; ; round++) {
     enter('Verify');
+    // Another job on a pinned GPU does not stop a correctness round, but the user hears of it before it starts.
+    const gpus = await call('verify_engineer', 'gpus', inputs({ round }), GPU_CHECK, `verify_engineer:gpus#${round}`);
+    const inUse = gpus ? String(gpus.in_use || '').trim() : '';
+    if (inUse) {
+      note('Verify', 'warning', `another job uses a pinned GPU: ${inUse}`);
+      log(`  [inferpilot] warning: another job uses a pinned GPU before Verify round ${round}: ${inUse}`);
+    } else if (!gpus) {
+      log(`  [inferpilot] the pinned GPUs were not checked before Verify round ${round}: the check returned nothing`);
+    }
     // A round that stopped before a suite that would not fit runs again, once, with the limit it asked for;
     // nobody is asked to choose a time. A timeout the user gave stays the limit.
     let v = null;
@@ -1020,12 +1031,6 @@ async function verifyLoop(extraGates) {
       const limit = minutes(timeoutFor('verify_engineer'));
       v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
         VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`);
-      // Another job on a pinned GPU does not stop a correctness round; the user hears of it at once.
-      const gpuWarning = v ? String(v.gpu_warning || '').trim() : '';
-      if (gpuWarning) {
-        note('Verify', 'warning', `another job held a pinned GPU: ${gpuWarning}`);
-        log(`  [inferpilot] warning: another job held a pinned GPU in Verify round ${round}: ${gpuWarning}`);
-      }
       const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
         ? Math.ceil(Number(v.needs_min) || 0) : 0;
       if (!needs) break;

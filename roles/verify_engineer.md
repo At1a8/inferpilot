@@ -8,18 +8,26 @@ Read: `knowledge/validation_doctrine.md` (all of it), `knowledge/composability.m
 the design. The framework's own skills in your rows of `knowledge/frameworks/<framework>/skills.md`,
 read from the task worktree.
 
+## PHASE=gpus (before every Verify round)
+
+Inputs: `round`. Stop what this run left running on its GPUs (the servers its records name: a test
+engineer's, an earlier round's), then `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`,
+where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses, with its VRAM%, GPU% and
+pids, in `in_use`, empty when they are idle: InferPilot warns the user before the round starts, and the
+round goes on. Start nothing.
+
+Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
+
 ## PHASE=verify
 
 Inputs: `extra_gates` (mode gates such as `issue_repro` or `failing_test`), `round`, `known_issues`
 (failures already proven pre-existing in this run), `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit).
 
-1. Before this round's servers start, this run's earlier ones stopped, check the pinned GPUs
-   (`gpu_status.py --check <gpu_ids>`, `env_hygiene.md`). One another job uses does not stop a correctness
-   round: name it in `gpu_warning` (each such GPU, its VRAM%, GPU% and pids), which InferPilot shows the
-   user at once. Then launch the feature build and the baseline with the task's `server_script` as Setup
-   did (the feature arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; the run's own launch
-   script when the task has none); confirm the effective flags from the `server_args=` line of each log.
+1. Launch the feature build and the baseline with the task's `server_script` as Setup did (the feature
+   arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; the run's own launch script when the
+   task has none); confirm the effective flags from the `server_args=` line of each log. InferPilot
+   checked their GPUs just before the round (PHASE=gpus).
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.
@@ -74,5 +82,4 @@ Return:
 ```
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
-did not run are `not run`. A round another job shared a pinned GPU with adds `"gpu_warning": "<each GPU in
-use, its VRAM%, GPU% and pids>"`.
+did not run are `not run`.

@@ -914,14 +914,27 @@ const scenarios = [
     check(r.result.phases.some((p) => p.phase === 'Profile' && p.summary === 'not run: GPU 3: VRAM 88%, GPU 100%, pid 4242'),
       `the note: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Profile'))}`);
   }],
-  ['feature: another job on a pinned GPU warns the user at once, and the correctness round goes on', async () => {
+  ['feature: another job on a pinned GPU warns the user before the Verify round starts, and the round goes on', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
-      'verify_engineer:verify': () => ({ all_pass: true, failures: [], gpu_warning: 'GPU 1: VRAM 12%, GPU 40%, pid 777' }),
+      'verify_engineer:gpus': () => ({ in_use: 'GPU 1: VRAM 12%, GPU 40%, pid 777' }),
     });
     check(r.result.status === 'ready_for_review' && !r.keys.includes('investigator:investigate'), `status ${r.result.status}`);
     check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'warning' && p.summary.includes('GPU 1: VRAM 12%')),
       'the warning is in the run record, for the report');
-    check(r.lines.some((l) => l.includes('warning: another job held a pinned GPU in Verify round 0')), 'and in the log at once');
+    const warned = r.lines.findIndex((l) => l.includes('warning: another job uses a pinned GPU before Verify round 0'));
+    const started = r.lines.findIndex((l) => l.includes('verify_engineer#0'));
+    check(warned >= 0 && started > warned, `in the log before the round starts: warning at ${warned}, round at ${started}`);
+    check(eqList(r.keys.filter((k) => k.startsWith('verify_engineer:')), ['verify_engineer:gpus', 'verify_engineer:verify']),
+      `one check per round: ${r.keys.filter((k) => k.startsWith('verify_engineer:'))}`);
+  }],
+  ['feature: a GPU check that cannot run stops Setup as blocked with its reason, not as a busy machine', async () => {
+    const why = "ROCR_VISIBLE_DEVICES is set ('1'): it renumbers the GPUs every server sees; unset it where InferPilot runs";
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: '', baseline_status: 'fail', baseline: why, gpu_ids: '' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Setup', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.phases.some((p) => p.phase === 'Setup' && p.summary === why), 'the reason is kept');
+    check((r.result.next || {}).say.includes('Fix what it names') && !(r.result.next || {}).rerun_with, `next: ${JSON.stringify(r.result.next)}`);
   }],
   ['perf: with held_out on, a gain that vanishes at the held-out operating point is dropped', async () => {
     const r = await run({ mode: 'perf', task: 'p', held_out: true }, {

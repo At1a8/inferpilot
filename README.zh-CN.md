@@ -371,7 +371,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |
 | `scripts/audit_host_syncs.py` | 热路径上的 host-device 同步和拷贝候选点（供 profile 参考的线索） |
-| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server 和 client 脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU 和正在运行的镜像；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
+| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server 和 client 脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU、正在运行的镜像，以及测量时遵循的规则（所有 GPU 空闲）；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
 | `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 

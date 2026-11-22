@@ -34,8 +34,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    (`docker exec <container> ...` when `container` is set). A GPU another job uses (its VRAM% or GPU% at
    5 or more, as rocm-smi shows them) ends the run here: `run_lock.py release --run-dir RUN_DIR`, create
    nothing, and return `lock: "busy"` as above, with each such GPU, its VRAM%, GPU% and pids in `notes`.
-   Exit 2, when it cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD, a GPU node unreadable), ends
-   it the same way, with its message.
+   Exit 2 means it cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD, a GPU node unreadable), which
+   waiting does not fix: release the lock and return `lock: "acquired"`, `run_dir: ""`, `gpu_ids: ""`,
+   `baseline_status: "fail"` with its message in `baseline`; the run stops at Setup with it.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger.
