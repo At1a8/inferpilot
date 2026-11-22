@@ -457,13 +457,15 @@ const scenarios = [
   }],
   ['setup: the GPUs Setup pins reach every later role; the user\'s GPUs win', async () => {
     const picked = await run({ mode: 'feature', task: 't' }, {
-      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', worktree: `${RUN}/wt`, gpu_ids: '4,5' }),
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', worktree: `${RUN}/wt`, gpu_ids: '4,5',
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     const later = picked.calls.filter((c) => !['director:setup', 'intake:define'].includes(c.key));
     check(later.length > 5 && later.every((c) => c.ins.gpu_ids === '4,5'), 'every role after Setup sees gpu_ids=4,5');
     check(later[0].prompt.includes('HIP_VISIBLE_DEVICES'), 'roles are told to export HIP_VISIBLE_DEVICES');
     const given = await run({ mode: 'feature', task: 't', gpu_ids: '2' }, {
-      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', gpu_ids: '6,7' }),
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', gpu_ids: '6,7',
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     check(String(given.calls.find((c) => c.key === 'verify_engineer:verify').ins.gpu_ids) === '2', 'the user\'s GPUs win');
     const none = await run({ mode: 'issue', task: 'i' }, {
@@ -1176,6 +1178,61 @@ const scenarios = [
     check(!asks(plain, 'client_script'), 'a feature without a workload needs no client script');
     const setupIns = plain.calls.find((c) => c.key === 'director:setup');
     check(setupIns && setupIns.ins.server_script === '/s/server.sh', 'the server script reaches the roles');
+  }],
+  ['feature: InferPilot\'s templates run only where the user took them, and its client\'s numbers are reported, never claimed', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template']) && /never a claim/.test(question(none, 'client_script').question),
+      `the questions offer the templates, the client's as reported only: ${JSON.stringify(none.result.questions)}`);
+    const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
+      accuracy_script: `${RUN}/scripts/accuracy.sh` };
+    const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
+      worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
+    const took = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: 'template', client_script: 'template',
+      harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
+    const setupIns = took.calls.find((c) => c.key === 'director:setup');
+    check(setupIns && setupIns.ins.server_script === 'template' && setupIns.ins.client_script === 'template'
+      && (typeof setupIns.ins.harness === 'string' ? JSON.parse(setupIns.ins.harness) : setupIns.ins.harness || {}).CONTEXT_LENGTH === 8192,
+      `Setup renders what the user took, with the task's values: ${JSON.stringify(setupIns && setupIns.ins.harness)}`);
+    const perf = took.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(took.result.status === 'ready_for_review' && perf && perf.ins.server_script === rendered.server_script
+      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script && !perf.ins.claim,
+      `the rendered scripts reach the performance engineer, and InferPilot's client claims nothing: ${took.result.status}, claim ${perf && perf.ins.claim}`);
+    const own = await run({ mode: 'feature', task: 't', accuracy_script: '/s/accuracy.sh' }, setup(rendered));
+    const ownIns = own.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.accuracy_script === '/s/accuracy.sh',
+      'the task\'s own scripts win over rendered ones');
+    const unrendered = await run({ mode: 'feature', task: 't', server_script: 'template' }, setup({}));
+    check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
+      && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
+    const noAccuracy = await run({ mode: 'feature', task: 't' }, setup({}));
+    check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
+      && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)), `no accuracy script stops the run at Setup: ${noAccuracy.result.status}`);
+    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, {
+      ...setup(rendered),
+      'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
+        workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in." }),
+    });
+    check(gap.result.status === 'needs_input' && gap.result.stopped_at === 'Spec' && !gap.keys.includes('analyst:recon'),
+      `InferPilot's client on the task's workload still asks for the source's scenarios: ${gap.result.status} at ${gap.result.stopped_at}`);
+  }],
+  ['perf: a perf task may take InferPilot\'s templates, and its numbers on them count', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template'])
+      && !/never a claim/.test(question(none, 'client_script').question),
+      `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
+    const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
+        gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+    });
+    const perf = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(r.result.status === 'ready_for_review' && perf && perf.ins.server_script === `${RUN}/scripts/server.sh`
+      && perf.ins.client_script === `${RUN}/scripts/perf.sh` && perf.ins.claim,
+      `on InferPilot's server and client, the planned gain is the claim: ${r.result.status}, ${JSON.stringify(perf && perf.ins.claim)}`);
   }],
   ['perf: a profile of the wrong path stops before any plan', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {

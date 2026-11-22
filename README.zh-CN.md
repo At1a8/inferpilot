@@ -321,8 +321,10 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `model_path` | 基线和各项门禁运行的模型（`feature` 和 `perf` 必填） |
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
 | `workload` | 每次测量都使用的基准负载，例如 `{"isl":8192,"osl":1024,"conc":64}`；`perf` 必填，在 Setup 时固定 |
-| `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1） |
-| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`perf` 必填，给了 `workload` 的 feature 也必填 |
+| `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1）。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/server.sh`，按模型在 sglang cookbook 里的配方启动 |
+| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`perf` 必填，给了 `workload` 的 feature 也必填。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`；feature 用它测出的数只报告、不算 claim |
+| `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
+| `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
 | `exp_root` | 运行目录放在哪里（默认 `<inferpilot_dir>/exp`，git 会忽略它） |
 | `kernel_backend` | `none`（默认）\| `geak` \| `command`：kernel hand-off 交给谁 |
@@ -367,11 +369,12 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 |---|---|
 | `scripts/scan_issues.py` | 开放的 AMD issue，附关联 PR、回复情况和预计的 60 天自动关闭日期 |
 | `scripts/scan_ci.py` | 从 main 上 AMD CI 自己的运行和日志读出现状（每个失败 job：从何时开始失败、上次通过的时间、失败的测试、第一条错误），以及 Failure Tracker 的失败簇 |
-| `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；key 只从环境变量读取 |
+| `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；有题没拿到答案的测试集不出成绩；key 只从环境变量读取 |
+| `scripts/harness.py` | InferPilot 的模板（`templates/harness/`）：`show` 列出 server、性能压测 client 和精度三个模板的参数和默认值；`render` 生成一次运行要用的脚本（没有自己脚本的用户选了模板的 server 或 client、任务没带精度脚本时的精度脚本、Spec 的备用 client），参数先取任务给的值，再取 feature 源头测试用的值，server 的参数再取模型的 sglang cookbook 配方（`--cookbook`），最后用默认值，并写出 `harness.json`，记录每个值的来源 |
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |
 | `scripts/audit_host_syncs.py` | 热路径上的 host-device 同步和拷贝候选点（供 profile 参考的线索） |
-| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server 和 client 脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU、正在运行的镜像，以及测量时遵循的规则（所有 GPU 空闲）；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
+| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server、client 和精度脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU、正在运行的镜像，以及测量时遵循的规则（所有 GPU 空闲）；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
 | `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 

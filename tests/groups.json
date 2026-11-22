@@ -9,9 +9,9 @@
   "feature": {
     "about": "bring an upstream feature to AMD",
     "code": ["runFeature"],
-    "paths": ["knowledge/feature_skills/*"],
+    "paths": ["knowledge/feature_skills/*", "templates/harness/*"],
     "dry_run": ["feature"],
-    "unittest": ["test_scripts.FindSkillTest", "test_scripts.EvalAccuracyTest"]
+    "unittest": ["test_scripts.FindSkillTest", "test_scripts.EvalAccuracyTest", "test_scripts.HarnessTest"]
   },
   "issue": {
     "about": "triage, reproduce and fix an issue",
@@ -30,9 +30,9 @@
   "perf": {
     "about": "a performance goal to a measured win; some of its scenarios run a feature task",
     "code": ["runPerf", "runFeature"],
-    "paths": [],
+    "paths": ["templates/harness/*"],
     "dry_run": ["perf"],
-    "unittest": ["test_scripts.EvalAccuracyTest"]
+    "unittest": ["test_scripts.EvalAccuracyTest", "test_scripts.HarnessTest"]
   },
   "scan": {
     "about": "collect and dispatch, and the daily report",

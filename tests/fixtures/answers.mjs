@@ -9,7 +9,8 @@ export const WP = (id, extra) => ({ id, goal: `goal of ${id}`, kind: 'framework'
 // Answers every role gives unless a scenario overrides them.
 export const DEFAULTS = {
   'intake:define': (ins) => ({ status: 'ready', task_def: ins.given || {}, provenance: {}, assumptions: [], questions: [], summary: 'as given' }),
-  'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1' }),
+  'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
+    accuracy_script: `${RUN}/scripts/accuracy.sh` }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': () => ({ report_path: `${RUN}/run_report.md`, summary: 'done' }),
   'analyst:recon': () => ({ design_path: `${RUN}/design.md`, subsystems: [{ name: 'scheduler', files: ['a.py'], hook: 'h' }], unmapped: [], gap_type: 'framework-only', level: 'L1' }),

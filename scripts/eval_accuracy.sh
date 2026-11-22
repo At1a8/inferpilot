@@ -18,7 +18,9 @@
 #                     sglang retracts requests and the run slows down
 #   LIMIT             at most this many questions per subset: a smoke test, not a result
 #   WAIT_SERVER       seconds to wait for a server that is still starting (default 0)
-#   MAX_TOKENS        default 102400: a truncated reasoning trace leaves the answer empty
+#   MAX_TOKENS        default 32768, enough for the common sets; a truncated reasoning trace leaves the answer
+#                     empty, so a model that reasons longer is given more. At most the server's context
+#                     (max_model_len) less 2048 tokens for the question, and lowered to that
 #   REASONING_EFFORT  default max; ENABLE_THINKING default 1 (chat_template_kwargs.thinking and
 #                     .enable_thinking true; 0 sends both false). Thinking models score wrongly without
 #                     them; ENABLE_THINKING=0 REASONING_EFFORT= for others
@@ -34,7 +36,7 @@
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
 # afresh: evalscope's cache (--use-cache) is never used, so no answer of an earlier run, or of other
 # settings, reaches a score.
-# Exit status: 0 when every set produced a report, 1 otherwise.
+# Exit status: 0 when every set produced a score over all its questions (with LIMIT, a report), 1 otherwise.
 set -u
 
 [ $# -eq 0 ] && set -- gsm8k
@@ -44,7 +46,7 @@ TAG=${TAG:-eval}
 RESULT_ROOT=${RESULT_ROOT:-./results}
 WAIT_SERVER=${WAIT_SERVER:-0}
 DATASET_HUB=${DATASET_HUB:-modelscope}
-MAX_TOKENS=${MAX_TOKENS:-102400}
+MAX_TOKENS=${MAX_TOKENS:-32768}
 TOP_P=${TOP_P:-}
 TOP_K=${TOP_K:-}
 REASONING_EFFORT=${REASONING_EFFORT-max}
@@ -64,7 +66,8 @@ JUDGE_NTID=${JUDGE_NTID:-}
 [ -n "${HF_TOKEN:-}" ] && export HF_TOKEN HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
 
 # DS_TOTAL checks the denominator afterwards: evalscope's --ignore-errors drops failed samples from both
-# the predictions and the mean, so a missing question is invisible in the score. 0: not a fixed count.
+# the predictions and the mean, so a missing question is invisible in the score. A set with one missing gets
+# no score (but with LIMIT, a smoke test). 0: not a fixed count; then a dropped sample in the log counts.
 dataset_profile() {  # <set> -> DS_BATCH, DS_ARGS, DS_TOTAL, DS_JUDGE
     DS_BATCH=256
     DS_ARGS=""
@@ -100,8 +103,8 @@ if [ "${WAIT_SERVER}" -gt 0 ]; then
 fi
 
 # evalscope sends --model as the request's model and names its result directory after it.
-SERVED=$(curl -s --max-time 20 "${API_URL%/}/models" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null)
+MODELS=$(curl -s --max-time 20 "${API_URL%/}/models")
+SERVED=$(echo "${MODELS}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null)
 if [ -z "${SERVED}" ]; then
     echo "eval_accuracy: no server answers at ${API_URL} (WAIT_SERVER=<seconds> waits for one that is starting)" >&2
     exit 1
@@ -110,6 +113,20 @@ MODEL=${MODEL:-${SERVED}}
 if [ "${MODEL}" != "${SERVED}" ]; then
     echo "eval_accuracy: MODEL=${MODEL}, but the server serves ${SERVED}; every request would fail. Unset MODEL." >&2
     exit 1
+fi
+
+# sglang rejects a request whose question and max_tokens exceed the context, and --ignore-errors would drop
+# it from the score unseen: MAX_TOKENS keeps QUESTION_ROOM tokens of the server's context for the question.
+QUESTION_ROOM=2048
+CONTEXT=$(echo "${MODELS}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0].get("max_model_len") or "")' 2>/dev/null)
+if [ -n "${CONTEXT}" ] && [ "${MAX_TOKENS}" -gt $((CONTEXT - QUESTION_ROOM)) ]; then
+    if [ $((CONTEXT - QUESTION_ROOM)) -lt 1 ]; then
+        echo "eval_accuracy: the server's context (${CONTEXT} tokens) leaves no room for an answer" >&2
+        exit 1
+    fi
+    echo "eval_accuracy: MAX_TOKENS=${MAX_TOKENS} lowered to $((CONTEXT - QUESTION_ROOM)), what the server's" \
+         "${CONTEXT}-token context leaves beside a question"
+    MAX_TOKENS=$((CONTEXT - QUESTION_ROOM))
 fi
 
 # The judge is probed only when a requested set needs one, and before any inference: a bad key then
@@ -140,7 +157,7 @@ FAILED=0
 SUMMARY=""
 
 run_one() {  # <set>
-    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line
+    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line complete
     local -a limit_arg=() args_arg=()
     dataset_profile "${ds}"
     batch=${BATCH:-${DS_BATCH}}
@@ -216,12 +233,13 @@ run_one() {  # <set>
         return
     fi
 
-    line=$(DS_TOTAL="${DS_TOTAL}" LOG="${log}" python3 -c "
+    line=$(DS_TOTAL="${DS_TOTAL}" LOG="${log}" LIMIT="${LIMIT:-}" python3 -c "
 import json, os, sys
 rep = json.load(open(sys.argv[1]))
 total = int(os.environ['DS_TOTAL'])
+metrics = rep.get('metrics', [])
 out = []
-for m in rep.get('metrics', []):
+for m in metrics:
     n, score = m['num'], m['score']
     name = m.get('name') or (m.get('identity') or {}).get('name') or m.get('legacy_name')
     out.append('%s=%s (%d questions)' % (name, score, n))
@@ -231,8 +249,19 @@ dropped = sum(1 for l in open(os.environ['LOG'], errors='replace') if 'Error ign
 if dropped:
     out.append('%d samples dropped by --ignore-errors' % dropped)
 print('  '.join(out))
+missing = (total and (not metrics or metrics[0]['num'] < total)) or (not total and dropped)
+sys.exit(3 if missing and not os.environ['LIMIT'] else 0)
 " "${rep}" 2>/dev/null)
+    complete=$?
     echo "${ds}: ${line}  accept_length=${accept:-?}"
+    # A score over the questions that got an answer is no score: the arms may miss different ones.
+    if [ "${complete}" = 3 ]; then
+        echo "${ds}: no score, since not every question got an answer: a question too long for MAX_TOKENS=${MAX_TOKENS}" \
+             "within the server's context, or a request that failed (${log})" >&2
+        SUMMARY="${SUMMARY}\n  ${ds}: failed, not every question got an answer (${line})"
+        FAILED=1
+        return
+    fi
     SUMMARY="${SUMMARY}\n  ${ds}: ${line}  accept_length=${accept:-?}"
 
     python3 -c "

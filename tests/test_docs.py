@@ -199,7 +199,8 @@ def inputs(path):
 
 
 def code_files():
-    return sorted(p for pattern in ("inferpilot/*.py", "setup.py", "scripts/*.py", "scripts/*.sh", "runtime/*.mjs")
+    return sorted(p for pattern in ("inferpilot/*.py", "setup.py", "scripts/*.py", "scripts/*.sh", "templates/harness/*.sh",
+                                    "runtime/*.mjs")
                   for p in ROOT.glob(pattern) if not p.name.startswith("test_"))
 
 
