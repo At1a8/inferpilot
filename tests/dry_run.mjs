@@ -457,13 +457,15 @@ const scenarios = [
   }],
   ['setup: the GPUs Setup pins reach every later role; the user\'s GPUs win', async () => {
     const picked = await run({ mode: 'feature', task: 't' }, {
-      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', worktree: `${RUN}/wt`, gpu_ids: '4,5' }),
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', worktree: `${RUN}/wt`, gpu_ids: '4,5',
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     const later = picked.calls.filter((c) => !['director:setup', 'intake:define'].includes(c.key));
     check(later.length > 5 && later.every((c) => c.ins.gpu_ids === '4,5'), 'every role after Setup sees gpu_ids=4,5');
     check(later[0].prompt.includes('HIP_VISIBLE_DEVICES'), 'roles are told to export HIP_VISIBLE_DEVICES');
     const given = await run({ mode: 'feature', task: 't', gpu_ids: '2' }, {
-      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', gpu_ids: '6,7' }),
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', gpu_ids: '6,7',
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     check(String(given.calls.find((c) => c.key === 'verify_engineer:verify').ins.gpu_ids) === '2', 'the user\'s GPUs win');
     const none = await run({ mode: 'issue', task: 'i' }, {
@@ -1204,6 +1206,16 @@ const scenarios = [
     const unrendered = await run({ mode: 'feature', task: 't', server_script: 'template' }, setup({}));
     check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
       && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
+    const noAccuracy = await run({ mode: 'feature', task: 't' }, setup({}));
+    check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
+      && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)), `no accuracy script stops the run at Setup: ${noAccuracy.result.status}`);
+    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, {
+      ...setup(rendered),
+      'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
+        workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in." }),
+    });
+    check(gap.result.status === 'needs_input' && gap.result.stopped_at === 'Spec' && !gap.keys.includes('analyst:recon'),
+      `InferPilot's client on the task's workload still asks for the source's scenarios: ${gap.result.status} at ${gap.result.stopped_at}`);
   }],
   ['perf: a perf task may take InferPilot\'s templates, and its numbers on them count', async () => {
     const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};

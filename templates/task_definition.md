@@ -94,7 +94,8 @@ only where the user takes them:
   user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
   task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 32768 tokens
-  per answer); only the task or the feature's source changes them (PARD-2: thinking off).
+  per answer); only the task or the feature's source changes them (PARD-2: thinking off). The sets it
+  measures are its arguments, from `goal` (gsm8k when none), never a template parameter.
 
 An issue or a ci task launches its server with the reporter's or the job's own command, as given, never
 with a template's or the cookbook's flags.
@@ -111,6 +112,9 @@ each parameter from, in this order:
 
 `python3 scripts/harness.py show` lists every parameter with its default and meaning, and
 `RUN_DIR/scripts/harness.json` the value each one took and where it came from, which the report lists.
+A rendered script holds its values: no variable of the environment changes them, but for
+`CONTEXT_LENGTH` and `CONCURRENCY`, which InferPilot still sets for a launch. A recipe's setting of the
+run's GPUs, port, tree or model is dropped and recorded.
 On the template server, an accuracy run keeps the model's own context when the feature's cannot hold the
 answers (`accuracy_server_env`); on any server, `eval_accuracy.sh` lowers `MAX_TOKENS` to what the
 server's context leaves beside a question.

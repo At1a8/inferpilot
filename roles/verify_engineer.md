@@ -33,9 +33,10 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.
-   - **gsm8k (1319) first**, G2's first set, with the run's `accuracy_script` (the task's own, or
-     InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's settings; the same
-     for both arms): once per arm, at most 1 point below the baseline, with no token-level comparison.
+   - **gsm8k (1319) first**, G2's first set, with the run's `accuracy_script` (`<accuracy_script> gsm8k`:
+     the task's own, or InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's
+     settings; the same for both arms): once per arm, at most 1 point below the baseline, with no
+     token-level comparison. A set where a question got no answer has no score.
    - G0 feature off; every gate in `extra_gates`: `issue_repro` (the reproduction no longer fails),
      `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
      dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,

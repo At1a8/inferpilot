@@ -12,18 +12,22 @@ template's default.
         --cookbook RUN_DIR/scripts/cookbook.txt --cookbook-source "docs/cookbook/.../GLM-5.1.mdx, MI355X FP8"
 
 render writes server.sh, perf.sh and accuracy.sh to --out (--scripts picks some; --name NAME writes the one
-picked as NAME.sh, with NAME.json beside it), each parameter line holding its value and the kind of its source,
-and harness.json: when it was rendered and, per parameter, its script, value and source (task, feature,
-cookbook or template) with the words it came from, the cookbook recipe, and accuracy_server_env, what the server of an accuracy run sets beyond server.sh (CONTEXT_LENGTH emptied when
-that context cannot hold MAX_TOKENS and a question). The task's values come from --set NAME=VALUE, --task (a
-JSON object, the task's harness field) and --workload (its isl, osl and conc); the feature's from --feature,
-a JSON object or file of {"NAME": {"value": ..., "source": "<where the source sets it>"}} or of plain values,
-which --feature-source describes. --cookbook is the recipe's launch command, as text or a file: its
-environment settings and `sglang serve` or `python -m sglang.launch_server` with its flags. The flags of a
-parameter line fill that parameter, the model, host and port are the task's and InferPilot's, and the
-environment and the other flags go to server.sh's cookbook block as written. A name no template has, or a
-value its line cannot hold, is an error (exit 2). A rendered script holds no time and none of those words, so
-the same values render the same script: the baseline cache fingerprints its contents.
+picked as NAME.sh, with NAME.json beside it), each parameter line holding its value and the kind of its
+source, and harness.json: when it was rendered and, per parameter, its script, value and source (task,
+feature, cookbook or template) with the words it came from, the cookbook recipe, and accuracy_server_env,
+what the server of an accuracy run sets beyond server.sh (CONTEXT_LENGTH emptied when the feature's source
+caps the context below MAX_TOKENS and a question). The task's values come from --set NAME=VALUE, --task (a
+JSON object, the task's harness field; empty is none) and --workload (its isl, osl and conc, read only when
+perf.sh is rendered); the feature's from --feature, a JSON object or file of {"NAME": {"value": ...,
+"source": "<where the source sets it>"}} or of plain values, which --feature-source describes. --cookbook is
+the recipe's launch command, as text or a file: its environment settings and `sglang serve` or
+`python -m sglang.launch_server` with its flags. The flags of a parameter line fill that parameter, the
+model, host and port are the task's and InferPilot's, and the environment and the other flags go to
+server.sh's cookbook block as written, but for a setting of a variable InferPilot sets for each launch or a
+parameter line holds, which harness.json lists as dropped. A name no template has, or a value its line cannot
+hold, is an error (exit 2). A rendered script holds its values: the environment changes only CONTEXT_LENGTH
+(an accuracy run's server) and CONCURRENCY (the held-out point). It holds no time and none of the record's
+words, so the same values render the same script: the baseline cache fingerprints its contents.
 """
 import argparse
 import datetime
@@ -40,9 +44,14 @@ BEGIN, END = "# >>> parameters", "# <<< parameters"
 COOKBOOK_BEGIN, COOKBOOK_END = "# >>> cookbook", "# <<< cookbook"
 LINE = re.compile(r'^(?P<name>[A-Z][A-Z0-9_]*)="\$\{(?P=name)(?P<op>:?-)(?P<default>[^"$`\\}]*)\}"(?P<pad>\s*)'
                   r'# (?P<type>int|float|bool|str|ints|strs); (?P<about>.*)$')
-# What a value of each type may be; none may hold what would end or expand its "${NAME:-...}" line.
+# What a value of each type may be; none may hold what would end or expand its double-quoted line.
 VALUES = {"int": r"-?\d+", "float": r"-?\d+(\.\d+)?", "bool": r"[01]", "ints": r"\d+( \d+)*",
           "str": r'[^"$`\\}\n]*', "strs": r'[^"$`\\}\n]*'}
+# A rendered line holds its value, but for these, which InferPilot still sets for a launch: an accuracy run's
+# server drops the feature's context cap, and the held-out point halves the concurrency.
+RUNTIME = ("CONTEXT_LENGTH", "CONCURRENCY")
+# What InferPilot sets for every launch: a cookbook recipe's setting of one, or of a parameter, would override it.
+RUNNER_ENV = ("PORT", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "PYTHONPATH", "EXTRA_ARGS")
 WORKLOAD = {"isl": "ISL", "osl": "OSL", "conc": "CONCURRENCY"}
 # The flags of a cookbook command that server.sh's parameter lines hold.
 COOKBOOK_FLAGS = {"--tp": "TP", "--tp-size": "TP", "--tensor-parallel-size": "TP", "--context-length": "CONTEXT_LENGTH",
@@ -76,7 +85,7 @@ def parameters(script):
         m = LINE.match(lines[n])
         if not m:
             raise HarnessError("templates/harness/%s.sh:%d is not a parameter line" % (script, n + 1))
-        out.append(dict(m.groupdict(), script=script, line=n))
+        out.append(dict(m.groupdict(), script=script, line=n, col=m.end("pad")))
     return out
 
 
@@ -109,8 +118,8 @@ def value_of(p, raw):
 
 
 def load(arg, what):
-    """A JSON object, given inline or as a file."""
-    if arg is None:
+    """A JSON object, given inline or as a file; nothing or an empty argument is none."""
+    if arg is None or not arg.strip():
         return {}
     path = Path(arg)
     try:
@@ -213,11 +222,12 @@ def cookbook_values(text, source):
         raise HarnessError("--cookbook holds no sglang launch command (sglang serve, python -m sglang.launch_server)")
     if "docker" in words[:start]:
         raise HarnessError("--cookbook: take the recipe's command that runs sglang itself, not its docker command")
-    env = []
+    env, dropped = [], []
+    owned = set(RUNNER_ENV) | set(catalog())
     for w in words[:start]:
         if not ENV_WORD.match(w):
             raise HarnessError("--cookbook: %r comes before the launch command and sets no variable" % w)
-        env.append(w)
+        (dropped if w.partition("=")[0] in owned else env).append(w)
     groups = []
     for w in words[start + skip:]:
         if w.startswith("--"):
@@ -238,12 +248,13 @@ def cookbook_values(text, source):
             model = given[0] if given else None
         elif flag not in ("--host", "--port"):
             args.append(group)
-    return values, {"source": source, "model": model, "env": env, "args": args}
+    return values, {"source": source, "model": model, "env": env, "env_dropped": dropped, "args": args}
 
 
 def accuracy_server_env(params):
-    """A context the feature caps for its own tests may not hold an accuracy run's answers."""
-    if "CONTEXT_LENGTH" not in params or "MAX_TOKENS" not in params:
+    """A context the feature's source caps for its speed tests may not hold an accuracy run's answers. One the
+    task or the cookbook sets stays, and eval_accuracy.sh lowers MAX_TOKENS to it instead."""
+    if (params.get("CONTEXT_LENGTH") or {}).get("source") != "feature" or "MAX_TOKENS" not in params:
         return {}
     ctx, max_tokens = params["CONTEXT_LENGTH"]["value"], params["MAX_TOKENS"]["value"]
     if ctx and int(ctx) < int(max_tokens) + QUESTION_ROOM:
@@ -255,7 +266,7 @@ def cookbook_lines(recipe):
     """server.sh's cookbook block for a recipe: its environment exported, then its other flags, each word quoted."""
     if not recipe:
         return ["cookbook=()"]
-    out = ["# the recipe's model: %s (harness.json names its page)" % (recipe["model"] or "none named")]
+    out = ["# the recipe's environment and other flags; harness.json names its page and model"]
     for setting in recipe["env"]:
         name, _, value = setting.partition("=")
         out.append("export %s=%s" % (name, shlex.quote(value)))
@@ -270,15 +281,19 @@ def rendered(script, params, recipe=None, record="harness.json"):
     lines = text.splitlines()
     for p in parameters(script):
         e = params[p["name"]]
-        lines[p["line"]] = '%s="${%s%s%s}"%s# %s; %s [%s]' % (p["name"], p["name"], p["op"], e["value"],
-                                                            p["pad"] or " ", p["type"], p["about"], e["source"])
+        if p["name"] in RUNTIME:
+            head = '%s="${%s%s%s}"' % (p["name"], p["name"], p["op"], e["value"])
+        else:
+            head = '%s="%s"' % (p["name"], e["value"])
+        lines[p["line"]] = "%s%s# %s; %s [%s]" % (head, " " * max(1, p["col"] - len(head)), p["type"], p["about"],
+                                                  e["source"])
     if script == "server":
         first, last = block(lines, COOKBOOK_BEGIN, COOKBOOK_END, script)
         lines[first + 1:last] = cookbook_lines(recipe)
     lines.insert(1, "# Rendered from templates/harness/%s.sh by scripts/harness.py; %s beside it says when, and "
                     "where each value came from." % (script, record))
     out = "\n".join(lines) + "\n"
-    if not re.fullmatch(VALUES["str"], str(ROOT)):
+    if not re.fullmatch(r"[^\"$`\\}'\n]*", str(ROOT)):
         raise HarnessError("the checkout's path %s cannot be written into a script" % ROOT)
     return INFERPILOT_DIR_LINE.sub(lambda m: 'INFERPILOT_DIR="${INFERPILOT_DIR:-%s}"' % ROOT, out)
 
@@ -323,7 +338,7 @@ def main(argv=None):
     r.add_argument("--out", required=True, help="the directory to write the scripts and harness.json to")
     r.add_argument("--set", action="append", default=[], metavar="NAME=VALUE", help="a task's value")
     r.add_argument("--task", help="the task's values, a JSON object or file (its harness field)")
-    r.add_argument("--workload", help="the task's workload, a JSON object with isl, osl and conc")
+    r.add_argument("--workload", help="the task's workload, a JSON object with isl, osl and conc (perf.sh only)")
     r.add_argument("--feature", help="the feature's values, a JSON object or file")
     r.add_argument("--feature-source", default="the feature's source", help="where plain --feature values come from")
     r.add_argument("--cookbook", help="the model's sglang cookbook recipe for this GPU: its launch command, or a file of it")
@@ -340,7 +355,8 @@ def main(argv=None):
         if unknown or not scripts:
             raise HarnessError("--scripts takes some of %s" % ", ".join(SCRIPTS))
         cook, recipe = cookbook_values(text_or_file(args.cookbook), args.cookbook_source)
-        params = resolve(task_values(args.set, load(args.task, "--task"), load(args.workload, "--workload")),
+        workload = load(args.workload, "--workload") if "perf" in scripts else {}
+        params = resolve(task_values(args.set, load(args.task, "--task"), workload),
                          feature_values(load(args.feature, "--feature"), args.feature_source), cook, scripts)
         record = render(args.out, params, scripts, recipe, args.name)
     except HarnessError as e:
@@ -349,8 +365,8 @@ def main(argv=None):
     for name, e in record["parameters"].items():
         print("%-22s %-28s %s%s" % (name, e["value"] or "(empty)", e["source"], ": " + e["why"] if e.get("why") else ""))
     if record["cookbook"]:
-        print("cookbook: %s; environment %s; other flags %s" % (record["cookbook"]["source"],
-              " ".join(record["cookbook"]["env"]) or "none",
+        print("cookbook: %s; environment %s; dropped %s; other flags %s" % (record["cookbook"]["source"],
+              " ".join(record["cookbook"]["env"]) or "none", " ".join(record["cookbook"]["env_dropped"]) or "none",
               " ".join(" ".join(g) for g in record["cookbook"]["args"]) or "none"))
     print("wrote %s" % ", ".join(record["scripts"].values()))
     return 0

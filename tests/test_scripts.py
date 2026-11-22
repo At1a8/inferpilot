@@ -279,7 +279,9 @@ class EvalAccuracyTest(unittest.TestCase):
             done
             echo "work dir $wd"
             mkdir -p "$wd/run/reports/fake-model"
-            echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": 1319}]}' > "$wd/run/reports/fake-model/$ds.json"
+            # every question answered, unless FAKE_NUM says how many were
+            case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
+            echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
             """))
         for f in fake.iterdir():
             f.chmod(0o755)
@@ -372,6 +374,16 @@ class EvalAccuracyTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("leaves no room", r.stderr)
 
+    def test_a_set_with_an_unanswered_question_has_no_score(self):
+        r = self.run_script("gsm8k", FAKE_NUM="1300")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("not every question got an answer", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "gsm8k:" in summary.read_text(), "a score over 1300 of 1319 questions was kept")
+        r = self.run_script("gsm8k", FAKE_NUM="5", LIMIT="5")
+        self.assertEqual(r.returncode, 0, "a smoke test asks for fewer: " + r.stderr)
+        self.assertIn("eval gsm8k:", summary.read_text())
+
     def test_a_judged_set_without_a_key_is_skipped(self):
         r = self.run_script("simple_qa")
         self.assertEqual(r.returncode, 1)
@@ -403,9 +415,23 @@ class HarnessTest(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
         self.calls = self.tmp / "calls.txt"
-        # sglang records its arguments, one per line; python3 records a benchmark run and passes the import check.
+        # sglang records its arguments, one per line. python3 passes the import check, records a benchmark run and
+        # appends its result with FAKE_COMPLETED of its prompts done (all by default), and runs anything else.
         (self.bin / "sglang").write_text('#!/bin/bash\nprintf "%%s\\n" "$@" > %s\n' % self.calls)
-        (self.bin / "python3").write_text('#!/bin/bash\n[ "$1" = -c ] && exit 0\necho "$*" >> %s\n' % self.calls)
+        (self.bin / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = -c ] && exit 0
+            if [ "$1" = -m ]; then
+              echo "$*" >> %s
+              while [ $# -gt 0 ]; do
+                case "$1" in --output-file) out=$2; shift ;; --num-prompts) n=$2; shift ;; esac
+                shift
+              done
+              echo "{\\"completed\\": ${FAKE_COMPLETED:-$n}}" >> "$out"
+              exit 0
+            fi
+            exec %s "$@"
+            """) % (self.calls, sys.executable))
         for f in self.bin.iterdir():
             f.chmod(0o755)
 
@@ -449,7 +475,9 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual((p["SEED"]["value"], p["SEED"]["source"]), ("1", "template"))
         self.assertEqual(p["REASONING_EFFORT"]["value"], "", "no reasoning effort without thinking")
         line = next(t for t in (self.out / "server.sh").read_text().splitlines() if t.startswith("PREFIX_CACHE="))
-        self.assertTrue(line.startswith('PREFIX_CACHE="${PREFIX_CACHE:-0}"') and line.endswith("[feature]"), line)
+        self.assertTrue(line.startswith('PREFIX_CACHE="0"') and line.endswith("[feature]"), line)
+        line = next(t for t in (self.out / "server.sh").read_text().splitlines() if t.startswith("CONTEXT_LENGTH="))
+        self.assertTrue(line.startswith('CONTEXT_LENGTH="${CONTEXT_LENGTH-8192}"'), "InferPilot still sets it for a launch: " + line)
 
     def test_the_same_values_render_the_same_scripts(self):
         """The baseline cache fingerprints a script's contents: no time and no words of the record in it."""
@@ -490,6 +518,8 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(self.record()["accuracy_server_env"], {"CONTEXT_LENGTH": ""})
         self.assertEqual(self.render("--set", "MODEL_PATH=/models/m")[0], 0)
         self.assertEqual(self.record()["accuracy_server_env"], {})
+        self.assertEqual(self.render("--set", "MODEL_PATH=/models/m", "--set", "CONTEXT_LENGTH=8192")[0], 0)
+        self.assertEqual(self.record()["accuracy_server_env"], {}, "the task's own context stays; MAX_TOKENS is lowered to it")
 
     def test_mistakes_are_errors(self):
         for args, what in ((["--set", "MAX_MODEL_LEN=4096"], "no template has a parameter MAX_MODEL_LEN"),
@@ -497,6 +527,7 @@ class HarnessTest(unittest.TestCase):
                            (["--set", "SERVER_ARGS=--x $(id)"], "is not a value"),
                            (["--workload", '{"isl": 1, "ratio": 2}'], "ratio unknown"),
                            (["--feature", "not json"], "is not a JSON object"),
+                           (["--set", "SETS=gsm8k"], "no template has a parameter SETS"),
                            (["--scripts", "server,client"], "--scripts")):
             rc, msg = self.render("--set", "MODEL_PATH=/models/m", *args)
             self.assertEqual(rc, 2, args)
@@ -507,6 +538,11 @@ class HarnessTest(unittest.TestCase):
         rc, msg = self.render("--scripts", "perf,accuracy")
         self.assertEqual(rc, 0, "a task with a server of its own needs no MODEL_PATH: " + msg)
         self.assertFalse((self.out / "server.sh").exists())
+        for empty in (["--task", ""], ["--task", "  "], ["--feature", ""], ["--workload", ""]):
+            self.assertEqual(self.render("--set", "MODEL_PATH=/models/m", *empty)[0], 0, "%s is none" % empty)
+        rc, msg = self.render("--scripts", "server,accuracy", "--set", "MODEL_PATH=/models/m",
+                              "--workload", '{"dataset": "sharegpt", "conc": 32}')
+        self.assertEqual(rc, 0, "the workload of the task's own client is not the template's to read: " + msg)
 
     def test_the_rendered_server_passes_every_value_and_the_feature_flags_last(self):
         self.assertEqual(self.render("--set", "MODEL_PATH=/models/m", "--feature", json.dumps(self.FEATURE))[0], 0)
@@ -517,10 +553,20 @@ class HarnessTest(unittest.TestCase):
                                                           "--speculative-algorithm", "PARD2"])
         self.assertEqual(self.run_rendered("server.sh", PORT="30001", CONTEXT_LENGTH="").returncode, 0)
         self.assertNotIn("--context-length", self.calls.read_text().split(), "the accuracy server keeps the model's own context")
+        self.assertEqual(self.run_rendered("server.sh", PORT="30001", MODEL_PATH="/models/other", PREFIX_CACHE="1").returncode, 0)
+        argv = self.calls.read_text().split()
+        self.assertTrue(argv[2] == "/models/m" and "--disable-radix-cache" in argv, "an exported value replaces no rendered one")
+
+    def test_a_value_with_an_apostrophe_renders_a_valid_script(self):
+        self.assertEqual(self.render("--scripts", "server", "--set", "MODEL_PATH=/models/m",
+                                     "--set", "SERVER_ARGS=--chat-template it's")[0], 0)
+        r = self.run_rendered("server.sh", PORT="30001")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.calls.read_text().split()[-2:], ["--chat-template", "it's"])
 
     COOKBOOK = textwrap.dedent("""\
         # FP8 on MI300X/MI325X/MI355X
-        SGLANG_USE_AITER=1 sglang serve \\
+        SGLANG_USE_AITER=1 HIP_VISIBLE_DEVICES=0,1,2,3 sglang serve \\
           --model-path zai-org/GLM-5.1-FP8 \\
           --tp 8 \\
           --trust-remote-code \\
@@ -545,16 +591,27 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual((p["CHUNKED_PREFILL_SIZE"]["value"], p["CHUNKED_PREFILL_SIZE"]["source"]), ("8192", "feature"))
         self.assertEqual((p["MEM_FRACTION_STATIC"]["value"], p["MEM_FRACTION_STATIC"]["source"], p["MEM_FRACTION_STATIC"]["why"]),
                          ("0.80", "cookbook", "GLM-5.1, MI355X FP8"))
-        self.assertEqual((rec["cookbook"]["model"], rec["cookbook"]["env"]), ("zai-org/GLM-5.1-FP8", ["SGLANG_USE_AITER=1"]))
-        (self.bin / "sglang").write_text('#!/bin/bash\necho "SGLANG_USE_AITER=$SGLANG_USE_AITER" > %s\nprintf "%%s\\n" "$@" >> %s\n'
-                                         % (self.calls, self.calls))
-        r = self.run_rendered("server.sh", PORT="30001", EXTRA_ARGS="--speculative-algorithm EAGLE")
+        self.assertEqual((rec["cookbook"]["model"], rec["cookbook"]["env"], rec["cookbook"]["env_dropped"]),
+                         ("zai-org/GLM-5.1-FP8", ["SGLANG_USE_AITER=1"], ["HIP_VISIBLE_DEVICES=0,1,2,3"]),
+                         "a recipe's setting of the run's GPUs is dropped, and recorded")
+        self.assertNotIn("zai-org/GLM-5.1-FP8", (self.out / "server.sh").read_text(), "the recipe's model stays in the record")
+        (self.bin / "sglang").write_text('#!/bin/bash\necho "SGLANG_USE_AITER=$SGLANG_USE_AITER HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES"'
+                                         ' > %s\nprintf "%%s\\n" "$@" >> %s\n' % (self.calls, self.calls))
+        r = self.run_rendered("server.sh", PORT="30001", HIP_VISIBLE_DEVICES="6,7", EXTRA_ARGS="--speculative-algorithm EAGLE")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.calls.read_text().splitlines(),
-                         ["SGLANG_USE_AITER=1", "serve", "--model-path", "/models/glm", "--tp", "4", "--host", "127.0.0.1",
+                         ["SGLANG_USE_AITER=1 HIP_VISIBLE_DEVICES=6,7", "serve", "--model-path", "/models/glm", "--tp", "4", "--host", "127.0.0.1",
                           "--port", "30001", "--mem-fraction-static", "0.80", "--chunked-prefill-size", "8192",
                           "--trust-remote-code", "--nsa-prefill-backend", "tilelang",
                           "--json-model-override-args", '{"index_topk_pattern": "FFSF"}', "--speculative-algorithm", "EAGLE"])
+
+    def test_a_recipe_writes_nothing_into_the_script_but_quoted_words(self):
+        pwned = self.tmp / "pwned"
+        rc, msg = self.render("--scripts", "server", "--set", "MODEL_PATH=/models/q",
+                              "--cookbook", "sglang serve --model-path 'q\ntouch %s' --trust-remote-code" % pwned)
+        self.assertEqual(rc, 0, msg)
+        self.assertEqual(self.run_rendered("server.sh", PORT="30001").returncode, 0)
+        self.assertFalse(pwned.exists(), "a model name with a newline ran as a command")
 
     def test_a_configurator_command_and_what_is_no_recipe(self):
         rc, msg = self.render("--scripts", "server", "--set", "MODEL_PATH=/models/q",
@@ -586,24 +643,34 @@ class HarnessTest(unittest.TestCase):
         self.assertIn("--flush-cache", last)
         self.assertEqual(len(list(bench.glob("bench_1024_256_c*.log"))), 2)
 
+    def test_a_benchmark_run_with_a_failed_request_is_no_measurement(self):
+        self.assertEqual(self.render("--scripts", "perf", "--workload", '{"isl": 1024, "osl": 256, "conc": [1, 8]}')[0], 0)
+        bench = self.tmp / "bench"
+        r = self.run_rendered("perf.sh", PORT="30001", OUT_DIR=str(bench), FAKE_COMPLETED="3")
+        self.assertEqual(r.returncode, 1, "the benchmark exits 0 when a request failed; perf.sh does not")
+        self.assertIn("not every request completed", r.stderr)
+        self.assertIn("3 of the 4 requests completed", "".join(f.read_text() for f in bench.glob("bench_*_c1_*.log")))
+        self.assertEqual(self.run_rendered("perf.sh", PORT="30001", OUT_DIR=str(self.tmp / "again")).returncode, 0)
+
     def test_the_rendered_accuracy_script_runs_eval_accuracy_with_the_run_settings(self):
-        self.assertEqual(self.render("--scripts", "accuracy", "--set", "SETS=gsm8k gpqa_diamond",
-                                     "--feature", json.dumps(self.FEATURE))[0], 0)
+        self.assertEqual(self.render("--scripts", "accuracy", "--feature", json.dumps(self.FEATURE))[0], 0)
         self.assertIn('INFERPILOT_DIR="${INFERPILOT_DIR:-%s}"' % harness.ROOT, (self.out / "accuracy.sh").read_text())
         fake = self.tmp / "inferpilot"
         (fake / "scripts").mkdir(parents=True)
         (fake / "scripts" / "eval_accuracy.sh").write_text(
             'echo "sets=$* max_tokens=$MAX_TOKENS thinking=$ENABLE_THINKING effort=[$REASONING_EFFORT]" > %s\n' % self.calls)
-        r = self.run_rendered("accuracy.sh", INFERPILOT_DIR=str(fake))
+        r = self.run_rendered("accuracy.sh", "gsm8k", "gpqa_diamond", INFERPILOT_DIR=str(fake), ENABLE_THINKING="1",
+                              MAX_TOKENS="999")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.calls.read_text().strip(), "sets=gsm8k gpqa_diamond max_tokens=32768 thinking=0 effort=[]")
-        self.assertEqual(self.run_rendered("accuracy.sh", "simple_qa", INFERPILOT_DIR=str(fake)).returncode, 0)
-        self.assertTrue(self.calls.read_text().startswith("sets=simple_qa "), "arguments replace SETS")
+        self.assertEqual(self.calls.read_text().strip(), "sets=gsm8k gpqa_diamond max_tokens=32768 thinking=0 effort=[]",
+                         "the sets are its arguments, and an exported setting replaces no rendered one")
+        self.assertEqual(self.run_rendered("accuracy.sh", INFERPILOT_DIR=str(fake)).returncode, 0)
+        self.assertTrue(self.calls.read_text().startswith("sets= "), "without arguments, eval_accuracy.sh's own: gsm8k")
 
     def test_the_accuracy_template_exports_every_setting_and_thinking_brings_its_effort(self):
         text = (harness.TEMPLATES / "accuracy.sh").read_text()
         exported = re.search(r"^export (.+)$", text, re.M).group(1).split()
-        self.assertEqual(sorted(exported), sorted(n for n, p in harness.catalog().items() if p["script"] == "accuracy" and n != "SETS"),
+        self.assertEqual(sorted(exported), sorted(n for n, p in harness.catalog().items() if p["script"] == "accuracy"),
                          "what the run sets reaches eval_accuracy.sh for every arm")
         self.assertEqual(self.render("--scripts", "accuracy")[0], 0)
         p = self.record()["parameters"]

@@ -369,7 +369,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 |---|---|
 | `scripts/scan_issues.py` | 开放的 AMD issue，附关联 PR、回复情况和预计的 60 天自动关闭日期 |
 | `scripts/scan_ci.py` | 从 main 上 AMD CI 自己的运行和日志读出现状（每个失败 job：从何时开始失败、上次通过的时间、失败的测试、第一条错误），以及 Failure Tracker 的失败簇 |
-| `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；key 只从环境变量读取 |
+| `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；有题没拿到答案的测试集不出成绩；key 只从环境变量读取 |
 | `scripts/harness.py` | InferPilot 的模板（`templates/harness/`）：`show` 列出 server、性能压测 client 和精度三个模板的参数和默认值；`render` 生成一次运行要用的脚本（没有自己脚本的用户选了模板的 server 或 client、任务没带精度脚本时的精度脚本、Spec 的备用 client），参数先取任务给的值，再取 feature 源头测试用的值，server 的参数再取模型的 sglang cookbook 配方（`--cookbook`），最后用默认值，并写出 `harness.json`，记录每个值的来源 |
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |

@@ -950,6 +950,11 @@ async function setup(requireBaseline) {
     note('Setup', 'fail', `${unrendered.join(' and ')}: the user took InferPilot's template, and Setup rendered none`);
     return false;
   }
+  // G2 runs the same accuracy script for every arm, from the baseline on.
+  if ((MODE === 'feature' || MODE === 'perf') && !C.accuracy_script) {
+    note('Setup', 'fail', "no accuracy script: Setup returned neither the task's nor InferPilot's accuracy.sh");
+    return false;
+  }
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
   note('Setup', ok ? 'pass' : 'fail',
     `baseline ${s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`);
@@ -1351,11 +1356,11 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
 async function runFeature() {
   const early = await start(true);
   if (early) return early;
-  // InferPilot's client, its template taken at Intake or the fallback Spec offered for the source's
-  // scenarios, need not reproduce the source's numbers: what it measures is reported, never a claim.
-  const fallback = isTemplate(A.client_script)
-    || (C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script));
-  const claimOf = (c) => (fallback ? '' : c || '');
+  // Spec's fallback client, which the user took for the source's scenarios.
+  const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
+  // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
+  // reproduce the source's numbers: what it measures is reported, never a claim.
+  const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : c || '');
 
   // Resume after a human approved design.md (a run that stopped at Design).
   if (RESUME === 'implement') {
@@ -1380,6 +1385,7 @@ async function runFeature() {
     return finish('blocked', 'Spec');
   }
   C.spec_path = spec.spec_path;
+  // Only the fallback runs the source's scenarios; the template taken at Intake runs the task's workload.
   if (!fallback && String(spec.workload_gap || '').trim()) return askWorkload(spec);
   note('Spec', 'pass', `${spec.spec_path}${spec.skill ? `; skill ${spec.skill}` : ''}`);
   if (stopHere('Spec')) return finish('stopped', 'Spec');

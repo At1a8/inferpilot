@@ -43,7 +43,26 @@ for c in $CONCURRENCY; do
   [ "$PROFILE" = 1 ] && args+=(--profile --profile-num-steps "$PROFILE_STEPS")
   log="$OUT_DIR/bench_${ISL}_${OSL}_c${c}_$(date -u +%Y%m%d-%H%M%SZ).log"
   echo "python3 -m $bench ${args[*]} $BENCH_ARGS" > "$log"
+  before=0
+  [ -f "$OUT_DIR/bench.jsonl" ] && before=$(wc -l < "$OUT_DIR/bench.jsonl")
   # shellcheck disable=SC2086  # a flag list
   python3 -m "$bench" "${args[@]}" $BENCH_ARGS >> "$log" 2>&1 || status=1
+  # The benchmark exits 0 when requests failed: a run counts only when every prompt completed.
+  if ! python3 - "$OUT_DIR/bench.jsonl" "$before" "$((PROMPTS_PER_CONC * c))" >> "$log" 2>&1 <<'EOF'
+import json, sys
+path, before, want = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+try:
+    new = open(path, encoding="utf-8").read().splitlines()[before:]
+except OSError:
+    new = []
+got = json.loads(new[-1]).get("completed") if new else None
+if got != want:
+    print("perf.sh: %s of the %d requests completed: this run is no measurement" % (got, want))
+    sys.exit(1)
+EOF
+  then
+    echo "perf.sh: concurrency $c: not every request completed ($log)" >&2
+    status=1
+  fi
 done
 exit "$status"

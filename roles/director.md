@@ -99,17 +99,22 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
        command to `RUN_DIR/scripts/cookbook.txt` as the page gives it for that GPU (its environment
        settings, then `sglang serve` or `python -m sglang.launch_server` with every flag): in an AMD
        section, or the command its configurator builds for that selection (`docs/src/snippets/`). A
-       model or GPU the cookbook has no recipe for: no `--cookbook`, and the report says so.
+       model or GPU the cookbook has no recipe for: no `--cookbook`, and the report says so. The
+       recipe's setting of a variable InferPilot sets for each launch (`HIP_VISIBLE_DEVICES`, `PORT`,
+       `PYTHONPATH`) or of a parameter (`MODEL_PATH`) is dropped, and `harness.json` lists it under
+       `env_dropped`: the run's GPUs, port, tree and model win.
      - For a feature, write `RUN_DIR/feature_params.json` first: every template parameter the source's
        own tests set (its reproduce commands, test settings and result tables), each as `{"value": ...,
        "source": "<the words it comes from>"}`; vLLM's `--max-model-len 4096` is `CONTEXT_LENGTH`,
        `--no-enable-prefix-caching` `PREFIX_CACHE=0`, `--max-num-seqs` `MAX_RUNNING_REQUESTS`,
        `enable_thinking=false` `ENABLE_THINKING=0`. What the source does not set keeps the cookbook's or
        the template's value.
-     - `RUN_DIR/scripts/harness.json` records every value and where it came from, and the recipe; on the
-       template server, an accuracy run adds its `accuracy_server_env` (a context the feature caps for its
-       speed tests cannot hold the answers). Return the scripts the run uses as `server_script`,
-       `client_script` and `accuracy_script`.
+     - `RUN_DIR/scripts/harness.json` records every value and where it came from, and the recipe. A
+       rendered script holds its values, so no variable of your environment changes them; only
+       `CONTEXT_LENGTH` and `CONCURRENCY` still take what InferPilot sets for a launch. On the template
+       server, an accuracy run adds its `accuracy_server_env` (the context the feature's source caps for
+       its speed tests cannot hold the answers; a context the task or the recipe sets stays). Return the
+       scripts the run uses as `server_script`, `client_script` and `accuracy_script`.
    - The server and every test command put the tree they run first on `PYTHONPATH` (sglang:
      `<tree>/python`): the worktree for the feature arm, `RUN_DIR/base` for the baseline arm when there
      is one. The first log shows `sglang.__file__` inside that tree (`env_hygiene.md`, *The code under
@@ -146,12 +151,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      stored; the script refuses one that is incomplete.
    - `feature`, `perf`: accuracy is gsm8k on all 1319 questions, once
      (`API_URL=http://127.0.0.1:<port>/v1 TAG=baseline RESULT_ROOT=RUN_DIR/accuracy
-     bash <accuracy_script>`: InferPilot's `accuracy.sh` runs `scripts/eval_accuracy.sh`, evalscope, with
-     the run's settings), and gpqa_diamond and simple_qa as well when `goal` says the change may lose
-     accuracy (`acceptance.md` §1.1; `<accuracy_script> gsm8k gpqa_diamond simple_qa`; simple_qa needs
-     the LLM judge, which the script probes before any inference); other suites or more runs only when
-     `goal` asks. Never decide it yourself. An `accuracy_script` of the task's runs instead, as given,
-     with the same variables, on the sets it measures.
+     bash <accuracy_script> gsm8k`: InferPilot's `accuracy.sh` runs `scripts/eval_accuracy.sh`, evalscope,
+     with the run's settings, on the sets it is given), and gpqa_diamond and simple_qa as well when `goal`
+     says the change may lose accuracy (`acceptance.md` §1.1; `<accuracy_script> gsm8k gpqa_diamond
+     simple_qa`; simple_qa needs the LLM judge, which the script probes before any inference); other
+     suites or more runs only when `goal` asks. Never decide it yourself. An `accuracy_script` of the
+     task's runs instead, as given, with the same variables, on the sets it measures.
      Performance is the run's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
      run, at least twice, and the spread recorded (`validation_doctrine.md`), on a server started only
      after the warm-up's is stopped and `gpu_status.py --check all` finds the machine idle

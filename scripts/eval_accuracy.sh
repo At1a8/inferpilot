@@ -36,7 +36,7 @@
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
 # afresh: evalscope's cache (--use-cache) is never used, so no answer of an earlier run, or of other
 # settings, reaches a score.
-# Exit status: 0 when every set produced a report, 1 otherwise.
+# Exit status: 0 when every set produced a score over all its questions (with LIMIT, a report), 1 otherwise.
 set -u
 
 [ $# -eq 0 ] && set -- gsm8k
@@ -66,7 +66,8 @@ JUDGE_NTID=${JUDGE_NTID:-}
 [ -n "${HF_TOKEN:-}" ] && export HF_TOKEN HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
 
 # DS_TOTAL checks the denominator afterwards: evalscope's --ignore-errors drops failed samples from both
-# the predictions and the mean, so a missing question is invisible in the score. 0: not a fixed count.
+# the predictions and the mean, so a missing question is invisible in the score. A set with one missing gets
+# no score (but with LIMIT, a smoke test). 0: not a fixed count; then a dropped sample in the log counts.
 dataset_profile() {  # <set> -> DS_BATCH, DS_ARGS, DS_TOTAL, DS_JUDGE
     DS_BATCH=256
     DS_ARGS=""
@@ -156,7 +157,7 @@ FAILED=0
 SUMMARY=""
 
 run_one() {  # <set>
-    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line
+    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line complete
     local -a limit_arg=() args_arg=()
     dataset_profile "${ds}"
     batch=${BATCH:-${DS_BATCH}}
@@ -232,12 +233,13 @@ run_one() {  # <set>
         return
     fi
 
-    line=$(DS_TOTAL="${DS_TOTAL}" LOG="${log}" python3 -c "
+    line=$(DS_TOTAL="${DS_TOTAL}" LOG="${log}" LIMIT="${LIMIT:-}" python3 -c "
 import json, os, sys
 rep = json.load(open(sys.argv[1]))
 total = int(os.environ['DS_TOTAL'])
+metrics = rep.get('metrics', [])
 out = []
-for m in rep.get('metrics', []):
+for m in metrics:
     n, score = m['num'], m['score']
     name = m.get('name') or (m.get('identity') or {}).get('name') or m.get('legacy_name')
     out.append('%s=%s (%d questions)' % (name, score, n))
@@ -247,8 +249,19 @@ dropped = sum(1 for l in open(os.environ['LOG'], errors='replace') if 'Error ign
 if dropped:
     out.append('%d samples dropped by --ignore-errors' % dropped)
 print('  '.join(out))
+missing = (total and (not metrics or metrics[0]['num'] < total)) or (not total and dropped)
+sys.exit(3 if missing and not os.environ['LIMIT'] else 0)
 " "${rep}" 2>/dev/null)
+    complete=$?
     echo "${ds}: ${line}  accept_length=${accept:-?}"
+    # A score over the questions that got an answer is no score: the arms may miss different ones.
+    if [ "${complete}" = 3 ]; then
+        echo "${ds}: no score, since not every question got an answer: a question too long for MAX_TOKENS=${MAX_TOKENS}" \
+             "within the server's context, or a request that failed (${log})" >&2
+        SUMMARY="${SUMMARY}\n  ${ds}: failed, not every question got an answer (${line})"
+        FAILED=1
+        return
+    fi
     SUMMARY="${SUMMARY}\n  ${ds}: ${line}  accept_length=${accept:-?}"
 
     python3 -c "
