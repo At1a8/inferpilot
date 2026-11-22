@@ -13,8 +13,10 @@ Read: `knowledge/system_perf.md`, `knowledge/perf_evaluation.md`, `knowledge/rew
 The workload is fixed at Setup (`RUN_DIR/run.json`) before any profile is read; never change it after
 seeing results. If it must change, stop and say why.
 
-1. Launch the baseline server with the task's `server_script` and warm it up with its `client_script`
-   (`task_definition.md` §1.1).
+1. Before any server of this run starts, the machine idle (`gpu_status.py --check all`, `env_hygiene.md`):
+   a GPU another job uses means no profile is taken; return at once with `not_run`, each such GPU with
+   its VRAM%, GPU% and pids (`path_ok` false, no opportunities). Then launch the baseline server with the
+   task's `server_script` and warm it up with its `client_script` (`task_definition.md` §1.1).
 2. **Path check first.** From the launch script and the server log (`server_args=` line, backend and
    graph-capture messages), compare intended and effective: attention backend, MoE and GEMM backends,
    graph capture and its batch sizes, torch.compile, the quantization path, and any fallback or
@@ -47,9 +49,16 @@ Return:
    "evidence": "/abs/RUN_DIR/traces/decode.json", "upper_bound_pct": 3.5, "owner": "inferpilot"}]}
 ```
 
+A profile the machine was not idle for is `{"analysis_path": "", "path_ok": false, "opportunities": [],
+"not_run": "<each GPU in use, its VRAM%, GPU% and pids>"}`.
+
 ## PHASE=perf_eval (G5 in feature and perf; guards in every mode that runs it)
 
 Inputs: `claim` (empty when the task claims no gain).
+
+Before the servers of every round start, this run's earlier ones stopped, the machine idle
+(`gpu_status.py --check all`, `env_hygiene.md`). A GPU another job uses means the measurement is not run:
+return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and judge nothing.
 
 1. Follow `perf_evaluation.md`: the benchmark is the task's `client_script`, run unchanged with
    `OUT_DIR` set, against servers started from its `server_script` (the change's flags in
@@ -84,3 +93,6 @@ Return:
  "results": [{"workload": "...", "budget": "...", "reference": "...", "change": "...", "delta": "...", "runs": 3, "artifact": "..."}],
  "summary": "<headline delta with its budget and runs; the held-out delta; suspected hacks by id>"}
 ```
+
+A round the machine was not idle for adds `"not_run": "<each GPU in use, its VRAM%, GPU% and pids>"`, and
+nothing it returns is judged.

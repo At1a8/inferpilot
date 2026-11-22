@@ -600,7 +600,9 @@ post, the daily report to share.
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and
 frees it at the end of its report. While another task holds it, a new run ends at once as `busy` and
-names the holder. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
+names the holder. Every mode but scan also needs the machine's GPUs free of other jobs
+(`scripts/gpu_status.py --check all`): another job on any of them ends the run at Setup as `busy` too,
+and makes a later performance measurement not run. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
 container) is gone, or which wrote nothing in its run directory for twice its longest agent call (12 h
 by default), is taken over by the next run. A run in another container is
 never taken over for silence, since its run directory is not visible from here; once that run is
@@ -629,7 +631,8 @@ GitHub allows 60 requests an hour and 10 searches a minute per IP address).
 | `scripts/scan_upstream.py` | merged upstream commits: new CUDA gates, CUDA-first features, new models |
 | `scripts/audit_platform_gates.py` | platform gates to re-check on a new architecture (capability checks true on gfx1250, wave32 assumptions) |
 | `scripts/audit_host_syncs.py` | host-device sync and copy candidates on the hot path (leads for a profile) |
-| `scripts/baseline_cache.py` | baseline measurements kept for reuse in `<exp_root>/baseline_cache`, keyed by the framework commit, the model's files, the contents of the server and client scripts, the workload, the accuracy sets with the contents of `scripts/eval_accuracy.sh`, the settings it reads and the evalscope version, the GPU and the running image; Setup takes a hit from the last 7 days instead of measuring accuracy and performance again, stores only a baseline that passed, and on a hit still probes the accuracy harness with a few questions |
+| `scripts/baseline_cache.py` | baseline measurements kept for reuse in `<exp_root>/baseline_cache`, keyed by the framework commit, the model's files, the contents of the server and client scripts, the workload, the accuracy sets with the contents of `scripts/eval_accuracy.sh`, the settings it reads and the evalscope version, the GPU, the running image and the rule it was measured under (every GPU idle); Setup takes a hit from the last 7 days instead of measuring accuracy and performance again, stores only a baseline that passed, and on a hit still probes the accuracy harness with a few questions |
+| `scripts/gpu_status.py` | the GPUs by HIP number (the numbers `HIP_VISIBLE_DEVICES` takes: the order of their KFD nodes, which rocm-smi's Device numbers can differ from), each with its VRAM% and GPU% as rocm-smi shows them and the processes of any container holding memory on it; `--check all` fails while one is in use (either at 5% or more), and every mode but scan runs it when it starts and before each performance measurement |
 | `scripts/leak_scan.py` | what a branch would publish about this machine (local paths upstream does not already carry, host names, internal sites, `root` commits) in the lines each of its commits adds, its commit messages and PR description; the PR engineer runs it before handing a branch over |
 
 `scripts/restore_owner.sh` (POSIX sh) gives what root wrote in the container on a host mount back to

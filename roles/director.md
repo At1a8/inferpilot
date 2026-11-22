@@ -29,7 +29,14 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    and return `lock: "busy"`, `run_dir: ""`, `baseline_status: "skip"`, `gpu_ids: ""`, with the holder
    (its run directory, task, container and start) and the release command in `notes`. Otherwise
    `lock: "acquired"`; a lock taken over from a run that finished, whose runner is gone or that went
-   silent is noted.
+   silent is noted. Then, in every mode but scan, the whole machine must be idle, or what is measured on
+   it means nothing: `python3 <inferpilot_dir>/scripts/gpu_status.py --check all`, where the servers run
+   (`docker exec <container> ...` when `container` is set). A GPU another job uses (its VRAM% or GPU% at
+   5 or more, as rocm-smi shows them) ends the run here: `run_lock.py release --run-dir RUN_DIR`, create
+   nothing, and return `lock: "busy"` as above, with each such GPU, its VRAM%, GPU% and pids in `notes`.
+   Exit 2 means it cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD, a GPU node unreadable), which
+   waiting does not fix: release the lock and return `lock: "acquired"`, `run_dir: ""`, `gpu_ids: ""`,
+   `baseline_status: "fail"` with its message in `baseline`; the run stops at Setup with it.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger.
@@ -59,8 +66,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    - After git writes, `scripts/restore_owner.sh <framework_dir>/.git` (nothing to do for the image's
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
-   and return it as `gpu_ids`: the given one, or, when none was given, GPUs that `rocm-smi` shows with no
-   process and no memory in use, as many as the task needs (`env_hygiene.md`). Every later role uses
+   and return it as `gpu_ids`: the given one, or, when none was given, the first GPUs by HIP number, as
+   many as the task needs; step 0 found them all idle. `gpu_status.py` lists them by HIP number, the
+   order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
@@ -111,8 +119,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      gpqa_diamond simple_qa`; simple_qa needs the LLM judge, which the script probes before any
      inference); other suites or more runs only when `goal` asks. Never decide it yourself.
      Performance is the task's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
-     run, at least twice, and the spread recorded (`validation_doctrine.md`). The baseline passes when
-     repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
+     run, at least twice, and the spread recorded (`validation_doctrine.md`), on a server started only
+     after the warm-up's is stopped and `gpu_status.py --check all` finds the machine idle
+     (`env_hygiene.md`; a GPU another job uses then fails the baseline, naming it). The baseline passes
+     when repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
      cache keeps it.

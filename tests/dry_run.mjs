@@ -896,6 +896,46 @@ const scenarios = [
     check(r.keys.includes('implementer:rollback'), 'change rolled back');
     check(r.result.handoffs.some((h) => h.owner === 'kernel_workflow'), 'kernel opportunity handed off');
   }],
+  ['perf: a measurement not run because another job held a GPU drops nothing and judges nothing', async () => {
+    const r = await run({ mode: 'perf', task: 'DeepSeek-V4.1 decode on MI355X' }, {
+      'perf_engineer:perf_eval': () => ({ claim_reproduced: false, held_out_ok: true, guards_ok: true, workload_unchanged: true, path_ok: true,
+        not_run: 'GPU 5: pid 91234 holds 61440 MiB', summary: 'not run' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Performance', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('implementer:rollback'), 'nothing is rolled back on a measurement that did not run');
+    check(r.result.phases.some((p) => p.phase === 'Performance' && p.summary === 'not run: GPU 5: pid 91234 holds 61440 MiB'),
+      'the note says who held which GPU');
+  }],
+  ['perf: a profile not run because another job used a GPU stops at Profile and names the job, not the serving path', async () => {
+    const r = await run({ mode: 'perf', task: 'p' }, {
+      'perf_engineer:profile': () => ({ analysis_path: '', path_ok: false, opportunities: [], not_run: 'GPU 3: VRAM 88%, GPU 100%, pid 4242' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Profile', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.phases.some((p) => p.phase === 'Profile' && p.summary === 'not run: GPU 3: VRAM 88%, GPU 100%, pid 4242'),
+      `the note: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Profile'))}`);
+  }],
+  ['feature: another job on a pinned GPU warns the user before the Verify round starts, and the round goes on', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'verify_engineer:gpus': () => ({ in_use: 'GPU 1: VRAM 12%, GPU 40%, pid 777' }),
+    });
+    check(r.result.status === 'ready_for_review' && !r.keys.includes('investigator:investigate'), `status ${r.result.status}`);
+    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'warning' && p.summary.includes('GPU 1: VRAM 12%')),
+      'the warning is in the run record, for the report');
+    const warned = r.lines.findIndex((l) => l.includes('warning: another job uses a pinned GPU before Verify round 0'));
+    const started = r.lines.findIndex((l) => l.includes('verify_engineer#0'));
+    check(warned >= 0 && started > warned, `in the log before the round starts: warning at ${warned}, round at ${started}`);
+    check(eqList(r.keys.filter((k) => k.startsWith('verify_engineer:')), ['verify_engineer:gpus', 'verify_engineer:verify']),
+      `one check per round: ${r.keys.filter((k) => k.startsWith('verify_engineer:'))}`);
+  }],
+  ['feature: a GPU check that cannot run stops Setup as blocked with its reason, not as a busy machine', async () => {
+    const why = "ROCR_VISIBLE_DEVICES is set ('1'): it renumbers the GPUs every server sees; unset it where InferPilot runs";
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: '', baseline_status: 'fail', baseline: why, gpu_ids: '' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Setup', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.phases.some((p) => p.phase === 'Setup' && p.summary === why), 'the reason is kept');
+    check((r.result.next || {}).say.includes('Fix what it names') && !(r.result.next || {}).rerun_with, `next: ${JSON.stringify(r.result.next)}`);
+  }],
   ['perf: with held_out on, a gain that vanishes at the held-out operating point is dropped', async () => {
     const r = await run({ mode: 'perf', task: 'p', held_out: true }, {
       'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: false, guards_ok: true, workload_unchanged: true, path_ok: true,

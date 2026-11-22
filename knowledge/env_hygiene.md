@@ -87,6 +87,15 @@ belongs to a host user, and the rules below are about those.
 - Keep one server per GPU set; a previous server still holding the GPUs looks like an out-of-memory bug.
   Stop it only if this run started it (its recorded PID); a GPU busy with anything else is somebody's
   work — wait, or ask Setup for other GPUs, never kill it or reset the GPU (`guardrails.md` §3).
+- Before the servers of every performance measurement start (the baseline's, a profile's, each A/B
+  round's), this run's earlier servers stopped by their recorded PIDs:
+  `python3 <inferpilot_dir>/scripts/gpu_status.py --check all`, where the servers run. Never while a server
+  of this run is up: its memory and load count like anyone's, and the pids the script names are host pids,
+  which do not name this run's processes inside a container. A GPU in use anywhere on the machine (its
+  VRAM% or GPU% at 5 or more, as rocm-smi shows them) moves the numbers, not only one of the run's GPUs:
+  that measurement is not run, reported at once with each such GPU, its VRAM%, GPU% and pids. A number
+  measured next to somebody else's job is not a measurement. GPUs are numbered as HIP numbers them, in KFD
+  node order; rocm-smi's Device numbers can differ.
 - Running a test that needs a GPU the server occupies: stop the server first.
 
 ## Disk and tools

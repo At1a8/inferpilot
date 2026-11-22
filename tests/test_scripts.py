@@ -29,6 +29,7 @@ import latest_image  # noqa: E402
 import daily_report  # noqa: E402
 import leak_scan  # noqa: E402
 import find_skill  # noqa: E402
+import gpu_status  # noqa: E402
 import propose_knowledge  # noqa: E402
 import run_lock  # noqa: E402
 import scan_ci  # noqa: E402
@@ -558,6 +559,89 @@ class RunLockTest(unittest.TestCase):
         self.assertIn('"status": "busy"', out.getvalue())
 
 
+class GpuStatusTest(unittest.TestCase):
+    """scripts/gpu_status.py on fake KFD and DRM trees whose node order differs from the PCI order."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.kfd, self.drm = Path(tmp.name) / "kfd", Path(tmp.name) / "drm"
+        nodes = self.kfd / "topology" / "nodes"
+        # Two CPU nodes, then the GPUs in node order: HIP 0 is node 2, whose PCI bus (0x75) comes last
+        for node, gpu_id, bus, minor in [(0, 0, 0, 0), (1, 0, 0, 0), (2, 111, 0x75, 128), (3, 222, 0x05, 136),
+                                         (4, 333, 0x65, 144)]:
+            (nodes / str(node)).mkdir(parents=True)
+            (nodes / str(node) / "gpu_id").write_text("%d\n" % gpu_id)
+            (nodes / str(node) / "properties").write_text("location_id %d\ndomain 0\ngfx_target_version %d\n"
+                                                          "drm_render_minor %d\n" % (bus << 8, 90500 if gpu_id else 0, minor))
+        self.use(128, 0.1, 0)
+        self.use(136, 88, 100)
+        self.use(144, 0.1, 0)
+        for pid, gpu_id, size in [(4242, 222, 4096 * 2 ** 20), (5151, 333, 2 ** 19)]:  # 4 GiB on HIP 1, half a MiB on HIP 2
+            (self.kfd / "proc" / str(pid)).mkdir(parents=True)
+            (self.kfd / "proc" / str(pid) / ("vram_%d" % gpu_id)).write_text("%d\n" % size)
+
+    def use(self, minor, vram_pct, busy, total=288 * 2 ** 30):
+        dev = self.drm / ("renderD%d" % minor) / "device"
+        dev.mkdir(parents=True, exist_ok=True)
+        (dev / "mem_info_vram_total").write_text("%d\n" % total)
+        (dev / "mem_info_vram_used").write_text("%d\n" % int(total * vram_pct / 100))
+        (dev / "gpu_busy_percent").write_text("%d\n" % busy)
+
+    def run_main(self, *args, env=None):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = gpu_status.main(["--kfd", str(self.kfd), "--drm", str(self.drm), "--samples", "1", *args],
+                                 env={} if env is None else env)
+        return rc, json.loads(out.getvalue())
+
+    def test_hip_numbers_follow_the_kfd_node_order_not_the_pci_address(self):
+        rc, out = self.run_main()
+        self.assertEqual(rc, 0)
+        self.assertEqual([(r["hip"], r["node"], r["pci"], r["arch"]) for r in out["gpus"]],
+                         [(0, 2, "0000:75:00.0", "gfx950"), (1, 3, "0000:05:00.0", "gfx950"), (2, 4, "0000:65:00.0", "gfx950")])
+        self.assertEqual([(r["vram_pct"], r["busy_pct"], r["in_use"]) for r in out["gpus"]],
+                         [(0.1, 0, False), (88.0, 100, True), (0.1, 0, False)])
+        self.assertEqual([r["pids"] for r in out["gpus"]], [{}, {"4242": 4096}, {"5151": 1}],
+                         "half a MiB shows as 1: the pids name holders and decide nothing")
+
+    def test_a_gpu_is_in_use_from_5_percent_of_its_memory_or_of_its_busy_time(self):
+        rc, out = self.run_main("--check", "all")
+        self.assertEqual((rc, [r["hip"] for r in out["busy"]]), (1, [1]))
+        self.assertEqual(self.run_main("--check", "0,2")[0], 0)
+        for vram, busy, rc in [(4.9, 4, 0), (0.1, 5, 1), (5, 0, 1)]:
+            self.use(128, vram, busy)
+            self.assertEqual(self.run_main("--check", "0")[0], rc, "VRAM %s%%, GPU %s%%" % (vram, busy))
+        rc, out = self.run_main("--check", "7")
+        self.assertEqual((rc, out["missing"]), (1, [7]))
+
+    def test_a_gpu_whose_use_cannot_be_read_is_not_idle(self):
+        (self.drm / "renderD144" / "device" / "gpu_busy_percent").unlink()
+        rc, out = self.run_main("--check", "2")
+        self.assertEqual((rc, out["unknown"]), (1, [2]))
+
+    def test_what_it_cannot_tell_stops_it(self):
+        for args, env, says in [(["--check", "0-3"], {}, "comma-separated"),
+                                (["--check", "1 0"], {}, "comma-separated"),  # not "10", nor GPU 1 alone
+                                (["--check", ""], {}, "comma-separated"),
+                                (["--check", " "], {}, "comma-separated"),
+                                (["--check", "0,,2"], {}, "comma-separated"),
+                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": "1,2"}, "ROCR_VISIBLE_DEVICES is set ('1,2')"),
+                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": ""}, "ROCR_VISIBLE_DEVICES is set ('')")]:
+            rc, out = self.run_main(*args, env=env)
+            self.assertEqual(rc, 2, args)
+            self.assertIn(says, out["error"])
+        self.assertEqual(self.run_main("--check", " 0, 2 ")[0], 0, "spaces around a number are fine")
+        (self.kfd / "topology" / "nodes" / "3" / "gpu_id").write_text("")  # dropped, HIP 2 would become HIP 1
+        rc, out = self.run_main("--check", "all")
+        self.assertEqual(rc, 2)
+        self.assertIn("node 3", out["error"])
+        shutil.rmtree(self.kfd / "topology")
+        rc, out = self.run_main("--check", "all")
+        self.assertEqual(rc, 2)
+        self.assertIn("no GPU", out["error"])
+
+
 class BaselineCacheTest(unittest.TestCase):
     """scripts/baseline_cache.py: what a fingerprint covers, what a store keeps and what a hit restores."""
 
@@ -693,6 +777,12 @@ class BaselineCacheTest(unittest.TestCase):
         self.assertIn("0.91", (Path(first["dir"]) / "accuracy" / "summary.txt").read_text())
         self.assertIn("0.92", (Path(second["dir"]) / "accuracy" / "summary.txt").read_text())
         self.assertFalse(list(Path(self.cache).rglob("meta.json.part")))
+
+    def test_an_entry_measured_under_an_older_rule_is_measured_again(self):
+        older = {k: v for k, v in self.key().items() if k != "policy"}  # stored before every GPU had to be idle
+        self.assertTrue(self.store(older)["stored"])
+        self.assertTrue(baseline_cache.lookup(self.cache, older, 7, now=2000.0)["hit"])
+        self.assertFalse(self.hit(), "the current rule misses it")
 
     def test_an_old_entry_is_not_used_and_goes_at_the_next_store(self):
         old = self.store(now=1000.0)

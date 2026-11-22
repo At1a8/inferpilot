@@ -84,6 +84,8 @@ name next to the arguments file: `exp/<name>.again.json`, `exp/<name>.start-<ran
 - Never edit the files of a run directory to change its task. A change of goal, workload, GPUs or gates
   comes from the user and goes in new arguments; the run's agents reject a goal changed behind them. The
   control file moves only where the run stops.
-- One task per machine (`python3 scripts/run_lock.py status`); check the GPUs (`rocm-smi`) before a run.
+- One task per machine (`python3 scripts/run_lock.py status`), and but for a scan no other job on its
+  GPUs: check them by HIP number before a run (`python3 scripts/gpu_status.py`; rocm-smi's Device numbers
+  can differ).
 - Never print or write keys. InferPilot never pushes and never posts upstream: the push command is the
   user's.

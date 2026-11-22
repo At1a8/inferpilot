@@ -350,7 +350,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享日报。
 
-**一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用的时间里（默认 12 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
+**一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用的时间里（默认 12 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
 
 ```bash
 python3 scripts/run_lock.py status            # 谁占着这台机器
@@ -371,7 +371,8 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |
 | `scripts/audit_host_syncs.py` | 热路径上的 host-device 同步和拷贝候选点（供 profile 参考的线索） |
-| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server 和 client 脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU 和正在运行的镜像；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
+| `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server 和 client 脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU、正在运行的镜像，以及测量时遵循的规则（所有 GPU 空闲）；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
+| `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 
 `scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有本地路径、主机名或内部站点）、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。

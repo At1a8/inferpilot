@@ -605,6 +605,7 @@ const PROFILE = S({
   analysis_path: str,
   path_ok: bool,
   path_evidence: str,
+  not_run: str, // another job held a GPU of the machine: who held which; no profile was taken
   metrics: obj,
   opportunities: arr(S({
     id: str,
@@ -652,6 +653,8 @@ const VERIFY = S({
   ledger_path: str,
   summary: str,
 }, ['all_pass', 'failures']);
+// in_use: '' when the pinned GPUs are idle; otherwise each one another job uses, its VRAM%, GPU% and pids
+const GPU_CHECK = S({ in_use: str }, ['in_use']);
 const INVESTIGATE = S({
   verdict: { type: 'string', enum: ['fix_needed', 'baseline_bug', 'kernel_regression', 'inconclusive'] },
   work_packages: WPS,
@@ -666,6 +669,7 @@ const PERF = S({
   guards_ok: bool,
   workload_unchanged: bool,
   path_ok: bool,
+  not_run: str, // another job held a GPU of the machine: who held which; no number was taken
   results: arr(),
   summary: str,
 }, ['claim_reproduced', 'held_out_ok', 'guards_ok', 'workload_unchanged', 'path_ok']);
@@ -821,7 +825,8 @@ function nextSteps(status, at) {
       + `without stop_after: the task starts over.${report}`;
     out.rerun_with = { stop_after: '' };
   } else if (status === 'busy') {
-    out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it ends; python3 scripts/run_lock.py status names it.`;
+    out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
+      + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
     out.rerun_with = {};
   } else if (status === 'needs_input' && at === 'Spec') {
     const fallback = (((R.questions || [])[0] || {}).options || [])[0];
@@ -895,7 +900,8 @@ function askWorkload(spec) {
   return finish('needs_input', 'Spec');
 }
 
-// true, false, 'busy' when another InferPilot task holds the machine, or {ask} when the image check stopped
+// true, false, 'busy' when the machine is not free (another InferPilot task holds it, or, but for a scan,
+// another job holds one of its GPUs), or {ask} when the image check stopped
 // the run (nothing was created in either case).
 async function setup(requireBaseline) {
   enter('Setup');
@@ -903,11 +909,12 @@ async function setup(requireBaseline) {
     image_ok: IMAGE_OK }), SETUP);
   if (s && s.lock === 'skipped') return { ask: s.image || {} };
   if (s && s.lock === 'busy') {
-    note('Setup', 'busy', `another InferPilot task holds this machine${s.notes ? `: ${s.notes}` : ''}`);
+    note('Setup', 'busy', `the machine is not free${s.notes ? `: ${s.notes}` : ''}`);
     return 'busy';
   }
   if (!s || !s.run_dir) {
-    note('Setup', 'fail', 'the director returned no run directory');
+    // a check that could not run (gpu_status.py exit 2) stops here with its reason: waiting would not fix it
+    note('Setup', 'fail', (s && s.baseline_status === 'fail' && s.baseline) || 'the director returned no run directory');
     return false;
   }
   // GPUs the user gave win; otherwise every later role uses the set Setup pinned.
@@ -1008,6 +1015,15 @@ async function implementAll(wps) {
 async function verifyLoop(extraGates) {
   for (let round = 0; ; round++) {
     enter('Verify');
+    // Another job on a pinned GPU does not stop a correctness round, but the user hears of it before it starts.
+    const gpus = await call('verify_engineer', 'gpus', inputs({ round }), GPU_CHECK, `verify_engineer:gpus#${round}`);
+    const inUse = gpus ? String(gpus.in_use || '').trim() : '';
+    if (inUse) {
+      note('Verify', 'warning', `another job uses a pinned GPU: ${inUse}`);
+      log(`  [inferpilot] warning: another job uses a pinned GPU before Verify round ${round}: ${inUse}`);
+    } else if (!gpus) {
+      log(`  [inferpilot] the pinned GPUs were not checked before Verify round ${round}: the check returned nothing`);
+    }
     // A round that stopped before a suite that would not fit runs again, once, with the limit it asked for;
     // nobody is asked to choose a time. A timeout the user gave stays the limit.
     let v = null;
@@ -1111,11 +1127,14 @@ async function performance(claim) {
   enter('Performance');
   const p = await call('perf_engineer', 'perf_eval', inputs({ claim: claim || '' }), PERF);
   // A measurement counts only on the fixed workload and on the path the task targets; with held_out, a
-  // gain counts only if it also holds at the held-out operating point nobody tuned on.
-  const trusted = !!p && p.workload_unchanged === true && p.path_ok === true;
+  // gain counts only if it also holds at the held-out operating point nobody tuned on. One not run (another
+  // job on the machine) is no evidence either way: nothing is judged or dropped on it.
+  const notRun = !!p && String(p.not_run || '').trim();
+  const trusted = !!p && !notRun && p.workload_unchanged === true && p.path_ok === true;
   const reproduced = trusted && p.claim_reproduced === true && (!HELD_OUT || p.held_out_ok === true);
   const ok = trusted && p.guards_ok === true && (!claim || reproduced);
   const why = !p ? 'the performance engineer returned nothing'
+    : notRun ? `not run: ${notRun}`
     : !trusted ? `not trusted: ${p.workload_unchanged !== true ? 'workload changed' : 'the run left the intended path'}; ${p.summary || ''}`
       : claim && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true
         ? `the gain does not hold at the held-out operating point; ${p.summary || ''}`
@@ -1498,6 +1517,10 @@ async function runPerf() {
   const pf = await call('perf_engineer', 'profile', inputs(), PROFILE);
   if (!pf) {
     note('Profile', 'fail', 'no profile');
+    return finish('blocked', 'Profile');
+  }
+  if (String(pf.not_run || '').trim()) {
+    note('Profile', 'fail', `not run: ${String(pf.not_run).trim()}`);
     return finish('blocked', 'Profile');
   }
   if (pf.path_ok !== true) {
