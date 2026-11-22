@@ -3,6 +3,16 @@
 Start only after the correctness gates pass. The question is "what does the feature buy, under which
 conditions, at what cost", answered with an A/B that a reviewer can reproduce.
 
+**Performance is measured alone.** Throughput, TTFT, TPOT, latency and every other speed number are
+measured only while no other job uses any GPU of the machine: work on the other GPUs shares the CPUs, the
+PCIe and xGMI links, memory bandwidth and the power budget, and moves the numbers. So a run holds the whole
+machine (`scripts/run_lock.py`), and before the servers of each measurement start, this run's earlier
+servers stopped, `python3 <inferpilot_dir>/scripts/gpu_status.py --check all` must find every GPU idle,
+under 5% of its VRAM and of its busy time (`env_hygiene.md`). Otherwise the measurement is not run,
+reported at once with who uses which GPU; a number measured next to another job is no evidence either way.
+Accuracy and accept length do not depend on speed: a Verify round goes on next to another job, and the
+user is warned of it (`../roles/verify_engineer.md`, PHASE=gpus).
+
 ## 1. Compare at an equal budget
 
 A feature usually spends a resource to save another. Hold the scarce resource equal:

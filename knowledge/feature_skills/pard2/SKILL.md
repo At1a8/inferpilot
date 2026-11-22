@@ -148,8 +148,9 @@ Startup logs `PARD2 draft worker: mode=..., target_proj loaded=...`.
   target alone. PARD-2 verifies exactly, so it is a lossless change: gpqa_diamond and simple_qa are not
   needed. Measured with the PR's CI test (5-shot, greedy; it also asserts accuracy > 0.88 and accept
   length > 5.0): TD 0.9075 at 6.65, TI 0.9037 at 5.34, the target alone 0.9067.
-- G5 performance, vLLM's case: 80 prompts each of GSM8K and HumanEval (PARD-2's eval set, `datas/bmk` of
-  AMD-AGI/PARD), MATH-500 (its first 80 problems; PARD-2's set is the first 20) and MT-Bench (the first
+- G5 performance, with no other GPU of the machine in use (speed numbers move otherwise), vLLM's case:
+  80 prompts each of GSM8K and HumanEval (PARD-2's eval set, `datas/bmk` of AMD-AGI/PARD), MATH-500
+  (its first 80 problems; PARD-2's set is the first 20) and MT-Bench (the first
   turns of its 80 questions); PARD-2's template (system prompt "You are a helpful assistant.",
   enable_thinking off), greedy, 256 new tokens, concurrency 1, 8 warm-up prompts and a cache flush before
   each dataset; output tok/s against the same server without speculation; GSM8K also at 8 and 32.
