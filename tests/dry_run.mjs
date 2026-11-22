@@ -1181,7 +1181,8 @@ const scenarios = [
     const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
     const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
     check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
-      && eqList(question(none, 'client_script').options, ['template']), `the questions offer the templates: ${JSON.stringify(none.result.questions)}`);
+      && eqList(question(none, 'client_script').options, ['template']) && /never a claim/.test(question(none, 'client_script').question),
+      `the questions offer the templates, the client's as reported only: ${JSON.stringify(none.result.questions)}`);
     const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
@@ -1204,20 +1205,22 @@ const scenarios = [
     check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
       && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
   }],
-  ['perf: a perf task may take the server template, never the client\'s, and keeps its claim on its own client', async () => {
+  ['perf: a perf task may take InferPilot\'s templates, and its numbers on them count', async () => {
     const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
     const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
-    check(eqList(question(none, 'server_script').options, ['template']) && asks(none, 'client_script')
-      && !question(none, 'client_script').options, `only the server's question offers a template: ${JSON.stringify(none.result.questions)}`);
-    check(asks(await run({ mode: 'perf', task: 'p', client_script: 'template' }), 'client_script'),
-      'a perf task that names the client template is asked for its own client');
-    const r = await run({ mode: 'perf', task: 'p', server_script: 'template' }, {
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template'])
+      && !/never a claim/.test(question(none, 'client_script').question),
+      `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
+    const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
-        gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+        gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
+        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     const perf = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(perf && perf.ins.server_script === `${RUN}/scripts/server.sh` && perf.ins.client_script === '/s/client.sh' && perf.ins.claim,
-      `on the server template, measured with its own client, the claim stands: ${JSON.stringify(perf && [perf.ins.server_script, perf.ins.claim])}`);
+    check(r.result.status === 'ready_for_review' && perf && perf.ins.server_script === `${RUN}/scripts/server.sh`
+      && perf.ins.client_script === `${RUN}/scripts/perf.sh` && perf.ins.claim,
+      `on InferPilot's server and client, the planned gain is the claim: ${r.result.status}, ${JSON.stringify(perf && perf.ins.claim)}`);
   }],
   ['perf: a profile of the wrong path stops before any plan', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {

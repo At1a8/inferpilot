@@ -32,9 +32,9 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      each exists and is readable, and that the server script passes `$PORT` and `$EXTRA_ARGS` to the
      server; say what is missing. Never write them for the user: a script you wrote is not the user's
      baseline. A question for one offers `template`, InferPilot's (`task_definition.md` §1.2): the
-     server after the model's sglang cookbook recipe, and for a feature the client, whose numbers are
-     reported, never a claim; a perf task's client is the user's own. Only the user takes it; never
-     answer `template` yourself.
+     server after the model's sglang cookbook recipe, and the client, sglang's serving benchmark on the
+     workload, whose numbers count for a perf task and are reported, never a claim, for a feature. Only
+     the user takes it; never answer `template` yourself.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):

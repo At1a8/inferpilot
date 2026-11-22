@@ -86,10 +86,13 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      `RUN_DIR/scripts/`, render only the server or the client the user answered `template` for, and
      `accuracy.sh` unless the task brings an `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts <those> --set MODEL_PATH=<model_path> --set TP=<the number of
-     GPUs in the set> --task '<harness>' --workload '<workload, when a JSON object>' [--feature
-     RUN_DIR/feature_params.json] [--cookbook RUN_DIR/scripts/cookbook.txt --cookbook-source '<page,
-     section or selection>']` (`harness.py show` lists every parameter). Each parameter takes the task's
-     value, else the feature's, else the cookbook's (the server's), else the template's.
+     GPUs in the set> --task '<harness>' --workload '<workload, when a JSON object; else its lengths and
+     concurrency as --set ISL=, OSL=, CONCURRENCY=>' [--feature RUN_DIR/feature_params.json] [--cookbook
+     RUN_DIR/scripts/cookbook.txt --cookbook-source '<page, section or selection>']` (`harness.py show`
+     lists every parameter). Each parameter takes the task's
+     value, else the feature's, else the cookbook's (the server's), else the template's. A workload the
+     client template's parameters cannot express fails the baseline, saying what is missing: the user's
+     own client runs it, and a template measuring another workload would count for nothing.
      - The cookbook recipe, for the template server: the page of the model in the framework checkout's
        `docs/cookbook/` (docs.sglang.io/cookbook when the checkout has none), for the run's GPU
        (its name: MI355X, MI300X) and the checkpoint's precision. Write its launch
@@ -253,10 +256,10 @@ produced so far.
   it: as an issue titled `InferPilot daily report <the scan's UTC date>` on the new-issue page of InferPilot's
   repository (the origin of the InferPilot checkout), its whole file as the body.
 - List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
-  and the scripts: which were the task's and which were InferPilot's templates the user took (numbers
-  of InferPilot's client are reported, never claimed), the cookbook recipe the template server
-  followed, and each rendered parameter's value and source (`RUN_DIR/scripts/harness.json`), the
-  feature's and the cookbook's with the words they came from.
+  and the scripts: which were the task's and which were InferPilot's templates the user took (a
+  feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
+  template server followed, and each rendered parameter's value and source
+  (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
 - A Design phase with the verdict `auto_approved` (`auto_approve_design`): no human approved the
   design. Say so near the top, with what the architect wanted a human to review, so the PR's reviewer
   checks it there.

@@ -1,12 +1,12 @@
 #!/bin/bash
 # InferPilot's performance client template: sglang's serving benchmark on random prompts of a fixed length,
 # one run per concurrency, each with PROMPTS_PER_CONC prompts and WARMUP_PER_CONC warm-up requests per
-# concurrent request, after a flush of the prefix cache. A feature whose user took it (client_script:
-# template), or Spec's fallback client for the source's scenarios, measures with this one, and what it
-# measures is reported, never a claim. scripts/harness.py renders it into the run directory, where each
-# parameter line below holds the task's value (its workload), else the one the feature's source tests with,
-# else the default written here. InferPilot sets PORT, and OUT_DIR, where each run writes
-# bench_<ISL>_<OSL>_c<n>_<time>.log and appends its result to bench.jsonl.
+# concurrent request, after a flush of the prefix cache. A feature or perf task whose user took it
+# (client_script: template), or Spec's fallback client for the source's scenarios, measures with this one;
+# a perf task's numbers count, a feature's are reported, never a claim. scripts/harness.py renders it into
+# the run directory, where each parameter line below holds the task's value (its workload), else the one
+# the feature's source tests with, else the default written here. InferPilot sets PORT, and OUT_DIR, where
+# each run writes bench_<ISL>_<OSL>_c<n>_<time>.log and appends its result to bench.jsonl.
 # Parameters, each described on its line: ISL, OSL, RANGE_RATIO, CONCURRENCY, PROMPTS_PER_CONC,
 # WARMUP_PER_CONC, DATASET, DATASET_PATH, REQUEST_RATE, TEMPERATURE, SEED, PROFILE, PROFILE_STEPS, BENCH_ARGS.
 set -u

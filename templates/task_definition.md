@@ -15,7 +15,7 @@ of it.
 | `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
 | `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1); a feature may take `template`, InferPilot's, whose numbers are reported, never a claim (§1.2) | when a workload is given | for a performance issue | — | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given | for a performance issue | — | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -86,10 +86,12 @@ only where the user takes them:
   A feature or perf task runs it when the user answers `server_script: template`.
 - `perf.sh`: sglang's serving benchmark on random prompts: one run per concurrency, with 4 prompts and
   2 warm-up requests per concurrent request after a flush of the prefix cache, as the client above. A
-  feature runs it when the user answers `client_script: template` (on the task's workload), or takes it
-  as Spec's fallback client for the source's scenarios (`../roles/director.md`, PHASE=spec). It need not
-  reproduce the source's numbers, so what it measures is reported, never a claim. A perf task measures
-  with the user's own client only.
+  feature or perf task runs it on the task's workload when the user answers `client_script: template`.
+  A perf task's numbers on it count as on any client: the workload is the user's, and there is no
+  source to reproduce. A feature's are reported, never a claim: it need not reproduce the source's
+  numbers, and the same holds when a feature takes it as Spec's fallback client for the source's
+  scenarios (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the
+  user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
   task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 102400 tokens
   per answer); only the task or the feature's source changes them (PARD-2: thinking off).

@@ -16,8 +16,8 @@ seeing results. If it must change, stop and say why.
 1. Before any server of this run starts, the machine idle (`gpu_status.py --check all`, `env_hygiene.md`):
    a GPU another job uses means no profile is taken; return at once with `not_run`, each such GPU with
    its VRAM%, GPU% and pids (`path_ok` false, no opportunities). Then launch the baseline server with the
-   run's `server_script` and warm it up with its `client_script` (the task's, or InferPilot's server
-   template the user took: `task_definition.md` §1.1–1.2).
+   run's `server_script` and warm it up with its `client_script` (the task's, or InferPilot's templates
+   the user took: `task_definition.md` §1.1–1.2).
 2. **Path check first.** From the launch script and the server log (`server_args=` line, backend and
    graph-capture messages), compare intended and effective: attention backend, MoE and GEMM backends,
    graph capture and its batch sizes, torch.compile, the quantization path, and any fallback or
