@@ -11,7 +11,7 @@
 set -u
 # >>> parameters (scripts/harness.py reads and renders these lines)
 SETS="${SETS:-gsm8k}"                       # strs; the sets when none are given: gsm8k, and gpqa_diamond simple_qa too when the goal says the change may lose accuracy
-MAX_TOKENS="${MAX_TOKENS:-102400}"          # int; tokens per answer, lowered to what the server's context leaves beside a question
+MAX_TOKENS="${MAX_TOKENS:-32768}"           # int; tokens per answer, lowered to what the server's context leaves beside a question
 ENABLE_THINKING="${ENABLE_THINKING:-1}"     # bool; 1: thinking on, 0: off, through both chat-template keys
 REASONING_EFFORT="${REASONING_EFFORT-max}"  # str; the reasoning_effort of each request; empty: none
 BATCH="${BATCH-}"                           # int; concurrent requests; empty: each set's own

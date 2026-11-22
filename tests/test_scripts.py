@@ -356,11 +356,18 @@ class EvalAccuracyTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--limit") + 1], "5")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
+        def sent():
+            argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+            return json.loads(argv[argv.index("--generation-config") + 1])["max_tokens"]
         r = self.run_script("gsm8k", FAKE_CONTEXT="40960")
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
-        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
-        self.assertEqual(json.loads(argv[argv.index("--generation-config") + 1])["max_tokens"], 40960 - 2048)
-        self.assertIn("lowered to 38912", r.stdout)
+        self.assertEqual(sent(), 32768, "the default fits a 40960-token context (Qwen3) as it is")
+        self.assertNotIn("lowered", r.stdout)
+        for context, given, want in (("32768", None, 32768 - 2048), ("40960", "102400", 40960 - 2048)):
+            r = self.run_script("gsm8k", FAKE_CONTEXT=context, **({"MAX_TOKENS": given} if given else {}))
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            self.assertEqual(sent(), want, (context, given))
+            self.assertIn("lowered to %d" % want, r.stdout)
         r = self.run_script("gsm8k", FAKE_CONTEXT="2048")
         self.assertEqual(r.returncode, 1)
         self.assertIn("leaves no room", r.stderr)
@@ -589,7 +596,7 @@ class HarnessTest(unittest.TestCase):
             'echo "sets=$* max_tokens=$MAX_TOKENS thinking=$ENABLE_THINKING effort=[$REASONING_EFFORT]" > %s\n' % self.calls)
         r = self.run_rendered("accuracy.sh", INFERPILOT_DIR=str(fake))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.calls.read_text().strip(), "sets=gsm8k gpqa_diamond max_tokens=102400 thinking=0 effort=[]")
+        self.assertEqual(self.calls.read_text().strip(), "sets=gsm8k gpqa_diamond max_tokens=32768 thinking=0 effort=[]")
         self.assertEqual(self.run_rendered("accuracy.sh", "simple_qa", INFERPILOT_DIR=str(fake)).returncode, 0)
         self.assertTrue(self.calls.read_text().startswith("sets=simple_qa "), "arguments replace SETS")
 
@@ -600,7 +607,7 @@ class HarnessTest(unittest.TestCase):
                          "what the run sets reaches eval_accuracy.sh for every arm")
         self.assertEqual(self.render("--scripts", "accuracy")[0], 0)
         p = self.record()["parameters"]
-        self.assertEqual((p["MAX_TOKENS"]["value"], p["ENABLE_THINKING"]["value"], p["REASONING_EFFORT"]["value"]), ("102400", "1", "max"))
+        self.assertEqual((p["MAX_TOKENS"]["value"], p["ENABLE_THINKING"]["value"], p["REASONING_EFFORT"]["value"]), ("32768", "1", "max"))
         self.assertEqual(self.render("--scripts", "accuracy", "--set", "ENABLE_THINKING=0")[0], 0)
         self.assertEqual(self.record()["parameters"]["REASONING_EFFORT"]["value"], "", "no reasoning effort without thinking")
 

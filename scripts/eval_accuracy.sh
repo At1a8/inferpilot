@@ -18,8 +18,9 @@
 #                     sglang retracts requests and the run slows down
 #   LIMIT             at most this many questions per subset: a smoke test, not a result
 #   WAIT_SERVER       seconds to wait for a server that is still starting (default 0)
-#   MAX_TOKENS        default 102400: a truncated reasoning trace leaves the answer empty; at most the server's
-#                     context (max_model_len) less 2048 tokens for the question, and lowered to that
+#   MAX_TOKENS        default 32768, enough for the common sets; a truncated reasoning trace leaves the answer
+#                     empty, so a model that reasons longer is given more. At most the server's context
+#                     (max_model_len) less 2048 tokens for the question, and lowered to that
 #   REASONING_EFFORT  default max; ENABLE_THINKING default 1 (chat_template_kwargs.thinking and
 #                     .enable_thinking true; 0 sends both false). Thinking models score wrongly without
 #                     them; ENABLE_THINKING=0 REASONING_EFFORT= for others
@@ -45,7 +46,7 @@ TAG=${TAG:-eval}
 RESULT_ROOT=${RESULT_ROOT:-./results}
 WAIT_SERVER=${WAIT_SERVER:-0}
 DATASET_HUB=${DATASET_HUB:-modelscope}
-MAX_TOKENS=${MAX_TOKENS:-102400}
+MAX_TOKENS=${MAX_TOKENS:-32768}
 TOP_P=${TOP_P:-}
 TOP_K=${TOP_K:-}
 REASONING_EFFORT=${REASONING_EFFORT-max}

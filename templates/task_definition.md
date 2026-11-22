@@ -93,7 +93,7 @@ only where the user takes them:
   scenarios (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the
   user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
-  task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 102400 tokens
+  task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 32768 tokens
   per answer); only the task or the feature's source changes them (PARD-2: thinking off).
 
 An issue or a ci task launches its server with the reporter's or the job's own command, as given, never
