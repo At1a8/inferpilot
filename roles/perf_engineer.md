@@ -13,9 +13,10 @@ Read: `knowledge/system_perf.md`, `knowledge/perf_evaluation.md`, `knowledge/rew
 The workload is fixed at Setup (`RUN_DIR/run.json`) before any profile is read; never change it after
 seeing results. If it must change, stop and say why.
 
-1. Check the pinned GPUs are free (`gpu_status.py --check`, `env_hygiene.md`; again before every
-   round), then launch the baseline server with the task's `server_script` and warm it up with its `client_script`
-   (`task_definition.md` §1.1).
+1. The machine idle first (`gpu_status.py --check all`, `env_hygiene.md`): another job holding memory on
+   any of its GPUs means no profile is taken; `path_ok` false, with who holds which GPU in
+   `path_evidence`. Then launch the baseline server with the task's `server_script` and warm it up with
+   its `client_script` (`task_definition.md` §1.1).
 2. **Path check first.** From the launch script and the server log (`server_args=` line, backend and
    graph-capture messages), compare intended and effective: attention backend, MoE and GEMM backends,
    graph capture and its batch sizes, torch.compile, the quantization path, and any fallback or
@@ -52,6 +53,10 @@ Return:
 
 Inputs: `claim` (empty when the task claims no gain).
 
+Before every round, the machine idle (`gpu_status.py --check all`, `env_hygiene.md`). Another job holding
+memory on any of its GPUs means the measurement is not run: return at once with `not_run`, each held GPU
+with its pids and their memory, and judge nothing.
+
 1. Follow `perf_evaluation.md`: the benchmark is the task's `client_script`, run unchanged with
    `OUT_DIR` set, against servers started from its `server_script` (the change's flags in
    `EXTRA_ARGS`); equal budget for the scarce resource; guard workloads only where the goal or the acceptance
@@ -85,3 +90,6 @@ Return:
  "results": [{"workload": "...", "budget": "...", "reference": "...", "change": "...", "delta": "...", "runs": 3, "artifact": "..."}],
  "summary": "<headline delta with its budget and runs; the held-out delta; suspected hacks by id>"}
 ```
+
+A round the machine was not idle for adds `"not_run": "<each held GPU, its pids and their memory>"`, and
+nothing it returns is judged.

@@ -22,20 +22,19 @@ there. When it has not, and `image_ok` is not true, create nothing and return `l
 asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`, `older` or
 `resumed_elsewhere`); the run then asks the user. `unknown` and `not-daily` go on, with a note.
 
-0. **One task per GPU set.** Before anything else, choose `RUN_DIR` (step 1: `resume_run_dir`, the
-   directory an earlier attempt created, or a new path) and the GPUs: the given `gpu_ids`, or as many as
-   the task needs from `python3 <inferpilot_dir>/scripts/gpu_status.py --free <n>` (HIP numbers, the
-   ones `HIP_VISIBLE_DEVICES` takes; rocm-smi's card numbers can differ from them). It skips GPUs another
-   InferPilot task holds, idle or not; when it names fewer than needed (exit 1), return `lock: "busy"` as
-   below, with its `locked` list as the holder. A task that uses no GPU (scan) takes the whole
-   machine instead. Take them:
+0. **One task per machine.** Before anything else, choose `RUN_DIR` (step 1: `resume_run_dir`, the
+   directory an earlier attempt created, or a new path) and take the machine:
    `python3 <inferpilot_dir>/scripts/run_lock.py acquire --run-dir RUN_DIR --mode <mode> --task "<task>"
-   --gpus <ids> --idle-hours <lock_idle_hours>` (no `--gpus` for the whole machine). Exit 1 means another
-   InferPilot task holds one of these GPUs, this container or the machine: create nothing
+   --idle-hours <lock_idle_hours>`. Exit 1 means another InferPilot task holds this machine: create nothing
    and return `lock: "busy"`, `run_dir: ""`, `baseline_status: "skip"`, `gpu_ids: ""`, with the holder
    (its run directory, task, container and start) and the release command in `notes`. Otherwise
    `lock: "acquired"`; a lock taken over from a run that finished, whose runner is gone or that went
-   silent is noted.
+   silent is noted. Then, in every mode but scan, the whole machine must be idle, or what is measured on
+   it means nothing: `python3 <inferpilot_dir>/scripts/gpu_status.py --check all`, where the servers run
+   (`docker exec <container> ...` when `container` is set). A GPU another process holds memory on, any
+   container's, ends the run here: `run_lock.py release --run-dir RUN_DIR`, create nothing, and return
+   `lock: "busy"` as above, with each held GPU, its pids and their memory in `notes`. Exit 2, when it
+   cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD), ends it the same way, with its message.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger.
@@ -65,8 +64,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    - After git writes, `scripts/restore_owner.sh <framework_dir>/.git` (nothing to do for the image's
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
-   and return it as `gpu_ids`: the GPUs step 0 took, which `gpu_status.py --check <ids>` shows free
-   (`env_hygiene.md`). Every later role uses exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
+   and return it as `gpu_ids`: the given one, or, when none was given, the first GPUs by HIP number, as
+   many as the task needs; step 0 found them all idle. `gpu_status.py` lists them by HIP number, the
+   order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
+   exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server

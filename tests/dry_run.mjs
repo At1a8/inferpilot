@@ -896,6 +896,16 @@ const scenarios = [
     check(r.keys.includes('implementer:rollback'), 'change rolled back');
     check(r.result.handoffs.some((h) => h.owner === 'kernel_workflow'), 'kernel opportunity handed off');
   }],
+  ['perf: a measurement not run because another job held a GPU drops nothing and judges nothing', async () => {
+    const r = await run({ mode: 'perf', task: 'DeepSeek-V4.1 decode on MI355X' }, {
+      'perf_engineer:perf_eval': () => ({ claim_reproduced: false, held_out_ok: true, guards_ok: true, workload_unchanged: true, path_ok: true,
+        not_run: 'GPU 5: pid 91234 holds 61440 MiB', summary: 'not run' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Performance', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('implementer:rollback'), 'nothing is rolled back on a measurement that did not run');
+    check(r.result.phases.some((p) => p.phase === 'Performance' && p.summary === 'not run: GPU 5: pid 91234 holds 61440 MiB'),
+      'the note says who held which GPU');
+  }],
   ['perf: with held_out on, a gain that vanishes at the held-out operating point is dropped', async () => {
     const r = await run({ mode: 'perf', task: 'p', held_out: true }, {
       'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: false, guards_ok: true, workload_unchanged: true, path_ok: true,

@@ -80,7 +80,7 @@ const timeoutFor = (role) => GRANTED_MS[role]
   || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
-// One task per GPU set (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
+// One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
 // its longest agent call has died, and its lock may be taken over.
 const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
 const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;
@@ -666,6 +666,7 @@ const PERF = S({
   guards_ok: bool,
   workload_unchanged: bool,
   path_ok: bool,
+  not_run: str, // another job held a GPU of the machine: who held which; no number was taken
   results: arr(),
   summary: str,
 }, ['claim_reproduced', 'held_out_ok', 'guards_ok', 'workload_unchanged', 'path_ok']);
@@ -821,7 +822,8 @@ function nextSteps(status, at) {
       + `without stop_after: the task starts over.${report}`;
     out.rerun_with = { stop_after: '' };
   } else if (status === 'busy') {
-    out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it ends; python3 scripts/run_lock.py status names it.`;
+    out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
+      + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
     out.rerun_with = {};
   } else if (status === 'needs_input' && at === 'Spec') {
     const fallback = (((R.questions || [])[0] || {}).options || [])[0];
@@ -895,7 +897,8 @@ function askWorkload(spec) {
   return finish('needs_input', 'Spec');
 }
 
-// true, false, 'busy' when another InferPilot task holds the machine, or {ask} when the image check stopped
+// true, false, 'busy' when the machine is not free (another InferPilot task holds it, or, but for a scan,
+// another job holds one of its GPUs), or {ask} when the image check stopped
 // the run (nothing was created in either case).
 async function setup(requireBaseline) {
   enter('Setup');
@@ -903,7 +906,7 @@ async function setup(requireBaseline) {
     image_ok: IMAGE_OK }), SETUP);
   if (s && s.lock === 'skipped') return { ask: s.image || {} };
   if (s && s.lock === 'busy') {
-    note('Setup', 'busy', `another InferPilot task holds this machine${s.notes ? `: ${s.notes}` : ''}`);
+    note('Setup', 'busy', `the machine is not free${s.notes ? `: ${s.notes}` : ''}`);
     return 'busy';
   }
   if (!s || !s.run_dir) {
@@ -1111,11 +1114,14 @@ async function performance(claim) {
   enter('Performance');
   const p = await call('perf_engineer', 'perf_eval', inputs({ claim: claim || '' }), PERF);
   // A measurement counts only on the fixed workload and on the path the task targets; with held_out, a
-  // gain counts only if it also holds at the held-out operating point nobody tuned on.
-  const trusted = !!p && p.workload_unchanged === true && p.path_ok === true;
+  // gain counts only if it also holds at the held-out operating point nobody tuned on. One not run (another
+  // job on the machine) is no evidence either way: nothing is judged or dropped on it.
+  const notRun = !!p && String(p.not_run || '').trim();
+  const trusted = !!p && !notRun && p.workload_unchanged === true && p.path_ok === true;
   const reproduced = trusted && p.claim_reproduced === true && (!HELD_OUT || p.held_out_ok === true);
   const ok = trusted && p.guards_ok === true && (!claim || reproduced);
   const why = !p ? 'the performance engineer returned nothing'
+    : notRun ? `not run: ${notRun}`
     : !trusted ? `not trusted: ${p.workload_unchanged !== true ? 'workload changed' : 'the run left the intended path'}; ${p.summary || ''}`
       : claim && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true
         ? `the gain does not hold at the held-out operating point; ${p.summary || ''}`
