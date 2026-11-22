@@ -31,10 +31,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    `lock: "acquired"`; a lock taken over from a run that finished, whose runner is gone or that went
    silent is noted. Then, in every mode but scan, the whole machine must be idle, or what is measured on
    it means nothing: `python3 <inferpilot_dir>/scripts/gpu_status.py --check all`, where the servers run
-   (`docker exec <container> ...` when `container` is set). A GPU another process holds memory on, any
-   container's, ends the run here: `run_lock.py release --run-dir RUN_DIR`, create nothing, and return
-   `lock: "busy"` as above, with each held GPU, its pids and their memory in `notes`. Exit 2, when it
-   cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD), ends it the same way, with its message.
+   (`docker exec <container> ...` when `container` is set). A GPU another job uses (its VRAM% or GPU% at
+   5 or more, as rocm-smi shows them) ends the run here: `run_lock.py release --run-dir RUN_DIR`, create
+   nothing, and return `lock: "busy"` as above, with each such GPU, its VRAM%, GPU% and pids in `notes`.
+   Exit 2, when it cannot tell (`ROCR_VISIBLE_DEVICES` set, no GPU in KFD, a GPU node unreadable), ends
+   it the same way, with its message.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger.
@@ -117,8 +118,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      gpqa_diamond simple_qa`; simple_qa needs the LLM judge, which the script probes before any
      inference); other suites or more runs only when `goal` asks. Never decide it yourself.
      Performance is the task's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
-     run, at least twice, and the spread recorded (`validation_doctrine.md`). The baseline passes when
-     repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
+     run, at least twice, and the spread recorded (`validation_doctrine.md`), on a server started only
+     after the warm-up's is stopped and `gpu_status.py --check all` finds the machine idle
+     (`env_hygiene.md`; a GPU another job uses then fails the baseline, naming it). The baseline passes
+     when repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
      cache keeps it.

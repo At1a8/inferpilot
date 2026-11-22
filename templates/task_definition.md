@@ -81,7 +81,7 @@ done
 ```json
 {"mode": "feature", "task": "https://github.com/sgl-project/sglang/pull/<n>",
  "goal": "the feature passes G0–G5 on DeepSeek-V4.1 at TP4",
- "model_path": "/mnt/models/DeepSeek-V4.1-Flash", "gpu_ids": "0-3",
+ "model_path": "/mnt/models/DeepSeek-V4.1-Flash", "gpu_ids": "0,1,2,3",
  "server_script": "/workspace/scripts/server.sh"}
 ```
 

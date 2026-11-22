@@ -605,6 +605,7 @@ const PROFILE = S({
   analysis_path: str,
   path_ok: bool,
   path_evidence: str,
+  not_run: str, // another job held a GPU of the machine: who held which; no profile was taken
   metrics: obj,
   opportunities: arr(S({
     id: str,
@@ -649,6 +650,7 @@ const VERIFY = S({
   // blocking false: a report-only item of the acceptance matrix, which is reported and never investigated
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
   needs_min: num, // the round stopped before a suite that would not fit: the limit it needs, from its start
+  gpu_warning: str, // another job held a pinned GPU when the round started: who held which; the round ran on
   ledger_path: str,
   summary: str,
 }, ['all_pass', 'failures']);
@@ -1018,6 +1020,12 @@ async function verifyLoop(extraGates) {
       const limit = minutes(timeoutFor('verify_engineer'));
       v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
         VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`);
+      // Another job on a pinned GPU does not stop a correctness round; the user hears of it at once.
+      const gpuWarning = v ? String(v.gpu_warning || '').trim() : '';
+      if (gpuWarning) {
+        note('Verify', 'warning', `another job held a pinned GPU: ${gpuWarning}`);
+        log(`  [inferpilot] warning: another job held a pinned GPU in Verify round ${round}: ${gpuWarning}`);
+      }
       const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
         ? Math.ceil(Number(v.needs_min) || 0) : 0;
       if (!needs) break;
@@ -1504,6 +1512,10 @@ async function runPerf() {
   const pf = await call('perf_engineer', 'profile', inputs(), PROFILE);
   if (!pf) {
     note('Profile', 'fail', 'no profile');
+    return finish('blocked', 'Profile');
+  }
+  if (String(pf.not_run || '').trim()) {
+    note('Profile', 'fail', `not run: ${String(pf.not_run).trim()}`);
     return finish('blocked', 'Profile');
   }
   if (pf.path_ok !== true) {

@@ -560,27 +560,39 @@ class RunLockTest(unittest.TestCase):
 
 
 class GpuStatusTest(unittest.TestCase):
-    """scripts/gpu_status.py on a fake KFD tree whose node order differs from the PCI order."""
+    """scripts/gpu_status.py on fake KFD and DRM trees whose node order differs from the PCI order."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.kfd = Path(tmp.name) / "kfd"
+        self.kfd, self.drm = Path(tmp.name) / "kfd", Path(tmp.name) / "drm"
         nodes = self.kfd / "topology" / "nodes"
         # Two CPU nodes, then the GPUs in node order: HIP 0 is node 2, whose PCI bus (0x75) comes last
-        for node, gpu_id, bus in [(0, 0, 0), (1, 0, 0), (2, 111, 0x75), (3, 222, 0x05), (4, 333, 0x65)]:
+        for node, gpu_id, bus, minor in [(0, 0, 0, 0), (1, 0, 0, 0), (2, 111, 0x75, 128), (3, 222, 0x05, 136),
+                                         (4, 333, 0x65, 144)]:
             (nodes / str(node)).mkdir(parents=True)
             (nodes / str(node) / "gpu_id").write_text("%d\n" % gpu_id)
-            (nodes / str(node) / "properties").write_text(
-                "location_id %d\ndomain 0\ngfx_target_version %d\n" % (bus << 8, 90500 if gpu_id else 0))
-        for pid, gpu_id, mib in [(4242, 222, 4096), (5151, 333, 100)]:
+            (nodes / str(node) / "properties").write_text("location_id %d\ndomain 0\ngfx_target_version %d\n"
+                                                          "drm_render_minor %d\n" % (bus << 8, 90500 if gpu_id else 0, minor))
+        self.use(128, 0.1, 0)
+        self.use(136, 88, 100)
+        self.use(144, 0.1, 0)
+        for pid, gpu_id, size in [(4242, 222, 4096 * 2 ** 20), (5151, 333, 2 ** 19)]:  # 4 GiB on HIP 1, half a MiB on HIP 2
             (self.kfd / "proc" / str(pid)).mkdir(parents=True)
-            (self.kfd / "proc" / str(pid) / ("vram_%d" % gpu_id)).write_text("%d\n" % (mib * 2 ** 20))
+            (self.kfd / "proc" / str(pid) / ("vram_%d" % gpu_id)).write_text("%d\n" % size)
+
+    def use(self, minor, vram_pct, busy, total=288 * 2 ** 30):
+        dev = self.drm / ("renderD%d" % minor) / "device"
+        dev.mkdir(parents=True, exist_ok=True)
+        (dev / "mem_info_vram_total").write_text("%d\n" % total)
+        (dev / "mem_info_vram_used").write_text("%d\n" % int(total * vram_pct / 100))
+        (dev / "gpu_busy_percent").write_text("%d\n" % busy)
 
     def run_main(self, *args, env=None):
         out = io.StringIO()
         with redirect_stdout(out):
-            rc = gpu_status.main(["--kfd", str(self.kfd), *args], env={} if env is None else env)
+            rc = gpu_status.main(["--kfd", str(self.kfd), "--drm", str(self.drm), "--samples", "1", *args],
+                                 env={} if env is None else env)
         return rc, json.loads(out.getvalue())
 
     def test_hip_numbers_follow_the_kfd_node_order_not_the_pci_address(self):
@@ -588,41 +600,40 @@ class GpuStatusTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual([(r["hip"], r["node"], r["pci"], r["arch"]) for r in out["gpus"]],
                          [(0, 2, "0000:75:00.0", "gfx950"), (1, 3, "0000:05:00.0", "gfx950"), (2, 4, "0000:65:00.0", "gfx950")])
-        self.assertEqual([(r["used_mib"], r["pids"]) for r in out["gpus"]], [(0, {}), (4096, {"4242": 4096}), (0, {})],
-                         "100 MiB is below --min-mib")
+        self.assertEqual([(r["vram_pct"], r["busy_pct"], r["in_use"]) for r in out["gpus"]],
+                         [(0.1, 0, False), (88.0, 100, True), (0.1, 0, False)])
+        self.assertEqual([r["pids"] for r in out["gpus"]], [{}, {"4242": 4096}, {"5151": 1}],
+                         "half a MiB shows as 1: the pids name holders and decide nothing")
 
-    def test_a_check_fails_while_another_job_holds_a_gpu(self):
+    def test_a_gpu_is_in_use_from_5_percent_of_its_memory_or_of_its_busy_time(self):
         rc, out = self.run_main("--check", "all")
-        self.assertEqual((rc, [r["hip"] for r in out["busy"]]), (1, [1]), "any held GPU fails a check of the machine")
+        self.assertEqual((rc, [r["hip"] for r in out["busy"]]), (1, [1]))
         self.assertEqual(self.run_main("--check", "0,2")[0], 0)
-        self.assertEqual(self.run_main("--check", "1")[0], 1)
+        for vram, busy, rc in [(4.9, 4, 0), (0.1, 5, 1), (5, 0, 1)]:
+            self.use(128, vram, busy)
+            self.assertEqual(self.run_main("--check", "0")[0], rc, "VRAM %s%%, GPU %s%%" % (vram, busy))
         rc, out = self.run_main("--check", "7")
         self.assertEqual((rc, out["missing"]), (1, [7]))
-        rc, out = self.run_main("--check", "2", "--min-mib", "64")
-        self.assertEqual((rc, out["busy"][0]["pids"]), (1, {"5151": 100}))
 
-    def test_rocr_visible_devices_or_no_gpu_stops_it(self):
-        rc, out = self.run_main("--check", "all", env={"ROCR_VISIBLE_DEVICES": "1,2"})
+    def test_a_gpu_whose_use_cannot_be_read_is_not_idle(self):
+        (self.drm / "renderD144" / "device" / "gpu_busy_percent").unlink()
+        rc, out = self.run_main("--check", "2")
+        self.assertEqual((rc, out["unknown"]), (1, [2]))
+
+    def test_what_it_cannot_tell_stops_it(self):
+        for args, env, says in [(["--check", "0-3"], {}, "comma-separated"),
+                                (["--check", "all"], {"ROCR_VISIBLE_DEVICES": "1,2"}, "ROCR_VISIBLE_DEVICES=1,2")]:
+            rc, out = self.run_main(*args, env=env)
+            self.assertEqual(rc, 2, args)
+            self.assertIn(says, out["error"])
+        (self.kfd / "topology" / "nodes" / "3" / "gpu_id").write_text("")  # dropped, HIP 2 would become HIP 1
+        rc, out = self.run_main("--check", "all")
         self.assertEqual(rc, 2)
-        self.assertIn("ROCR_VISIBLE_DEVICES=1,2", out["error"])
+        self.assertIn("node 3", out["error"])
         shutil.rmtree(self.kfd / "topology")
         rc, out = self.run_main("--check", "all")
         self.assertEqual(rc, 2)
         self.assertIn("no GPU", out["error"])
-
-    def test_unreadable_accounting_is_unknown_not_free(self):
-        shutil.rmtree(self.kfd / "proc")
-        rc, out = self.run_main("--check", "all")
-        self.assertEqual((rc, out["unknown"]), (1, [0, 1, 2]))
-        self.assertIn("unreadable", out["error"])
-        (self.kfd / "proc" / "77").mkdir(parents=True)  # a process with nothing on the GPUs: all free
-        self.assertEqual(self.run_main("--check", "all")[0], 0)
-        if os.geteuid() != 0:  # root reads a file whatever its mode
-            f = self.kfd / "proc" / "77" / "vram_333"
-            f.write_text("0\n")
-            f.chmod(0)
-            rc, out = self.run_main("--check", "all")
-            self.assertEqual((rc, out["unknown"]), (1, [2]), "HIP 2 is KFD node 4, whose file cannot be read")
 
 
 class BaselineCacheTest(unittest.TestCase):

@@ -906,6 +906,23 @@ const scenarios = [
     check(r.result.phases.some((p) => p.phase === 'Performance' && p.summary === 'not run: GPU 5: pid 91234 holds 61440 MiB'),
       'the note says who held which GPU');
   }],
+  ['perf: a profile not run because another job used a GPU stops at Profile and names the job, not the serving path', async () => {
+    const r = await run({ mode: 'perf', task: 'p' }, {
+      'perf_engineer:profile': () => ({ analysis_path: '', path_ok: false, opportunities: [], not_run: 'GPU 3: VRAM 88%, GPU 100%, pid 4242' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Profile', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.phases.some((p) => p.phase === 'Profile' && p.summary === 'not run: GPU 3: VRAM 88%, GPU 100%, pid 4242'),
+      `the note: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Profile'))}`);
+  }],
+  ['feature: another job on a pinned GPU warns the user at once, and the correctness round goes on', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'verify_engineer:verify': () => ({ all_pass: true, failures: [], gpu_warning: 'GPU 1: VRAM 12%, GPU 40%, pid 777' }),
+    });
+    check(r.result.status === 'ready_for_review' && !r.keys.includes('investigator:investigate'), `status ${r.result.status}`);
+    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'warning' && p.summary.includes('GPU 1: VRAM 12%')),
+      'the warning is in the run record, for the report');
+    check(r.lines.some((l) => l.includes('warning: another job held a pinned GPU in Verify round 0')), 'and in the log at once');
+  }],
   ['perf: with held_out on, a gain that vanishes at the held-out operating point is dropped', async () => {
     const r = await run({ mode: 'perf', task: 'p', held_out: true }, {
       'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: false, guards_ok: true, workload_unchanged: true, path_ok: true,
