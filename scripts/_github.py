@@ -1,6 +1,6 @@
 """Minimal GitHub REST client for InferPilot's scan scripts (standard library only).
 
-A token from GITHUB_TOKEN or GH_TOKEN raises the limits (search 30/min, core 5000/h); without one,
+A token from GITHUB_TOKEN raises the limits (search 30/min, core 5000/h); without one,
 search allows 10 requests per minute and core 60 per hour per IP, and the IP may be shared.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ API = "https://api.github.com"
 
 
 def _token() -> str:
-    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    return os.environ.get("GITHUB_TOKEN") or ""
 
 
 def search_pause() -> float:

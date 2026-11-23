@@ -8,8 +8,8 @@ Only changes under knowledge/ go in. They are applied as a patch onto the curren
 throwaway worktree, committed on inferpilot/knowledge/<run directory name> and pushed there, never to main;
 the pull request targets main and a human merges it. Once it is open, those files are restored in the
 checkout, so later runs read knowledge/ as merged, not as proposed; a re-run updates the same branch
-and pull request. It pushes with INFERPILOT_REPO_TOKEN, a fine-grained token for this repository alone
-(Contents, Pull requests: read and write). The repository is public: added lines or a body that name a
+and pull request. It pushes with GITHUB_TOKEN, the token every GitHub script of InferPilot uses, which needs
+Contents and Pull requests: read and write on this repository (README step 1). The repository is public: added lines or a body that name a
 local path, this machine or an internal site stop it, as in scripts/daily_report.py. Without the token,
 or on any failure, the changes stay where they are. Standard library and git only.
 """
@@ -157,11 +157,11 @@ def main(argv=None) -> int:
         if a.dry_run:
             print(json.dumps({"dry_run": True, "branch": branch, "title": title, "files": files}, indent=1))
             return 0
-        token = os.environ.get("INFERPILOT_REPO_TOKEN", "")
+        token = os.environ.get("GITHUB_TOKEN", "")
         repo = a.repo or default_repo()
         if not token or not repo:
             print("propose_knowledge: %s; the changes stay in %s/knowledge. Propose them later with:\n  python3 %s "
-                  "--run-dir %s --body %s" % ("INFERPILOT_REPO_TOKEN is not set" if not token else "no GitHub repository",
+                  "--run-dir %s --body %s" % ("GITHUB_TOKEN is not set" if not token else "no GitHub repository",
                                               a.inferpilot_dir, sys.argv[0], a.run_dir, a.body), file=sys.stderr)
             return 2
         sha = commit_branch(a.inferpilot_dir, branch, diff, title, run, a.push_url or "https://github.com/%s.git" % repo, token)
@@ -171,13 +171,13 @@ def main(argv=None) -> int:
         return 0
     except urllib.error.HTTPError as e:
         print("propose_knowledge: HTTP %d from GitHub%s; the changes stay where they are" % (
-            e.code, " (INFERPILOT_REPO_TOKEN cannot write to the repository; README step 1)" if e.code in (401, 403) else ""),
+            e.code, " (GITHUB_TOKEN cannot write to the repository; README step 1)" if e.code in (401, 403) else ""),
             file=sys.stderr)
         return 2 if e.code in (401, 403) else 1
     except RuntimeError as e:
         denied = any(k in str(e) for k in ("403", "401", "Authentication failed", "Permission to"))
         print("propose_knowledge: %s; the changes stay where they are%s" % (
-            e, " (INFERPILOT_REPO_TOKEN cannot push; README step 1)" if denied else ""), file=sys.stderr)
+            e, " (GITHUB_TOKEN cannot push; README step 1)" if denied else ""), file=sys.stderr)
         return 4 if "apply" in str(e) else 2 if denied else 1
     except (urllib.error.URLError, OSError, ValueError) as e:
         print("propose_knowledge: %s; the changes stay where they are" % e, file=sys.stderr)

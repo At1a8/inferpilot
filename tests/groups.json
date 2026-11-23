@@ -40,7 +40,8 @@
     "paths": [],
     "dry_run": ["scan"],
     "unittest": ["test_scripts.ScanCiTest", "test_scripts.ScanIssuesTest", "test_scripts.ScanUpstreamTest", "test_scripts.DailyReportTest",
-                 "test_scripts.AuditPlatformGatesTest", "test_scripts.AuditHostSyncsTest", "test_scripts.CheckFrameworkSkillsTest"]
+                 "test_scripts.ShareDailyReportTest", "test_scripts.AuditPlatformGatesTest", "test_scripts.AuditHostSyncsTest",
+                 "test_scripts.CheckFrameworkSkillsTest"]
   },
   "kernel": {
     "about": "kernel hand-offs and their back ends, in feature and perf tasks",

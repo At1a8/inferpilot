@@ -996,6 +996,35 @@ const scenarios = [
     const collect = r.calls.find((c) => c.key === 'scout:collect').ins;
     check(eqList(collect.sources, ['ci', 'issues', 'upstream']) && collect.rescan === false,
       `the daily report's sources by default, no rescan: ${collect.sources} ${collect.rescan}`);
+    check(r.result.daily_report_url === '' && (r.result.next.user || []).some((u) => u.includes(`${RUN}/daily_report.md`)),
+      `a daily report the director did not share is the user's to share: ${JSON.stringify(r.result.next.user)}`);
+    const director = r.calls.find((c) => c.key === 'director:report');
+    check(director.ins.share_daily_report === true, 'a queued scan has the director share its daily report');
+    const contract = JSON.parse(/## Output contract[\s\S]*?```json\n([\s\S]*?)\n```/.exec(director.prompt)[1]).required;
+    check(['daily_report_url', 'daily_report_action'].every((f) => contract.includes(f)),
+      `a scan's report must say how its daily report went out, empty when it did not: ${contract}`);
+    const url = 'https://github.com/At1a8/inferpilot/issues/7';
+    const report = (action) => () => ({ report_path: `${RUN}/run_report.md`, summary: 'done', daily_report_url: url, daily_report_action: action });
+    const shared = await run({ mode: 'scan', framework_dir: '' }, { 'director:report': report('created') });
+    check(shared.result.daily_report_url === url && shared.result.next.say.includes(url)
+      && !(shared.result.next.user || []).some((u) => u.includes('daily_report.md')),
+      `one the director shared is named, and not asked of the user: ${JSON.stringify(shared.result.next)}`);
+    const before = await run({ mode: 'scan', framework_dir: '' }, { 'director:report': report('exists') });
+    check(before.result.next.say.includes('before this scan') && before.result.next.say.includes(`${RUN}/daily_report.md`)
+      && !(before.result.next.user || []).some((u) => u.includes('daily_report.md')),
+      `that day's report, shared before this scan, is named as such, and this scan's stays a file: ${before.result.next.say}`);
+    const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
+    check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
+      && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,
+      `a scan whose Dispatch failed shares nothing: ${failed.result.status} at ${failed.result.stopped_at}`);
+    const late = await run({ mode: 'scan', framework_dir: '', agent_timeout_ms: 100 }, {
+      'director:report': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return report('created')();
+      },
+    });
+    check((late.result.next.user || []).some((u) => u.includes('may still share') && u.includes(`${RUN}/daily_report.md`)),
+      `a director that timed out may still share the report: the user waits for it first: ${JSON.stringify(late.result.next.user)}`);
   }],
   ['scan: a report from the last 24 hours makes the run ask first; rescan=true scans again', async () => {
     const recent = (ins) => (ins.rescan

@@ -16,7 +16,7 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 | `issue` | 一个 AMD 用户 issue | Setup → Triage → Reproduce → Diagnose（已有修复 PR 时跳过）→ Implement → (Kernel) → Verify → (Performance) → Review → PR → (Spinoff) → Reply → Report | 修复 PR，或一个结论（已分诊、未复现、main 上已修复、已定位）；总会附一份回复草稿，并在结束时按运行结果重写 |
 | `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Review → PR → (Spinoff) → Report | 修复 PR，或把偶发 / 基础设施失败移交出去 |
 | `perf` | 针对某个模型和固定负载的系统级性能目标 | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 带实测收益的 PR，或放弃改动；kernel 级的工作交给 kernel 后端 |
-| `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
+| `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（作为 issue 分享到 InferPilot 仓库，否则是一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
 
 括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel；issue 模式下只有被分诊为 `performance` 的 issue 才跑 Performance。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
 
@@ -40,8 +40,8 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 
 - 只有 **implementer** 修改框架源码，而且只在任务自己的分支上改；
 - 负责测量的角色（test engineer、verify engineer、performance engineer）、intake 和 reviewer 从不修改框架源码；负责测量的角色从不复用别人的数据，而是全部重新跑一遍；
-- **curator** 只修改 InferPilot 自己的 `knowledge/`，并把改动作为 PR 提到 InferPilot 仓库，由你审阅合并（需要 `INFERPILOT_REPO_TOKEN`；没有时改动留在 checkout 里，不提交）；
-- 没有任何角色会 push，或往上游发帖：PR engineer 只返回确切的 `git push` 命令，issue 回复都是草稿；scan 的日报是一个由你来分享的文件；唯一会发出去的是 curator 的知识更新：一个提到 InferPilot 自己仓库、由你合并的 PR，而且只有在你为此设置了 token 时才会发。
+- **curator** 只修改 InferPilot 自己的 `knowledge/`，并把改动作为 PR 提到 InferPilot 仓库，由你审阅合并（需要能写这个仓库的 `GITHUB_TOKEN`；没有时改动留在 checkout 里，不提交）；
+- 没有任何角色会 push，或往上游发帖：PR engineer 只返回确切的 `git push` 命令，issue 回复都是草稿；会发出去的只有两样，都发到 InferPilot 自己的仓库，而且只用你的 `GITHUB_TOKEN`：curator 的知识更新，作为一个由你合并的 PR；scan 的日报，作为一个 issue（token 不能往那里写时，它是一个由你来分享的文件）。
 
 | 角色 | 阶段 | 职责 |
 |---|---|---|
@@ -75,7 +75,7 @@ InferPilot 以 root 身份运行在 ROCm 容器里：Claude Code、InferPilot、
 - 你能使用的 Docker（用户在 `docker` 组里，或者有 sudo），以及 git、curl 和 python3。
 - 能访问 claude.ai、github.com 和 Docker Hub；每个 sglang 镜像约需 45 GB 磁盘。
 - 一个 AMD LLM 网关 key（`LLM_GATEWAY_KEY`）、Anthropic API key 或其他网关；都没有时，用 Claude 订阅。
-- 一个只读的 GitHub token（`GITHUB_TOKEN`），强烈建议准备：scan 和 issue 运行要通过 GitHub API 读取数据。
+- 一个 GitHub token（`GITHUB_TOKEN`），强烈建议准备：scan 和 issue 运行要通过 GitHub API 读取数据；它能写 InferPilot 自己的仓库时，curator 的 PR 和日报也用它提交到那里。
 - 模型权重放在会挂载进容器的目录里（`/data`、`/mnt`、`/kmd2` 等；其他目录用 `EXTRA_MOUNTS` 加上）：InferPilot 从不下载权重。
 
 ### 1. 保存 key（宿主机）
@@ -88,8 +88,7 @@ InferPilot 以 root 身份运行在 ROCm 容器里：Claude Code、InferPilot、
 宿主机上不需要 Claude Code：第 3 步会把它装在容器里。运行这两行之前，先把 `<your AMD LLM gateway key>` 和 `<your GitHub token>` 换成你自己的值：每一行都只在 `~/.inferpilot_env` 里还没有这个 key 时才写入，所以以后要换 key，直接编辑这个文件。`~/.inferpilot_env` 把 key 保存在宿主机上，只有你能读取；run_docker.sh 会把它以只读方式挂进它启动的每个容器，所以要在启动容器之前创建它（没有它就启动的容器，可以在自己的 `/root/.inferpilot_env` 里放一份）。
 
 - **LLM key（必填）。** 写的是 AMD LLM 网关 key 时，第 3 步会让 Claude Code 走这个网关（`https://llm-api.amd.com/Unified`，key 放在 `Ocp-Apim-Subscription-Key` 请求头里），网关按 Claude 模型的常用名字提供服务。不在 AMD 内部时，改写成 `export ANTHROPIC_API_KEY=sk-ant-...`，或者其他网关（`ANTHROPIC_BASE_URL` 加上 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_CUSTOM_HEADERS`）。用 Claude 订阅时，在任何有 Claude Code 和浏览器的地方运行 `claude setup-token`，写入 `export CLAUDE_CODE_OAUTH_TOKEN=<token>`；或者不写 key，在每个新容器首次启动时登录（第 4 步）。
-- **GitHub token（强烈建议）。** scan 和 issue 运行要通过 GitHub API 读取 issue、PR 和 CI 跟踪记录。没有 token 时，GitHub 对每个 IP 地址每小时只允许 60 次请求、每分钟 10 次搜索，同一出口 IP 下的所有人共用这个额度，扫描会非常慢，还可能中途停下；有 token 时每小时 5000 次。只读权限就够了：在 github.com 上进入 Settings → Developer settings → Personal access tokens → Fine-grained tokens，权限选 *Public repositories (read-only)*（不勾选任何权限的 classic token 也可以）。容器里的每个 agent 都能读到 `~/.inferpilot_env` 里的内容，所以不要把你日常用来 push 的 token 放进去。
-- **InferPilot 仓库 token（可选）。** 只用于 curator 的知识更新：从 `inferpilot/knowledge/<run>` 分支向 main 提一个 PR，由你审阅合并。这需要一个只对这个仓库有效的 token，这样它没法往别处写：fine-grained token，*Only select repositories* 选 `At1a8/inferpilot`，*Repository permissions* 里 *Contents* 和 *Pull requests* 都选 *Read and write*，然后以 `export INFERPILOT_REPO_TOKEN=<token>` 写进 `~/.inferpilot_env`。InferPilot 只 push `inferpilot/` 开头的分支；在 GitHub 上给 main 开分支保护（要求通过 PR 合并），这个 token 就也改不了 main。没有它时，知识更新只留在容器的 checkout 里，报告会给出提交它们的命令。
+- **GitHub token（强烈建议）。** InferPilot 在 GitHub 上的所有操作都只用这一个 token：`GITHUB_TOKEN`。scan 和 issue 运行要通过 GitHub API 读取 issue、PR 和 CI 跟踪记录：没有 token 时，GitHub 对每个 IP 地址每小时只允许 60 次请求、每分钟 10 次搜索，同一出口 IP 下的所有人共用这个额度，扫描会非常慢，还可能中途停下；有 token 时每小时 5000 次。它还会往 InferPilot 自己的仓库写东西，而且只写这一个仓库：curator 的知识更新，即从 `inferpilot/knowledge/<run>` 分支向 main 提一个 PR，由你审阅合并；以及 scan 的日报，作为一个 issue。容器里的每个 agent 都能读到 `~/.inferpilot_env` 里的内容，所以不要给这个 token 更多权限：在 github.com 上进入 Settings → Developer settings → Personal access tokens → Fine-grained tokens，*Only select repositories* 选 `At1a8/inferpilot`，*Repository permissions* 里 *Contents*、*Pull requests* 和 *Issues* 都选 *Read and write*（每个 fine-grained token 都还能读取所有公开仓库，包括 sglang），也不要把你日常用来 push 的 token 放进去。InferPilot 只 push `inferpilot/` 开头的分支；在 GitHub 上给 main 开分支保护（要求通过 PR 合并），这个 token 就也改不了 main。不能往那里写的 token（比如只读的）照样能用来 scan：知识更新会留在容器的 checkout 里，报告会给出提交它们的命令；日报则是一个由你来分享的文件。
 - **Git 身份（建议设置）。** 容器里没有你的 home，也就没有你的 git 配置：InferPilot 在那里的提交作者会是 `root@<本机主机名>`。加上 `export INFERPILOT_GIT_NAME="<你的名字>"` 和 `export INFERPILOT_GIT_EMAIL=<你的邮箱>`，第 3 步会把它们设给 root。
 
 ### 2. 启动容器（宿主机）
@@ -191,7 +190,7 @@ cd /workspace/inferpilot && IS_SANDBOX=1 claude --dangerously-skip-permissions
 use /workspace/inferpilot/inferpilot.js with mode=scan, inferpilot_dir=/workspace/inferpilot
 ```
 
-scan 不改任何代码。它写出框架当天的日报，覆盖上一份日报以来（没有时为最近 7 天）的情况：main 上的 AMD CI（每个失败的 job、从何时开始失败、日志里说了什么）、按 P0、P1、P2 分好的开放 AMD 用户 issue，以及 AMD 需要跟进的上游改动。它把其中的任务排好序写进 `exp/scan_<time>/task_queue.md`，每项附可以启动它的任务定义，并把去掉本机信息的日报写进 `exp/scan_<time>/daily_report.md`，由你来分享；InferPilot 不会把它发到任何地方。一天一份日报就够了：已有不到 24 小时的日报时，scan 会先问你要不要重扫（回答 `rescan`）；`upstream_repos` 可以加上要跟进的其他仓库，比如 vLLM。要接手一个任务，并在复现之后停下来确认环境，就给出它的字段：
+scan 不改任何代码。它写出框架当天的日报，覆盖上一份日报以来（没有时为最近 7 天）的情况：main 上的 AMD CI（每个失败的 job、从何时开始失败、日志里说了什么）、按 P0、P1、P2 分好的开放 AMD 用户 issue，以及 AMD 需要跟进的上游改动。它把其中的任务排好序写进 `exp/scan_<time>/task_queue.md`，每项附可以启动它的任务定义，并把去掉本机信息的日报写进 `exp/scan_<time>/daily_report.md`，并用 `GITHUB_TOKEN` 作为 issue 分享到 InferPilot 仓库（第 1 步；token 不能往那里写时，这个文件由你来分享）。一天一份日报就够了：已有不到 24 小时的日报时，scan 会先问你要不要重扫（回答 `rescan`）；`upstream_repos` 可以加上要跟进的其他仓库，比如 vLLM。要接手一个任务，并在复现之后停下来确认环境，就给出它的字段：
 
 ```
 use /workspace/inferpilot/inferpilot.js with mode=issue, task=https://github.com/sgl-project/sglang/issues/41299,
@@ -259,9 +258,9 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>.log` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
-| `daily_report.md`、`task_queue.md` | scan 的日报，由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
+| `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 
-scan 的 `daily_report.md` 就是为分享而写的，`scripts/daily_report.py check` 已经确认它不含本机信息：在 GitHub 上 InferPilot 仓库里新建一个 issue，标题写 `InferPilot daily report <date>`，把整个文件粘贴进去。文件第一行是一个隐藏标记，下一次 scan 不管在哪个容器里，都能靠它在那里找到这份日报，并标出之后的变化。
+scan 的 `daily_report.md` 就是为分享而写的，`scripts/daily_report.py check` 已经确认它不含本机信息。`GITHUB_TOKEN` 能写这个仓库时（第 1 步），director 会把它作为标题为 `InferPilot daily report <date>` 的 issue 分享到 InferPilot 仓库（当天的已经在那里时除外），结果里会给出它的链接。没有这样的 token、而当天的日报还不在那里时，在 GitHub 上 InferPilot 仓库里新建一个 issue，用这个标题，把整个文件粘贴进去；或者设好 token 后运行 `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`。Dispatch 失败的 scan 什么都不分享：它留下的日报可能不完整。文件第一行是一个隐藏标记，下一次 scan 不管在哪个容器里，都能靠它在那里找到这份日报，并标出之后的变化。
 
 InferPilot 从不 push。任务的分支 `inferpilot/<slug>` 在 `/sgl-workspace/sglang` 里，报告给出确切的 `git -C /sgl-workspace/sglang push ...`：可以在容器里用有 push 权限的凭据执行它。运行目录随容器保留和删除；要保留某次运行，或者要在宿主机上 push（你的 git 凭据在那里），就在宿主机上把它复制出来（`<name>` 是容器名，`<run>` 是运行目录的名字）：
 
@@ -293,7 +292,7 @@ docker cp <name>:/workspace/inferpilot/exp/<run> ~/
 | `INFERPILOT_CLAUDE`、`INFERPILOT_CURSOR`、`INFERPILOT_RUNNER`、`INFERPILOT_NODE_VERSION` | bootstrap | 不设置；设为 `1` 时分别等同于 `--claude`、`--cursor`、`--runner`（设为 `0` 表示关闭；前两个都没有时装 Claude Code）；默认装最新的 Node.js LTS（`22` 表示最新的 22.x，也可以写确切的 `v22.11.0`） |
 | `INFERPILOT_CLAUDE_BIN`、`INFERPILOT_CURSOR_BIN` | `runtime/run.mjs` | `PATH` 上的 `claude`、`agent`：`--backend claude` 和 `--backend cursor` 运行的 CLI |
 | `INFERPILOT_GIT_NAME`、`INFERPILOT_GIT_EMAIL` | `~/.inferpilot_env`、bootstrap | 不设置；容器里 root 提交时用的身份 |
-| `INFERPILOT_REPO_TOKEN` | `~/.inferpilot_env`、`scripts/propose_knowledge.py` | 不设置；只对 InferPilot 自己仓库有 Contents、Pull requests 读写权限的 fine-grained token，curator 用它提 PR |
+| `GITHUB_TOKEN` | `~/.inferpilot_env`、bootstrap、访问 GitHub 的脚本 | 不设置；唯一的 GitHub token，强烈建议设置（第 1 步）：用它读取 GitHub API；它对 InferPilot 自己的仓库有 Contents、Pull requests、Issues 读写权限时，curator 用它提 PR，director 用它分享 scan 的日报 |
 | `LLM_GATEWAY_KEY` | `~/.inferpilot_env`、容器的 shell 配置 | 不设置；设置后 Claude Code 走 AMD LLM 网关，除非 `ANTHROPIC_BASE_URL` 指定了别的地址 |
 | `INFERPILOT_FRAMEWORK_DIR`、`INFERPILOT_FRAMEWORK_REPO` | bootstrap：`--framework-dir`、`--framework-repo` | 镜像里的 `/sgl-workspace/sglang`；sglang |
 | `INFERPILOT_SKIP_BOOTSTRAP` | bootstrap | 不设置；设置后安装这个包时没有任何副作用（CI、构建镜像） |
@@ -350,7 +349,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
-每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享日报。
+每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 
 **一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用的时间里（默认 12 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
 
@@ -363,7 +362,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 
 ## 脚本
 
-全部是只用标准库的 Python；访问 GitHub 的脚本读取 `GITHUB_TOKEN` 或 `GH_TOKEN`（见第 1 步；没有 token 时，GitHub 对每个 IP 每小时只允许 60 次请求、每分钟 10 次搜索）。
+全部是只用标准库的 Python；访问 GitHub 的脚本读取 `GITHUB_TOKEN`（见第 1 步；没有 token 时，GitHub 对每个 IP 每小时只允许 60 次请求、每分钟 10 次搜索）。
 
 | 脚本 | 任务来源 |
 |---|---|
@@ -378,7 +377,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 
-`scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有本地路径、主机名或内部站点）、每个 PR 和 issue 是否除了编号还写了标题、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。
+`scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有密钥、本地路径、主机名或内部站点）、每个 PR 和 issue 是否除了编号还写了标题、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/share_daily_report.py` 用 `GITHUB_TOKEN` 把通过检查的日报作为 issue 分享到 InferPilot 仓库，以日报的日期为标题，当天的日报已经在那里时不再重复发（Dispatch 成功的 scan 结束时，director 运行它）。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。
 
 ## 测试
 
