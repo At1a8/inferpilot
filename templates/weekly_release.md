@@ -1,18 +1,14 @@
-<!-- inferpilot:weekly-release -->
 # InferPilot weekly release <YYYY>-W<ww> — <Monday YYYY-MM-DD> to <Sunday YYYY-MM-DD>
 
 <!-- A week of InferPilot's work in the shape of an sglang release note: Highlights a reader acts on,
      then the full notes by area, Breaking Changes & Upgrade Notes, Contributors and the Full Changelog.
-     A human shares it, as an issue or a release titled "InferPilot weekly release <YYYY>-W<ww>" in
-     InferPilot's repository; the first line lets next week's find this one. Its sources: the week's
-     runs (each container's `exp/index.md` and its run directories), the daily reports shared in
-     InferPilot's repository, InferPilot's pull requests merged in the week, and the sglang pull
-     requests pushed from `inferpilot/<slug>` branches. Public: nothing about the machine, its paths or
-     internal sources, no keys; `scripts/daily_report.py check` verifies that, the titles and the
-     length (an issue holds 65,536 characters). Every line links to its evidence: the upstream pull
-     request or issue, the daily report, the InferPilot pull request, or the run by its directory's
-     name (`issue_41299-glm-dcp_20261106-071502Z`). A week with nothing in a section says none. Times
-     are UTC. -->
+     A progress report, not posted to GitHub. Its sources: the week's runs (each container's
+     `exp/index.md` and its run directories), the daily reports shared in InferPilot's repository,
+     InferPilot's pull requests merged in the week, and the sglang pull requests pushed from
+     `inferpilot/<slug>` branches. Every line links to its evidence: the upstream pull request or issue,
+     the daily report, the InferPilot pull request, or the run by its directory's name
+     (`issue_41299-glm-dcp_20261106-071502Z`). A week with nothing in a section says none. Times are
+     UTC. -->
 
 | Week (UTC) | sglang main | Images | Runs | Previous weekly |
 |---|---|---|---|---|
@@ -31,23 +27,14 @@
 ## Upstream pull requests
 
 <!-- Every sglang pull request an InferPilot run prepared and a human pushed that opened, changed or
-     merged this week, merged first. Gates as the validation report records them; a performance
-     claim with its workload; Review is upstream's state. -->
+     merged this week, merged first. Gates: each one's verdict as the validation report records it,
+     "not run" for one that did not run; a CI fix has `failing_test` and no G5, an issue fix
+     `issue_repro`, and G5 only when the issue is about performance. Result: the gain with its
+     workload, or for a fix what passes again. Review is upstream's state. -->
 
 | Pull request | Kind | Model / feature | Platform | Gates | Result | Review |
 |---|---|---|---|---|---|---|
-| [#<n>](<url>) <title> | feature / issue / ci / perf | | MI30x / MI35x | G0-G4 pass, G5 <gain> | <the claim and its workload> | merged / approved / changes requested / open / closed |
-
-## AMD on main this week
-
-<!-- The week's first daily report against its last: what moved. -->
-
-| | <Monday> | <Sunday> | Change |
-|---|---|---|---|
-| AMD CI jobs failing on main | | | <n> fixed, <k> new |
-| Open P0 / P1 user issues | <p0> / <p1> | <p0> / <p1> | <closed>, <new> |
-| User issues without a reply | | | |
-| Upstream changes AMD needs to follow | | | <brought to AMD>, <new> |
+| [#<n>](<url>) <title> | feature / issue / ci / perf | | MI30x / MI35x | <each gate's verdict, e.g. G0-G2 pass, G3 not run, failing_test pass> | <the gain and its workload, or what passes again> | merged / approved / changes requested / open / closed |
 
 ## To use
 
