@@ -86,14 +86,19 @@ first. This file lists what differs on ROCm, skill by skill. Checked against sgl
 - Its gate patterns already cover ROCm: D1 (gfx950 reports capability (9, 5), so `major >=` and
   `torch.cuda.is_available()` checks written for NVIDIA admit AMD; gfx substring tests admit a whole
   family) and C2 (a default-off fast path is flipped per architecture). Find the candidates with
-  `scripts/audit_platform_gates.py` first; the skill's proof is a pure gate function unit-tested on CPU
-  across families. Checked at sglang `2be81e0ddc` (2026-11-23).
+  `scripts/audit_platform_gates.py` first, and grep for `torch.cuda.is_available()` and gfx family
+  substrings (`"gfx95"`), which it does not flag. The skill's evidence for a gate change is the gate as a
+  pure function of the capability tuple, unit-tested on CPU across families, and also a probe on each
+  architecture it touches and the kernel's tests on the hardware of the lane they are registered on: a
+  CPU test alone does not prove it. Checked at sglang `2be81e0ddc` (2026-11-23).
 
 ## processor-mm-parity
 
 - The skill names two ways Python's default on a CUDA host departs from its CPU reference. On ROCm
   only the second applies (sglang `2be81e0ddc`): JPEG decode stays on the CPU, because
-  `media_io.is_jpeg_with_cuda` requires `is_cuda()`, which is false on HIP; but the torchvision image
-  processor still runs on the GPU, because `serving_preprocessing.fast_image_processor_device` returns
-  `cuda:<base_gpu_id>` for every `is_cuda_alike()` platform. Report that delta as Python's own, as the
+  `media_io.is_jpeg_with_cuda` requires `is_cuda()`, which is false on HIP; but by default the
+  torchvision image processor still runs on the GPU, because
+  `serving_preprocessing.fast_image_processor_device` returns `cuda:<base_gpu_id>` for every
+  `is_cuda_alike()` platform. With `rl_on_policy_target` set it returns `cpu` before that check, on ROCm
+  as anywhere, and preprocessing runs on the CPU. Report the default's delta as Python's own, as the
   skill says; the bit-exact checks use its PIL-backend inputs.
