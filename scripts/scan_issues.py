@@ -2,9 +2,10 @@
 """Collect open AMD-related issues with the facts triage needs (knowledge/issue_triage.md).
 
 For each issue: kind (user issue, roadmap, tracker, internal), age, reporter association, linked PRs
-that cite the issue explicitly (with their state), replies from anyone but the reporter (with
---with-comments), and the projected date of sglang's 60-day inactivity auto-close. It assigns no
-priority: that is the triager's judgement.
+that cite the issue explicitly (with their state, and `closes` when one closes it with a GitHub keyword:
+Fixes, Closes or Resolves #N), replies from anyone but the reporter (with --with-comments), and the
+projected date of sglang's 60-day inactivity auto-close. It assigns no priority: that is the triager's
+judgement.
 
   scan_issues.py --out issues.json [--md issues.md] [--with-comments] [--no-prs] [--limit N]
   scan_issues.py --issue 38849 --with-comments --out issue.json
@@ -53,6 +54,15 @@ def cites_issue(text: str, number: int) -> bool:
     return re.search(rf"(#|/issues/|/pull/|\bissue\s+){number}\b", text or "", re.I) is not None
 
 
+def closes_issue(text: str, number: int, repo: str = DEFAULT_REPO) -> bool:
+    """True when a PR title/body closes the issue as GitHub reads it: close, fix or resolve in any tense, then
+    #N, <repo>#N or the issue's URL. A PR that only cites the issue may name it as background, or be the
+    change that caused it."""
+    keyword = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+"
+    ref = rf"(?:(?:{re.escape(repo)})?#|https://github\.com/{re.escape(repo)}/issues/){number}\b"
+    return re.search(keyword + ref, text or "", re.I) is not None
+
+
 def parse_time(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
@@ -84,13 +94,15 @@ def linked_prs(repo: str, number: int) -> list[dict]:
     for it in items:
         if it.get("number") == number:
             continue
-        if not cites_issue((it.get("title") or "") + "\n" + (it.get("body") or ""), number):
+        text = (it.get("title") or "") + "\n" + (it.get("body") or "")
+        if not cites_issue(text, number):
             continue
         merged = (it.get("pull_request") or {}).get("merged_at")
         out.append({
             "number": it["number"],
             "title": it.get("title", ""),
             "state": "merged" if merged else it.get("state", ""),
+            "closes": closes_issue(text, number, repo),
             "author": (it.get("user") or {}).get("login", ""),
             "created_at": it.get("created_at", ""),
             "merged_at": merged or "",
@@ -134,7 +146,8 @@ def to_markdown(rows: list[dict]) -> str:
     lines = ["| Issue | Age (d) | Reporter | Replies (others) | Linked PRs | Auto-close | Title |",
              "|---|---|---|---|---|---|---|"]
     for r in rows:
-        prs = ", ".join(f"#{p['number']} {p['state']}" for p in r.get("linked_prs", [])) or "none"
+        prs = ", ".join(f"#{p['number']} {p['state']}{' (closes it)' if p.get('closes') else ''}"
+                        for p in r.get("linked_prs", [])) or "none"
         rep = r.get("replies", {}).get("replies_from_others", "?") if "replies" in r else "?"
         lines.append(f"| #{r['number']} | {r['age_days']} | {r['reporter']} ({r['association']}) | {rep} | "
                      f"{prs} | {r['projected_auto_close']} | {r['title'].replace('|', '/')} |")

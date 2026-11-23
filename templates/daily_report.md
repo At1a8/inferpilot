@@ -41,7 +41,9 @@ main no longer shows: <list, or none>.
 ## 2. User issues
 
 <!-- Open AMD user issues, prioritized with issue_triage.md §2 against the quarter's AMD roadmap issue;
-     within a priority, the nearest auto-close date first. P2 takes one line each. -->
+     within a priority, the nearest auto-close date first. P2 takes one line each. Fix PR: a linked PR
+     that fixes the issue, one that closes it (`closes` in issues.json) or whose title or description
+     says it fixes this issue; never one that only cites it, such as the change that caused it. -->
 
 ### P0: <n>
 

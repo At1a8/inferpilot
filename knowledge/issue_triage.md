@@ -50,7 +50,7 @@ Judgement calls, decided once so they are applied the same way every time:
 
 | Check | Why | How |
 |---|---|---|
-| Linked PRs and their state | a fix PR is not a fix: of 44 AMD bugs with a fix PR from someone else in 2026, 21 were merged by November; PRs also get closed unmerged | PRs whose title or body cites `#<n>` or the issue URL; `scan_issues.py` |
+| Linked PRs and their state | a fix PR is not a fix: of 44 AMD bugs with a fix PR from someone else in 2026, 21 were merged by November; PRs also get closed unmerged. And a PR that cites the issue is not always its fix: it may name it as background, or be the change that caused it (sglang #43815 cites #43526 because it made the GEMM that issue reports on the default for gfx942) | PRs whose title or body cites `#<n>` or the issue URL; `scan_issues.py`, which marks `closes` on those that close it with GitHub's keywords (`Fixes #<n>`). Another is a fix only when its title or description says it fixes this issue |
 | Replies from anyone but the reporter | an unanswered report is the first thing to fix | issue comments, excluding the reporter and bots |
 | Projected auto-close date | the report disappears without a fix | see *Auto-close* |
 | Partial fixes | a merged PR may fix one of two problems (e.g. the correction-bias half of a routing precision report while the router GEMM still returns bf16) | read the merged diff against every point of the report |

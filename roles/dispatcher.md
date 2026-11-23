@@ -15,7 +15,8 @@ Input: `candidates_path`.
 2. For each remaining candidate decide: gap type (§1), level (§2), the CUDA dependencies and their AMD
    starting points (§3), the subsystems it touches, an effort estimate (agent hours, GPU hours), and the
    priority: every open AMD user issue gets P0, P1 or P2 by `issue_triage.md` §2 against the quarter's
-   AMD roadmap issue; a job failing on main (`ci.json` "main") gets its class by `ci_triage.md` §2
+   AMD roadmap issue, where its fix PR is a linked PR that fixes it, not one that only cites it
+   (`issue_triage.md` §3); a job failing on main (`ci.json` "main") gets its class by `ci_triage.md` §2
    when the log or its history shows it (a code regression names the first failing run's commit
    range), else "unclassified", and blocks every AMD PR while it is a code regression.
 3. Rank with `dispatch.md` §6; within a rank, prefer what a named customer workload or a roadmap item
