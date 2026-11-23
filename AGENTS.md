@@ -74,7 +74,8 @@ The result file ends with `next`, what comes after the run, the same Claude Code
   answers already given);
 - offer each of `next.start` (a scan's top tasks) as a new run with its arguments, and start the one the
   user picks;
-- `next.user` is what only the user does: the push, a reply to post, the daily report to share.
+- `next.user` is what only the user does: the push, a reply to post, a daily report the director could
+  not share.
 
 The runner's log ends with the same steps (`=== NEXT: ...`), and it writes the arguments of each run they
 name next to the arguments file: `exp/<name>.again.json`, `exp/<name>.start-<rank>.json`.

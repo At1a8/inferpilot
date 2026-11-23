@@ -986,7 +986,7 @@ def check_environment(env=None, keys_path: str = "", cursor: bool = False, claud
          "crawl and can stop partway; add a read-only token to ~/.inferpilot_env (README step 1)"),
         ("repo_token", bool(env.get("INFERPILOT_REPO_TOKEN")),
          "no INFERPILOT_REPO_TOKEN (optional): the curator's knowledge changes stay in this checkout instead of a "
-         "pull request to InferPilot's repository (README step 1)"),
+         "pull request to InferPilot's repository, and a scan's daily report is a file to share by hand (README step 1)"),
     ]
     if not claude:
         checks = [c for c in checks if c[0] != "api"]

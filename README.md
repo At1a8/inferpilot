@@ -19,7 +19,7 @@ Why it exists and how it maps onto the agreed design: [`docs/design.md`](docs/de
 | `issue` | an AMD user issue | Setup → Triage → Reproduce → Diagnose (skipped for an existing fix PR) → Implement → (Kernel) → Verify → (Performance) → Review → PR → (Spinoff) → Reply → Report | fix PR, or a conclusion (triaged, not reproduced, fixed on main, diagnosed); always a reply draft, rewritten from how the run ended |
 | `ci` | a red AMD CI job or Failure Tracker cluster | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Review → PR → (Spinoff) → Report | fix PR, or a handover for flaky/infrastructure failures |
 | `perf` | a system-level performance goal for a model and a fixed workload | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | PR with a measured win, or the change dropped; kernel-level items go to the kernel back end |
-| `scan` | none — the day's state of the framework: the AMD CI on main, open AMD user issues, upstream changes AMD needs to follow (platform gates and host-sync leads on request) | Collect → Dispatch → Report | the daily report, a file for you to share, with the ranked tasks and the definition that starts each |
+| `scan` | none — the day's state of the framework: the AMD CI on main, open AMD user issues, upstream changes AMD needs to follow (platform gates and host-sync leads on request) | Collect → Dispatch → Report | the daily report, shared as an issue in InferPilot's repository (else a file for you to share), with the ranked tasks and the definition that starts each |
 
 Phases in parentheses run only when they apply: Kernel when there is a kernel hand-off and
 `kernel_backend` is not `none`; Performance in issue mode for issues triaged as `performance`. An
@@ -80,9 +80,9 @@ the roles:
   repository for you to review and merge (with `INFERPILOT_REPO_TOKEN`; without it they stay uncommitted in
   the checkout);
 - no role pushes or posts upstream: the PR engineer returns the exact `git push`, issue replies are
-  drafts, a scan's daily report is a file for you to share; the one post is the curator's knowledge
-  changes, as a pull request to InferPilot's own repository that you merge, and only with a token you set
-  for that.
+  drafts; the two posts both go to InferPilot's own repository, and only with a token you set for that:
+  the curator's knowledge changes, as a pull request that you merge, and a scan's daily report, as an
+  issue (without the token, a file for you to share).
 
 | Role | Phases | What it does |
 |---|---|---|
@@ -163,14 +163,15 @@ its own `/root/.inferpilot_env`).
   settings → Personal access tokens → Fine-grained tokens, with *Public repositories (read-only)*
   access (a classic token with no scopes also works). Every agent in the container can read what
   `~/.inferpilot_env` holds, so keep your everyday token, the one you push with, out of it.
-- **InferPilot repository token (optional).** Only for the curator's knowledge changes: as a pull request
-  from a `inferpilot/knowledge/<run>` branch to main, which you review and merge. That takes a token for
-  this repository alone, so it can write nowhere else: a fine-grained token with *Only select
-  repositories* → `At1a8/inferpilot` and *Repository permissions* → *Contents* and *Pull requests*: *Read
-  and write*, added to `~/.inferpilot_env` as `export INFERPILOT_REPO_TOKEN=<token>`. InferPilot pushes only
-  `inferpilot/` branches; protect main on GitHub (require a pull request) so the token cannot change it
-  either. Without it the knowledge changes stay in the container's checkout, and the report gives the
-  command that proposes them.
+- **InferPilot repository token (optional).** Only for InferPilot's own repository: the curator's
+  knowledge changes, as a pull request from a `inferpilot/knowledge/<run>` branch to main, which you
+  review and merge, and a scan's daily report, as an issue. That takes a token for this repository alone,
+  so it can write nowhere else: a fine-grained token with *Only select repositories* → `At1a8/inferpilot`
+  and *Repository permissions* → *Contents*, *Pull requests* and *Issues*: *Read and write*, added to
+  `~/.inferpilot_env` as `export INFERPILOT_REPO_TOKEN=<token>`. InferPilot pushes only `inferpilot/`
+  branches; protect main on GitHub (require a pull request) so the token cannot change it either. Without
+  it the knowledge changes stay in the container's checkout, and the report gives the command that
+  proposes them; the daily report stays a file for you to share.
 - **Git identity (recommended).** The container carries no home, so no git config of yours: commits
   InferPilot makes there would read `root@<this host>`. Add `export INFERPILOT_GIT_NAME="<your name>"` and
   `export INFERPILOT_GIT_EMAIL=<your email>`; step 3 gives them to root.
@@ -344,8 +345,9 @@ The scan changes no code. It writes the day's report on the framework since the 
 last 7 days): the AMD CI on main (every failing job, since when it fails and what its log says), the
 open AMD user issues under P0, P1 and P2, and the upstream changes AMD needs to follow. It ranks the
 tasks in them into `exp/scan_<time>/task_queue.md`, each with the task definition that starts it, and
-writes the report, without anything about this machine, to `exp/scan_<time>/daily_report.md` for you
-to share; InferPilot posts it nowhere. One report a day is enough: when one is less than 24 hours old, the scan asks before it starts again
+writes the report, without anything about this machine, to `exp/scan_<time>/daily_report.md`, which it
+shares as an issue in InferPilot's repository with `INFERPILOT_REPO_TOKEN` (step 1; without it, the file
+is yours to share). One report a day is enough: when one is less than 24 hours old, the scan asks before it starts again
 (answer `rescan`), and `upstream_repos` adds repositories to follow, such as vLLM. To take one task,
 stopping after the reproduction to confirm the environment, name its fields:
 
@@ -468,12 +470,15 @@ the container with its status. A run directory holds:
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>.log` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
 | `knowledge_pr.md` | the description of the curator's pull request to InferPilot's repository |
-| `daily_report.md`, `task_queue.md` | a scan's daily report, for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
+| `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
 
 A scan's `daily_report.md` is written to be shared, and `scripts/daily_report.py check` has made sure
-it names nothing about this machine: open a new issue in InferPilot's repository on GitHub, title it
-`InferPilot daily report <date>` and paste the whole file. Its first line, a hidden marker, lets the next
-scan, in any container, find it there and mark what changed since.
+it names nothing about this machine. With `INFERPILOT_REPO_TOKEN` (step 1) the director shares it as an
+issue in InferPilot's repository titled `InferPilot daily report <date>`, unless that day's is there
+already, and the result names it. Without the token, open a new issue there on GitHub, give it that title
+and paste the whole file, or run `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`
+once the token is set. Its first line, a hidden marker, lets the next scan, in any container, find it
+there and mark what changed since.
 
 InferPilot never pushes. The task's branch, `inferpilot/<slug>`, is in `/sgl-workspace/sglang`, and the report
 gives the exact `git -C /sgl-workspace/sglang push ...`: run it here with credentials that can push.
@@ -517,7 +522,7 @@ step 3 too, cloning InferPilot to `/workspace/inferpilot` (pip shows the output 
 | `INFERPILOT_CLAUDE`, `INFERPILOT_CURSOR`, `INFERPILOT_RUNNER`, `INFERPILOT_NODE_VERSION` | bootstrap | unset; `1` as `--claude`, `--cursor` and `--runner` (`0` is off; with neither of the first two, Claude Code); the newest Node.js LTS (`22` for the newest 22.x, or an exact `v22.11.0`) |
 | `INFERPILOT_CLAUDE_BIN`, `INFERPILOT_CURSOR_BIN` | `runtime/run.mjs` | `claude`, `agent` on `PATH`: the CLIs that `--backend claude` and `--backend cursor` run |
 | `INFERPILOT_GIT_NAME`, `INFERPILOT_GIT_EMAIL` | `~/.inferpilot_env`, bootstrap | unset; the identity root commits with in the container |
-| `INFERPILOT_REPO_TOKEN` | `~/.inferpilot_env`, `scripts/propose_knowledge.py` | unset; a fine-grained token for InferPilot's own repository alone (Contents, Pull requests: read and write), with which the curator opens its pull request |
+| `INFERPILOT_REPO_TOKEN` | `~/.inferpilot_env`, `scripts/propose_knowledge.py`, `scripts/share_daily_report.py` | unset; a fine-grained token for InferPilot's own repository alone (Contents, Pull requests, Issues: read and write), with which the curator opens its pull request and the director shares a scan's daily report as an issue |
 | `LLM_GATEWAY_KEY` | `~/.inferpilot_env`, the container's shell settings | unset; set, Claude Code runs on the AMD LLM gateway unless `ANTHROPIC_BASE_URL` names another |
 | `INFERPILOT_FRAMEWORK_DIR`, `INFERPILOT_FRAMEWORK_REPO` | bootstrap: `--framework-dir`, `--framework-repo` | the image's `/sgl-workspace/sglang`; sglang |
 | `INFERPILOT_SKIP_BOOTSTRAP` | bootstrap | unset; set it to install the package with no side effects (CI, images) |
@@ -597,7 +602,7 @@ Every result ends with `next`, what comes after the run, the same for Claude Cod
 runner's log: `say`, a sentence for you; `ask`, questions only you answer; `rerun_with`, the arguments to
 set before running it again with the rest unchanged (answers merge with those already given); `start`, new
 runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
-post, the daily report to share.
+post, a daily report the director could not share.
 
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and
@@ -649,7 +654,9 @@ keeps one InferPilot task per machine (`acquire`, `release`, `status`). `scripts
 tells whether a daily report can be made public (no local path, hostname or internal site), names every
 pull request and issue by its title as well as its number, and fits in an issue; `latest` finds the
 newest report shared in InferPilot's repository, which the next scan, in any container, continues from.
-Both only read.
+Both only read. `scripts/share_daily_report.py` shares a report that passes the check as an issue in
+InferPilot's repository with `INFERPILOT_REPO_TOKEN`, titled with the report's date, unless that day's
+report is there already (the director runs it at the end of a scan).
 `scripts/propose_knowledge.py` turns the curator's changes under `knowledge/` into a pull request
 from `inferpilot/knowledge/<run>` to main, built on the current main in a throwaway worktree, and then
 restores `knowledge/` in the checkout, so later runs read only merged knowledge.

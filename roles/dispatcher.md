@@ -27,7 +27,7 @@ Input: `candidates_path`.
    field its mode requires that the scan can establish; leave out what it cannot (a model that is not
    on this machine, the workload of a performance task), and the run asks for it.
 6. Write `RUN_DIR/daily_report.md` from `templates/daily_report.md`: the day's report on the framework,
-   which a human shares, e.g. as an issue in InferPilot's repository. Keep its order: the summary, (1) the
+   which the director shares as an issue in InferPilot's repository. Keep its order: the summary, (1) the
    AMD CI on main, every failing job with since when it fails, when it last passed, its failed tests or
    first error and its class; (2) every open AMD user issue under P0, P1 or P2; (3) the upstream
    changes AMD needs to follow, per repository; (4) the top 10 tasks, their definitions folded in

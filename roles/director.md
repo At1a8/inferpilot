@@ -255,11 +255,15 @@ produced so far.
   When it is not empty, open the report with it: what is left, where, and the command that cleans it.
 - `scan`: when `RUN_DIR/skills.json` lists framework skills that are missing or not indexed, add them
   to the report as index maintenance for the curator.
-- `scan` that reached Dispatch: the daily report is for a human to share; InferPilot posts it nowhere.
-  Check it once more (`python3 <inferpilot_dir>/scripts/daily_report.py check RUN_DIR/daily_report.md`; exit
-  3, 4 or 5: fix what it lists, then check again), and open the report with where it is and how to share
-  it: as an issue titled `InferPilot daily report <the scan's UTC date>` on the new-issue page of InferPilot's
-  repository (the origin of the InferPilot checkout), its whole file as the body.
+- `scan` that reached Dispatch: share the daily report as an issue in InferPilot's repository (the origin
+  of the InferPilot checkout): `python3 <inferpilot_dir>/scripts/share_daily_report.py RUN_DIR/daily_report.md`.
+  It checks the report once more (exit 3, 4 or 5: fix what it lists, then run it again), then opens the
+  issue `InferPilot daily report <the scan's UTC date>` with the whole file as its body, or finds that
+  day's there already, and prints its URL: return it as `daily_report_url` and open the report with it.
+  Exit 2 (no `INFERPILOT_REPO_TOKEN`, or one that cannot open issues) or any other failure: nothing was
+  posted and `daily_report_url` stays empty; open the report with where the daily report is and how a
+  human shares it: as an issue with that title on the new-issue page of InferPilot's repository, its
+  whole file as the body, or with the same command once the token is set.
 - List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
   and the scripts: which were the task's and which were InferPilot's templates the user took (a
   feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
@@ -303,5 +307,6 @@ produced so far.
 Return:
 
 ```json
-{"report_path": "/abs/RUN_DIR/validation_report.md", "summary": "<3-5 sentences>"}
+{"report_path": "/abs/RUN_DIR/validation_report.md", "summary": "<3-5 sentences>",
+ "daily_report_url": "<scan: the issue the daily report is shared in, or empty>"}
 ```

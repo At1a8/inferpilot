@@ -1,9 +1,10 @@
 <!-- inferpilot:daily-report -->
 # InferPilot daily report <YYYY-MM-DD> — <framework> main `<sha>`
 
-<!-- mode=scan artifact, for a human to share, e.g. as an issue titled "InferPilot daily report <YYYY-MM-DD>"
-     in InferPilot's repository; the first line lets later scans find a shared copy there. Public: nothing
-     about the machine, its paths or internal sources. `scripts/daily_report.py check` verifies that and
+<!-- mode=scan artifact, shared as an issue titled "InferPilot daily report <YYYY-MM-DD>", the date of the
+     heading above, in InferPilot's repository (scripts/share_daily_report.py, or a human without its
+     token); the first line lets later scans find the shared copy there. Public: nothing about the
+     machine, its paths or internal sources. `scripts/daily_report.py check` verifies that, the titles and
      the length: an issue holds 65,536 characters, so aim for about 40,000. Every row links to its
      evidence; *new* marks what the previous report did not have. Times are UTC. -->
 

@@ -36,6 +36,7 @@ import run_lock  # noqa: E402
 import scan_ci  # noqa: E402
 import scan_issues  # noqa: E402
 import scan_upstream  # noqa: E402
+import share_daily_report  # noqa: E402
 
 
 class CheckFrameworkSkillsTest(unittest.TestCase):
@@ -191,7 +192,7 @@ class LatestImageTest(unittest.TestCase):
 
 
 class DailyReportTest(unittest.TestCase):
-    """The scan's daily report: checked before a human shares it, found again once shared. Read only."""
+    """The scan's daily report: checked before it is shared, found again once shared. Read only."""
 
     def issue(self, number, date, created="T01:00:00Z", marker=True):
         return {"number": number, "title": daily_report.title(date), "state": "open", "created_at": date + created,
@@ -260,6 +261,68 @@ class DailyReportTest(unittest.TestCase):
     def test_it_never_writes(self):
         src = (Path(__file__).resolve().parent.parent / "scripts" / "daily_report.py").read_text()
         self.assertNotRegex(src, r"method=|\"POST\"|\"PATCH\"|\"PUT\"|\"DELETE\"")
+
+
+class ShareDailyReportTest(unittest.TestCase):
+    """The daily report as an issue in InferPilot's repository, with INFERPILOT_REPO_TOKEN; GitHub is mocked."""
+
+    REPORT = (daily_report.MARKER + "\n# InferPilot daily report 2026-11-23 — sglang main `2be81e0ddc`\n\n"
+              "| [#48414](https://github.com/sgl-project/sglang/pull/48414) [Feat] kimi_k3: Merge the Day-0 branch | 2026-11-16 |\n")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.report = Path(tmp.name) / "daily_report.md"
+
+    def share(self, body=None, token="t", shared=None, post=None, flags=()):
+        self.report.write_text(self.REPORT if body is None else body)
+        env = {k: v for k, v in os.environ.items() if k != "INFERPILOT_REPO_TOKEN"}
+        if token:
+            env["INFERPILOT_REPO_TOKEN"] = token
+        posted = []
+
+        def fake_post(repo, title, text, tok):
+            posted.append((repo, title, text, tok))
+            if isinstance(post, Exception):
+                raise post
+            return {"number": 7, "html_url": "https://github.com/At1a8/inferpilot/issues/7"}
+
+        with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()) as out, \
+                redirect_stderr(io.StringIO()) as err, mock.patch.object(daily_report, "latest", return_value=shared or {}), \
+                mock.patch.object(share_daily_report, "post", side_effect=fake_post):
+            rc = share_daily_report.main([str(self.report), "--repo", "At1a8/inferpilot", *flags])
+        return rc, out.getvalue(), err.getvalue(), posted
+
+    def test_a_checked_report_becomes_the_days_issue(self):
+        rc, out, err, posted = self.share()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["url"], "https://github.com/At1a8/inferpilot/issues/7")
+        self.assertEqual(posted, [("At1a8/inferpilot", "InferPilot daily report 2026-11-23", self.REPORT, "t")],
+                         "titled as daily_report.py latest reads it back, the whole file as the body")
+
+    def test_that_days_report_shared_already_is_not_posted_again_with_or_without_a_token(self):
+        day = {"date": "2026-11-23", "number": 5, "url": "https://github.com/At1a8/inferpilot/issues/5"}
+        for token in ("t", ""):
+            rc, out, err, posted = self.share(token=token, shared=day)
+            self.assertEqual((rc, json.loads(out)["action"], json.loads(out)["url"], posted), (0, "exists", day["url"], []), err)
+        rc, out, err, posted = self.share(shared={**day, "date": "2026-11-22"})
+        self.assertEqual((rc, len(posted)), (0, 1), "the day before's report does not stop today's")
+
+    def test_nothing_is_posted_without_a_token_or_a_clean_report(self):
+        self.assertEqual(self.share(token="")[0::3], (2, []))
+        self.assertEqual(self.share(body=self.REPORT + "weights in /data/models/x\n")[0::3], (3, []))
+        self.assertEqual(self.share(body=self.REPORT + "| [#46784](https://github.com/sgl-project/sglang/pull/46784) | x |\n")[0::3], (5, []))
+        self.assertEqual(self.share(body=self.REPORT.replace(daily_report.MARKER, ""))[0::3], (1, []), "no marker")
+        self.assertEqual(self.share(body=self.REPORT.replace("# InferPilot daily report 2026-11-23", "# Report"))[0::3], (1, []))
+        rc, out, err, posted = self.share(flags=["--dry-run"])
+        self.assertEqual((rc, json.loads(out)["title"], posted), (0, "InferPilot daily report 2026-11-23", []))
+
+    def test_a_token_that_cannot_open_issues_is_named(self):
+        denied = share_daily_report.urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
+        rc, out, err, posted = self.share(post=denied)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("INFERPILOT_REPO_TOKEN cannot open issues", err)
+        self.assertIn("share it by hand", err)
 
 
 @unittest.skipUnless(shutil.which("bash"), "needs bash")

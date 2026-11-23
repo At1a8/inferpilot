@@ -996,6 +996,14 @@ const scenarios = [
     const collect = r.calls.find((c) => c.key === 'scout:collect').ins;
     check(eqList(collect.sources, ['ci', 'issues', 'upstream']) && collect.rescan === false,
       `the daily report's sources by default, no rescan: ${collect.sources} ${collect.rescan}`);
+    check(r.result.daily_report_url === '' && (r.result.next.user || []).some((u) => u.includes(`${RUN}/daily_report.md`)),
+      `a daily report the director did not share is the user's to share: ${JSON.stringify(r.result.next.user)}`);
+    const url = 'https://github.com/At1a8/inferpilot/issues/7';
+    const shared = await run({ mode: 'scan', framework_dir: '' },
+      { 'director:report': () => ({ report_path: `${RUN}/run_report.md`, summary: 'done', daily_report_url: url }) });
+    check(shared.result.daily_report_url === url && shared.result.next.say.includes(url)
+      && !(shared.result.next.user || []).some((u) => u.includes('daily_report.md')),
+      `one the director shared is named, and not asked of the user: ${JSON.stringify(shared.result.next)}`);
   }],
   ['scan: a report from the last 24 hours makes the run ask first; rescan=true scans again', async () => {
     const recent = (ins) => (ins.rescan

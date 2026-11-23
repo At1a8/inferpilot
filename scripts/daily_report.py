@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Check a scan's daily report before a human shares it, and find the last one they shared. Read only:
-InferPilot posts nothing; the human uploads the report (e.g. as an issue in InferPilot's repository).
+"""Check a scan's daily report before it is shared, and find the last one shared. Read only: the report goes to
+InferPilot's repository as an issue through scripts/share_daily_report.py, or by a human's hand.
 
     python3 scripts/daily_report.py check RUN_DIR/daily_report.md   # public-safe, titled and short enough?
     python3 scripts/daily_report.py latest                          # the newest shared report: date, URL, age, body

@@ -13,9 +13,9 @@ Inputs: `sources` (any of `ci`, `issues`, `upstream`, which the daily report cov
 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]`), `rescan`.
 
 The previous report is the newest scan under `exp_root` (its `daily_report.md`, or `task_queue.md` for
-a scan from before daily reports), else the newest report a human shared in InferPilot's repository, which
-every container sees: `python3 <inferpilot_dir>/scripts/daily_report.py latest` prints its date, URL,
-`age_hours` and body (`{}` when there is none). InferPilot posts nothing; it only reads what was shared.
+a scan from before daily reports), else the newest report shared in InferPilot's repository, by a scan's
+director or by a human, which every container sees: `python3 <inferpilot_dir>/scripts/daily_report.py latest`
+prints its date, URL, `age_hours` and body (`{}` when there is none).
 
 0. **One report a day.** Unless `rescan` is true: when the newest scan under `exp_root` started less
    than 24 hours ago (its directory name is its UTC start), or the newest shared report is younger
