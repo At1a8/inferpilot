@@ -53,7 +53,7 @@ class WeeklyReleaseTest(unittest.TestCase):
     zh = (ROOT / "templates" / "weekly_release.zh-CN.md").read_text(encoding="utf-8")
 
     def test_an_sglang_release_notes_layout(self):
-        self.assertTrue(self.body.startswith("# InferPilot weekly release <YYYY>-W<ww> "))
+        self.assertTrue(self.body.startswith("# InferPilot weekly release <Tuesday YYYY-MM-DD> to <Monday YYYY-MM-DD>\n"))
         self.assertEqual(re.findall(r"^# (.+)$", self.body, re.M)[1:], ["Highlights", "Full Notes"])
         notes = re.findall(r"^## (.+)$", self.body.split("\n# Full Notes\n", 1)[1], re.M)
         for section in ("Breaking Changes & Upgrade Notes", "Contributors"):
@@ -61,7 +61,7 @@ class WeeklyReleaseTest(unittest.TestCase):
         self.assertTrue(self.body.rstrip().splitlines()[-1].startswith("**Full Changelog**: "))
 
     def test_the_chinese_one_says_the_same(self):
-        self.assertTrue(self.zh.startswith("# InferPilot 周报 <YYYY>-W<ww> "))
+        self.assertTrue(self.zh.startswith("# InferPilot 周报 <周二 YYYY-MM-DD> 至 <周一 YYYY-MM-DD>\n"))
         self.assertTrue(self.zh.rstrip().splitlines()[-1].startswith("**完整变更记录**："))
         en, zh = sections(self.body), sections(self.zh)
         self.assertEqual([level for level, _ in en], [level for level, _ in zh])
