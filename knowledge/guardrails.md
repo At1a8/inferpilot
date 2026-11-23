@@ -11,12 +11,11 @@ scarcest resource in the community, and a careless agent spends it.
   production service — need a human review. The agent does not carry that responsibility.
 - InferPilot never pushes, never opens or comments on an upstream PR or issue by itself. It prepares the
   branch, the PR body, the reply draft and the exact commands, and stops.
-- InferPilot posts two things, both to its own repository and only with a token the human set for that
-  repository alone (`INFERPILOT_REPO_TOKEN`): the curator's knowledge changes, as a pull request to main
-  which a human merges (`scripts/propose_knowledge.py`), and a scan's daily report, as an issue
-  (`scripts/share_daily_report.py`); without the token the daily report is a file a human shares. That
-  repository is public: nothing posted there, or in a report meant to be shared, names the machine, its
-  paths or internal sources.
+- InferPilot posts two things, both to its own repository and only with the human's `GITHUB_TOKEN`, the one
+  token it uses on GitHub: the curator's knowledge changes, as a pull request to main which a human merges
+  (`scripts/propose_knowledge.py`), and a scan's daily report, as an issue (`scripts/share_daily_report.py`);
+  when the token cannot write there, the daily report is a file a human shares. That repository is public:
+  nothing posted there, or in a report meant to be shared, names the machine, its paths or internal sources.
 
 ## 2. Conduct toward the community
 

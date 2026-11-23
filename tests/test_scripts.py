@@ -258,17 +258,18 @@ class DailyReportTest(unittest.TestCase):
         with mock.patch.object(daily_report, "get", return_value=[]):
             self.assertEqual(daily_report.latest("At1a8/inferpilot"), {})
 
-    def test_latest_reads_with_the_token_it_is_given_else_github_token(self):
+    def test_latest_reads_with_github_token_alone(self):
         seen = []
 
         def urlopen(req, timeout=0):
             seen.append(req.get_header("Authorization"))
             return io.BytesIO(b"[]")
 
-        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "g"}), mock.patch.object(daily_report.urllib.request, "urlopen", urlopen):
-            daily_report.latest("At1a8/inferpilot", "r")
-            daily_report.latest("At1a8/inferpilot")
-        self.assertEqual(seen, ["Bearer r", "Bearer g"])
+        with mock.patch.object(daily_report.urllib.request, "urlopen", urlopen):
+            for env in ({"GITHUB_TOKEN": "g", "GH_TOKEN": "h"}, {"GH_TOKEN": "h"}):
+                with mock.patch.dict(os.environ, env, clear=True):
+                    daily_report.latest("At1a8/inferpilot")
+        self.assertEqual(seen, ["Bearer g", None])
 
     def test_a_root_this_machine_mounts_storage_on_is_local_whatever_its_name(self):
         with tempfile.TemporaryDirectory() as d:
@@ -287,7 +288,7 @@ class DailyReportTest(unittest.TestCase):
 
 
 class ShareDailyReportTest(unittest.TestCase):
-    """The daily report as an issue in InferPilot's repository, with INFERPILOT_REPO_TOKEN; GitHub is mocked."""
+    """The daily report as an issue in InferPilot's repository, with GITHUB_TOKEN; GitHub is mocked."""
 
     REPORT = (daily_report.MARKER + "\n# InferPilot daily report 2026-11-23 — sglang main `2be81e0ddc`\n\n"
               "| [#48414](https://github.com/sgl-project/sglang/pull/48414) [Feat] kimi_k3: Merge the Day-0 branch | 2026-11-16 |\n")
@@ -300,9 +301,9 @@ class ShareDailyReportTest(unittest.TestCase):
     def share(self, body=None, token="t", shared=None, post=None, flags=(), after=None):
         """after: what the repository's issues show when they are read again after a post GitHub did not answer."""
         self.report.write_text(self.REPORT if body is None else body)
-        env = {k: v for k, v in os.environ.items() if k != "INFERPILOT_REPO_TOKEN"}
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
         if token:
-            env["INFERPILOT_REPO_TOKEN"] = token
+            env["GITHUB_TOKEN"] = token
         posted = []
 
         def fake_post(repo, title, text, tok):
@@ -318,13 +319,13 @@ class ShareDailyReportTest(unittest.TestCase):
             rc = share_daily_report.main([str(self.report), "--repo", "At1a8/inferpilot", *flags])
         return rc, out.getvalue(), err.getvalue(), posted
 
-    def test_what_is_checked_is_what_is_posted_and_the_lookup_reads_with_the_repository_token(self):
+    def test_what_is_checked_is_what_is_posted(self):
         checked = []
         check = daily_report.check
         with mock.patch.object(daily_report, "check", side_effect=lambda body, host="": checked.append(body) or check(body, host)):
             rc, out, err, posted = self.share()
         self.assertEqual((rc, checked), (0, [posted[0][2]]), "the body read once is the one checked and the one posted")
-        self.assertEqual(self.lookups.call_args_list, [mock.call("At1a8/inferpilot", "t")])
+        self.assertEqual(posted[0][3], "t", "posted with GITHUB_TOKEN")
 
     def test_a_post_github_did_not_answer_is_looked_up_before_anything_else(self):
         timeout = share_daily_report.urllib.error.URLError("timed out")
@@ -370,7 +371,7 @@ class ShareDailyReportTest(unittest.TestCase):
         denied = share_daily_report.urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
         rc, out, err, posted = self.share(post=denied)
         self.assertEqual((rc, out, self.lookups.call_count), (2, "", 1))
-        self.assertIn("INFERPILOT_REPO_TOKEN cannot open issues", err)
+        self.assertIn("GITHUB_TOKEN cannot open issues", err)
         self.assertIn("share it by hand", err)
 
 
@@ -852,9 +853,9 @@ class ProposeKnowledgeTest(unittest.TestCase):
                                                capture_output=True, text=True).stdout
 
     def propose(self, token="t", api=None):
-        env = {k: v for k, v in os.environ.items() if k != "INFERPILOT_REPO_TOKEN"}
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
         if token:
-            env["INFERPILOT_REPO_TOKEN"] = token
+            env["GITHUB_TOKEN"] = token
         with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()) as out, \
                 redirect_stderr(io.StringIO()) as err, mock.patch.object(propose_knowledge, "api", side_effect=api):
             rc = propose_knowledge.main(["--run-dir", str(self.run), "--body", str(self.body), "--repo", "At1a8/inferpilot",

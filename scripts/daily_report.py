@@ -9,8 +9,8 @@ check: exit 3 when a line names a local path (under one of the usual roots, or o
 this machine or a sibling, or the company's network (the lines are listed), exit 5 when a table row or list item names
 a pull request or issue by its number alone, without its title (the lines are listed), exit 4 when the body is longer
 than a GitHub issue allows. latest: the newest issue in InferPilot's repository (the origin of this checkout) that
-carries the report's marker, `{}` when there is none; it reads a public repository, with the token its caller gives
-(share_daily_report.py's) or else GITHUB_TOKEN when set. Standard library only.
+carries the report's marker, `{}` when there is none; it reads a public repository, with GITHUB_TOKEN when set.
+Standard library only.
 """
 from __future__ import annotations
 
@@ -157,16 +157,16 @@ def age_hours(stamp: str, now: dt.datetime | None = None) -> float:
     return round(((now or dt.datetime.now(dt.timezone.utc)) - then).total_seconds() / 3600, 1)
 
 
-def get(path: str, token: str = ""):
-    token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+def get(path: str):
+    token = os.environ.get("GITHUB_TOKEN") or ""
     req = urllib.request.Request(API + path, headers={"Accept": "application/vnd.github+json", "User-Agent": "inferpilot",
                                                       **({"Authorization": "Bearer " + token} if token else {})})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
 
 
-def latest(repo: str, token: str = "") -> dict:
-    items = [i for i in get("/repos/%s/issues?state=all&per_page=50&sort=created&direction=desc" % repo, token)
+def latest(repo: str) -> dict:
+    items = [i for i in get("/repos/%s/issues?state=all&per_page=50&sort=created&direction=desc" % repo)
              if "pull_request" not in i and MARKER in (i.get("body") or "")]
     if not items:
         return {}

@@ -981,12 +981,10 @@ def check_environment(env=None, keys_path: str = "", cursor: bool = False, claud
         ("evalscope", _has("evalscope"), "evalscope not found: scripts/eval_accuracy.sh (accuracy, gate G2) needs it; the bootstrap installs it as root in a container"),
         ("node", _has("node"), "Node.js not found: needed only for tests/dry_run.mjs and for running inferpilot.js outside Claude Code"),
         ("api", api_configured(env, _expand("~", env)), "no Claude Code API access in this shell (see the next steps)"),
-        ("github_token", bool(env.get("GITHUB_TOKEN") or env.get("GH_TOKEN")),
+        ("github_token", bool(env.get("GITHUB_TOKEN")),
          "no GITHUB_TOKEN: GitHub then allows 60 requests an hour and 10 searches a minute per IP, so scans "
-         "crawl and can stop partway; add a read-only token to ~/.inferpilot_env (README step 1)"),
-        ("repo_token", bool(env.get("INFERPILOT_REPO_TOKEN")),
-         "no INFERPILOT_REPO_TOKEN (optional): the curator's knowledge changes stay in this checkout instead of a "
-         "pull request to InferPilot's repository, and a scan's daily report is a file to share by hand (README step 1)"),
+         "crawl and can stop partway, the curator's knowledge changes stay in this checkout and a scan's daily "
+         "report is a file to share by hand; add one to ~/.inferpilot_env (README step 1)"),
     ]
     if not claude:
         checks = [c for c in checks if c[0] != "api"]

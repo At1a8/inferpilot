@@ -8,11 +8,10 @@ The report is read once, and what was read is what scripts/daily_report.py check
 come back as they are) and what is posted. It must carry the report's marker and its date in the heading: the
 issue is titled "InferPilot daily report <date>" with the whole file as its body, which is how the next scan,
 in any container, finds it (daily_report.py latest). When the newest shared report is already that day's,
-nothing is posted and its URL is printed with the action "exists". It reads and posts with
-INFERPILOT_REPO_TOKEN, the fine-grained token for this repository alone with which the curator opens its pull
-request; opening issues takes Issues: read and write as well. Without the token, or with one that cannot open
-issues (exit 2), or on any other failure (exit 1), nothing is posted and the report stays a file for a human
-to share. A post GitHub did not answer (a timeout, a dropped connection, a 5xx) may have opened the issue all
+nothing is posted and its URL is printed with the action "exists". It reads and posts with GITHUB_TOKEN, the
+token every GitHub script of InferPilot uses, which opens issues here with Issues: read and write on this
+repository (README step 1). Without the token, or with one that cannot open issues (exit 2), or on any other
+failure (exit 1), nothing is posted and the report stays a file for a human to share. A post GitHub did not answer (a timeout, a dropped connection, a 5xx) may have opened the issue all
 the same: the script looks for that day's report again and prints it as created when it is there; when it
 cannot tell (exit 6), a human looks in the repository's issues before sharing the report by hand. Standard
 library only.
@@ -42,11 +41,11 @@ def post(repo: str, title: str, body: str, token: str) -> dict:
         return json.load(r)
 
 
-def reconcile(repo: str, date: str, title: str, token: str, failure: str, later: str) -> int:
+def reconcile(repo: str, date: str, title: str, failure: str, later: str) -> int:
     """After a post GitHub did not answer: 0, with the issue printed, when that day's report is there now; 1 when
     it is not; 6 when the repository's issues cannot be read to tell."""
     try:
-        shared = daily_report.latest(repo, token)
+        shared = daily_report.latest(repo)
     except (urllib.error.URLError, OSError, ValueError) as e:
         print("share_daily_report: %s, and the issues of %s cannot be read to tell whether it was opened (%s); look there "
               "for \"%s\" before sharing it by hand" % (failure, repo, e, title), file=sys.stderr)
@@ -85,9 +84,8 @@ def main(argv=None) -> int:
     if not repo:
         print("share_daily_report: no GitHub repository (set --repo owner/name); %s" % later, file=sys.stderr)
         return 2
-    token = os.environ.get("INFERPILOT_REPO_TOKEN", "")
     try:
-        shared = daily_report.latest(repo, token)
+        shared = daily_report.latest(repo)
     except (urllib.error.URLError, OSError, ValueError) as e:
         print("share_daily_report: cannot read the reports shared in %s (%s); %s" % (repo, e, later), file=sys.stderr)
         return 1
@@ -97,8 +95,9 @@ def main(argv=None) -> int:
     if a.dry_run:
         print(json.dumps({"dry_run": True, "repo": repo, "title": title, "chars": len(body)}, indent=1))
         return 0
+    token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
-        print("share_daily_report: INFERPILOT_REPO_TOKEN is not set; %s" % later, file=sys.stderr)
+        print("share_daily_report: GITHUB_TOKEN is not set; %s" % later, file=sys.stderr)
         return 2
     try:
         issue = post(repo, title, body, token)
@@ -108,13 +107,13 @@ def main(argv=None) -> int:
         if e.code < 500:
             denied = e.code in (401, 403)
             print("share_daily_report: HTTP %d from GitHub%s; %s" % (
-                e.code, " (INFERPILOT_REPO_TOKEN cannot open issues in the repository; README step 1)" if denied else "", later),
+                e.code, " (GITHUB_TOKEN cannot open issues in the repository; README step 1)" if denied else "", later),
                 file=sys.stderr)
             return 2 if denied else 1
         failure = "HTTP %d from GitHub" % e.code
     except (urllib.error.URLError, OSError, ValueError) as e:
         failure = str(e)
-    return reconcile(repo, date, title, token, failure, later)
+    return reconcile(repo, date, title, failure, later)
 
 
 if __name__ == "__main__":

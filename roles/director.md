@@ -262,7 +262,7 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   report <the scan's UTC date>` with the whole file as its body (action `created`), or finds that day's
   there already (`exists`: an earlier scan or a human shared it, and this scan's report stays a file),
   and prints its URL: return it as `daily_report_url` and the action as `daily_report_action`, and open
-  the report with them. Exit 2 (no `INFERPILOT_REPO_TOKEN`, or one that cannot open issues) or 1: nothing
+  the report with them. Exit 2 (no `GITHUB_TOKEN`, or one that cannot open issues there) or 1: nothing
   was posted and `daily_report_url` stays empty; open the report with where the daily report is and how a
   human shares it: as an issue with that title on the new-issue page of InferPilot's repository, unless
   that day's is there already, its whole file as the body, or with the same command once the token is

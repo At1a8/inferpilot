@@ -164,8 +164,9 @@ directory is not visible: `run_lock.py release --force` frees a lock whose run i
   the report says no human approved the design); the PR is prepared, never
   pushed; issue replies are drafts; a scan's daily report is checked to name nothing about the machine
   (`scripts/daily_report.py`), and a shared copy is where the next scan, in any container, continues
-  from. The two posts both go to InferPilot's own repository, with a token for it alone: the daily
-  report, as an issue (`scripts/share_daily_report.py`; without the token a human shares the file), and
+  from. The two posts both go to InferPilot's own repository, with the user's `GITHUB_TOKEN`: the daily
+  report, as an issue (`scripts/share_daily_report.py`; when the token cannot write there, a human shares
+  the file), and
   the curator's knowledge changes, as a pull request to main (`scripts/propose_knowledge.py`), so
   knowledge a run proved reaches later runs only once a human merged it.
 

@@ -77,12 +77,12 @@ the roles:
   reviewer never edit framework source; the measuring ones never reuse anyone else's numbers but run
   everything again;
 - the **curator** edits only InferPilot's own `knowledge/`, and proposes the edits as a pull request to InferPilot's
-  repository for you to review and merge (with `INFERPILOT_REPO_TOKEN`; without it they stay uncommitted in
-  the checkout);
+  repository for you to review and merge (with a `GITHUB_TOKEN` that can write there; without one they stay
+  uncommitted in the checkout);
 - no role pushes or posts upstream: the PR engineer returns the exact `git push`, issue replies are
-  drafts; the two posts both go to InferPilot's own repository, and only with a token you set for that:
-  the curator's knowledge changes, as a pull request that you merge, and a scan's daily report, as an
-  issue (without the token, a file for you to share).
+  drafts; the two posts both go to InferPilot's own repository, and only with your `GITHUB_TOKEN`: the
+  curator's knowledge changes, as a pull request that you merge, and a scan's daily report, as an issue
+  (when the token cannot write there, a file for you to share).
 
 | Role | Phases | What it does |
 |---|---|---|
@@ -130,8 +130,9 @@ packaging changes in `/sgl-workspace/sglang` of a new container from the daily i
 - Network access to claude.ai, github.com and Docker Hub, and about 45 GB of disk per sglang image.
 - An AMD LLM gateway key (`LLM_GATEWAY_KEY`), an Anthropic API key or another gateway; without any, a
   Claude subscription.
-- A read-only GitHub token (`GITHUB_TOKEN`), strongly recommended: scans and issue runs read GitHub's
-  API.
+- A GitHub token (`GITHUB_TOKEN`), strongly recommended: scans and issue runs read GitHub's API, and
+  where it may write to InferPilot's own repository, the curator's pull requests and the daily reports go
+  there with it.
 - Model weights in a directory the container mounts (`/data`, `/mnt`, `/kmd2`, ...; any other through
   `EXTRA_MOUNTS`): InferPilot never downloads weights.
 
@@ -156,22 +157,21 @@ its own `/root/.inferpilot_env`).
   `ANTHROPIC_CUSTOM_HEADERS`). With a Claude subscription, run `claude setup-token` wherever you have
   Claude Code and a browser and write `export CLAUDE_CODE_OAUTH_TOKEN=<token>`; or leave the key out and
   log in at the first start, in every new container (step 4).
-- **GitHub token (strongly recommended).** Scans and issue runs read issues, pull requests and CI
-  trackers through GitHub's API. Without a token GitHub allows 60 requests an hour and 10 searches a
-  minute per IP address, shared with everyone behind the same address, so a scan crawls and can stop
-  partway; with one, 5000 requests an hour. Read-only is enough: on github.com, Settings → Developer
-  settings → Personal access tokens → Fine-grained tokens, with *Public repositories (read-only)*
-  access (a classic token with no scopes also works). Every agent in the container can read what
-  `~/.inferpilot_env` holds, so keep your everyday token, the one you push with, out of it.
-- **InferPilot repository token (optional).** Only for InferPilot's own repository: the curator's
-  knowledge changes, as a pull request from a `inferpilot/knowledge/<run>` branch to main, which you
-  review and merge, and a scan's daily report, as an issue. That takes a token for this repository alone,
-  so it can write nowhere else: a fine-grained token with *Only select repositories* → `At1a8/inferpilot`
-  and *Repository permissions* → *Contents*, *Pull requests* and *Issues*: *Read and write*, added to
-  `~/.inferpilot_env` as `export INFERPILOT_REPO_TOKEN=<token>`. InferPilot pushes only `inferpilot/`
-  branches; protect main on GitHub (require a pull request) so the token cannot change it either. Without
-  it the knowledge changes stay in the container's checkout, and the report gives the command that
-  proposes them; the daily report stays a file for you to share.
+- **GitHub token (strongly recommended).** InferPilot uses this one token, `GITHUB_TOKEN`, for all it does
+  on GitHub. Scans and issue runs read issues, pull requests and CI trackers through GitHub's API: without
+  a token GitHub allows 60 requests an hour and 10 searches a minute per IP address, shared with everyone
+  behind the same address, so a scan crawls and can stop partway; with one, 5000 requests an hour. It also
+  writes to InferPilot's own repository, and nowhere else: the curator's knowledge changes, as a pull
+  request from a `inferpilot/knowledge/<run>` branch to main, which you review and merge, and a scan's
+  daily report, as an issue. Every agent in the container can read what `~/.inferpilot_env` holds, so give
+  the token no more than that: on github.com, Settings → Developer settings → Personal access tokens →
+  Fine-grained tokens, *Only select repositories* → `At1a8/inferpilot` and *Repository permissions* →
+  *Contents*, *Pull requests* and *Issues*: *Read and write* (every fine-grained token reads all public
+  repositories as well, sglang's among them), and keep your everyday token, the one you push with, out of
+  it. InferPilot pushes only `inferpilot/` branches; protect main on GitHub (require a pull request) so the
+  token cannot change it either. A token that cannot write there, a read-only one, still serves the
+  scans: the knowledge changes then stay in the container's checkout, and the report gives the command
+  that proposes them, and the daily report stays a file for you to share.
 - **Git identity (recommended).** The container carries no home, so no git config of yours: commits
   InferPilot makes there would read `root@<this host>`. Add `export INFERPILOT_GIT_NAME="<your name>"` and
   `export INFERPILOT_GIT_EMAIL=<your email>`; step 3 gives them to root.
@@ -346,8 +346,8 @@ last 7 days): the AMD CI on main (every failing job, since when it fails and wha
 open AMD user issues under P0, P1 and P2, and the upstream changes AMD needs to follow. It ranks the
 tasks in them into `exp/scan_<time>/task_queue.md`, each with the task definition that starts it, and
 writes the report, without anything about this machine, to `exp/scan_<time>/daily_report.md`, which it
-shares as an issue in InferPilot's repository with `INFERPILOT_REPO_TOKEN` (step 1; without it, the file
-is yours to share). One report a day is enough: when one is less than 24 hours old, the scan asks before it starts again
+shares as an issue in InferPilot's repository with `GITHUB_TOKEN` (step 1; when the token cannot write
+there, the file is yours to share). One report a day is enough: when one is less than 24 hours old, the scan asks before it starts again
 (answer `rescan`), and `upstream_repos` adds repositories to follow, such as vLLM. To take one task,
 stopping after the reproduction to confirm the environment, name its fields:
 
@@ -473,9 +473,9 @@ the container with its status. A run directory holds:
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
 
 A scan's `daily_report.md` is written to be shared, and `scripts/daily_report.py check` has made sure
-it names nothing about this machine. With `INFERPILOT_REPO_TOKEN` (step 1) the director shares it as an
-issue in InferPilot's repository titled `InferPilot daily report <date>`, unless that day's is there
-already, and the result names it. Without the token, and when that day's is not there yet, open a new
+it names nothing about this machine. With a `GITHUB_TOKEN` that can write there (step 1) the director
+shares it as an issue in InferPilot's repository titled `InferPilot daily report <date>`, unless that day's
+is there already, and the result names it. Without one, and when that day's is not there yet, open a new
 issue there on GitHub, give it that title and paste the whole file, or run
 `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md` once the token is set. A scan
 whose Dispatch failed shares nothing: the report it left may be partial. Its first line, a hidden marker, lets the next scan, in any container, find it
@@ -523,7 +523,7 @@ step 3 too, cloning InferPilot to `/workspace/inferpilot` (pip shows the output 
 | `INFERPILOT_CLAUDE`, `INFERPILOT_CURSOR`, `INFERPILOT_RUNNER`, `INFERPILOT_NODE_VERSION` | bootstrap | unset; `1` as `--claude`, `--cursor` and `--runner` (`0` is off; with neither of the first two, Claude Code); the newest Node.js LTS (`22` for the newest 22.x, or an exact `v22.11.0`) |
 | `INFERPILOT_CLAUDE_BIN`, `INFERPILOT_CURSOR_BIN` | `runtime/run.mjs` | `claude`, `agent` on `PATH`: the CLIs that `--backend claude` and `--backend cursor` run |
 | `INFERPILOT_GIT_NAME`, `INFERPILOT_GIT_EMAIL` | `~/.inferpilot_env`, bootstrap | unset; the identity root commits with in the container |
-| `INFERPILOT_REPO_TOKEN` | `~/.inferpilot_env`, `scripts/propose_knowledge.py`, `scripts/share_daily_report.py` | unset; a fine-grained token for InferPilot's own repository alone (Contents, Pull requests, Issues: read and write), with which the curator opens its pull request and the director shares a scan's daily report as an issue |
+| `GITHUB_TOKEN` | `~/.inferpilot_env`, bootstrap, the GitHub scripts | unset; the one GitHub token, strongly recommended (step 1): it reads GitHub's API, and with Contents, Pull requests and Issues read and write on InferPilot's own repository the curator opens its pull request with it and the director shares a scan's daily report |
 | `LLM_GATEWAY_KEY` | `~/.inferpilot_env`, the container's shell settings | unset; set, Claude Code runs on the AMD LLM gateway unless `ANTHROPIC_BASE_URL` names another |
 | `INFERPILOT_FRAMEWORK_DIR`, `INFERPILOT_FRAMEWORK_REPO` | bootstrap: `--framework-dir`, `--framework-repo` | the image's `/sgl-workspace/sglang`; sglang |
 | `INFERPILOT_SKIP_BOOTSTRAP` | bootstrap | unset; set it to install the package with no side effects (CI, images) |
@@ -628,7 +628,7 @@ lists for it from the task worktree, so they match the code it changes, with ROC
 
 ## Scripts
 
-Standard-library Python; the GitHub ones read `GITHUB_TOKEN` or `GH_TOKEN` (step 1; without a token
+Standard-library Python; the GitHub ones read `GITHUB_TOKEN` (step 1; without a token
 GitHub allows 60 requests an hour and 10 searches a minute per IP address).
 
 | Script | Source of tasks |
@@ -656,7 +656,7 @@ tells whether a daily report can be made public (no local path, hostname or inte
 pull request and issue by its title as well as its number, and fits in an issue; `latest` finds the
 newest report shared in InferPilot's repository, which the next scan, in any container, continues from.
 Both only read. `scripts/share_daily_report.py` shares a report that passes the check as an issue in
-InferPilot's repository with `INFERPILOT_REPO_TOKEN`, titled with the report's date, unless that day's
+InferPilot's repository with `GITHUB_TOKEN`, titled with the report's date, unless that day's
 report is there already (the director runs it at the end of a scan whose Dispatch passed).
 `scripts/propose_knowledge.py` turns the curator's changes under `knowledge/` into a pull request
 from `inferpilot/knowledge/<run>` to main, built on the current main in a throwaway worktree, and then
