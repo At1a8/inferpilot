@@ -36,9 +36,11 @@ class ScanTemplatesTest(unittest.TestCase):
     def test_an_effort_cell_says_where_its_numbers_go(self):
         for name in ("daily_report.md", "task_queue.md"):
             text = (ROOT / "templates" / name).read_text(encoding="utf-8")
-            units = re.findall(r"(<[^<>]+>|\S+) (?:agent|GPU) h\b", text)
+            units = list(re.finditer(r"\b(?:agent|GPU) h\b", text))
             self.assertTrue(units, name)
-            self.assertEqual([u for u in units if not re.fullmatch(r"<[^<>]+>", u)], [], name)
+            bare = [text[max(0, u.start() - 24):u.end()] for u in units
+                    if not re.search(r"<[^<>]+> \Z", text[max(0, u.start() - 60):u.start()])]
+            self.assertEqual(bare, [], name)
 
 
 if __name__ == "__main__":
