@@ -2,7 +2,9 @@
 
 <!-- A week of InferPilot's work in the shape of an sglang release note: Highlights a reader acts on,
      then the full notes by area, Breaking Changes & Upgrade Notes, Contributors and the Full Changelog.
-     A progress report, not posted to GitHub. Its sources: the week's runs (each container's
+     A progress report, not posted to GitHub, in English (`weekly_release.md`) and in Chinese
+     (`weekly_release.zh-CN.md`): the same sections, tables, inline code, numbers and links, as
+     `tests/test_templates.py` checks. Its sources: the week's runs (each container's
      `exp/index.md` and its run directories), the daily reports shared in InferPilot's repository,
      InferPilot's pull requests merged in the week, and the sglang pull requests pushed from
      `inferpilot/<slug>` branches. Every line links to its evidence: the upstream pull request or issue,
@@ -108,7 +110,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/At1a8/inferpilot/main/script
 
 ## Next week
 
-<!-- The top tasks of the week's last daily report, ranked with dispatch.md §6. -->
+<!-- The top tasks of the week's last daily report, ranked with §6 of dispatch.md. -->
 
 | Rank | Task | Source | Type | Level | Priority |
 |---|---|---|---|---|---|

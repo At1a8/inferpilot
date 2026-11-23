@@ -6,6 +6,8 @@ import re
 import unittest
 from pathlib import Path
 
+from test_readme import code_spans, commands, link_targets, numbers, prose, sections, table_rows
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -44,9 +46,11 @@ class ScanTemplatesTest(unittest.TestCase):
 
 
 class WeeklyReleaseTest(unittest.TestCase):
-    """templates/weekly_release.md: a week of InferPilot's work in the shape of an sglang release note."""
+    """templates/weekly_release.md and weekly_release.zh-CN.md: a week of InferPilot's work in the shape of an
+    sglang release note, in English and in Chinese."""
 
     body = (ROOT / "templates" / "weekly_release.md").read_text(encoding="utf-8")
+    zh = (ROOT / "templates" / "weekly_release.zh-CN.md").read_text(encoding="utf-8")
 
     def test_an_sglang_release_notes_layout(self):
         self.assertTrue(self.body.startswith("# InferPilot weekly release <YYYY>-W<ww> "))
@@ -55,6 +59,20 @@ class WeeklyReleaseTest(unittest.TestCase):
         for section in ("Breaking Changes & Upgrade Notes", "Contributors"):
             self.assertIn(section, notes)
         self.assertTrue(self.body.rstrip().splitlines()[-1].startswith("**Full Changelog**: "))
+
+    def test_the_chinese_one_says_the_same(self):
+        self.assertTrue(self.zh.startswith("# InferPilot 周报 <YYYY>-W<ww> "))
+        self.assertTrue(self.zh.rstrip().splitlines()[-1].startswith("**完整变更记录**："))
+        en, zh = sections(self.body), sections(self.zh)
+        self.assertEqual([level for level, _ in en], [level for level, _ in zh])
+        headings = ["(top)"] + re.findall(r"^#{1,6} (.+)$", prose(self.body), re.M)
+        for title, (_, a), (_, b) in zip(headings, en, zh):
+            with self.subTest(section=title):
+                self.assertEqual(code_spans(a), code_spans(b), "inline code only one language has")
+                self.assertEqual(numbers(a), numbers(b), "numbers only one language has")
+                self.assertEqual(link_targets(a, {}, ""), link_targets(b, {}, ""), "links only one language has")
+        self.assertEqual(table_rows(self.body), table_rows(self.zh), "tables with other rows")
+        self.assertEqual(commands(self.body), commands(self.zh))
 
 
 if __name__ == "__main__":
