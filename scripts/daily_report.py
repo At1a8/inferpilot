@@ -2,11 +2,12 @@
 """Check a scan's daily report before a human shares it, and find the last one they shared. Read only:
 InferPilot posts nothing; the human uploads the report (e.g. as an issue in InferPilot's repository).
 
-    python3 scripts/daily_report.py check RUN_DIR/daily_report.md   # public-safe and short enough?
+    python3 scripts/daily_report.py check RUN_DIR/daily_report.md   # public-safe, titled and short enough?
     python3 scripts/daily_report.py latest                          # the newest shared report: date, URL, age, body
 
 check: exit 3 when a line names a local path, this machine or a sibling, or the company's network (the lines are listed),
-exit 4 when the body is longer than a GitHub issue allows. latest: the newest issue in InferPilot's repository
+exit 5 when a table row or list item names a pull request or issue by its number alone, without its title (the lines
+are listed), exit 4 when the body is longer than a GitHub issue allows. latest: the newest issue in InferPilot's repository
 (the origin of this checkout) that carries the report's marker, `{}` when there is none; it reads a
 public repository, with GITHUB_TOKEN when set. Standard library only.
 """
@@ -39,6 +40,9 @@ INTERNAL_SITE = re.compile(r"\b(?:confluence|jira)\.[a-z0-9-]+\.[a-z]|\b[a-z0-9-
                            # self.unique_id.internal or grpc.StatusCode.INTERNAL
                            r"|(?<![\w.])(?<!from )(?<!import )(?-i:(?:[a-z0-9-]+\.)+internal)\b", re.I)
 PRIVATE_IP = re.compile(r"(?<![\d.])(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}(?!\d|\.\d)")
+# A row or item the template opens with [#<n>](<url>) <title>, written without the title: its cell or the item
+# ends right after the link (and *new*).
+UNTITLED = re.compile(r"^(?:\|\s*|[-*]\s+)\[#\d+\]\([^)\s]*\)\s*(?:\*new\*\s*)?(?:\||:|$)")
 
 
 def title(date: str) -> str:
@@ -98,8 +102,14 @@ def leaks(body: str, host: str = "") -> list:
     return out
 
 
+def untitled(body: str) -> list:
+    """Lines that name a pull request or issue by its number alone where the template gives its title too."""
+    return ["%d: %s" % (n, line.strip()[:160]) for n, line in enumerate(body.splitlines(), 1) if UNTITLED.match(line)]
+
+
 def check(body: str, host: str = "") -> dict:
-    return {"leaks": leaks(body, host), "chars": len(body), "limit": ISSUE_LIMIT, "marker": MARKER in body}
+    return {"leaks": leaks(body, host), "untitled": untitled(body), "chars": len(body), "limit": ISSUE_LIMIT,
+            "marker": MARKER in body}
 
 
 def age_hours(stamp: str, now: dt.datetime | None = None) -> float:
@@ -132,7 +142,7 @@ def latest(repo: str) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Check a daily report, or find the last one shared. Read only.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    c = sub.add_parser("check", help="is the report public-safe and short enough for an issue?")
+    c = sub.add_parser("check", help="is the report public-safe, every pull request and issue titled, short enough for an issue?")
     c.add_argument("file")
     lt = sub.add_parser("latest", help="the newest shared report in InferPilot's repository")
     lt.add_argument("--repo", default="", help="owner/name (default: the origin of this checkout)")
@@ -144,6 +154,10 @@ def main(argv=None) -> int:
             print("daily_report: not public-safe; it names something local or internal:\n  " + "\n  ".join(r["leaks"]),
                   file=sys.stderr)
             return 3
+        if r["untitled"]:
+            print("daily_report: these name a pull request or issue by its number alone; give each its title after the link:\n  "
+                  + "\n  ".join(r["untitled"]), file=sys.stderr)
+            return 5
         if r["chars"] > ISSUE_LIMIT:
             print("daily_report: %d characters, more than an issue's %d; shorten it" % (r["chars"], ISSUE_LIMIT), file=sys.stderr)
             return 4

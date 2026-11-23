@@ -257,7 +257,7 @@ produced so far.
   to the report as index maintenance for the curator.
 - `scan` that reached Dispatch: the daily report is for a human to share; InferPilot posts it nowhere.
   Check it once more (`python3 <inferpilot_dir>/scripts/daily_report.py check RUN_DIR/daily_report.md`; exit
-  3 or 4: fix what it lists, then check again), and open the report with where it is and how to share
+  3, 4 or 5: fix what it lists, then check again), and open the report with where it is and how to share
   it: as an issue titled `InferPilot daily report <the scan's UTC date>` on the new-issue page of InferPilot's
   repository (the origin of the InferPilot checkout), its whole file as the body.
 - List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
