@@ -221,8 +221,15 @@ class DailyReportTest(unittest.TestCase):
             "- [#38710](https://github.com/sgl-project/sglang/issues/38710) [Bug] auto-enable commented out *new*: close",
             "| 6 | Kimi-K3.1 Day-0 branch (#48414) | [upstream](https://github.com/sgl-project/sglang/pull/48414) | L1 |",
             "- Priorities follow the roadmap ([#46462](https://github.com/sgl-project/sglang/issues/46462)).",
+            "  | [#50842](https://github.com/sgl-project/sglang/pull/50842) | 2026-11-18 | CUDA-first feature |",
+            "    - [#30599](https://github.com/sgl-project/sglang/issues/30599): tracking issue (hand over)",
+            "+ [#40624](https://github.com/sgl-project/sglang/issues/40624): feature plan",
+            "1. [#44304](https://github.com/sgl-project/sglang/issues/44304)",
+            "| #52054 | 2026-11-21 | CUDA-first feature |",
+            "| [#50620](https://github.com/sgl-project/sglang/pull/50620) :rocket: Fuse the draft softmax and sample | 2026-11-19 |",
+            "2) #50124 [Perf] decode: Copy the top logprobs to the host once per step",
         ])
-        self.assertEqual([l.split(":")[0] for l in daily_report.untitled(body)], ["1", "3", "4"])
+        self.assertEqual([l.split(":")[0] for l in daily_report.untitled(body)], ["1", "3", "4", "8", "9", "10", "11", "12"])
 
     def test_check_exit_codes(self):
         template = Path(__file__).resolve().parent.parent / "templates" / "daily_report.md"

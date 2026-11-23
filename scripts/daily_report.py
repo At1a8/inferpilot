@@ -40,9 +40,10 @@ INTERNAL_SITE = re.compile(r"\b(?:confluence|jira)\.[a-z0-9-]+\.[a-z]|\b[a-z0-9-
                            # self.unique_id.internal or grpc.StatusCode.INTERNAL
                            r"|(?<![\w.])(?<!from )(?<!import )(?-i:(?:[a-z0-9-]+\.)+internal)\b", re.I)
 PRIVATE_IP = re.compile(r"(?<![\d.])(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}(?!\d|\.\d)")
-# A row or item the template opens with [#<n>](<url>) <title>, written without the title: its cell or the item
-# ends right after the link (and *new*).
-UNTITLED = re.compile(r"^(?:\|\s*|[-*]\s+)\[#\d+\]\([^)\s]*\)\s*(?:\*new\*\s*)?(?:\||:|$)")
+# A row or item the template opens with [#<n>](<url>) <title>, written without the title: at any indentation and
+# after any list marker, the link (or a bare #<n>) is followed only by the end of its cell or item, *new*, or a
+# colon before a space or the end (a title may open with :rocket:).
+UNTITLED = re.compile(r"^[ \t]*(?:\|\s*|(?:[-*+]|\d+[.)])\s+)(?:\[#\d+\]\([^)\s]*\)|#\d+)\s*(?:\*new\*\s*)?(?:\||:(?:\s|$)|$)")
 
 
 def title(date: str) -> str:
@@ -155,7 +156,7 @@ def main(argv=None) -> int:
                   file=sys.stderr)
             return 3
         if r["untitled"]:
-            print("daily_report: these name a pull request or issue by its number alone; give each its title after the link:\n  "
+            print("daily_report: these name a pull request or issue by its number alone; write each as [#<n>](<url>) <title>:\n  "
                   + "\n  ".join(r["untitled"]), file=sys.stderr)
             return 5
         if r["chars"] > ISSUE_LIMIT:

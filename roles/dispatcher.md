@@ -38,8 +38,8 @@ Input: `candidates_path`.
    only as `model_path=<weights>`, no internal sites or names; that and the local detail stay in
    `task_queue.md`. Aim for about 40,000 characters (an issue holds 65,536): cap the long tables and
    count the rest. `python3 <inferpilot_dir>/scripts/daily_report.py check RUN_DIR/daily_report.md` must pass
-   (exit 3: remove the lines it lists; exit 4: shorten; exit 5: give each pull request or issue it lists
-   its title).
+   (exit 3: remove the lines it lists; exit 4: shorten; exit 5: write each pull request or issue it lists
+   as `[#<n>](<url>) <title>`).
 
 Return, each top entry with the `task_def` that starts it, as in `queue.json` (the run's `next` offers
 them as runs to start):
