@@ -258,6 +258,29 @@ class DailyReportTest(unittest.TestCase):
         with mock.patch.object(daily_report, "get", return_value=[]):
             self.assertEqual(daily_report.latest("At1a8/inferpilot"), {})
 
+    def test_latest_reads_with_the_token_it_is_given_else_github_token(self):
+        seen = []
+
+        def urlopen(req, timeout=0):
+            seen.append(req.get_header("Authorization"))
+            return io.BytesIO(b"[]")
+
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "g"}), mock.patch.object(daily_report.urllib.request, "urlopen", urlopen):
+            daily_report.latest("At1a8/inferpilot", "r")
+            daily_report.latest("At1a8/inferpilot")
+        self.assertEqual(seen, ["Bearer r", "Bearer g"])
+
+    def test_a_root_this_machine_mounts_storage_on_is_local_whatever_its_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            mounts = Path(d) / "mounts"
+            mounts.write_text("overlay / overlay rw 0 0\nproc /proc proc rw 0 0\n/dev/sdb1 /lustre ext4 rw 0 0\n"
+                              "/dev/sdb1 /etc/hosts ext4 rw 0 0\n/dev/sdc1 /var xfs rw 0 0\nnfs:/v /gpfs/x nfs rw 0 0\n")
+            self.assertEqual(daily_report.mounted_roots(str(mounts)), ("gpfs", "lustre"), "not the system's own: /etc, /proc, /var")
+            self.assertEqual(daily_report.mounted_roots(str(Path(d) / "none")), ())
+        local = daily_report.local_paths(("lustre",))
+        self.assertTrue(local.search("weights in /lustre/models/x") and local.search("weights in /" + "srv/models/x"))
+        self.assertFalse(local.search("logs in /var/log/x.log") or local.search("see /usr/lib/python3/x.py"))
+
     def test_it_never_writes(self):
         src = (Path(__file__).resolve().parent.parent / "scripts" / "daily_report.py").read_text()
         self.assertNotRegex(src, r"method=|\"POST\"|\"PATCH\"|\"PUT\"|\"DELETE\"")
@@ -274,7 +297,8 @@ class ShareDailyReportTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.report = Path(tmp.name) / "daily_report.md"
 
-    def share(self, body=None, token="t", shared=None, post=None, flags=()):
+    def share(self, body=None, token="t", shared=None, post=None, flags=(), after=None):
+        """after: what the repository's issues show when they are read again after a post GitHub did not answer."""
         self.report.write_text(self.REPORT if body is None else body)
         env = {k: v for k, v in os.environ.items() if k != "INFERPILOT_REPO_TOKEN"}
         if token:
@@ -287,11 +311,36 @@ class ShareDailyReportTest(unittest.TestCase):
                 raise post
             return {"number": 7, "html_url": "https://github.com/At1a8/inferpilot/issues/7"}
 
+        self.lookups = mock.MagicMock(side_effect=[shared or {}] + ([] if after is None else [after]))
         with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()) as out, \
-                redirect_stderr(io.StringIO()) as err, mock.patch.object(daily_report, "latest", return_value=shared or {}), \
+                redirect_stderr(io.StringIO()) as err, mock.patch.object(daily_report, "latest", self.lookups), \
                 mock.patch.object(share_daily_report, "post", side_effect=fake_post):
             rc = share_daily_report.main([str(self.report), "--repo", "At1a8/inferpilot", *flags])
         return rc, out.getvalue(), err.getvalue(), posted
+
+    def test_what_is_checked_is_what_is_posted_and_the_lookup_reads_with_the_repository_token(self):
+        checked = []
+        check = daily_report.check
+        with mock.patch.object(daily_report, "check", side_effect=lambda body, host="": checked.append(body) or check(body, host)):
+            rc, out, err, posted = self.share()
+        self.assertEqual((rc, checked), (0, [posted[0][2]]), "the body read once is the one checked and the one posted")
+        self.assertEqual(self.lookups.call_args_list, [mock.call("At1a8/inferpilot", "t")])
+
+    def test_a_post_github_did_not_answer_is_looked_up_before_anything_else(self):
+        timeout = share_daily_report.urllib.error.URLError("timed out")
+        day = {"date": "2026-11-23", "number": 9, "url": "https://github.com/At1a8/inferpilot/issues/9"}
+        rc, out, err, posted = self.share(post=timeout, after=day)
+        self.assertEqual((rc, json.loads(out)["action"], json.loads(out)["url"]), (0, "created", day["url"]), "opened all the same")
+        rc, out, err, posted = self.share(post=timeout, after={})
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("share it by hand", err)
+        rc, out, err, posted = self.share(post=timeout, after=share_daily_report.urllib.error.URLError("down"))
+        self.assertEqual((rc, out), (6, ""), "cannot tell")
+        self.assertIn("before sharing it by hand", err)
+        bad_gateway = share_daily_report.urllib.error.HTTPError("https://api.github.com", 502, "Bad Gateway", {}, None)
+        self.assertEqual(self.share(post=bad_gateway, after=day)[0], 0, "a 5xx is no answer either")
+        invalid = share_daily_report.urllib.error.HTTPError("https://api.github.com", 422, "Unprocessable", {}, None)
+        self.assertEqual((self.share(post=invalid)[0], self.lookups.call_count), (1, 1), "a 4xx is GitHub's answer: no second look")
 
     def test_a_checked_report_becomes_the_days_issue(self):
         rc, out, err, posted = self.share()
@@ -320,7 +369,7 @@ class ShareDailyReportTest(unittest.TestCase):
     def test_a_token_that_cannot_open_issues_is_named(self):
         denied = share_daily_report.urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
         rc, out, err, posted = self.share(post=denied)
-        self.assertEqual((rc, out), (2, ""))
+        self.assertEqual((rc, out, self.lookups.call_count), (2, "", 1))
         self.assertIn("INFERPILOT_REPO_TOKEN cannot open issues", err)
         self.assertIn("share it by hand", err)
 

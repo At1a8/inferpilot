@@ -5,11 +5,12 @@ InferPilot's repository as an issue through scripts/share_daily_report.py, or by
     python3 scripts/daily_report.py check RUN_DIR/daily_report.md   # public-safe, titled and short enough?
     python3 scripts/daily_report.py latest                          # the newest shared report: date, URL, age, body
 
-check: exit 3 when a line names a local path, this machine or a sibling, or the company's network (the lines are listed),
-exit 5 when a table row or list item names a pull request or issue by its number alone, without its title (the lines
-are listed), exit 4 when the body is longer than a GitHub issue allows. latest: the newest issue in InferPilot's repository
-(the origin of this checkout) that carries the report's marker, `{}` when there is none; it reads a
-public repository, with GITHUB_TOKEN when set. Standard library only.
+check: exit 3 when a line names a local path (under one of the usual roots, or one this machine mounts storage on),
+this machine or a sibling, or the company's network (the lines are listed), exit 5 when a table row or list item names
+a pull request or issue by its number alone, without its title (the lines are listed), exit 4 when the body is longer
+than a GitHub issue allows. latest: the newest issue in InferPilot's repository (the origin of this checkout) that
+carries the report's marker, `{}` when there is none; it reads a public repository, with the token its caller gives
+(share_daily_report.py's) or else GITHUB_TOKEN when set. Standard library only.
 """
 from __future__ import annotations
 
@@ -28,8 +29,29 @@ import urllib.request
 API = "https://api.github.com"
 MARKER = "<!-- inferpilot:daily-report -->"
 ISSUE_LIMIT = 65536  # characters GitHub accepts in an issue body
-LOCAL = re.compile(r"(?<![\w.-])/(?:data\d*|mnt|home|root|workspace|sgl-workspace|apps|shared|nfs\w*|kmd\d*|scratch|raid\w*"
-                   r"|work|export|models|opt|tmp)/|confluence|jira\.", re.I)
+# The system's own top-level directories, whatever is mounted on them (a host's /var, a container's /etc/hosts).
+SYSTEM_ROOTS = {"bin", "boot", "dev", "etc", "lib", "lib32", "lib64", "libx32", "media", "proc", "run", "sbin", "snap",
+                "sys", "usr", "var"}
+
+
+def mounted_roots(mounts: str = "/proc/self/mounts") -> tuple:
+    """The top-level directories storage is mounted on here (/kmd2, /nfs_shared1, ...), whatever their names."""
+    try:
+        with open(mounts, encoding="utf-8") as f:
+            points = [fields[1] for fields in (line.split() for line in f) if len(fields) > 1]
+    except OSError:
+        return ()
+    return tuple(sorted({p.split("/")[1] for p in points if p.startswith("/")} - SYSTEM_ROOTS - {""}))
+
+
+def local_paths(roots: tuple = ()) -> re.Pattern:
+    """Paths under a local root: the usual names, and the roots given (those this machine mounts storage on)."""
+    return re.compile(r"(?<![\w.-])/(?:data\d*|mnt|home|root|workspace|sgl-workspace|apps|shared|nfs\w*|kmd\d*|scratch"
+                      r"|raid\w*|work|export|models|opt|tmp|srv%s)/|confluence|jira\." % "".join("|" + re.escape(r) for r in roots),
+                      re.I)
+
+
+LOCAL = local_paths(mounted_roots())
 # The company's network, which tests/test_hygiene.py keeps out of this repository with the same patterns: a
 # host of amd.com that is not public, an internal site, a private network address.
 AMD_HOST = re.compile(r"\b[a-z0-9][a-z0-9.-]*\.amd\.com\b", re.I)
@@ -113,22 +135,38 @@ def check(body: str, host: str = "") -> dict:
             "marker": MARKER in body}
 
 
+def verdict(r: dict) -> int:
+    """check's exit code for what check() found, 0 when the report may be shared; the findings go to stderr."""
+    if r["leaks"]:
+        print("daily_report: not public-safe; it names something local or internal:\n  " + "\n  ".join(r["leaks"]),
+              file=sys.stderr)
+        return 3
+    if r["untitled"]:
+        print("daily_report: these name a pull request or issue by its number alone; write each as [#<n>](<url>) <title>:\n  "
+              + "\n  ".join(r["untitled"]), file=sys.stderr)
+        return 5
+    if r["chars"] > ISSUE_LIMIT:
+        print("daily_report: %d characters, more than an issue's %d; shorten it" % (r["chars"], ISSUE_LIMIT), file=sys.stderr)
+        return 4
+    return 0
+
+
 def age_hours(stamp: str, now: dt.datetime | None = None) -> float:
     """Hours since a GitHub timestamp (2026-11-09T01:11:40Z)."""
     then = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
     return round(((now or dt.datetime.now(dt.timezone.utc)) - then).total_seconds() / 3600, 1)
 
 
-def get(path: str):
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+def get(path: str, token: str = ""):
+    token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
     req = urllib.request.Request(API + path, headers={"Accept": "application/vnd.github+json", "User-Agent": "inferpilot",
                                                       **({"Authorization": "Bearer " + token} if token else {})})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
 
 
-def latest(repo: str) -> dict:
-    items = [i for i in get("/repos/%s/issues?state=all&per_page=50&sort=created&direction=desc" % repo)
+def latest(repo: str, token: str = "") -> dict:
+    items = [i for i in get("/repos/%s/issues?state=all&per_page=50&sort=created&direction=desc" % repo, token)
              if "pull_request" not in i and MARKER in (i.get("body") or "")]
     if not items:
         return {}
@@ -151,18 +189,7 @@ def main(argv=None) -> int:
     if a.cmd == "check":
         r = check(open(a.file, encoding="utf-8").read(), this_host())
         print(json.dumps(r, indent=1))
-        if r["leaks"]:
-            print("daily_report: not public-safe; it names something local or internal:\n  " + "\n  ".join(r["leaks"]),
-                  file=sys.stderr)
-            return 3
-        if r["untitled"]:
-            print("daily_report: these name a pull request or issue by its number alone; write each as [#<n>](<url>) <title>:\n  "
-                  + "\n  ".join(r["untitled"]), file=sys.stderr)
-            return 5
-        if r["chars"] > ISSUE_LIMIT:
-            print("daily_report: %d characters, more than an issue's %d; shorten it" % (r["chars"], ISSUE_LIMIT), file=sys.stderr)
-            return 4
-        return 0
+        return verdict(r)
     repo = a.repo or default_repo()
     if not repo:
         print("daily_report: no GitHub repository (set --repo owner/name)", file=sys.stderr)

@@ -475,9 +475,10 @@ the container with its status. A run directory holds:
 A scan's `daily_report.md` is written to be shared, and `scripts/daily_report.py check` has made sure
 it names nothing about this machine. With `INFERPILOT_REPO_TOKEN` (step 1) the director shares it as an
 issue in InferPilot's repository titled `InferPilot daily report <date>`, unless that day's is there
-already, and the result names it. Without the token, open a new issue there on GitHub, give it that title
-and paste the whole file, or run `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`
-once the token is set. Its first line, a hidden marker, lets the next scan, in any container, find it
+already, and the result names it. Without the token, and when that day's is not there yet, open a new
+issue there on GitHub, give it that title and paste the whole file, or run
+`python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md` once the token is set. A scan
+whose Dispatch failed shares nothing: the report it left may be partial. Its first line, a hidden marker, lets the next scan, in any container, find it
 there and mark what changed since.
 
 InferPilot never pushes. The task's branch, `inferpilot/<slug>`, is in `/sgl-workspace/sglang`, and the report
@@ -656,7 +657,7 @@ pull request and issue by its title as well as its number, and fits in an issue;
 newest report shared in InferPilot's repository, which the next scan, in any container, continues from.
 Both only read. `scripts/share_daily_report.py` shares a report that passes the check as an issue in
 InferPilot's repository with `INFERPILOT_REPO_TOKEN`, titled with the report's date, unless that day's
-report is there already (the director runs it at the end of a scan).
+report is there already (the director runs it at the end of a scan whose Dispatch passed).
 `scripts/propose_knowledge.py` turns the curator's changes under `knowledge/` into a pull request
 from `inferpilot/knowledge/<run>` to main, built on the current main in a throwaway worktree, and then
 restores `knowledge/` in the checkout, so later runs read only merged knowledge.

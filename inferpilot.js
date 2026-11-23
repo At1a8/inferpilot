@@ -736,7 +736,7 @@ const K_COLLECT = S({
   integrate_wp: { type: ['object', 'null'], properties: WP.properties, required: WP.required },
   notes: str,
 }, ['status']);
-const REPORT = S({ report_path: str, summary: str, daily_report_url: str }, ['report_path']);
+const REPORT = S({ report_path: str, summary: str, daily_report_url: str, daily_report_action: str }, ['report_path']);
 const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, notes: str },
   ['updates']);
 const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'] }, run_dir: str, candidates_path: str,
@@ -794,14 +794,18 @@ async function finish(status, at) {
     }
     if (MODE === 'issue') R.reply_draft_path = C.reply_draft_path || '';
     enter('Report');
+    // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
       inputs({ status, stopped_at: at || '', phases: R.phases, handoffs: R.handoffs, attention: R.attention,
-        spinoffs: R.spinoffs }), REPORT);
+        spinoffs: R.spinoffs, ...(MODE === 'scan' ? { share_daily_report: status === 'queued' } : {}) }), REPORT);
     if (rep) {
       R.report_path = rep.report_path;
       R.summary = rep.summary || '';
     }
-    if (MODE === 'scan') R.daily_report_url = (rep && rep.daily_report_url) || '';
+    if (MODE === 'scan') {
+      R.daily_report_url = (rep && rep.daily_report_url) || '';
+      R.daily_report_action = (R.daily_report_url && rep.daily_report_action) || '';
+    }
     const learn = await call('curator', 'learn',
       inputs({ status, report_path: R.report_path, phases: R.phases }), LEARN);
     if (learn) {
@@ -832,7 +836,10 @@ function nextSteps(status, at) {
   if (status === 'ready_for_review') {
     out.say = `A pull request is ready on ${(R.pr && R.pr.branch) || C.branch}: read it, then push it yourself.${report}`;
   } else if (status === 'queued') {
-    const shared = R.daily_report_url ? ` The daily report is shared: ${R.daily_report_url}.` : '';
+    const shared = !R.daily_report_url ? ''
+      : R.daily_report_action === 'exists'
+        ? ` That day's daily report was shared before this scan: ${R.daily_report_url}; this scan's stays at ${C.run_dir}/daily_report.md.`
+        : ` The daily report is shared: ${R.daily_report_url}.`;
     out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.${shared}${report}`;
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
       .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...t.task_def } }));
@@ -859,7 +866,7 @@ function nextSteps(status, at) {
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
-  if (status === 'queued' && !R.daily_report_url) user.push(`share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository (README step 5)`);
+  if (status === 'queued' && !R.daily_report_url) user.push(`share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository, unless that day's is there already (README step 5)`);
   if (R.reply_draft_path) user.push(`post the reply draft on the issue: ${R.reply_draft_path}`);
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);

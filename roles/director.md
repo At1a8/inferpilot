@@ -248,22 +248,29 @@ Return:
 
 ## PHASE=report (every mode, every outcome)
 
-Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention` and every artifact path
-produced so far.
+Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a scan
+`share_daily_report`, and every artifact path produced so far.
 
 - `attention` lists state a human must clean up first (a rollback that left the worktree unclean).
   When it is not empty, open the report with it: what is left, where, and the command that cleans it.
 - `scan`: when `RUN_DIR/skills.json` lists framework skills that are missing or not indexed, add them
   to the report as index maintenance for the curator.
-- `scan` that reached Dispatch: share the daily report as an issue in InferPilot's repository (the origin
-  of the InferPilot checkout): `python3 <inferpilot_dir>/scripts/share_daily_report.py RUN_DIR/daily_report.md`.
-  It checks the report once more (exit 3, 4 or 5: fix what it lists, then run it again), then opens the
-  issue `InferPilot daily report <the scan's UTC date>` with the whole file as its body, or finds that
-  day's there already, and prints its URL: return it as `daily_report_url` and open the report with it.
-  Exit 2 (no `INFERPILOT_REPO_TOKEN`, or one that cannot open issues) or any other failure: nothing was
-  posted and `daily_report_url` stays empty; open the report with where the daily report is and how a
-  human shares it: as an issue with that title on the new-issue page of InferPilot's repository, its
-  whole file as the body, or with the same command once the token is set.
+- `scan` with `share_daily_report` true (its Dispatch passed): share the daily report as an issue in
+  InferPilot's repository (the origin of the InferPilot checkout):
+  `python3 <inferpilot_dir>/scripts/share_daily_report.py RUN_DIR/daily_report.md`. It checks the report
+  once more (exit 3, 4 or 5: fix what it lists, then run it again), then opens the issue `InferPilot daily
+  report <the scan's UTC date>` with the whole file as its body (action `created`), or finds that day's
+  there already (`exists`: an earlier scan or a human shared it, and this scan's report stays a file),
+  and prints its URL: return it as `daily_report_url` and the action as `daily_report_action`, and open
+  the report with them. Exit 2 (no `INFERPILOT_REPO_TOKEN`, or one that cannot open issues) or 1: nothing
+  was posted and `daily_report_url` stays empty; open the report with where the daily report is and how a
+  human shares it: as an issue with that title on the new-issue page of InferPilot's repository, unless
+  that day's is there already, its whole file as the body, or with the same command once the token is
+  set. Exit 6: GitHub did not answer the post, and its issues could not be read to tell whether it opened
+  one; `daily_report_url` stays empty, and the report says so first, so a human looks there before
+  sharing it.
+- `scan` with `share_daily_report` false (its Dispatch failed or timed out): share nothing, since a daily
+  report it left may be partial; say where it is, if there is one, and that it was not shared.
 - List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
   and the scripts: which were the task's and which were InferPilot's templates the user took (a
   feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
@@ -308,5 +315,6 @@ Return:
 
 ```json
 {"report_path": "/abs/RUN_DIR/validation_report.md", "summary": "<3-5 sentences>",
- "daily_report_url": "<scan: the issue the daily report is shared in, or empty>"}
+ "daily_report_url": "<scan: the issue the daily report is shared in, or empty>",
+ "daily_report_action": "<scan: created | exists, as share_daily_report.py printed it, or empty>"}
 ```
