@@ -627,7 +627,7 @@ GitHub allows 60 requests an hour and 10 searches a minute per IP address).
 
 | Script | Source of tasks |
 |---|---|
-| `scripts/scan_issues.py` | open AMD issues with linked PRs, replies and the projected 60-day auto-close date |
+| `scripts/scan_issues.py` | open AMD issues with linked PRs (and which of them close the issue), replies and the projected 60-day auto-close date |
 | `scripts/scan_ci.py` | the AMD CI on main from its own runs and logs (each failing job: since when, last passed, failed tests, first errors), and the Failure Trackers' clusters |
 | `scripts/eval_accuracy.sh` | accuracy of a running server through evalscope (the bootstrap installs it), the G2 gate (each set at most 1 point below the baseline): gsm8k on all 1319 questions by default; gpqa_diamond and simple_qa (LLM judge) as well when the task says the change may lose accuracy; other sets by name; every run sampled afresh, never from evalscope's cache; a set where a question got no answer gets no score; keys only from the environment |
 | `scripts/harness.py` | InferPilot's templates (`templates/harness/`): `show` lists the parameters of the server, performance client and accuracy templates with their defaults; `render` writes the ones a run uses (the server or client a user without a script of their own took, the accuracy script unless the task brings one, Spec's fallback client) with the task's values, then those the feature's source tests with, then for the server the model's sglang cookbook recipe (`--cookbook`), then the defaults, and `harness.json`, where each value came from |

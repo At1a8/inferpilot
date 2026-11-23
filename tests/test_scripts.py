@@ -1433,6 +1433,32 @@ class ScanIssuesTest(unittest.TestCase):
         self.assertTrue(scan_issues.cites_issue("related to issue 38849", 38849))
         self.assertFalse(scan_issues.cites_issue("bumps #388490 and port 38849", 38849))
 
+    def test_closes_issue(self):
+        for text in ("Fixes #49602. The AMD nightly workflow could report ...", "closes: #49602",
+                     "Resolved sgl-project/sglang#49602", "Fix https://github.com/sgl-project/sglang/issues/49602."):
+            self.assertTrue(scan_issues.closes_issue(text, 49602, "sgl-project/sglang"), text)
+        for text in ("#41071 added the CK GEMM behind a switch; the caveat of #49602 depends on the settings",
+                     "Fix HiCache TP rank divergence (#49602)", "a prefix fix, #49602 has the numbers",
+                     "Fixes #496020", "Fixes vllm-project/vllm#49602", "a quick fix\n#49602 explains the numbers"):
+            self.assertFalse(scan_issues.closes_issue(text, 49602, "sgl-project/sglang"), text)
+
+    def test_a_linked_pr_that_only_cites_the_issue_does_not_close_it(self):
+        found = [{"number": 43815, "title": "[Perf] [AMD] fp8: Use the AITER CK blockscale GEMM by default on gfx942",
+                  "body": "#41071 added it off by default; the accuracy caveat of #43526 depends on the settings.",
+                  "state": "closed", "pull_request": {"merged_at": "2026-10-27T08:00:00Z"}, "created_at": "2026-10-20T08:00:00Z"},
+                 {"number": 52001, "title": "[Fix] [AMD] fp8: Keep gfx942 block-FP8 on the Triton GEMM", "body": "Fixes #43526.",
+                  "state": "open", "pull_request": {"merged_at": None}, "created_at": "2026-11-20T08:00:00Z"},
+                 {"number": 52002, "title": "[AMD] moe: dispatch logging fix", "body": "#43526 is background for this change.",
+                  "state": "open", "pull_request": {"merged_at": None}, "created_at": "2026-11-21T08:00:00Z"},
+                 {"number": 52003, "title": "Fix #43526: keep gfx942 block-FP8 on the Triton GEMM", "body": "Measured on MI300X.",
+                  "state": "open", "pull_request": {"merged_at": None}, "created_at": "2026-11-22T08:00:00Z"},
+                 {"number": 43526, "title": "the issue itself", "body": "", "state": "open"}]
+        with mock.patch.object(scan_issues.gh, "search_issues", return_value=found):
+            prs = scan_issues.linked_prs("sgl-project/sglang", 43526)
+        self.assertEqual([(p["number"], p["state"], p["closes"]) for p in prs],
+                         [(43815, "merged", False), (52001, "open", True), (52002, "open", False), (52003, "open", True)],
+                         "a title ending in fix does not close with a body opening with the issue; a closing title does")
+
     def test_projected_auto_close(self):
         self.assertEqual(scan_issues.projected_auto_close("2026-09-09T10:00:00Z"), "2026-11-09")
         self.assertEqual(scan_issues.projected_auto_close("2026-09-09T00:00:00Z"), "2026-11-08")

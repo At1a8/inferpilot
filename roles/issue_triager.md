@@ -14,7 +14,8 @@ Input: `task` (the issue URL or `<repo>#<n>`).
 
 1. Fetch the issue, its comments and labels, and the linked PRs:
    `python3 <inferpilot_dir>/scripts/scan_issues.py --issue <n> --with-comments --out RUN_DIR/issue.json`
-   (it reports PR states, replies from anyone but the reporter, and the projected auto-close date).
+   (it reports PR states and `closes` on those that close the issue, replies from anyone but the
+   reporter, and the projected auto-close date).
 2. Do the state checks of `issue_triage.md` §3: linked PRs and their state, replies, partial fixes
    (read a merged fix's diff against every point of the report), skipped tests.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
