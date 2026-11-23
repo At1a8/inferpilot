@@ -721,7 +721,8 @@ inferpilot/
 │   ├── kernels/aklr/skills.md, playbook.md   # AKLR's own docs (index); when a kernel gain lands in AKLR
 │   └── feature_skills/      # validated plans per feature (hisparse-v2 first)
 ├── templates/               # task_definition, feature_spec, design, experiment_ledger, validation_report,
-│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, acceptance
+│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, daily_report,
+│                            # weekly_release, acceptance
 ├── scripts/                 # task collection, audits, run_docker.sh, latest_image.py, run_lock.py,
 │                            # restore_owner.sh, run_in_tmux.sh
 ├── inferpilot/bootstrap.py  # setup step 3, in the container; safe to re-run

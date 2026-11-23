@@ -425,7 +425,8 @@ inferpilot/
 │   ├── kernels/aklr/skills.md, playbook.md   # AKLR 自带文档的索引；kernel 收益何时落到 AKLR
 │   └── feature_skills/      # 按特性整理的已验证方案（首个是 hisparse-v2）
 ├── templates/               # task_definition, feature_spec, design, experiment_ledger, validation_report,
-│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, acceptance
+│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, daily_report,
+│                            # weekly_release, acceptance
 ├── scripts/                 # 任务收集、审计、run_docker.sh、latest_image.py、run_lock.py、
 │                            # restore_owner.sh、run_in_tmux.sh
 ├── inferpilot/bootstrap.py  # 第 3 步的配置脚本，在容器内运行；可以重复执行

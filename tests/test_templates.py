@@ -3,10 +3,13 @@
     python3 -m unittest discover -s tests
 """
 import re
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import daily_report  # noqa: E402
 
 
 class PrBodyTest(unittest.TestCase):
@@ -41,6 +44,24 @@ class ScanTemplatesTest(unittest.TestCase):
             bare = [text[max(0, u.start() - 24):u.end()] for u in units
                     if not re.search(r"<[^<>]+> \Z", text[max(0, u.start() - 60):u.start()])]
             self.assertEqual(bare, [], name)
+
+
+class WeeklyReleaseTest(unittest.TestCase):
+    """templates/weekly_release.md: a week of InferPilot's work in the shape of an sglang release note."""
+
+    body = (ROOT / "templates" / "weekly_release.md").read_text(encoding="utf-8")
+
+    def test_an_sglang_release_notes_layout(self):
+        self.assertTrue(self.body.startswith("<!-- inferpilot:weekly-release -->\n# InferPilot weekly release <YYYY>-W<ww> "))
+        self.assertEqual(re.findall(r"^# (.+)$", self.body, re.M)[1:], ["Highlights", "Full Notes"])
+        notes = re.findall(r"^## (.+)$", self.body.split("\n# Full Notes\n", 1)[1], re.M)
+        for section in ("Breaking Changes & Upgrade Notes", "Contributors"):
+            self.assertIn(section, notes)
+        self.assertTrue(self.body.rstrip().splitlines()[-1].startswith("**Full Changelog**: "))
+
+    def test_it_can_be_shared_as_it_is(self):
+        self.assertEqual(daily_report.verdict(daily_report.check(self.body)), 0,
+                         "public-safe, every pull request and issue titled, short enough for an issue")
 
 
 if __name__ == "__main__":
