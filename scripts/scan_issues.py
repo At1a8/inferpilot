@@ -55,10 +55,10 @@ def cites_issue(text: str, number: int) -> bool:
 
 
 def closes_issue(text: str, number: int, repo: str = DEFAULT_REPO) -> bool:
-    """True when a PR title/body closes the issue as GitHub reads it: close, fix or resolve in any tense, then
-    #N, <repo>#N or the issue's URL. A PR that only cites the issue may name it as background, or be the
-    change that caused it."""
-    keyword = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+"
+    """True when a PR title or body closes the issue as GitHub reads it: close, fix or resolve in any tense, then,
+    on the same line, #N, <repo>#N or the issue's URL. A title counts as well, since a squash merge's commit
+    carries it. A PR that only cites the issue may name it as background, or be the change that caused it."""
+    keyword = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
     ref = rf"(?:(?:{re.escape(repo)})?#|https://github\.com/{re.escape(repo)}/issues/){number}\b"
     return re.search(keyword + ref, text or "", re.I) is not None
 
@@ -94,15 +94,15 @@ def linked_prs(repo: str, number: int) -> list[dict]:
     for it in items:
         if it.get("number") == number:
             continue
-        text = (it.get("title") or "") + "\n" + (it.get("body") or "")
-        if not cites_issue(text, number):
+        title, body = it.get("title") or "", it.get("body") or ""
+        if not cites_issue(title + "\n" + body, number):
             continue
         merged = (it.get("pull_request") or {}).get("merged_at")
         out.append({
             "number": it["number"],
             "title": it.get("title", ""),
             "state": "merged" if merged else it.get("state", ""),
-            "closes": closes_issue(text, number, repo),
+            "closes": closes_issue(title, number, repo) or closes_issue(body, number, repo),
             "author": (it.get("user") or {}).get("login", ""),
             "created_at": it.get("created_at", ""),
             "merged_at": merged or "",
