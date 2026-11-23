@@ -6,7 +6,8 @@ code-style rules under `.claude/rules/`. They are the framework's own convention
 registered, where a kernel goes, how a trace is triaged — and they change with the code. InferPilot
 therefore **references them in place and never copies them**: a role reads the file in the task
 worktree (`<worktree>/.agents/skills/<name>/SKILL.md`), which matches the code it is changing.
-Index checked against sglang main `e2982985` (2026-11-01): 29 skills, 5 diffusion skills, 11 rules.
+Index checked against sglang main `e2982985` (2026-11-01): 29 skills, 5 diffusion skills, 11 rules;
+re-checked at main `2be81e0ddc` (2026-11-23): 32 skills, 5 diffusion skills, 11 rules.
 
 Claude Code runs from the InferPilot checkout, so it does not load these skills by itself; read the files
 this index names.
@@ -29,17 +30,18 @@ this index names.
 | Role | Phase | Skills | When to read |
 |---|---|---|---|
 | analyst | recon | `sglang-runtime-context`, `kernel-organization` | the feature touches runtime configuration or process-global state; it needs a kernel API |
-| architect | design, perf_plan | `sglang-runtime-context`, `kernel-organization`, `compute-mamba-ratio` | as for the analyst; hybrid-attention models whose memory split the design changes |
+| architect | design, perf_plan | `sglang-runtime-context`, `kernel-organization`, `compute-mamba-ratio`, `hybrid-cache-checkpoints` | as for the analyst; hybrid-attention models whose memory split or prefix-cache checkpoint level (`--hybrid-cache-checkpoints-level`) the design changes |
 | implementer | implement | `.claude/rules/*` | every package: the repository's code-style rules |
 | implementer | implement | `write-sglang-test`, `env-var-conventions`, `kernel-organization`, `add-jit-kernel`, `add-sgl-kernel` | the package adds a test, an environment variable or a kernel (JIT or AOT) |
 | implementer | implement | `large-class-style`, `speculative-naming`, `mechanical-refactor-verify`, `processor-model-parity`, `scripted-runtime-notes` | it touches `Scheduler`, `TokenizerManager` or `ModelRunner`; speculative-decoding names; a mechanical refactor; chat-template rendering or tokenization; the scripted runtime |
+| implementer | implement | `code-cleanup`, `processor-mm-parity` | the package deletes dead code, dedupes an implementation, retires a flag or env var, or corrects a hardware gate (its patterns D1 and C2 name the gfx cases); its workflow's merge of main before the PR is the PR engineer's throwaway trial merge here, where its leftover greps run again, and the verified branch is not updated (`roles/pr_engineer.md`, its Upstream step); multimodal preprocessing in `rust/sglang-processor` |
 | test_engineer | unit | `write-sglang-test`, `kl-consistency-test` | how a test is structured, which tier and suite it belongs to; prefill-vs-decode logprob consistency |
 | verify_engineer | verify | `kl-consistency-test`, `sglang-multi-graph-check` | consistency gates; graph capture and replay correctness for the configurations under test |
 | investigator | investigate, diagnose | `debug-cuda-crash`, `debug-distributed-hang`, `sglang-multi-graph-check`, `sglang-runtime-context`, `clean-startup-log` | a crash; a hang across ranks; wrong results only under graph replay; configuration state; anomalies in the startup log |
 | issue_triager | reproduce | `sglang-prod-incident-triage` | save the failing request and replay it on a clean server before any deeper tool |
 | ci_guardian | classify, bisect, bisect_fix | `sglang-bisect-ci-regression`, `ci-workflow-guide`, `write-sglang-test` | the bisect method (signature, window, bisect, confirmation); CI tiers, stages and suites |
-| perf_engineer | profile, perf_eval | `generate-profile`, `llm-torch-profiler-analysis`, `compute-mamba-ratio` | capturing the trace; the kernel, overlap and fuse-pattern tables; memory settings of hybrid models |
-| reviewer | review | `.claude/rules/*`, `write-sglang-test`, `env-var-conventions`, `kernel-organization`, `large-class-style`, `speculative-naming`, `ci-test-audit` | the conventions the diff must follow |
+| perf_engineer | profile, perf_eval | `generate-profile`, `llm-torch-profiler-analysis`, `compute-mamba-ratio`, `hybrid-cache-checkpoints` | capturing the trace; the kernel, overlap and fuse-pattern tables; memory settings and prefix-cache checkpoint level of hybrid models (its numbers are B300's, not targets) |
+| reviewer | review | `.claude/rules/*`, `write-sglang-test`, `env-var-conventions`, `kernel-organization`, `large-class-style`, `speculative-naming`, `ci-test-audit`, `code-cleanup` | the conventions the diff must follow; `code-cleanup`'s review checklist for a diff that deletes, dedupes or re-gates code |
 | pr_engineer | pr | `.claude/rules/*`, `ci-workflow-guide`, `cookbook-review-pr` | lint and the CI a PR goes through; cookbook pages a model PR updates |
 | dispatcher | dispatch | `cookbook-add-model` | a new-model task includes its cookbook page |
 
