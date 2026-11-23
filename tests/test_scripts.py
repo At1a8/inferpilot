@@ -212,15 +212,36 @@ class DailyReportTest(unittest.TestCase):
         body = "ran on gpu-node-8\nweights in /models/x\nok"
         self.assertEqual([l.split(":")[0] for l in daily_report.leaks(body, "gpu-node-7")], ["1", "2"])
 
+    def test_a_pull_request_or_issue_by_its_number_alone_stops_the_report(self):
+        body = "\n".join([
+            "| [#48414](https://github.com/sgl-project/sglang/pull/48414) | 2026-11-16 | new CUDA-only gate |",
+            "| [#46784](https://github.com/sgl-project/sglang/pull/46784) [Feat] DSA MTP draft prefill | 2026-11-22 |",
+            "| [#41299](https://github.com/sgl-project/sglang/issues/41299) *new* | Qwen3.8-Flash-Next FP8, gfx950 |",
+            "- [#41852](https://github.com/sgl-project/sglang/issues/41852): feature request (plan)",
+            "- [#38710](https://github.com/sgl-project/sglang/issues/38710) [Bug] auto-enable commented out *new*: close",
+            "| 6 | Kimi-K3.1 Day-0 branch (#48414) | [upstream](https://github.com/sgl-project/sglang/pull/48414) | L1 |",
+            "- Priorities follow the roadmap ([#46462](https://github.com/sgl-project/sglang/issues/46462)).",
+            "  | [#50842](https://github.com/sgl-project/sglang/pull/50842) | 2026-11-18 | CUDA-first feature |",
+            "    - [#30599](https://github.com/sgl-project/sglang/issues/30599): tracking issue (hand over)",
+            "+ [#40624](https://github.com/sgl-project/sglang/issues/40624): feature plan",
+            "1. [#44304](https://github.com/sgl-project/sglang/issues/44304)",
+            "| #52054 | 2026-11-21 | CUDA-first feature |",
+            "| [#50620](https://github.com/sgl-project/sglang/pull/50620) :rocket: Fuse the draft softmax and sample | 2026-11-19 |",
+            "2) #50124 [Perf] decode: Copy the top logprobs to the host once per step",
+        ])
+        self.assertEqual([l.split(":")[0] for l in daily_report.untitled(body)], ["1", "3", "4", "8", "9", "10", "11", "12"])
+
     def test_check_exit_codes(self):
         template = Path(__file__).resolve().parent.parent / "templates" / "daily_report.md"
         with tempfile.TemporaryDirectory() as d:
-            leaky, long = Path(d) / "leaky.md", Path(d) / "long.md"
+            leaky, untitled, long = Path(d) / "leaky.md", Path(d) / "untitled.md", Path(d) / "long.md"
             leaky.write_text(daily_report.MARKER + "\nweights in /data/models/x\n")
+            untitled.write_text(daily_report.MARKER + "\n| [#48414](https://github.com/sgl-project/sglang/pull/48414) | 2026-11-16 |\n")
             long.write_text(daily_report.MARKER + "\n" + "x" * (daily_report.ISSUE_LIMIT + 1))
             with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
-                self.assertEqual(daily_report.main(["check", str(template)]), 0, "the template itself is public-safe")
+                self.assertEqual(daily_report.main(["check", str(template)]), 0, "the template itself is public-safe and titled")
                 self.assertEqual(daily_report.main(["check", str(leaky)]), 3)
+                self.assertEqual(daily_report.main(["check", str(untitled)]), 5)
                 self.assertEqual(daily_report.main(["check", str(long)]), 4)
             self.assertIn('"marker": true', out.getvalue())
 

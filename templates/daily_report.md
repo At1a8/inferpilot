@@ -63,7 +63,8 @@ Closed since the previous report: <issues, or none>.
 ## 3. Upstream changes to bring to AMD
 
 <!-- upstream.json, and upstream_<name>.json for each repository in upstream_repos. Per repository, the
-     changes AMD needs to follow, at most 15 rows; count the rest. -->
+     changes AMD needs to follow, at most 15 rows; count the rest. Each row names its PR by number and
+     title, the commit's subject without its "(#<n>)": a number alone tells a reader nothing. -->
 
 ### <framework>: <n> commits since <since>
 
