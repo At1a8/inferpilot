@@ -16,7 +16,7 @@
 
 | Rank | Task | Source | Type | Level | Priority | Depends on (AMD counterpart) | Effort | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| 1 | | | | L1 / L2 / L3 | | | agent h / GPU h | |
+| 1 | | | | L1 / L2 / L3 | | | <agent hours> agent h / <GPU hours> GPU h | |
 
 ## Starting the top tasks
 

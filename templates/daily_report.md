@@ -70,7 +70,7 @@ Closed since the previous report: <issues, or none>.
 
 | PR | Merged | Kind | What AMD needs | AMD counterpart | Effort |
 |---|---|---|---|---|---|
-| [#<n>](<url>) <title> | <date> | CUDA-first feature / new CUDA-only gate / new model | | | agent h / GPU h |
+| [#<n>](<url>) <title> | <date> | CUDA-first feature / new CUDA-only gate / new model | | | <agent hours> agent h / <GPU hours> GPU h |
 
 ## 4. Suggested tasks
 
@@ -78,7 +78,7 @@ Closed since the previous report: <issues, or none>.
 
 | Rank | Task | Source | Type | Level | Priority | Effort |
 |---|---|---|---|---|---|---|
-| 1 | | | | L1 / L2 / L3 | | agent h / GPU h |
+| 1 | | | | L1 / L2 / L3 | | <agent hours> agent h / <GPU hours> GPU h |
 
 <details><summary>Task definitions: pass one to inferpilot.js as it is</summary>
 
