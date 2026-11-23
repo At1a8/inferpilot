@@ -30,5 +30,16 @@ class PrBodyTest(unittest.TestCase):
             self.assertTrue(item.startswith(start), item)
 
 
+class ScanTemplatesTest(unittest.TestCase):
+    """templates/daily_report.md and templates/task_queue.md, which the dispatcher fills."""
+
+    def test_an_effort_cell_says_where_its_numbers_go(self):
+        for name in ("daily_report.md", "task_queue.md"):
+            text = (ROOT / "templates" / name).read_text(encoding="utf-8")
+            units = re.findall(r"(<[^<>]+>|\S+) (?:agent|GPU) h\b", text)
+            self.assertTrue(units, name)
+            self.assertEqual([u for u in units if not re.fullmatch(r"<[^<>]+>", u)], [], name)
+
+
 if __name__ == "__main__":
     unittest.main()
