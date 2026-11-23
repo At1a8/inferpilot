@@ -7,18 +7,20 @@
 The report is read once, and what was read is what scripts/daily_report.py checks (its exit codes 3, 4 and 5
 come back as they are) and what is posted. It must carry the report's marker and its date in the heading: the
 issue is titled "InferPilot daily report <date>" with the whole file as its body, which is how the next scan,
-in any container, finds it (daily_report.py latest). When the newest shared report is already that day's,
-nothing is posted and its URL is printed with the action "exists". It reads and posts with GITHUB_TOKEN, the
+in any container, finds it (daily_report.py latest). When the latest shared report is already that day's,
+nothing is posted and its URL is printed with the action "exists"; one of a later day leaves this older report
+unposted (exit 1), since the next scan continues from the latest. It reads and posts with GITHUB_TOKEN, the
 token every GitHub script of InferPilot uses, which opens issues here with Issues: read and write on this
 repository (README step 1). Without the token, or with one that cannot open issues (exit 2), or on any other
-failure (exit 1), nothing is posted and the report stays a file for a human to share. A post GitHub did not answer (a timeout, a dropped connection, a 5xx) may have opened the issue all
-the same: the script looks for that day's report again and prints it as created when it is there; when it
-cannot tell (exit 6), a human looks in the repository's issues before sharing the report by hand. Standard
-library only.
+failure (exit 1), nothing is posted and the report stays a file for a human to share. A post GitHub did not
+answer (a timeout, a dropped connection, a 5xx, a truncated answer) may have opened the issue all the same: the
+script looks for that day's report again and prints it as created when it is there; when it cannot tell
+(exit 6), a human looks in the repository's issues before sharing the report by hand. Standard library only.
 """
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -46,7 +48,7 @@ def reconcile(repo: str, date: str, title: str, failure: str, later: str) -> int
     it is not; 6 when the repository's issues cannot be read to tell."""
     try:
         shared = daily_report.latest(repo)
-    except (urllib.error.URLError, OSError, ValueError) as e:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
         print("share_daily_report: %s, and the issues of %s cannot be read to tell whether it was opened (%s); look there "
               "for \"%s\" before sharing it by hand" % (failure, repo, e, title), file=sys.stderr)
         return 6
@@ -86,12 +88,16 @@ def main(argv=None) -> int:
         return 2
     try:
         shared = daily_report.latest(repo)
-    except (urllib.error.URLError, OSError, ValueError) as e:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
         print("share_daily_report: cannot read the reports shared in %s (%s); %s" % (repo, e, later), file=sys.stderr)
         return 1
     if shared.get("date") == date:
         print(json.dumps({"action": "exists", "url": shared.get("url", ""), "number": shared.get("number"), "title": title}))
         return 0
+    if shared.get("date", "") > date:
+        print("share_daily_report: not shared; the report of %s is shared already (%s), newer than this one of %s"
+              % (shared["date"], shared.get("url", ""), date), file=sys.stderr)
+        return 1
     if a.dry_run:
         print(json.dumps({"dry_run": True, "repo": repo, "title": title, "chars": len(body)}, indent=1))
         return 0
@@ -111,8 +117,8 @@ def main(argv=None) -> int:
                 file=sys.stderr)
             return 2 if denied else 1
         failure = "HTTP %d from GitHub" % e.code
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        failure = str(e)
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
+        failure = str(e) or type(e).__name__
     return reconcile(repo, date, title, failure, later)
 
 

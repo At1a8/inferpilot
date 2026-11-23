@@ -736,7 +736,10 @@ const K_COLLECT = S({
   integrate_wp: { type: ['object', 'null'], properties: WP.properties, required: WP.required },
   notes: str,
 }, ['status']);
-const REPORT = S({ report_path: str, summary: str, daily_report_url: str, daily_report_action: str }, ['report_path']);
+const REPORT = S({ report_path: str, summary: str }, ['report_path']);
+// A scan's report always says how its daily report went out: empty strings when it did not.
+const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
+  ['report_path', 'daily_report_url', 'daily_report_action']);
 const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, notes: str },
   ['updates']);
 const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'] }, run_dir: str, candidates_path: str,
@@ -797,7 +800,8 @@ async function finish(status, at) {
     // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
       inputs({ status, stopped_at: at || '', phases: R.phases, handoffs: R.handoffs, attention: R.attention,
-        spinoffs: R.spinoffs, ...(MODE === 'scan' ? { share_daily_report: status === 'queued' } : {}) }), REPORT);
+        spinoffs: R.spinoffs, ...(MODE === 'scan' ? { share_daily_report: status === 'queued' } : {}) }),
+      MODE === 'scan' ? SCAN_REPORT : REPORT);
     if (rep) {
       R.report_path = rep.report_path;
       R.summary = rep.summary || '';
@@ -866,7 +870,12 @@ function nextSteps(status, at) {
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
-  if (status === 'queued' && !R.daily_report_url) user.push(`share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository, unless that day's is there already (README step 5)`);
+  if (status === 'queued' && !R.daily_report_url) {
+    // A director that timed out may still be running, and may still share it.
+    user.push(TIMED_OUT_CALLS.has('director:report')
+      ? `the director timed out and may still share ${C.run_dir}/daily_report.md: once it has stopped, share it as a new issue in InferPilot's repository unless that day's is there already (README step 5)`
+      : `share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository, unless that day's is there already (README step 5)`);
+  }
   if (R.reply_draft_path) user.push(`post the reply draft on the issue: ${R.reply_draft_path}`);
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);

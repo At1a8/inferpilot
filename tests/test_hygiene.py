@@ -15,16 +15,8 @@ from test_readme import ROOT
 
 sys.path.insert(0, str(ROOT / "scripts"))
 # The scripts that check what InferPilot publishes (daily_report, leak_scan) use the same patterns.
-from daily_report import AMD_HOST, INTERNAL_SITE, PRIVATE_IP, PUBLIC_AMD, machine_names  # noqa: E402
+from daily_report import AMD_HOST, INTERNAL_SITE, PRIVATE_IP, PUBLIC_AMD, SECRET, machine_names  # noqa: E402
 
-SECRET = re.compile(r"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[ousr]_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{16,}"
-                    r"|\bsk-[A-Za-z0-9_-]{32,}|AKIA[0-9A-Z]{16}|\bhf_[A-Za-z0-9]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-                    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}"
-                    # the gateway's key as its header carries it
-                    r"|Ocp-Apim-Subscription-Key[\"']?\s*[:=]\s*[\"']?[0-9a-fA-F]{32}"
-                    # a variable that holds a key, given a value rather than <your key> or $ANOTHER
-                    r"|\b(?:LLM_GATEWAY_KEY|JUDGE_KEY|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|CURSOR_API_KEY"
-                    r"|OPENAI_API_KEY|HF_TOKEN|GH_TOKEN|GITHUB_TOKEN|INFERPILOT_REPO_TOKEN)[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9_\-./+]{16,}")
 HOME = re.compile(r"/home/(?![<${*])([A-Za-z0-9._-]+)")
 # Names that stand for anyone.
 PLACEHOLDER_USERS = {"user", "you", "me", "alice", "bob", "username"}

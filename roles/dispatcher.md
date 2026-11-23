@@ -33,9 +33,9 @@ Input: `candidates_path`.
    changes AMD needs to follow, per repository; (4) the top 10 tasks, their definitions folded in
    `<details>`. The header names the image from `RUN_DIR/image.txt`, and the newest daily one when it
    is older. Against `RUN_DIR/previous_report.md`, mark what is *new* and list what was resolved or
-   closed since. It is written to be made public: nothing about this machine or its owner, no
-   hostnames, no local paths (`/data`, `/mnt`, `/home`, `/workspace`, `/sgl-workspace`, ...), weights
-   only as `model_path=<weights>`, no internal sites or names; that and the local detail stay in
+   closed since. It is written to be made public: nothing about this machine or its owner, no key or
+   token, no hostnames, no local paths (`/data`, `/mnt`, `/home`, `/workspace`, `/sgl-workspace`, ...),
+   weights only as `model_path=<weights>`, no internal sites or names; that and the local detail stay in
    `task_queue.md`. Aim for about 40,000 characters (an issue holds 65,536): cap the long tables and
    count the rest. `python3 <inferpilot_dir>/scripts/daily_report.py check RUN_DIR/daily_report.md` must pass
    (exit 3: remove the lines it lists; exit 4: shorten; exit 5: write each pull request or issue it lists

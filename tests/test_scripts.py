@@ -275,12 +275,33 @@ class DailyReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             mounts = Path(d) / "mounts"
             mounts.write_text("overlay / overlay rw 0 0\nproc /proc proc rw 0 0\n/dev/sdb1 /lustre ext4 rw 0 0\n"
-                              "/dev/sdb1 /etc/hosts ext4 rw 0 0\n/dev/sdc1 /var xfs rw 0 0\nnfs:/v /gpfs/x nfs rw 0 0\n")
-            self.assertEqual(daily_report.mounted_roots(str(mounts)), ("gpfs", "lustre"), "not the system's own: /etc, /proc, /var")
+                              "/dev/sdb1 /etc/hosts ext4 rw 0 0\n/dev/sdc1 /var xfs rw 0 0\nnfs:/v /gpfs/x nfs rw 0 0\n"
+                              "/dev/sdd1 /fast\\040disk ext4 rw 0 0\n")
+            self.assertEqual(daily_report.mounted_roots(str(mounts)), ("fast disk", "gpfs", "lustre"),
+                             "the kernel's \\040 read as the space it stands for; not the system's own: /etc, /proc, /var")
             self.assertEqual(daily_report.mounted_roots(str(Path(d) / "none")), ())
-        local = daily_report.local_paths(("lustre",))
-        self.assertTrue(local.search("weights in /lustre/models/x") and local.search("weights in /" + "srv/models/x"))
-        self.assertFalse(local.search("logs in /var/log/x.log") or local.search("see /usr/lib/python3/x.py"))
+        local = daily_report.local_paths(("lustre", "fast disk"))
+        for line in ("weights in /lustre/models/x", "weights in /" + "srv/models/x", "weights in /fast disk/x", "model_path=/lustre",
+                     "model_path=/" + "data"):
+            self.assertTrue(local.search(line), line)
+        for line in ("logs in /var/log/x.log", "see /usr/lib/python3/x.py", "see /database/x", "huggingface.co/models", "a/b/data"):
+            self.assertFalse(local.search(line), line)
+
+    def test_a_secret_stops_the_report_and_is_listed_redacted(self):
+        token = "ghp_" + "A1b2" * 9
+        found = daily_report.leaks("ok\nCI said: export GITHUB_TOKEN=%s for the job\n" % token)
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("2: ") and "<secret>" in found[0] and token not in found[0], found[0])
+        self.assertEqual(daily_report.verdict(daily_report.check("a key %s here\n" % token)), 3)
+
+    def test_latest_pages_until_a_report_and_takes_the_latest_date(self):
+        prs = [{"number": 100 + k, "title": "a PR", "pull_request": {}, "body": daily_report.MARKER} for k in range(100)]
+        late = self.issue(8, "2026-11-22", created="T09:00:00Z")
+        newest = self.issue(7, "2026-11-23", created="T01:00:00Z")
+        with mock.patch.object(daily_report, "get", side_effect=[prs, [late, newest]]) as get:
+            got = daily_report.latest("At1a8/inferpilot")
+        self.assertEqual(get.call_count, 2, "a page of pull requests alone holds no report: the next page is read")
+        self.assertEqual((got["date"], got["number"]), ("2026-11-23", 7), "the latest date, though the older report was shared later")
 
     def test_it_never_writes(self):
         src = (Path(__file__).resolve().parent.parent / "scripts" / "daily_report.py").read_text()
@@ -338,6 +359,10 @@ class ShareDailyReportTest(unittest.TestCase):
         rc, out, err, posted = self.share(post=timeout, after=share_daily_report.urllib.error.URLError("down"))
         self.assertEqual((rc, out), (6, ""), "cannot tell")
         self.assertIn("before sharing it by hand", err)
+        truncated = share_daily_report.http.client.IncompleteRead(b"{")
+        self.assertEqual(self.share(post=truncated, after=day)[0], 0, "a truncated answer is no answer either")
+        self.assertEqual(self.share(post=timeout, after=truncated)[0], 6, "nor one read back truncated")
+        self.assertEqual(self.share(shared=truncated)[0::3], (1, []), "the first lookup cut short posts nothing")
         bad_gateway = share_daily_report.urllib.error.HTTPError("https://api.github.com", 502, "Bad Gateway", {}, None)
         self.assertEqual(self.share(post=bad_gateway, after=day)[0], 0, "a 5xx is no answer either")
         invalid = share_daily_report.urllib.error.HTTPError("https://api.github.com", 422, "Unprocessable", {}, None)
@@ -357,6 +382,12 @@ class ShareDailyReportTest(unittest.TestCase):
             self.assertEqual((rc, json.loads(out)["action"], json.loads(out)["url"], posted), (0, "exists", day["url"], []), err)
         rc, out, err, posted = self.share(shared={**day, "date": "2026-11-22"})
         self.assertEqual((rc, len(posted)), (0, 1), "the day before's report does not stop today's")
+
+    def test_a_report_older_than_the_latest_shared_is_not_posted(self):
+        newer = {"date": "2026-11-24", "number": 9, "url": "https://github.com/At1a8/inferpilot/issues/9"}
+        rc, out, err, posted = self.share(shared=newer)
+        self.assertEqual((rc, out, posted), (1, "", []))
+        self.assertIn("newer than this one of 2026-11-23", err)
 
     def test_nothing_is_posted_without_a_token_or_a_clean_report(self):
         self.assertEqual(self.share(token="")[0::3], (2, []))

@@ -652,7 +652,7 @@ scan). `scripts/find_skill.py "<query>"` lists the feature skills whose tags, id
 in a request or task title, best match first (the intake and the director run it). `scripts/latest_image.py [--variant rocm10-mi30x]` prints the newest daily sglang image
 (`run_docker.sh` starts from it; the director compares a run's image with it). `scripts/run_lock.py`
 keeps one InferPilot task per machine (`acquire`, `release`, `status`). `scripts/daily_report.py check`
-tells whether a daily report can be made public (no local path, hostname or internal site), names every
+tells whether a daily report can be made public (no secret, local path, hostname or internal site), names every
 pull request and issue by its title as well as its number, and fits in an issue; `latest` finds the
 newest report shared in InferPilot's repository, which the next scan, in any container, continues from.
 Both only read. `scripts/share_daily_report.py` shares a report that passes the check as an issue in
