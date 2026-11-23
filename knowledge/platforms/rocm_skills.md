@@ -80,3 +80,20 @@ first. This file lists what differs on ROCm, skill by skill. Checked against sgl
 
 - Applies as written: it works at the HTTP level (bundle, failing request, replay). Route a crash it
   finds to the notes on `debug-cuda-crash` above.
+
+## code-cleanup
+
+- Its gate patterns already cover ROCm: D1 (gfx950 reports capability (9, 5), so `major >=` and
+  `torch.cuda.is_available()` checks written for NVIDIA admit AMD; gfx substring tests admit a whole
+  family) and C2 (a default-off fast path is flipped per architecture). Find the candidates with
+  `scripts/audit_platform_gates.py` first; the skill's proof is a pure gate function unit-tested on CPU
+  across families. Checked at sglang `2be81e0ddc` (2026-11-23).
+
+## processor-mm-parity
+
+- The skill names two ways Python's default on a CUDA host departs from its CPU reference. On ROCm
+  only the second applies (sglang `2be81e0ddc`): JPEG decode stays on the CPU, because
+  `media_io.is_jpeg_with_cuda` requires `is_cuda()`, which is false on HIP; but the torchvision image
+  processor still runs on the GPU, because `serving_preprocessing.fast_image_processor_device` returns
+  `cuda:<base_gpu_id>` for every `is_cuda_alike()` platform. Report that delta as Python's own, as the
+  skill says; the bit-exact checks use its PIL-backend inputs.
