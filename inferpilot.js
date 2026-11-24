@@ -15,7 +15,7 @@ export const meta = {
     { title: 'Bisect', detail: 'ci_guardian: culprit commit, confirmation, fix work packages [ci]; the commit that fixed it, when the reporter\'s code fails and main does not [issue, bisect_fixed]' },
     { title: 'Profile', detail: 'perf_engineer: trace metrics and the opportunity list [perf]' },
     { title: 'Plan', detail: 'architect: performance work packages, kernel hand-offs, PRs to apply [perf]' },
-    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on failure' },
+    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on a measured failure' },
     { title: 'Kernel', detail: 'kernel_liaison: kernel hand-offs to args.kernel_backend (none records them; geak runs the kernel lane of a GEAK checkout as an outside program; command runs a kernel agent CLI); gains integrated as work packages' },
     { title: 'Verify', detail: 'verify_engineer: G0-G4 against the same-pattern baseline plus mode gates; investigator loop on failure' },
     { title: 'Investigate', detail: 'investigator: controls first, hypothesis ledger, fix or baseline bug' },
@@ -653,11 +653,14 @@ const IMPL = S({
   kernel_handoff: { type: ['object', 'null'] },
   notes: str,
 }, ['wp', 'status']);
+// incomplete: the checks that have no result yet, none of those that ran having failed, and where the
+// runs still going write; '' when every check has a result. A gate without a result is not a failed one.
 const UNIT = S({
   wp: str,
   unit_pass: bool,
   feature_off_unchanged: bool,
   fails_without_change: { type: 'string', enum: ['parent', 'mutant', 'no', 'n/a'] },
+  incomplete: str,
   failure_summary: str,
   evidence: str,
 }, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change']);
@@ -779,6 +782,7 @@ async function finish(status, at) {
       // A base run that fails for another reason would pass for a confirmed lead: a timed-out agent may still
       // hold the GPUs, and a run that ended at Setup never showed the environment works.
       const skipped = !C.confirm_leads ? [] : [...TIMED_OUT_CALLS].map((c) => `${c} timed out`)
+        .concat(leftRunning)
         .concat(at === 'Setup' ? ['the run stopped at Setup'] : [])
         .concat(liveStopAfter() === 'now' ? ['the control file asked the run to stop now'] : []);
       const sp = await call('issue_triager', 'spinoff', inputs({ status, stopped_at: at || '', phases: R.phases,
@@ -983,12 +987,29 @@ async function setup(requireBaseline) {
 
 // One work package at a time: implement, then an independent unit + feature-off
 // gate; failed rounds feed the test engineer's findings back; after the last round
-// the package is rolled back to the last verified commit and the task stops.
+// the package is rolled back to the last verified commit and the task stops. A gate
+// that has no result is no failure: it costs no round and rolls nothing back.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
-function stalled(wp, label) {
+// Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
+function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
-  return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
+}
+// A unit gate with checks that have no result, none of those that ran having failed.
+const unfinished = (ut) => !!ut && String(ut.incomplete || '').trim() !== '';
+// Gates and rounds that ended without a result and may have left detached runs on the GPUs.
+const leftRunning = [];
+// Still without a result after the call that was to finish it: nothing measured went against the change,
+// so it is not rolled back; the package stops with its commit, on the attention list for a human.
+function noResult(wp, commit, what) {
+  const missing = String(what || '').trim() || 'the test engineer returned nothing';
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `the unit gate of ${wp.id} has no result (${missing}): `
+    + `commit ${commit} stays in the worktree, unverified; stop what the gate left running before reusing its GPUs` });
+  note('Implement', 'incomplete', `${wp.id}: the unit gate has no result after the call that was to finish it `
+    + `(${missing}); not rolled back`);
+  leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `the unit gate of ${wp.id} has no result` };
 }
 
 async function implementAll(wps) {
@@ -1028,19 +1049,30 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit',
-        inputs({ work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test }), UNIT, utLabel);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test };
+      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
+      // A gate without its result, checks still to give one or no answer at all, is finished by one more
+      // call, which spends no fix round and reads the runs the first one left going.
+      if (!ut || unfinished(ut)) {
+        const left = ut ? ut.incomplete : 'every check: the test engineer returned no answer';
+        const finLabel = `${utLabel}+finish`;
+        const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
+          earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return stalled(wp, finLabel, im.commit);
+        if (!fin || unfinished(fin)) {
+          return noResult(wp, im.commit, fin ? fin.incomplete : `the call to finish it returned no answer; before it: ${left}`);
+        }
+        ut = fin;
+      }
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
-      const bites = !!ut && (['parent', 'mutant'].includes(ut.fails_without_change)
-        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs'));
-      if (ut && ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
+      const bites = ['parent', 'mutant'].includes(ut.fails_without_change)
+        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs');
+      if (ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
         passed = true;
         R.done.push({ wp: wp.id, commit: im.commit, evidence: ut.evidence || '' });
-      } else if (!ut) {
-        feedback = 'the test engineer returned nothing';
       } else if (ut.unit_pass === true && ut.feature_off_unchanged === true) {
         feedback = `the unit test cannot fail (fails_without_change=${ut.fails_without_change}); make it fail on the parent `
           + `commit, or on a copy of the change broken in one way when the change keeps behaviour`
@@ -1095,6 +1127,7 @@ async function verifyLoop(extraGates) {
     }
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
+      leftRunning.push(`Verify round ${round} may have left its servers running`);
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
@@ -1134,7 +1167,8 @@ async function verifyLoop(extraGates) {
       if (!fix.ok) return { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
-      await kernelStage(); // hand-offs a fix raised
+      const ks = await kernelStage(); // hand-offs a fix raised
+      if (ks.held) return { ok: false, reason: ks.held };
       const afterKernel = stopAt('Kernel');
       if (afterKernel) return afterKernel;
       continue;
@@ -1170,8 +1204,8 @@ async function rejectKernels(ids, counterexample) {
     note('Investigate', 'kernel_rejected', `${h.id}: back to the functional kernel${suffix}`
       + `${retry ? '; handed back once with the failing case' : '; rejected after its retry'}`);
   }
-  await kernelStage();
-  return { ok: true };
+  const ks = await kernelStage();
+  return ks.held ? { ok: false, reason: ks.held } : { ok: true };
 }
 
 async function performance(claim) {
@@ -1234,7 +1268,8 @@ async function reviewLoop(extraGates, perfClaim, runPerf) {
 async function repaired(extraGates, perfClaim, runPerf) {
   const afterFix = stopAt('Implement');
   if (afterFix) return afterFix;
-  await kernelStage(); // hand-offs a requested change raised
+  const ks = await kernelStage(); // hand-offs a requested change raised
+  if (ks.held) return { ok: false, at: 'Kernel' };
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
   const ver = await verifyLoop(extraGates);
@@ -1308,6 +1343,13 @@ async function kernelStage() {
     if (res && res.status === 'improved' && res.integrate_wp) {
       h.status = 'not_integrated'; // what stays when a stop asked for now ends the run before Implement
       const r = await implementAll([res.integrate_wp]);
+      // Not rolled back (a gate without a result, a call that timed out): the commit stays, so the run stops.
+      if (r.held) {
+        h.status = 'integration_held';
+        h.commit = r.commit || '';
+        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`);
+        return { integrated, held: r.reason };
+      }
       h.status = r.ok ? 'integrated' : 'integration_failed';
       if (r.ok) {
         integrated += 1;
@@ -1329,6 +1371,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   }
   if (stopHere('Implement')) return finish('stopped', 'Implement');
   const ks = await kernelStage();
+  if (ks.held) return finish('blocked', 'Kernel');
   if (!wps.length && ks.integrated === 0) return finish('no_gain', 'Kernel');
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
 

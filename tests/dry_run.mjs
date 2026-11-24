@@ -711,6 +711,117 @@ const scenarios = [
     check(r.keys.includes('implementer:rollback'), 'rollback called');
     check(!r.keys.includes('verify_engineer:verify'), 'no verification of a failed package');
   }],
+  ['implement: a unit gate with checks still running is finished by one more call, which spends no fix round', async () => {
+    const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', evidence: 'runs 1-5 pass' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const units = r.calls.filter((c) => c.key === 'test_engineer:unit');
+    check(units.length === 3, `WP1 twice, WP2 once: ${units.length}`);
+    check(units[1] && units[1].ins.commit === 'c_WP1' && String(units[1].ins.incomplete).includes('pid 4242')
+      && units[1].ins.earlier_evidence === 'runs 1-3 pass', 'the second call finishes the same commit, told what is left');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 2 && !r.keys.includes('implementer:rollback'),
+      'no fix round and no rollback for a gate without a result');
+  }],
+  ['implement: a unit gate still without a result stops the package for a human: not rolled back, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'DCP1 never started: the GPUs were taken' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
+    check(r.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'one call to finish it, no more');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 1, 'no fix round');
+    check(!r.keys.includes('implementer:rollback'), 'nothing measured went against the change: no rollback');
+    const imp = r.result.phases.find((p) => p.phase === 'Implement');
+    check(imp && imp.verdict === 'incomplete' && imp.summary.includes('DCP1 never started'), `the stop says why: ${imp && imp.summary}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('unverified')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+    const nothing = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'run 3 still going' } : null),
+    });
+    check(nothing.result.stopped_at === 'Implement' && !nothing.keys.includes('implementer:rollback')
+      && nothing.result.attention.some((a) => a.wp === 'WP1'), 'a finishing call that returns nothing leaves the gate without a result too');
+    const failed = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: '', failure_summary: 'run 2 diverged' }),
+    });
+    check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
+      'a check that failed is a failure: rolled back as before');
+  }],
+  ['implement: a unit call with no answer at all is finished by one more call, not a fix round or a rollback', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_retries: 1, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? null
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', evidence: 'ok' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const fin = r.calls.filter((c) => c.key === 'test_engineer:unit')[1];
+    check(fin && fin.ins.commit === 'c_WP1' && String(fin.ins.incomplete).includes('returned no answer'),
+      `the second call finishes the same commit, told the first gave no answer: ${fin && fin.ins.incomplete}`);
+    check(!r.keys.includes('implementer:rollback') && r.keys.filter((k) => k === 'implementer:implement').length === 2, 'no fix round, no rollback');
+    const none = await run({ mode: 'feature', task: 't', agent_retries: 1 }, { 'test_engineer:unit': () => null });
+    check(none.result.stopped_at === 'Implement' && !none.keys.includes('implementer:rollback'), `no answer twice: held, not rolled back: ${none.result.status}`);
+    const imp = none.result.phases.find((p) => p.phase === 'Implement' && p.verdict === 'incomplete');
+    check(imp && imp.summary.includes('the call to finish it returned no answer'), `the stop names the missing finishing answer: ${imp && imp.summary}`);
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    const leads = await run({ mode: 'feature', task: 't', agent_retries: 1, confirm_leads: true }, {
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+      'test_engineer:unit': () => null,
+    });
+    const sp = leads.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(sp && sp.ins.confirm_leads === false && (sp.ins.confirm_skipped || []).some((x) => x.includes('unit gate of WP1')),
+      `no lead runs on GPUs a gate without a result may still use: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+  }],
+  ['kernel: an integration whose unit gate has no result stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-K-WP1', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
+  ['kernel: an integration without a unit result stops the run also from a Verify fix, a review change or a kernel retry', async () => {
+    const heldFor = (id) => (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== id, feature_off_unchanged: true,
+      fails_without_change: 'parent', incomplete: ins.work_package.id === id ? 'the kernel suite still runs' : '' });
+    const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+      kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
+    const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
+    const fix = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(fix.result.status === 'blocked' && verifies(fix) === 1 && !fix.keys.includes('implementer:rollback')
+      && fix.result.handoffs[0].status === 'integration_held', `a Verify fix's kernel: Verify ran ${verifies(fix)} time(s), ${JSON.stringify(fix.result.handoffs)}`);
+    const review = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('RV1'),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }], work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+      'test_engineer:unit': heldFor('K-K-RV1'),
+    });
+    check(review.result.status === 'blocked' && review.result.stopped_at === 'Kernel' && verifies(review) === 1,
+      `a review change's kernel: ${review.result.status} at ${review.result.stopped_at}, Verify ran ${verifies(review)} time(s)`);
+    let kernelGates = 0;
+    let kernelCommits = 0;
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const retry = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': (ins) => ({ ...implement(ins),
+        ...(ins.work_package.id === 'K-K-WP1' && ++kernelCommits > 1 ? { commit: 'c_K-K-WP1_retry' } : {}) }),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle' }),
+      'test_engineer:unit': (ins) => heldFor(ins.work_package.id === 'K-K-WP1' && ++kernelGates > 1 ? 'K-K-WP1' : '')(ins),
+    });
+    check(retry.result.status === 'blocked' && verifies(retry) === 1 && retry.result.handoffs[0].status === 'integration_held'
+      && retry.keys.filter((k) => k === 'implementer:rollback').length === 1,
+      `a kernel handed back: Verify ran ${verifies(retry)} time(s), ${JSON.stringify(retry.result.handoffs[0])}`);
+    check(retry.result.handoffs[0].commit === 'c_K-K-WP1_retry',
+      `the held hand-off names the commit left on the branch, not the reverted one: ${retry.result.handoffs[0].commit}`);
+  }],
   ['feature: baseline that does not reproduce blocks at Setup', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', baseline: 'spread 9% > 2%', gpu_ids: '0' }),

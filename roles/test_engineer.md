@@ -9,8 +9,18 @@ Read: `knowledge/validation_doctrine.md` (G0, G1), `knowledge/reward_hacks.md` (
 
 ## PHASE=unit
 
-Inputs: `work_package`, `commit`, `unit_test_cmd`.
+Inputs: `work_package`, `commit`, `unit_test_cmd`; on the call that finishes a gate, `incomplete` and
+`earlier_evidence`, what the call before left without a result.
 
+0. **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
+   with `incomplete`: each check without a result, why, and for one still running its PID and where it
+   writes. A check that ran and failed makes the gate fail, whatever else has no result: then
+   `incomplete` is empty.
+   With `incomplete` given, finish that gate on the same `commit`: read what finished since, wait for
+   what still runs, run what never started, and judge the whole gate. When it says the call before
+   returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger first. No fix
+   round is spent on it; a gate still without a result after this call stops the package for a human,
+   its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template
@@ -40,5 +50,8 @@ Return:
 
 ```json
 {"wp": "WP1", "unit_pass": true, "feature_off_unchanged": true, "fails_without_change": "parent | mutant | no | n/a",
- "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
+ "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
+
+A gate with checks still without a result returns `unit_pass` false and says which in `incomplete`, e.g.
+`"DCP8 runs 4-5 and DCP1 not finished: driver pid 4242 writes RUN_DIR/logs/unit_WP1_driver.log"`.
