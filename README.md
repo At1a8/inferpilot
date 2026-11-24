@@ -661,6 +661,10 @@ report is there already (the director runs it at the end of a scan whose Dispatc
 `scripts/propose_knowledge.py` turns the curator's changes under `knowledge/` into a pull request
 from `inferpilot/knowledge/<run>` to main, built on the current main in a throwaway worktree, and then
 restores `knowledge/` in the checkout, so later runs read only merged knowledge.
+`scripts/weekly_report.py` collects what the weekly report (`templates/weekly_release.md`) counts:
+InferPilot's pull requests merged, closed or still open in a range, by default from 7 days back at 00:00
+to now in UTC+8, or between `--since` and `--until`, main at its start and end with the change between,
+and the sglang pull requests from InferPilot's work. It only reads.
 
 ## Tests
 
@@ -721,7 +725,8 @@ inferpilot/
 │   ├── kernels/aklr/skills.md, playbook.md   # AKLR's own docs (index); when a kernel gain lands in AKLR
 │   └── feature_skills/      # validated plans per feature (hisparse-v2 first)
 ├── templates/               # task_definition, feature_spec, design, experiment_ledger, validation_report,
-│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, acceptance
+│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, daily_report,
+│                            # weekly_release, acceptance
 ├── scripts/                 # task collection, audits, run_docker.sh, latest_image.py, run_lock.py,
 │                            # restore_owner.sh, run_in_tmux.sh
 ├── inferpilot/bootstrap.py  # setup step 3, in the container; safe to re-run

@@ -37,6 +37,7 @@ import scan_ci  # noqa: E402
 import scan_issues  # noqa: E402
 import scan_upstream  # noqa: E402
 import share_daily_report  # noqa: E402
+import weekly_report  # noqa: E402
 
 
 class CheckFrameworkSkillsTest(unittest.TestCase):
@@ -189,6 +190,182 @@ class LatestImageTest(unittest.TestCase):
         self.assertEqual(cmp("rocm/sgl-dev:v0.5.23-rocm720-mi30x-20261104", self.TAGS), "current", "a variant against its own newest")
         self.assertEqual(cmp("rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261102", None), "unknown", "Docker Hub not readable")
         self.assertEqual(cmp("my/custom:latest", self.TAGS), "not-daily")
+
+
+class WeeklyReportTest(unittest.TestCase):
+    """scripts/weekly_report.py: the range and what the weekly report counts; GitHub and git are mocked."""
+
+    NOW = weekly_report.dt.datetime(2026, 11, 24, 9, 57, tzinfo=weekly_report.UTC8)
+
+    def test_by_default_from_seven_days_back_at_midnight_to_now(self):
+        start, end = weekly_report.window(now=self.NOW)
+        self.assertEqual((start.isoformat(), end), ("2026-11-17T00:00:00+08:00", self.NOW))
+
+    def test_a_range_given_as_dates_or_times_in_utc8(self):
+        start, end = weekly_report.window(now=self.NOW, since="2026-11-17", until="2026-11-23")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-17T00:00:00+08:00", "2026-11-24T00:00:00+08:00"))
+        start, end = weekly_report.window(now=self.NOW, since="2026-11-17 08:30", until="2026-11-24T10:00Z")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-17T08:30:00+08:00", "2026-11-24T18:00:00+08:00"))
+
+    def test_an_end_alone_takes_the_seven_days_before_it(self):
+        start, end = weekly_report.window(now=self.NOW, until="2026-11-16")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-10T00:00:00+08:00", "2026-11-17T00:00:00+08:00"))
+
+    def test_an_empty_range_is_refused(self):
+        with self.assertRaises(ValueError):
+            weekly_report.window(now=self.NOW, since="2026-11-24 10:00")
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(weekly_report.main(["--since", "2026-11-24", "--until", "2026-11-20"]), 2)
+        self.assertIn("empty", err.getvalue())
+
+    @staticmethod
+    def pull(n, created, merged=None, closed=None, head="b", title="t", state=None):
+        return {"number": n, "title": title, "user": {"login": "u"}, "html_url": "h%d" % n, "head": {"ref": head},
+                "created_at": created, "merged_at": merged, "closed_at": closed or merged,
+                "state": state or ("closed" if closed or merged else "open")}
+
+    @staticmethod
+    def events(**by_number):
+        """Issue events by number: n7=[("closed", "2026-11-20T00:00:00Z"), ...]."""
+        table = {int(k[1:]): [{"event": e, "created_at": t} for e, t in v] for k, v in by_number.items()}
+        return lambda n: table.get(n, [])
+
+    def test_a_pull_request_s_state_is_its_state_at_the_range_s_end(self):
+        start, end = weekly_report.window(now=self.NOW)
+        pulls = [self.pull(1, "2026-11-10T00:00:00Z", merged="2026-11-16T15:59:59Z"),  # 23:59:59 UTC+8, the day before
+                 self.pull(2, "2026-11-10T00:00:00Z", merged="2026-11-16T16:00:00Z"),  # 00:00 UTC+8, the first second
+                 self.pull(3, "2026-11-18T00:00:00Z", closed="2026-11-19T00:00:00Z"),
+                 self.pull(4, "2026-11-23T00:00:00Z"),
+                 self.pull(5, "2026-11-12T00:00:00Z", closed="2026-11-24T02:00:00Z"),  # closed after the end
+                 self.pull(6, "2026-11-24T02:00:00Z"),                                 # opened after the end
+                 self.pull(7, "2026-11-12T00:00:00Z"),                                 # closed in the range, reopened after
+                 self.pull(8, "2026-11-12T00:00:00Z"),                                 # closed and reopened in the range
+                 self.pull(9, "2026-11-12T00:00:00Z", merged="2026-11-24T03:00:00Z")]  # merged after the end
+        events = self.events(n7=[("closed", "2026-11-20T00:00:00Z"), ("reopened", "2026-11-24T03:00:00Z")],
+                             n8=[("closed", "2026-11-19T00:00:00Z"), ("reopened", "2026-11-21T00:00:00Z")])
+        got = weekly_report.sort_pulls(pulls, start, end, events)
+        self.assertEqual([[p["number"] for p in got[k]] for k in ("merged", "closed", "open")], [[2], [3, 7], [4, 5, 8, 9]])
+
+    def test_main_at_a_time_along_its_first_parent_line_with_git_else_from_github(self):
+        start, _ = weekly_report.window(now=self.NOW)
+        calls = []
+        with mock.patch.object(weekly_report, "git", side_effect=lambda *a: calls.append(a) or
+                               subprocess.CompletedProcess(a, 0, "abc123\n", "")):
+            self.assertEqual(weekly_report.main_at("o/r", start, True), ("abc123", "git"))
+        self.assertEqual(calls, [("rev-list", "-1", "--first-parent", "--before=2026-11-17 00:00:00 +0800", "origin/main")])
+        with mock.patch.object(weekly_report, "git", return_value=subprocess.CompletedProcess((), 128, "", "bad")), \
+                mock.patch.object(weekly_report._github, "get", return_value=[{"sha": "def456"}]) as get:
+            self.assertEqual(weekly_report.main_at("o/r", start, True), ("def456", "github"))
+        self.assertEqual(get.call_args[0][1]["until"], "2026-11-16T16:00:00Z")
+
+    def test_numstat_reads_renames_and_binary_files(self):
+        self.assertEqual(weekly_report.numstat("5\t2\tREADME.md\0-\t-\timg.png\0" "3\t1\t\0old.py\0new.py\0"),
+                         [(5, 2, "README.md"), (0, 0, "img.png"), (3, 1, "new.py")])
+
+    def test_git_runs_under_the_c_locale(self):
+        with mock.patch.object(weekly_report.subprocess, "run", return_value=subprocess.CompletedProcess((), 0, "", "")) as run:
+            weekly_report.git("diff", "--numstat", "-z", "a", "b")
+        self.assertEqual(run.call_args.kwargs["env"]["LC_ALL"], "C")
+
+    def test_the_change_from_git_and_from_github_only_when_git_cannot(self):
+        with mock.patch.object(weekly_report, "git", return_value=subprocess.CompletedProcess((), 0, "40\t1\ta.py\0" "3\t1\tb.md\0", "")):
+            got = weekly_report.change("o/r", "a1", "b2", True)
+        self.assertEqual(got, {"files": 2, "insertions": 43, "deletions": 2, "counted_by": "git", "complete": True,
+                               "paths": ["a.py", "b.md"]})
+        many = {"files": [{"filename": "f%d" % i, "additions": 1, "deletions": 0} for i in range(300)]}
+        for use_git, files, complete in ((False, many, False), (True, {"files": many["files"][:2]}, True)):
+            with mock.patch.object(weekly_report, "git", return_value=subprocess.CompletedProcess((), 128, "", "")), \
+                    mock.patch.object(weekly_report._github, "get", return_value=files):
+                got = weekly_report.change("o/r", "a1", "b2", use_git)
+            self.assertEqual((got["counted_by"], got["complete"], got["files"]), ("github", complete, len(files["files"])))
+
+    def test_git_answers_only_in_a_checkout_of_the_repository(self):
+        for url, ready in (("https://github.com/At1a8/inferpilot.git", True), ("git@github.com:at1a8/InferPilot.git", True),
+                           ("https://github.com/At1a8/inferpilot-old.git", False), ("https://github.com/notAt1a8/inferpilot", False)):
+            with mock.patch.object(weekly_report, "git", side_effect=lambda *a, u=url: subprocess.CompletedProcess(
+                    a, 0, u + "\n" if a[0] == "remote" else "", "")):
+                self.assertEqual(weekly_report.git_ready("At1a8/inferpilot"), ready, url)
+
+    def test_a_range_from_before_the_first_commit_counts_from_an_empty_tree(self):
+        calls = []
+        with mock.patch.object(weekly_report, "git", side_effect=lambda *a: calls.append(a) or
+                               subprocess.CompletedProcess(a, 0, "7\t0\tREADME.md\0", "")):
+            got = weekly_report.change("o/r", "", "b2", True)
+        self.assertEqual((got["files"], got["insertions"], got["complete"], calls[0][3]), (1, 7, True, weekly_report.EMPTY_TREE))
+        got = weekly_report.change("o/r", "", "b2", False)
+        self.assertEqual((got["counted_by"], got["complete"]), ("", False))
+        self.assertTrue(weekly_report.change("o/r", "", "", True)["complete"])
+
+    def test_ports_recorded_by_every_feature_skill_of_the_range_s_end(self):
+        files = {"knowledge/feature_skills/pard2/SKILL.md": 'id: pard2\nreference_pr: "sgl-project/sglang#51465"\n',
+                 "knowledge/feature_skills/other/SKILL.md": 'reference_pr: "vllm-project/vllm#123"\n',
+                 "knowledge/feature_skills/_template/SKILL_TEMPLATE.md": 'reference_pr: "sgl-project/sglang#1"\n',
+                 "knowledge/feature_skills/README.md": ""}
+
+        def git(*a):
+            if a[0] == "ls-tree":
+                return subprocess.CompletedProcess(a, 0, "\n".join(files) + "\n", "")
+            return subprocess.CompletedProcess(a, 0, files[a[1].split(":", 1)[1]], "")
+        with mock.patch.object(weekly_report, "git", side_effect=git):
+            self.assertEqual(weekly_report.recorded_ports("o/r", "sgl-project/sglang", "b2", True), {51465: "feature_skill:pard2"})
+            self.assertEqual(weekly_report.recorded_ports("o/r", "vllm-project/vllm", "b2", True), {123: "feature_skill:other"})
+
+    def test_no_skills_directory_means_no_recorded_ports(self):
+        with mock.patch.object(weekly_report, "git", return_value=subprocess.CompletedProcess((), 0, "", "")), \
+                mock.patch.object(weekly_report._github, "get") as get:
+            self.assertEqual(weekly_report.recorded_ports("o/r", "o/s", "b2", True), {})
+        get.assert_not_called()
+        with mock.patch.object(weekly_report._github, "get",
+                               side_effect=weekly_report.urllib.error.HTTPError("u", 404, "Not Found", {}, None)):
+            self.assertEqual(weekly_report.recorded_ports("o/r", "o/s", "b2", False), {})
+
+    def test_upstream_pulls_active_in_the_range_and_open_at_its_end(self):
+        start, end = weekly_report.window(now=self.NOW)
+        prs = {1: self.pull(1, "2026-11-01T00:00:00Z", head="inferpilot/50386-x"),
+               2: self.pull(2, "2026-11-01T00:00:00Z", head="someone/x"),
+               3: self.pull(3, "2026-11-01T00:00:00Z", head="inferpilot/9-idle"),
+               4: self.pull(4, "2026-11-19T00:00:00Z", head="fangyuan/pard2", title="[Feat] [AMD] PARD2"),
+               5: self.pull(5, "2026-11-18T00:00:00Z", head="inferpilot/7-late", merged="2026-11-25T00:00:00Z"),
+               6: self.pull(6, "2026-11-01T00:00:00Z", head="inferpilot/8-reopened")}
+        commits = {1: ["2026-11-20T00:00:00Z"], 3: ["2026-11-02T00:00:00Z"]}
+        events = {6: [("closed", "2026-11-19T00:00:00Z"), ("reopened", "2026-11-20T00:00:00Z")]}
+
+        def paginate(path, params=None, max_pages=20):
+            n = int(path.split("/")[-2])
+            if path.endswith("/commits"):
+                return [{"commit": {"committer": {"date": d}}} for d in commits.get(n, [])]
+            return [{"event": e, "created_at": t} for e, t in events.get(n, [])]
+        with mock.patch.object(weekly_report._github, "search_issues", return_value=[{"number": n} for n in (1, 2, 3, 5, 6)]), \
+                mock.patch.object(weekly_report._github, "get", side_effect=lambda path, params=None: prs[int(path.rsplit("/", 1)[1])]), \
+                mock.patch.object(weekly_report._github, "paginate", side_effect=paginate):
+            got = weekly_report.upstream_pulls("o/s", start, end, {4: "feature_skill:pard2"})
+        self.assertEqual([(p["number"], p["state"], p["kind_hint"], p["source"]) for p in got["pulls"]],
+                         [(1, "open", "issue", "branch"), (4, "open", "feature", "feature_skill:pard2"),
+                          (5, "open", "issue", "branch"), (6, "open", "issue", "branch")])
+        self.assertEqual([p["number"] for p in got["open_at_end"]], [1, 3, 4, 5, 6])
+
+    def test_every_inferpilot_pull_request_is_read(self):
+        start, end = weekly_report.window(now=self.NOW)
+        with mock.patch.object(weekly_report, "git_ready", return_value=False), \
+                mock.patch.object(weekly_report._github, "paginate", return_value=[]) as paginate, \
+                mock.patch.object(weekly_report, "main_at", return_value=("", "github")), \
+                mock.patch.object(weekly_report, "upstream_pulls", return_value={"pulls": [], "open_at_end": []}):
+            weekly_report.collect("o/r", "o/s", start, end)
+        args, kwargs = paginate.call_args_list[0]
+        self.assertEqual((args[0], kwargs["max_pages"] >= 10000), ("/repos/o/r/pulls", True))
+
+    def test_a_kind_from_the_branch_or_the_title(self):
+        k = weekly_report.kind_hint
+        self.assertEqual([k("inferpilot/133537752860-qwen35-encoder-sdpa", "[Fix] [AMD] x"),
+                          k("inferpilot/50386-int8-w8a8-rocm", "[Fix] [AMD] x"), k("fangyuan/pard2", "[Feat] [AMD] PARD2: x"),
+                          k("inferpilot/x", "[Perf] y"), k("inferpilot/gfx942-mla-fp8-ps0-startup", "[Fix] [AMD] aiter: x")],
+                         ["ci", "issue", "feature", "perf", ""])
+
+    def test_a_github_failure_exits_1(self):
+        with mock.patch.object(weekly_report, "collect", side_effect=weekly_report.urllib.error.URLError("down")), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(weekly_report.main([]), 1)
+        self.assertIn("down", err.getvalue())
 
 
 class DailyReportTest(unittest.TestCase):

@@ -377,7 +377,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 
-`scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有密钥、本地路径、主机名或内部站点）、每个 PR 和 issue 是否除了编号还写了标题、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/share_daily_report.py` 用 `GITHUB_TOKEN` 把通过检查的日报作为 issue 分享到 InferPilot 仓库，以日报的日期为标题，当天的日报已经在那里时不再重复发（Dispatch 成功的 scan 结束时，director 运行它）。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。
+`scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有密钥、本地路径、主机名或内部站点）、每个 PR 和 issue 是否除了编号还写了标题、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/share_daily_report.py` 用 `GITHUB_TOKEN` 把通过检查的日报作为 issue 分享到 InferPilot 仓库，以日报的日期为标题，当天的日报已经在那里时不再重复发（Dispatch 成功的 scan 结束时，director 运行它）。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。`scripts/weekly_report.py` 收集周报（`templates/weekly_release.md`）要统计的内容：一个时间范围里 InferPilot 合入、关闭或仍开着的 PR，范围默认从 7 天前的 00:00 到现在（UTC+8），也可以用 `--since` 和 `--until` 指定，范围起止时的 main 和两者之间的改动，以及来自 InferPilot 工作的 sglang PR。它只读。
 
 ## 测试
 
@@ -425,7 +425,8 @@ inferpilot/
 │   ├── kernels/aklr/skills.md, playbook.md   # AKLR 自带文档的索引；kernel 收益何时落到 AKLR
 │   └── feature_skills/      # 按特性整理的已验证方案（首个是 hisparse-v2）
 ├── templates/               # task_definition, feature_spec, design, experiment_ledger, validation_report,
-│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, acceptance
+│                            # pr_body, issue_triage, ci_triage, perf_analysis, task_queue, daily_report,
+│                            # weekly_release, acceptance
 ├── scripts/                 # 任务收集、审计、run_docker.sh、latest_image.py、run_lock.py、
 │                            # restore_owner.sh、run_in_tmux.sh
 ├── inferpilot/bootstrap.py  # 第 3 步的配置脚本，在容器内运行；可以重复执行
