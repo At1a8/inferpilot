@@ -41,7 +41,8 @@ questions, one per field, each with options or a default. A complete definition 
 
 Every implementation runs one work package at a time; an independent test engineer re-runs its unit
 test, checks that the test fails without the change, and runs the feature-off check; a package that
-keeps failing is rolled back. Verification failures go to an investigator that runs the controls
+keeps failing is rolled back, while one whose gate has no result yet is finished by one more call and
+otherwise stops for a human, never rolled back. Verification failures go to an investigator that runs the controls
 before any instrumentation and returns a fix, a proof that the failure is pre-existing on the
 baseline, or an inconclusive verdict that stops the task. Before the PR, a reviewer reads the diff and
 its evidence the way a maintainer would, starting from a catalog of known reward hacks — changes that
