@@ -1,14 +1,16 @@
-# InferPilot weekly release <Tuesday YYYY-MM-DD> to <Monday YYYY-MM-DD>
+# InferPilot weekly release <start YYYY-MM-DD HH:MM> to <end YYYY-MM-DD HH:MM> (UTC+8)
 
 <!-- A week of InferPilot in the shape of an sglang release note: Highlights a reader acts on, then the full
      notes by area, Breaking Changes & Upgrade Notes, Contributors and the Full Changelog. A progress report,
      not posted to GitHub, in English (`weekly_release.md`) and in Chinese (`weekly_release.zh-CN.md`): the
      same sections, tables, inline code, numbers and links, as `tests/test_templates.py` checks. It is written
-     from the repositories, not from any machine's runs: InferPilot's pull requests of the week, merged,
+     from the repositories, not from any machine's runs: InferPilot's pull requests of the range, merged,
      closed or still open at its end, whose merged ones the notes list, and the sglang pull requests from its
-     work, pushed from `inferpilot/<slug>` branches or recorded by its pull requests as its ports. Every line links to its pull request or issue. The title's two dates bound the
-     week, from Tuesday 00:00 to the next Monday 24:00 in UTC+8; a section with nothing in the week is left
-     out. -->
+     work, pushed from `inferpilot/<slug>` branches or recorded by its pull requests as its ports. Every line
+     links to its pull request or issue. The title gives the range, by default from 7 days before the request
+     at 00:00 to the request's time, in UTC+8: `scripts/weekly_report.py` works it out and collects what the
+     report counts, for another range between `--since` and `--until`. A section with nothing in the range
+     is left out. -->
 
 # Highlights
 

@@ -1,12 +1,13 @@
-# InferPilot 周报 <周二 YYYY-MM-DD> 至 <周一 YYYY-MM-DD>
+# InferPilot 周报 <起 YYYY-MM-DD HH:MM> 至 <止 YYYY-MM-DD HH:MM>（UTC+8）
 
 <!-- 按 sglang release note 的样子汇报 InferPilot 的一周：先是读者可以据此行动的亮点，再按领域写完整说明，然后是不兼容
      变更与升级说明、贡献者和完整变更记录。这是一份进度汇报，不发到 GitHub，英文版（`weekly_release.md`）和中文版
      （`weekly_release.zh-CN.md`）各一份：章节、表格、行内代码、数字和链接都相同，`tests/test_templates.py` 会检查。
-     它依据的是仓库，而不是哪台机器上的运行：InferPilot 本周的 PR（已合入、没有合入就关闭、或者周末仍开着的，完整说明
-     只列已合入的），以及来自 InferPilot 工作的 sglang PR，即从 `inferpilot/<slug>` 分支推送的、或者 InferPilot 的 PR
-     记为它自己移植的。每一行都链接到对应的 PR 或 issue。标题里的
-     两个日期就是这一周的起止：周二 00:00 到下周一 24:00，UTC+8。某一节这周没有内容，就不写这一节。 -->
+     它依据的是仓库，而不是哪台机器上的运行：这个时间范围里 InferPilot 的 PR（已合入、没有合入就关闭、或者到范围结束
+     时仍开着的，完整说明只列已合入的），以及来自 InferPilot 工作的 sglang PR，即从 `inferpilot/<slug>` 分支推送的、
+     或者 InferPilot 的 PR 记为它自己移植的。每一行都链接到对应的 PR 或 issue。标题写明时间范围，默认从请求时间往前
+     7 天的 00:00 到请求的时间点，UTC+8：`scripts/weekly_report.py` 算出这个范围并收集周报要统计的内容，用 `--since`
+     和 `--until` 可以指定别的范围。某一节在这个范围里没有内容，就不写这一节。 -->
 
 # 亮点
 

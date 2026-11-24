@@ -1,19 +1,23 @@
 ---
 name: inferpilot-weekly-naming
-description: Naming conventions for InferPilot's weekly report (周报) in Chinese and English - the report title and file names, the section headings, and the bold short titles of the Highlights. Use when writing, updating or reviewing an InferPilot weekly report or its templates (templates/weekly_release.md, templates/weekly_release.zh-CN.md), or when naming a new section of it.
+description: Naming conventions for InferPilot's weekly report (周报) in Chinese and English - the report title, its time range (scripts/weekly_report.py) and file names, the section headings, and the bold short titles of the Highlights. Use when writing, updating or reviewing an InferPilot weekly report or its templates (templates/weekly_release.md, templates/weekly_release.zh-CN.md), or when naming a new section of it.
 ---
 
 # InferPilot 周报命名规范
 
-周报的结构和每节写什么，见 InferPilot 仓库的 `templates/weekly_release.md` 和 `templates/weekly_release.zh-CN.md`。这里只管名字。
+周报的结构和每节写什么，见 InferPilot 仓库的 `templates/weekly_release.md` 和 `templates/weekly_release.zh-CN.md`。这里管名字、时间范围和数据从哪里来。
 
-## 标题与文件
+## 标题、时间范围与文件
 
-- 标题只写时间，标题下不再放时间表格：
-  - `# InferPilot weekly release <周二 YYYY-MM-DD> to <周一 YYYY-MM-DD>`
-  - `# InferPilot 周报 <周二 YYYY-MM-DD> 至 <周一 YYYY-MM-DD>`
-- 一周是周二 00:00 到下周一 24:00（UTC+8）。
-- 文件：`inferpilot_weekly_<周二>_<周一>.md` 和 `inferpilot_weekly_<周二>_<周一>.zh-CN.md`。
+- 标题只写时间范围，标题下不再放时间表格：
+  - `# InferPilot weekly release <起 YYYY-MM-DD HH:MM> to <止 YYYY-MM-DD HH:MM> (UTC+8)`
+  - `# InferPilot 周报 <起 YYYY-MM-DD HH:MM> 至 <止 YYYY-MM-DD HH:MM>（UTC+8）`
+- 时间范围默认从请求时间往前 7 天的 00:00 到请求的时间点（UTC+8）：例如 2026-11-24 10:00 请求，就是 2026-11-17 00:00 至 2026-11-24 10:00。
+- 范围和数据都由 InferPilot 仓库里的 `scripts/weekly_report.py` 给出，不要手算：
+  - 默认范围：`python3 scripts/weekly_report.py`
+  - 指定范围：`--since`、`--until`，取日期或日期加时间，不带时区就是 UTC+8；`--until` 只给日期时包含那一整天，例如 `--since 2026-11-17 --until 2026-11-23`；只给 `--until` 时，起点是它前 7 天的 00:00。
+  - 它输出合入、关闭、仍开着的 InferPilot PR，起止时的 main 和改动规模，以及来自 InferPilot 工作的 sglang PR；`source` 为 `feature_skill:<id>` 的是候选，可能是人手写的移植，由写周报的人判断是否收录。
+- 文件：`inferpilot_weekly_<起始日期>_<结束日期>.md` 和 `inferpilot_weekly_<起始日期>_<结束日期>.zh-CN.md`。
 
 ## 章节名的规律
 
