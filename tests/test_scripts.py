@@ -615,12 +615,18 @@ class EvalAccuracyTest(unittest.TestCase):
             echo "$*" >> "$CALLS"
             printf '%s\\n' "$@" > "$CALLS.argv"
             [ -n "${FAKE_NO_REPORT:-}" ] && exit 1
+            jm=""
             while [ $# -gt 0 ]; do
-              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; esac
+              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; --judge-model-args) jm=$2; shift ;; esac
               shift
             done
             echo "work dir $wd"
-            mkdir -p "$wd/run/reports/fake-model"
+            # as evalscope does: its arguments, the judge's among them, in its configs and its log
+            mkdir -p "$wd/configs" "$wd/run/reports/fake-model"
+            echo "judge_model_args: $jm" > "$wd/configs/task_config.yaml"
+            echo "judge_model_args=$jm"
+            # the script stopped while evalscope runs (a timeout, the agent's call ending)
+            [ -n "${FAKE_STOPPED:-}" ] && { kill -TERM "$PPID"; exit 143; }
             # every question answered, unless FAKE_NUM says how many were
             case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
             echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
@@ -698,6 +704,30 @@ class EvalAccuracyTest(unittest.TestCase):
         argv = Path(str(self.calls) + ".argv").read_text().splitlines()
         self.assertEqual(json.loads(argv[argv.index("--dataset-args") + 1])["longbench_v2"]["local_path"], str(data))
         self.assertEqual(argv[argv.index("--limit") + 1], "5")
+
+    def test_the_judge_key_reaches_only_a_judged_set_and_no_result_keeps_it(self):
+        key = "judge-key-for-the-test-7f3a"
+
+        def holding_key():
+            return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                          if p.is_file() and key in p.read_text(errors="replace"))
+        r = self.run_script("gsm8k", JUDGE_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertNotIn("--judge-model-args", argv, "gsm8k is graded by rule: no judge, no key")
+        self.assertEqual(holding_key(), [])
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--judge-strategy") + 1], "auto")
+        self.assertIn(key, argv[argv.index("--judge-model-args") + 1], "simple_qa's judge needs the key")
+        self.assertEqual(holding_key(), [], "evalscope's configs and log keep the key")
+        run = next((self.tmp / "results" / "eval_simple_qa").iterdir())
+        self.assertIn("<JUDGE_KEY>", (run / "configs" / "task_config.yaml").read_text())
+        self.assertIn("<JUDGE_KEY>", (run / "evalscope.log").read_text())
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200", FAKE_STOPPED="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(holding_key(), [], "a run stopped on its way keeps the key")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
         def sent():
