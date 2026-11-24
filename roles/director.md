@@ -281,7 +281,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   checks it there.
 
 - `ready_for_review`: write `RUN_DIR/validation_report.md` (`templates/validation_report.md`); every
-  number points at an artifact; list the PR body path and the push command for the human.
+  number points at an artifact; list the PR body path and the push command for the human, and before
+  them the tests and measurements the human re-runs first, each with its command (the PR body says AMD
+  engineers measured them: `pr_playbook.md` §Attribution).
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
   `fixed_on_main`, `diagnosed`, `handed_off`, `dropped`, `queued`): write `RUN_DIR/run_report.md` with what was
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to

@@ -838,7 +838,8 @@ function nextSteps(status, at) {
   const out = { say: `${ENDED[status] || `Ended ${status}`} at ${at}${last ? `: ${last}` : ''}.${report}` };
   if (status === 'blocked') out.say += ' Fix what it names, or change the task, then run it again.';
   if (status === 'ready_for_review') {
-    out.say = `A pull request is ready on ${(R.pr && R.pr.branch) || C.branch}: read it, then push it yourself.${report}`;
+    out.say = `A pull request is ready on ${(R.pr && R.pr.branch) || C.branch}: read every changed line and re-run its tests `
+      + `and measurements yourself, as its description says AMD engineers did, then push it.${report}`;
   } else if (status === 'queued') {
     const shared = !R.daily_report_url ? ''
       : R.daily_report_action === 'exists'

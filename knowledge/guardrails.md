@@ -27,7 +27,9 @@ scarcest resource in the community, and a careless agent spends it.
 - Follow the repository's conventions (`pr_playbook.md`): formatting, title tags, registered tests,
   docs for user-visible switches.
 - Changes stay **HIP-only or behind a switch**; the CUDA path must not change.
-- If the repository asks contributors to disclose AI assistance, disclose it.
+- Every upstream PR says, in one line word for word, that it was developed with InferPilot and reviewed
+  and measured by AMD engineers (`pr_playbook.md` §Attribution); the human who pushes it re-runs its
+  tests and measurements first. Where the repository asks for more disclosure of AI assistance, give it.
 
 ## 3. Safety constraints in a run
 

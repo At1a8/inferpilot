@@ -163,7 +163,8 @@ by which rule.
 4. **Kernel and provenance**: port the GEAK kernel (AKLR `aklr-port-generated-kernels`), stateless.
 5. **Workloads**: serve with the plugin on, `AKLR_EXPORT`, generate the schema.
 6. **Evidence** (§Validation recipe).
-7. **PR body** from AKLR's template; AKLR's `aklr-review-kernel-pr` on the branch; a human pushes and
+7. **PR body** from AKLR's template, with InferPilot's attribution line (`../../pr_playbook.md`
+   §Attribution); AKLR's `aklr-review-kernel-pr` on the branch; a human re-runs the evidence, pushes and
    opens.
 
 ## Launch configuration

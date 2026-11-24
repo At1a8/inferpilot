@@ -28,7 +28,8 @@ send what is missing back as work packages, so the branch that is pushed is the 
       but with the local copy of the model in place of its id.
 - [ ] Docs updated for the user-visible switch, and no more than the switch and CI need.
 - [ ] Commits tell the story: one per work package, follow-up fixes squashed into the commit they fix.
-- [ ] Description written from `validation_report.md`, citing artifacts.
+- [ ] Description written from `validation_report.md`, citing artifacts, with the attribution line word
+      for word (§Attribution).
 
 ## Title
 
@@ -41,9 +42,10 @@ scope, e.g. `[Feat] [AMD] DeepSeek-v4.1: Support HiSparse V2 with HiCache-backed
 
 Write it into the repository's own PR template and keep the template as it is: its comments, its
 headings in order, the checklist wording and the closing sections (sglang:
-`.github/pull_request_template.md`, mirrored in `../templates/pr_body.md`; check it against upstream,
-which changes it now and then). Editing an existing PR's description, keep the block a bot maintains at
-the end (sglang: `<!-- pr-states:start -->` … `<!-- pr-states:end -->`).
+`.github/pull_request_template.md`, mirrored in `../templates/pr_body.md` with the attribution line
+added; check it against upstream, which changes it now and then). Editing an existing PR's
+description, keep the block a bot maintains at the end (sglang: `<!-- pr-states:start -->` …
+`<!-- pr-states:end -->`).
 
 Write it the way a person tells reviewers about their change, not like a report: short sentences, first
 person, everyday words, contractions where they read naturally. No bold label on every bullet, no
@@ -68,6 +70,27 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 - **Checklist:** tick only what holds for this PR.
 
 Every number comes from `validation_report.md` or the experiment ledger.
+
+## Attribution
+
+Every upstream PR InferPilot prepares says so in one line of its description, word for word:
+
+```text
+Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; reviewed and measured by AMD engineers.
+```
+
+- One wording, so `InferPilot in:body` on GitHub finds every such PR and only those; never reword it.
+- A paragraph of its own: in sglang's template after the Checklist's last item, before `## Review and
+  Merge Process` (`../templates/pr_body.md` has it there); in another template at the end of the
+  description, above any line the template says is removed (vLLM: `BEFORE SUBMITTING`) and above a
+  block a bot appends.
+- InferPilot writes the line; the human who pushes makes it true. Before pushing, they read every
+  changed line and re-run the PR's tests and measurements themselves, with the commands of the
+  description and of `experiment_ledger.md`. A result that differs from the description's by more than
+  run-to-run noise replaces it there. A PR nobody has re-run is not pushed.
+- A repository that asks for more disclosure of AI assistance gets it as well (vLLM: the "AI
+  assistance was used" box of its PR template, its `/pr-checklist` skill, and a trailer such as
+  `Co-authored-by:` on each commit).
 
 ## Building on an unmerged PR
 
