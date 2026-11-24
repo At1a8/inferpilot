@@ -62,3 +62,14 @@
 ## Lessons
 
 <!-- At most a few; say where each was recorded (feature skill, method docs, known_issues). -->
+
+## Before pushing
+
+<!-- What the human runs before pushing, in a fresh shell, relying on neither RUN_DIR/base, which Report
+     removes, nor the branch the checkout is on by then. For each test and measurement the PR body cites:
+     each arm's tree made again from its commit (`git -C <framework_dir> worktree add --detach <dir>
+     <commit>`: the base commit and the branch's head); the server launch of each arm with that tree first
+     on PYTHONPATH, and `python -c "import sglang; print(sglang.__file__)"` with the same PYTHONPATH
+     printing a path inside it (`env_hygiene.md`, *The code under test*); the client and accuracy
+     commands; the numbers the PR body gives, with the run's spread; removing the worktrees after. Then
+     the PR body path and the push command. -->

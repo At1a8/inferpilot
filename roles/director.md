@@ -281,9 +281,13 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   checks it there.
 
 - `ready_for_review`: write `RUN_DIR/validation_report.md` (`templates/validation_report.md`); every
-  number points at an artifact; list the PR body path and the push command for the human, and before
-  them the tests and measurements the human re-runs first, each with its command (the PR body says AMD
-  engineers measured them: `pr_playbook.md` §Attribution).
+  number points at an artifact. Its *Before pushing* section is what the human runs before pushing
+  (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes `RUN_DIR/base`,
+  and the checkout may be on another branch by the time the human runs it. For each test and
+  measurement the PR body cites, it makes each arm's tree again from its commit (the base commit and the
+  branch's head), launches each arm's server with that tree first on `PYTHONPATH` and checks the import
+  (`env_hygiene.md`, *The code under test*), gives the client and accuracy commands and the numbers to
+  compare with, with the run's spread; then the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
   `fixed_on_main`, `diagnosed`, `handed_off`, `dropped`, `queued`): write `RUN_DIR/run_report.md` with what was
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to

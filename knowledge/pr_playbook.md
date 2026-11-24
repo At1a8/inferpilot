@@ -85,9 +85,12 @@ Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; r
   description, above any line the template says is removed (vLLM: `BEFORE SUBMITTING`) and above a
   block a bot appends.
 - InferPilot writes the line; the human who pushes makes it true. Before pushing, they read every
-  changed line and re-run the PR's tests and measurements themselves, with the commands of the
-  description and of `experiment_ledger.md`. A result that differs from the description's by more than
-  run-to-run noise replaces it there. A PR nobody has re-run is not pushed.
+  changed line and re-run the PR's tests and measurements themselves, as the *Before pushing* section
+  of `validation_report.md` gives them: each arm's tree made again from its commit and its import
+  checked, since Report removes the baseline worktree. A result that differs from the description's by
+  more than run-to-run noise replaces it there. A PR nobody has re-run is not pushed.
+- The verification comment for an existing PR (the PR engineer's step 5) rewrites no description and
+  carries no attribution line; it is re-run before it is posted all the same.
 - A repository that asks for more disclosure of AI assistance gets it as well (vLLM: the "AI
   assistance was used" box of its PR template, its `/pr-checklist` skill, and a trailer such as
   `Co-authored-by:` on each commit).

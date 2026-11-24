@@ -481,12 +481,14 @@ issue there on GitHub, give it that title and paste the whole file, or run
 whose Dispatch failed shares nothing: the report it left may be partial. Its first line, a hidden marker, lets the next scan, in any container, find it
 there and mark what changed since.
 
-Before you push, read every changed line and re-run the PR's tests and measurements yourself, with the
-commands in `pr_body.md` and `experiment_ledger.md`. The line under the description's checklist,
+Before you push, read every changed line and re-run the PR's tests and measurements yourself, as the
+*Before pushing* section of `validation_report.md` gives them: it makes each arm's tree again from its
+commit and checks which code each server imports, since the run has removed its baseline worktree by
+then. A new PR's description has, under its checklist, the line
 `Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; reviewed and measured by AMD engineers.`,
-says you did. Where your result differs from the description's by more than run-to-run noise, put yours
-in it. Don't push a PR you have not re-run, and keep that line word for word: a search of GitHub finds
-every InferPilot PR by it.
+which says you did; a verification comment for an existing PR has none. Where your result differs from
+the description's by more than run-to-run noise, put yours in it. Don't push a PR you have not re-run,
+and keep that line word for word: a search of GitHub finds every InferPilot PR by it.
 
 InferPilot never pushes. The task's branch, `inferpilot/<slug>`, is in `/sgl-workspace/sglang`, and the report
 gives the exact `git -C /sgl-workspace/sglang push ...`: run it here with credentials that can push.
