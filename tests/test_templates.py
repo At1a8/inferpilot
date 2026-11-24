@@ -9,6 +9,13 @@ from pathlib import Path
 from test_readme import code_spans, commands, link_targets, numbers, prose, sections, table_rows
 
 ROOT = Path(__file__).resolve().parent.parent
+PLACEHOLDER = re.compile(r"<[^<>]*>")
+URL = re.compile(r"https://(?:[^\s<>()]|<[^<>]*>)+|(?<=\]\()<[^<>]*>(?=\))")
+
+
+def urls(text):
+    """Every URL and placeholder link target, bare ones and those with spaces too, a placeholder's words as <>."""
+    return sorted(PLACEHOLDER.sub("<>", m.group(0)) for m in URL.finditer(text))
 
 
 class PrBodyTest(unittest.TestCase):
@@ -73,6 +80,7 @@ class WeeklyReleaseTest(unittest.TestCase):
                 self.assertEqual(link_targets(a, {}, ""), link_targets(b, {}, ""), "links only one language has")
         self.assertEqual(table_rows(self.body), table_rows(self.zh), "tables with other rows")
         self.assertEqual(commands(self.body), commands(self.zh))
+        self.assertEqual(urls(self.body), urls(self.zh), "URLs only one language has, the Full Changelog's too")
 
 
 if __name__ == "__main__":

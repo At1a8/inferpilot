@@ -4,9 +4,9 @@
      notes by area, Breaking Changes & Upgrade Notes, Contributors and the Full Changelog. A progress report,
      not posted to GitHub, in English (`weekly_release.md`) and in Chinese (`weekly_release.zh-CN.md`): the
      same sections, tables, inline code, numbers and links, as `tests/test_templates.py` checks. It is written
-     from the repositories, not from any machine's runs: InferPilot's pull requests merged in the week, and
-     the sglang pull requests from its work, pushed from `inferpilot/<slug>` branches or recorded by its pull
-     requests as its ports. Every line links to its pull request or issue. The title's two dates bound the
+     from the repositories, not from any machine's runs: InferPilot's pull requests of the week, merged,
+     closed or still open at its end, whose merged ones the notes list, and the sglang pull requests from its
+     work, pushed from `inferpilot/<slug>` branches or recorded by its pull requests as its ports. Every line links to its pull request or issue. The title's two dates bound the
      week, from Tuesday 00:00 to the next Monday 24:00 in UTC+8; a section with nothing in the week is left
      out. -->
 
@@ -23,9 +23,10 @@
 ## Upstream pull requests
 
 <!-- Every sglang pull request from InferPilot's work that opened, changed or merged this week, merged first.
-     Gates: each one's verdict as the pull request or its feature skill records it, "not run" for one that
-     did not run; a CI fix has `failing_test` and no G5, an issue fix `issue_repro`, and G5 only when the
-     issue is about performance. Result: the gain with its workload, or for a fix what passes again. Review
+     Gates: each one's verdict as the pull request records it for its head, or its feature skill for the
+     commit it names, a result on an older revision labeled so; "not run" where the record says so, "not
+     recorded" where nothing does; a CI fix has `failing_test` and no G5, an issue fix `issue_repro`, and G5
+     only when the issue is about performance. Result: the gain with its workload, or for a fix what passes again. Review
      is upstream's state. -->
 
 | Pull request | Kind | Model / feature | Platform | Gates | Result | Review |
@@ -38,19 +39,26 @@
 
 ## AMD feature porting
 
+<!-- The pull requests of kind feature in the table above. -->
+
 * [Feat] [AMD] <scope>: <title> (<the gain measured, or the parity shown>): [#<n>](<url>)
 
 ## Issue fixes
 
-<!-- The AMD user issues the week's pull requests fix, P0 first. -->
+<!-- The pull requests of kind issue in the table above, each under the issue it came from, P0 first; when
+     one fixes something else the issue led to, say what. -->
 
-* [#<n>](<url>) <title> (<P0 / P1 / P2>): fixed by [#<n>](<url>); reply <posted / not posted>
+* [#<n>](<url>) <title> (<P0 / P1 / P2>): <what [#<n>](<url>) fixes>; reply <posted / not posted>
 
 ## CI fixes
+
+<!-- The pull requests of kind ci in the table above. -->
 
 * [<job>](<job URL>): <class>, <the culprit commit or pull request>; fixed by [#<n>](<url>)
 
 ## Performance
+
+<!-- The pull requests of kind perf in the table above. -->
 
 * <model>, <workload>: <the gain, measured alone at equal budget (G5)> ([#<n>](<url>))
 

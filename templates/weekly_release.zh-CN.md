@@ -3,8 +3,9 @@
 <!-- 按 sglang release note 的样子汇报 InferPilot 的一周：先是读者可以据此行动的亮点，再按领域写完整说明，然后是不兼容
      变更与升级说明、贡献者和完整变更记录。这是一份进度汇报，不发到 GitHub，英文版（`weekly_release.md`）和中文版
      （`weekly_release.zh-CN.md`）各一份：章节、表格、行内代码、数字和链接都相同，`tests/test_templates.py` 会检查。
-     它依据的是仓库，而不是哪台机器上的运行：本周合入的 InferPilot PR，以及来自 InferPilot 工作的 sglang PR，即从
-     `inferpilot/<slug>` 分支推送的、或者 InferPilot 的 PR 记为它自己移植的。每一行都链接到对应的 PR 或 issue。标题里的
+     它依据的是仓库，而不是哪台机器上的运行：InferPilot 本周的 PR（已合入、没有合入就关闭、或者周末仍开着的，完整说明
+     只列已合入的），以及来自 InferPilot 工作的 sglang PR，即从 `inferpilot/<slug>` 分支推送的、或者 InferPilot 的 PR
+     记为它自己移植的。每一行都链接到对应的 PR 或 issue。标题里的
      两个日期就是这一周的起止：周二 00:00 到下周一 24:00，UTC+8。某一节这周没有内容，就不写这一节。 -->
 
 # 亮点
@@ -14,13 +15,14 @@
 <!-- 三到六条，相当于 sglang 的 “What's new”，每条以一个加粗的小标题开头：本周 InferPilot 自己多了什么、给 AMD 上的
      sglang 带来了什么，附上对应的 PR，测过的附上数字。先写已合入的。 -->
 
-* **<小标题>：**<变了什么，附上能说明它的数字>（[#<n>](<url>)）。
+* **<小标题>：** <变了什么，附上能说明它的数字>（[#<n>](<url>)）。
 
 ## 上游 PR
 
-<!-- 本周新开、有改动或已合入的、来自 InferPilot 工作的每个 sglang PR，已合入的排前面。Gates：每个 gate 在 PR 或它的
-     feature skill 里记录的结论，没跑的写“未运行”；CI 修复有 `failing_test`、没有 G5，issue 修复有 `issue_repro`，只有
-     性能类 issue 才有 G5。结果：收益和它的 workload，修复则写哪一项重新通过。Review 状态指上游的状态。 -->
+<!-- 本周新开、有改动或已合入的、来自 InferPilot 工作的每个 sglang PR，已合入的排前面。Gates：每个 gate 的结论，以 PR
+     对它最新提交的记录、或者 feature skill 对它所写提交的记录为准，较早版本上的结果要注明；记录里写了没跑的写“未运行”，
+     哪里都没有记录的写“没有记录”；CI 修复有 `failing_test`、没有 G5，issue 修复有 `issue_repro`，只有性能类 issue 才有
+     G5。结果：收益和它的 workload，修复则写哪一项重新通过。Review 状态指上游的状态。 -->
 
 | PR | 类型 | 模型 / 特性 | 平台 | Gates | 结果 | Review 状态 |
 |---|---|---|---|---|---|---|
@@ -32,19 +34,26 @@
 
 ## AMD feature 移植
 
+<!-- 上游 PR 表里类型为 feature 的 PR。 -->
+
 * [Feat] [AMD] <scope>：<标题>（<测得的收益，或证明的一致性>）：[#<n>](<url>)
 
 ## issue 修复
 
-<!-- 本周的 PR 修复的 AMD 用户 issue，P0 在前。 -->
+<!-- 上游 PR 表里类型为 issue 的 PR，各自挂在它来自的 issue 下，P0 在前；PR 修的是这个 issue 引出的另一个问题时，
+     写明修了什么。 -->
 
-* [#<n>](<url>) <标题>（<P0 / P1 / P2>）：由 [#<n>](<url>) 修复；回复<已发出 / 没有发出>
+* [#<n>](<url>) <标题>（<P0 / P1 / P2>）：<[#<n>](<url>) 修复了什么>；回复<已发出 / 没有发出>
 
 ## CI 修复
+
+<!-- 上游 PR 表里类型为 ci 的 PR。 -->
 
 * [<job>](<job URL>)：<类别>，<引起问题的 commit 或 PR>；由 [#<n>](<url>) 修复
 
 ## 性能
+
+<!-- 上游 PR 表里类型为 perf 的 PR。 -->
 
 * <模型>，<workload>：<收益，在同等预算下单独测得（G5）>（[#<n>](<url>)）
 
