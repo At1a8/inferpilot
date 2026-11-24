@@ -15,10 +15,11 @@ local path, this machine or an internal site stop it, as in scripts/daily_report
 or on any failure, the changes stay where they are. Standard library and git only.
 
 The patch is also written to RUN_DIR/knowledge.patch, which outlives the checkout: --patch proposes it later,
-from any checkout. Runs started from the same main give their new known issues the same next KI- number:
-a number main has taken since is replaced, in the entry and in every line the patch adds, by the next free
-one on main, and the pull request says which ("renumbered"); entries main added at the end of the file
-are kept beside this run's.
+from any checkout (the one that saved it, holding just those edits still, is restored as above). Runs
+started from the same main give their new known issues the same next KI- number: a number main has taken
+since is replaced, in the entry and in every line the patch adds, by the next free one on main, and the
+pull request says which ("renumbered"). Entries main added at the end of the file are kept beside this
+run's; an existing entry that main and the patch both changed stops it (exit 4) for a human to reconcile.
 """
 from __future__ import annotations
 
@@ -128,6 +129,37 @@ def preimage(inferpilot: str, diff: str, path: str) -> str:
     return git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
 
 
+def resolve_appends(text: str) -> str | None:
+    """The known issues after a three-way apply with diff3 conflicts. A conflict where one side kept the base's
+    lines and only added after them (or both only added at the same place) keeps both, main's first where it
+    can; None when both changed lines the base had (an entry edited on main and in the patch)."""
+    out, block, part = [], None, ""
+    for line in text.splitlines(keepends=True):
+        if block is None:
+            if line.startswith("<<<<<<< "):
+                block, part = {"ours": [], "base": [], "theirs": []}, "ours"
+            else:
+                out.append(line)
+        elif part == "ours" and line.startswith("||||||| "):
+            part = "base"
+        elif part == "base" and line.rstrip("\n") == "=======":
+            part = "theirs"
+        elif part == "theirs" and line.startswith(">>>>>>> "):
+            ours, base, theirs = block["ours"], block["base"], block["theirs"]
+            if theirs[:len(base)] == base:
+                out += ours + theirs[len(base):]
+            elif ours[:len(base)] == base:
+                out += theirs + ours[len(base):]
+            else:
+                return None
+            block = None
+        elif part == "ours" and line.rstrip("\n") == "=======":
+            return None  # no base section: not diff3, so nothing tells an addition from an edit
+        else:
+            block[part].append(line)
+    return None if block is not None else "".join(out)
+
+
 def with_renumbering(body: str, mapping: dict) -> str:
     if not mapping:
         return body
@@ -156,15 +188,26 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
     tmp = tempfile.mkdtemp(prefix="inferpilot-knowledge-patch-")
     try:
         git(wt, "checkout", "-q", "-B", branch)
-        patch_file, attrs = os.path.join(tmp, "knowledge.patch"), os.path.join(tmp, "attributes")
+        patch_file = os.path.join(tmp, "knowledge.patch")
         with open(patch_file, "w") as f:
             f.write(diff)
-        # The known issues are a list: what main appended since this checkout and what this run appends
-        # are both kept (git's union merge), rather than stopping on the conflict.
-        with open(attrs, "w") as f:
-            f.write("%s merge=union\n" % KNOWN)
-        git(wt, "-c", "core.attributesFile=" + attrs, "apply", "--3way", "--index", patch_file)
         known = os.path.join(wt, KNOWN)
+        p = subprocess.run(["git", "-C", wt, "-c", "merge.conflictStyle=diff3", "apply", "--3way", "--index", patch_file],
+                           capture_output=True, text=True)
+        if p.returncode != 0:
+            # The known issues are a list: what main appended since this checkout and what this run appends
+            # are both kept; an entry both changed stops here for a human.
+            unmerged = [f for f in git(wt, "diff", "--name-only", "--diff-filter=U").splitlines() if f]
+            resolved = None
+            if unmerged == [KNOWN]:
+                with open(known, encoding="utf-8") as f:
+                    resolved = resolve_appends(f.read())
+            if resolved is None:
+                raise RuntimeError("git apply: %s" % ("%s: lines main changed as well; reconcile them by hand" % ", ".join(unmerged)
+                                                      if unmerged else (p.stderr or p.stdout).strip()[:300]))
+            with open(known, "w", encoding="utf-8") as f:
+                f.write(resolved)
+            git(wt, "add", KNOWN)
         if KNOWN in patched(diff) and os.path.isfile(known):
             with open(known, encoding="utf-8") as f:
                 text = f.read()
@@ -173,6 +216,11 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
                 with open(known, "w", encoding="utf-8") as f:
                     f.write(tidy)
                 git(wt, "add", KNOWN)
+        # What was staged, not what the patch's headers seemed to name (a quoted path, one with a space).
+        staged = [f for f in git(wt, "diff", "--cached", "--name-only", "--no-renames", "-z").split("\0") if f]
+        outside = [f for f in staged if not f.startswith("knowledge/")]
+        if outside:
+            raise RuntimeError("the patch changes more than knowledge/: %s" % ", ".join(outside))
         git(wt, *AUTHOR, "commit", "-q", "-m", title, "-m", "From the InferPilot run %s." % run)
         sha = git(wt, "rev-parse", "HEAD").strip()
         git(wt, "push", "-q", "--force", push_url, "HEAD:refs/heads/%s" % branch, env=auth_env(token))
@@ -225,7 +273,10 @@ def main(argv=None) -> int:
     try:
         if a.patch:
             diff = open(a.patch, encoding="utf-8").read()
-            tracked, untracked = [], []  # the checkout's own knowledge/ is not this patch: nothing to restore
+            # The checkout that saved it, holding just these edits still, reads main again once they are
+            # proposed; any other checkout, or one with more edits, is left as it is.
+            mine = changed(a.inferpilot_dir)
+            tracked, untracked = mine if (mine[0] or mine[1]) and patch(a.inferpilot_dir, *mine) == diff else ([], [])
             files = patched(diff)
             outside = [f for f in files if not f.startswith("knowledge/")]
             if not files or outside:

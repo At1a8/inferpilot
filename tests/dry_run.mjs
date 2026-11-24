@@ -421,7 +421,8 @@ const scenarios = [
     check(eqList(r.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     check(!r.keys.some((k) => ['director:spec', 'analyst:recon', 'architect:design', 'implementer:implement', 'test_engineer:unit'].includes(k)),
       `nothing before Verify: ${r.keys}`);
-    check(r.calls.find((c) => c.key === 'director:setup').ins.resume_run_dir === RUN, 'Setup reuses the run directory');
+    const setupIns = r.calls.find((c) => c.key === 'director:setup').ins;
+    check(setupIns.resume_run_dir === RUN && setupIns.resume_from === 'verify', 'Setup reuses the run directory, told to check the resume before its smoke');
     const pe = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(pe && pe.ins.claim === '+20% output tok/s at equal HBM', `the claim the run had: ${pe && pe.ins.claim}`);
     check(r.result.done.map((d) => d.wp).join() === 'WP1,WP2', `the packages the run verified: ${JSON.stringify(r.result.done)}`);
@@ -429,6 +430,19 @@ const scenarios = [
     check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
     const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
     check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
+  }],
+  ['feature: resume_from verify restores the known issues and kernel hand-offs the run had', async () => {
+    const ki = { id: 'KI-009', title: 'G4 collapse on the baseline too' };
+    const h = { id: 'K-WP1', wp: 'WP1', owner: 'kernel_workflow', status: 'integrated', integrated_wp: 'K-K-WP1', commit: 'c_K', retries: 0 };
+    const r = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), known_issues: [ki], handoffs: [h] }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, failures: [{ gate: 'G4', failure_class: 'collapse' }] } : { all_pass: true, failures: [] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'bs=1', summary: 'the kernel' }),
+    });
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && (v.ins.known_issues || []).some((k) => k.id === 'KI-009'), 'Verify knows the baseline failures the run proved');
+    const rv = r.calls.find((c) => c.key === 'implementer:rollback' && c.ins.revert);
+    check(rv && rv.ins.revert === 'c_K', `a kernel regression reverts the commit the run integrated: ${rv && JSON.stringify(rv.ins)}`);
   }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
     const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
@@ -813,6 +827,37 @@ const scenarios = [
     check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
       'a check that failed is a failure: rolled back as before');
   }],
+  ['implement: a unit call with no answer at all is finished by one more call, not a fix round or a rollback', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_retries: 1, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? null
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', evidence: 'ok' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const fin = r.calls.filter((c) => c.key === 'test_engineer:unit')[1];
+    check(fin && fin.ins.commit === 'c_WP1' && String(fin.ins.incomplete).includes('returned no answer'),
+      `the second call finishes the same commit, told the first gave no answer: ${fin && fin.ins.incomplete}`);
+    check(!r.keys.includes('implementer:rollback') && r.keys.filter((k) => k === 'implementer:implement').length === 2, 'no fix round, no rollback');
+    const none = await run({ mode: 'feature', task: 't', agent_retries: 1 }, { 'test_engineer:unit': () => null });
+    check(none.result.stopped_at === 'Implement' && !none.keys.includes('implementer:rollback'), `no answer twice: held, not rolled back: ${none.result.status}`);
+    const imp = none.result.phases.find((p) => p.phase === 'Implement' && p.verdict === 'incomplete');
+    check(imp && imp.summary.includes('the call to finish it returned no answer'), `the stop names the missing finishing answer: ${imp && imp.summary}`);
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    const leads = await run({ mode: 'feature', task: 't', agent_retries: 1, confirm_leads: true }, {
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+      'test_engineer:unit': () => null,
+    });
+    const sp = leads.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(sp && sp.ins.confirm_leads === false && (sp.ins.confirm_skipped || []).some((x) => x.includes('unit gate of WP1')),
+      `no lead runs on GPUs a gate without a result may still use: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+  }],
+  ['kernel: an integration whose unit gate has no result stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-K-WP1', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held', `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
   ['feature: baseline that does not reproduce blocks at Setup', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', baseline: 'spread 9% > 2%', gpu_ids: '0' }),
@@ -918,6 +963,12 @@ const scenarios = [
     });
     check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `status ${r.result.status}`);
     check(!r.keys.includes('issue_triager:reply') && r.result.reply_draft_path === `${RUN}/reply.md`, 'the Triage draft is the reply');
+    const u = (r.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(u && !u.startsWith('post the reply draft') && u.includes('ended at Triage'), `a draft no reviewer checked is not offered as is: ${u}`);
+    const noRewrite = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:reply': () => null });
+    const v = (noRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(!noRewrite.keys.includes('reviewer:reply') && v && !v.startsWith('post the reply draft') && v.includes('this is the Triage draft'),
+      `a Triage draft the run never rewrote is not offered as is: ${v}`);
   }],
   ['issue: close_fixed that no longer reproduces', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {

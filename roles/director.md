@@ -39,7 +39,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    `baseline_status: "fail"` with its message in `baseline`; the run stops at Setup with it.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
-   re-run one baseline smoke to confirm the environment still matches the ledger.
+   re-run one baseline smoke to confirm the environment still matches the ledger. With `resume_from:
+   verify`, first check, reading only, what the resume needs (PHASE=resume, steps 1 and 2): the branch
+   head is the last commit the ledger's Implement verified, the checkout is clean, and for `issue` and
+   `ci` the run directory records the gate command. When one fails, run no smoke and return the run
+   directory with `baseline_status: "fail"` and what differs in `baseline`.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -62,7 +66,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      branch that is already there.
    - `feature` and `perf` also get the base commit as a worktree of the same repository, for the
      baseline arm while the task branch carries the change: `git -C <framework_dir> worktree add
-     --detach RUN_DIR/base <base>`.
+     --detach RUN_DIR/base <base>`. On a retry or a resume, `<base>` is the full SHA the ledger pinned
+     for the baseline, never a newer `origin/main`: the report removed `RUN_DIR/base`, and a baseline
+     on another commit is not the one the ledger measured.
    - After git writes, `scripts/restore_owner.sh <framework_dir>/.git` (nothing to do for the image's
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
@@ -202,13 +208,17 @@ comes after it run again, on the commit the run's Implement verified. Change not
    plan's, or an issue's reproduction), empty when it had none.
 4. The paths later phases read, those that exist: `triage_path`, `reply_draft_path` (`issue`),
    `spec_path`, `design_path` (`feature`), `analysis_path` (`perf`).
-5. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
+5. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
+   `RUN_DIR/handoffs.json` (empty lists when it wrote none): Verify judges a failure the baseline shares
+   by the first, and an integrated kernel is reverted to its `commit` by the second.
+6. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
    no result (the report and ledger say).
 
 Return:
 
 ```json
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
+ "known_issues": [], "handoffs": [],
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_claim": "",
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md", "notes": ""}
 ```
@@ -318,7 +328,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
   `bisect_fixed` run that would.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
-  `integration_failed`, `rejected`, `not_integrated`) and package paths. A `not_integrated` hand-off's
+  `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
+  `integration_held` hand-off's unit gate has no result: its integration commit is still on the branch,
+  unverified. Write `handoffs` and `known_issues` as given to `RUN_DIR/handoffs.json` and
+  `RUN_DIR/known_issues.json`, which a run resumed from Verify restores. A `not_integrated` hand-off's
   back end found a gain that the run, stopped by the control file, never integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with

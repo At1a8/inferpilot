@@ -1147,6 +1147,77 @@ class ProposeKnowledgeTest(unittest.TestCase):
         outside.write_text(saved.read_text().replace("knowledge/known_issues.md", "inferpilot.js"))
         self.assertEqual(self.propose(extra=["--patch", str(outside)], inferpilot=fresh)[0], 1, "only knowledge/ goes in")
 
+    def test_proposed_later_from_the_checkout_that_saved_it_that_checkout_reads_main_again(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(known.read_text(), "# Known issues\n", "the proposed edits leave the checkout that held them")
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n\n## KI-002 — more\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("KI-002 — more", known.read_text(), "edits beyond the saved patch stay")
+
+    def test_a_saved_patch_reaching_outside_knowledge_by_any_path_is_not_pushed(self):
+        import subprocess
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        (self.inferpilot / "odd dir").mkdir()
+        (self.inferpilot / "odd dir" / "x.sh").write_text("echo outside\n")
+        git("add", "-N", "odd dir/x.sh", cwd=self.inferpilot)
+        sneaky = self.run / "sneaky.patch"
+        sneaky.write_text(subprocess.run(["git", "-C", str(self.inferpilot), "diff", "--binary"],
+                                         capture_output=True, text=True, check=True).stdout)
+        self.assertIn("diff --git a/odd dir/x.sh b/odd dir/x.sh", sneaky.read_text())
+        git("reset", "-q", cwd=self.inferpilot)
+        git("checkout", "-q", "--", "knowledge", cwd=self.inferpilot)
+        shutil.rmtree(self.inferpilot / "odd dir")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(sneaky)])
+        self.assertEqual(rc, 1, err)
+        self.assertIn("odd dir/x.sh", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def _main_and_checkout_have(self, text):
+        other = self.origin.parent / "other"
+        if not other.exists():
+            git("clone", "-q", "-b", "main", str(self.origin), str(other))
+        (other / "knowledge" / "known_issues.md").write_text(text)
+        git("commit", "-qam", "main", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        return other
+
+    def test_an_entry_main_and_the_run_both_changed_stops_for_a_human(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("open", "workaround: AITER_X=0"))
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #123"))
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("knowledge/known_issues.md", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_an_entry_the_run_changed_and_one_main_appended_are_both_kept(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base + "\n## KI-002 — main's\nmain\n")
+        git("commit", "-qam", "main appends", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(
+            base.replace("open", "fixed by #123") + "\n## KI-002 — GLM-5.3 dcp 8\nours\n")
+        rc, out, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-002": "KI-003"})
+        known = self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name)
+        for want in ("Status: fixed by #123\n", "## KI-002 — main's\nmain\n", "## KI-003 — GLM-5.3 dcp 8\nours\n"):
+            self.assertIn(want, known)
+        self.assertNotIn("Status: open", known)
+        self.assertNotIn("<<<<<<<", known)
+
     def test_without_the_file_it_was_made_against_the_patch_itself_tells_its_new_known_issues(self):
         diff = ("diff --git a/knowledge/known_issues.md b/knowledge/known_issues.md\n"
                 "index %s..%s 100644\n--- a/knowledge/known_issues.md\n+++ b/knowledge/known_issues.md\n"

@@ -258,6 +258,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>.log` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
+| `handoffs.json`、`known_issues.json` | report 时的 kernel 交接记录和基线自带的失败；从 Verify 续跑时据此恢复 |
 | `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 

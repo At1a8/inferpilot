@@ -38,8 +38,9 @@ Inputs: `status`, `report_path`, `phases`, `known_issues`.
    `python3 <inferpilot_dir>/scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md`:
    it opens, or updates, a pull request from `inferpilot/knowledge/<run>` to main and restores `knowledge/`
    in the checkout. It first writes the change to `RUN_DIR/knowledge.patch`, which outlives the checkout.
-   Exit 3: remove from your edits and the description what it lists, then run it again. Exit 2 (no
-   `GITHUB_TOKEN`, or one that cannot write to InferPilot's repository) or any other failure: the edits
+   Exit 3: remove from your edits and the description what it lists, then run it again. Exit 4: an
+   existing entry you edited changed on main too; say which in `notes`, for a human to reconcile. Exit 2
+   (no `GITHUB_TOKEN`, or one that cannot write to InferPilot's repository) or any other failure: the edits
    stay in the checkout and in `RUN_DIR/knowledge.patch`; give the command it prints in `notes` (with
    `--patch RUN_DIR/knowledge.patch` it proposes the change later, from any checkout).
 7. Last, make sure the run freed the machine: `python3 <inferpilot_dir>/scripts/run_lock.py release

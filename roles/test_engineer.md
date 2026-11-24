@@ -21,7 +21,8 @@ a gate, `incomplete` and `earlier_evidence`, what the call before left without a
    result, why, and for one still running its PID and where it writes. A check that ran and failed makes
    the gate fail, whatever else has no result: then `incomplete` is empty.
    With `incomplete` given, finish that gate on the same `commit`: read what finished since, wait for
-   what still runs, run what never started, and judge the whole gate. No fix round is spent on it; a gate
+   what still runs, run what never started, and judge the whole gate. When it says the call before
+   returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger first. No fix round is spent on it; a gate
    still without a result after this call stops the package for a human, its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
