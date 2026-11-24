@@ -454,6 +454,10 @@ const scenarios = [
     const reply = r.calls.find((c) => c.key === 'issue_triager:reply');
     check(reply && reply.ins.triage_path === `${RUN}/issue_triage.md`, 'the reply is rewritten from the run\'s triage record');
     check(r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && p.summary.includes('c_WP2')), 'the record says where it resumed');
+    const noRewrite = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'issue_triager:reply': () => null });
+    const u = (noRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(noRewrite.result.reply_draft_path === `${RUN}/reply_draft.md` && u && u.includes('an earlier draft') && !u.includes('Triage draft'),
+      `the draft the resumed run restored, never rewritten, is not called the Triage draft: ${u}`);
   }],
   ['issue: resume_from verify measures nothing on a branch that moved, or without the gate the run recorded', async () => {
     const moved = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
@@ -967,7 +971,7 @@ const scenarios = [
     check(u && !u.startsWith('post the reply draft') && u.includes('ended at Triage'), `a draft no reviewer checked is not offered as is: ${u}`);
     const noRewrite = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:reply': () => null });
     const v = (noRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
-    check(!noRewrite.keys.includes('reviewer:reply') && v && !v.startsWith('post the reply draft') && v.includes('this is the Triage draft'),
+    check(!noRewrite.keys.includes('reviewer:reply') && v && !v.startsWith('post the reply draft') && v.includes('an earlier draft'),
       `a Triage draft the run never rewrote is not offered as is: ${v}`);
   }],
   ['issue: close_fixed that no longer reproduces', async () => {

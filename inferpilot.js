@@ -874,7 +874,7 @@ async function finish(status, at) {
       if (R.reply_draft_path && !C.reply_findings) {
         C.reply_findings = [{ claim: 'the whole draft', issue: at === 'Triage'
           ? 'not checked by the reviewer: the run ended at Triage, before the check'
-          : 'not checked: the triager returned no draft rewritten from how the run ended, so this is the Triage draft' }];
+          : 'not checked: the triager returned no draft rewritten from how the run ended, so this is an earlier draft' }];
       }
       if (C.reply_findings) R.reply_findings = C.reply_findings;
     }
