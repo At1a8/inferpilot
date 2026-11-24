@@ -469,6 +469,7 @@ the container with its status. A run directory holds:
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>.log` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
+| `handoffs.json`, `known_issues.json` | the kernel hand-offs and the failures the baseline shares, as the report had them, which a run resumed from Verify restores |
 | `knowledge_pr.md` | the description of the curator's pull request to InferPilot's repository |
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
 
@@ -588,7 +589,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `bisect_fixed` | `issue`: `true` bisects between the reporter's commit and main, with the reproduction as the test, when the first fails and the second passes, and names the commit that fixed it |
 | `confirm_leads` | default `false`: leads, the problems roles met that are not the task's, are listed in the report with how to reproduce them, and Spinoff runs nothing on the GPUs; `true` checks each on the base commit before the report and drafts an issue for those that show there |
 | `stop_after` | stop after the named phase of the mode (e.g. `Design`, `Reproduce`); a phase the mode does not run comes back as a question |
-| `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md` |
+| `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md`. Every mode but `scan`: `verify` runs Verify and the phases after it again in a run whose Verify ended without a result, on the commit its Implement verified (a branch that moved since stops the run); such a run's `next.rerun_with` says so |
 | `auto_approve_design` | `feature`, default `true`: a design the architect flags, or L3 work, goes on to Implement, and the report says no human approved the design. `false` makes such a design wait at Design for a human (`awaiting_design_review`). `stop_after` still stops |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's own workload and goal, each off by default: `held_out` measures the gain again at a held-out operating point (half the concurrency) and requires it to hold there; `guards` adds guard workloads of InferPilot's choosing to the ones the goal names; `sweep` measures points beyond the workload's own (more concurrencies or lengths) |
 | `tune` | `feature`, default `false`: the feature runs at the configuration of the target PR or design (for FLy, vLLM's window 2, threshold 0.3, top-k 3) and has to work there; `true` adds a work package that chooses its knobs by measurement |

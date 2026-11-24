@@ -415,6 +415,83 @@ const scenarios = [
     });
     check(noClaim.result.status === 'blocked' && noClaim.result.stopped_at === 'Design', `a design that does not state its claim: ${noClaim.result.status}`);
   }],
+  ['feature: resume_from verify measures the claim the run had; nothing before Verify runs again', async () => {
+    const r = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(eqList(r.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
+    check(!r.keys.some((k) => ['director:spec', 'analyst:recon', 'architect:design', 'implementer:implement', 'test_engineer:unit'].includes(k)),
+      `nothing before Verify: ${r.keys}`);
+    const setupIns = r.calls.find((c) => c.key === 'director:setup').ins;
+    check(setupIns.resume_run_dir === RUN && setupIns.resume_from === 'verify', 'Setup reuses the run directory, told to check the resume before its smoke');
+    const pe = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(pe && pe.ins.claim === '+20% output tok/s at equal HBM', `the claim the run had: ${pe && pe.ins.claim}`);
+    check(r.result.done.map((d) => d.wp).join() === 'WP1,WP2', `the packages the run verified: ${JSON.stringify(r.result.done)}`);
+    const rv = r.calls.find((c) => c.key === 'reviewer:review');
+    check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
+    const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
+    check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
+  }],
+  ['feature: resume_from verify restores the known issues and kernel hand-offs the run had', async () => {
+    const ki = { id: 'KI-009', title: 'G4 collapse on the baseline too' };
+    const h = { id: 'K-WP1', wp: 'WP1', owner: 'kernel_workflow', status: 'integrated', integrated_wp: 'K-K-WP1', commit: 'c_K', retries: 0 };
+    const r = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), known_issues: [ki], handoffs: [h] }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, failures: [{ gate: 'G4', failure_class: 'collapse' }] } : { all_pass: true, failures: [] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'bs=1', summary: 'the kernel' }),
+    });
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && (v.ins.known_issues || []).some((k) => k.id === 'KI-009'), 'Verify knows the baseline failures the run proved');
+    const rv = r.calls.find((c) => c.key === 'implementer:rollback' && c.ins.revert);
+    check(rv && rv.ins.revert === 'c_K', `a kernel regression reverts the commit the run integrated: ${rv && JSON.stringify(rv.ins)}`);
+  }],
+  ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
+    const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(eqList(r.phases, ['Setup', 'Verify', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
+    check(!r.keys.some((k) => /^(issue_triager:(triage|reproduce)|investigator:diagnose|implementer:implement)$/.test(k)), `nothing before Verify: ${r.keys}`);
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && eqList(v.ins.extra_gates, [{ gate: 'issue_repro', cmd: 'bash repro.sh', expect: 'fixed' }]), `the run's reproduction is the gate: ${v && JSON.stringify(v.ins.extra_gates)}`);
+    const reply = r.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.triage_path === `${RUN}/issue_triage.md`, 'the reply is rewritten from the run\'s triage record');
+    check(r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && p.summary.includes('c_WP2')), 'the record says where it resumed');
+    const noRewrite = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'issue_triager:reply': () => null });
+    check(noRewrite.result.reply_draft_path === `${RUN}/reply_draft.md`,
+      `a draft the resumed run never rewrote is the one it restored: ${noRewrite.result.reply_draft_path}`);
+  }],
+  ['issue: resume_from verify measures nothing on a branch that moved, or without the gate the run recorded', async () => {
+    const moved = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': () => ({ head_ok: false, head: 'f00d', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: 'bash repro.sh', perf_claim: '' }),
+    });
+    check(moved.result.status === 'blocked' && moved.result.stopped_at === 'Setup' && !moved.keys.includes('verify_engineer:verify'),
+      `a moved branch: ${moved.result.status} at ${moved.result.stopped_at}`);
+    check(moved.result.phases.some((p) => p.phase === 'Setup' && p.summary.includes('f00d')), 'the stop names the head');
+    const noGate = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': () => ({ head_ok: true, head: 'c_WP1', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: '', perf_claim: '' }),
+    });
+    check(noGate.result.stopped_at === 'Setup' && !noGate.keys.includes('verify_engineer:verify'), 'no reproduction recorded: nothing to gate on');
+    const nothing = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'director:resume': () => null });
+    check(nothing.result.stopped_at === 'Setup' && !nothing.keys.includes('verify_engineer:verify'), 'nothing restored: nothing measured');
+  }],
+  ['issue: a Verify that ended without a result offers to run Verify again in the same run directory', async () => {
+    const r = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:verify': () => null });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Verify', `status ${r.result.status}`);
+    check(r.result.next.rerun_with && r.result.next.rerun_with.resume_from === 'verify' && r.result.next.rerun_with.run_dir === RUN,
+      `rerun_with ${JSON.stringify(r.result.next.rerun_with)}`);
+    check(r.result.next.say.startsWith('Verify ended without a result: the verify engineer returned nothing'),
+      `say names why: ${r.result.next.say}`);
+    const failed = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
+    });
+    check(failed.result.stopped_at === 'Verify' && !failed.result.next.rerun_with, 'a measured failure is not offered again as it is');
+  }],
+  ['ci: resume_from verify gates on the failing test the run recorded', async () => {
+    const r = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(!r.keys.includes('ci_guardian:classify') && !r.keys.includes('ci_guardian:bisect'), 'no classify, no bisect');
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && v.ins.extra_gates[0].gate === 'failing_test' && v.ins.extra_gates[0].cmd === 'pytest test_x.py', `gate ${v && JSON.stringify(v.ins.extra_gates)}`);
+    check(!r.keys.includes('perf_engineer:perf_eval'), 'a CI fix is not measured for speed');
+  }],
   ['agents: a timed-out call is not retried and goes on the attention list', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 3, agent_timeout_ms: 100 }, {
       'verify_engineer:verify': async () => {
@@ -1356,6 +1433,8 @@ const scenarios = [
     const setupIns = image.calls.find((c) => c.key === 'director:setup').ins;
     check(setupIns.framework_dir === '/sgl-workspace/sglang', `sglang defaults to the image's checkout: ${setupIns.framework_dir}`);
     check(asks(await run({ mode: 'issue', task: 't', resume_from: 'implement', run_dir: RUN }), 'resume_from'), 'resume outside feature asked');
+    check(asks(await run({ mode: 'scan', resume_from: 'verify', run_dir: RUN }), 'resume_from'), 'a scan has nothing to resume');
+    check(asks(await run({ mode: 'issue', task: 't', resume_from: 'verify' }), 'run_dir'), 'resume_from verify without its run directory asked');
     let msg = '';
     try { await run({ mode: 'issue', task: 't', inferpilot_dir: '' }); } catch (e) { msg = e.message; }
     check(msg.includes('args.inferpilot_dir is required'), `no InferPilot checkout is still an error: ${msg}`);
@@ -1469,6 +1548,10 @@ const scenarios = [
           `${where}: asks ${JSON.stringify(n.ask)}, runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'awaiting_design_review' || (r.status === 'stopped' && r.stopped_at === 'Design' && r.mode === 'feature')) {
         check(again && again.resume_from === 'implement' && again.run_dir === r.run_dir, `${where}: runs again with ${JSON.stringify(again)}`);
+      } else if (r.status === 'blocked' && r.stopped_at === 'Verify'
+        && r.phases.some((p) => p.phase === 'Verify' && p.summary === 'the verify engineer returned nothing')) {
+        check(again && again.resume_from === 'verify' && again.run_dir === r.run_dir && again.stop_after === '',
+          `${where}: a Verify without a result runs again from Verify: ${JSON.stringify(again)}`);
       } else if (r.status === 'stopped') {
         check(again && again.stop_after === '', `${where}: runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'busy') {
