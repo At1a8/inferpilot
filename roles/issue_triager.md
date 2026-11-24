@@ -149,6 +149,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    A failure the run found on the baseline as well (`known_issues`) is reported as what was seen and
    where, not as part of this issue; whether it gets an issue of its own is the human's call.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
+3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
+   `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they
+   name to what the run shows, or drop it, change nothing else, and update the triage record to match.
 
 Return:
 
