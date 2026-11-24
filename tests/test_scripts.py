@@ -37,6 +37,7 @@ import scan_ci  # noqa: E402
 import scan_issues  # noqa: E402
 import scan_upstream  # noqa: E402
 import share_daily_report  # noqa: E402
+import weekly_report  # noqa: E402
 
 
 class CheckFrameworkSkillsTest(unittest.TestCase):
@@ -189,6 +190,96 @@ class LatestImageTest(unittest.TestCase):
         self.assertEqual(cmp("rocm/sgl-dev:v0.5.23-rocm720-mi30x-20261104", self.TAGS), "current", "a variant against its own newest")
         self.assertEqual(cmp("rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261102", None), "unknown", "Docker Hub not readable")
         self.assertEqual(cmp("my/custom:latest", self.TAGS), "not-daily")
+
+
+class WeeklyReportTest(unittest.TestCase):
+    """scripts/weekly_report.py: the range and what the weekly report counts; GitHub and git are mocked."""
+
+    NOW = weekly_report.dt.datetime(2026, 11, 24, 9, 57, tzinfo=weekly_report.UTC8)
+
+    def test_by_default_from_seven_days_back_at_midnight_to_now(self):
+        start, end = weekly_report.window(now=self.NOW)
+        self.assertEqual((start.isoformat(), end), ("2026-11-17T00:00:00+08:00", self.NOW))
+
+    def test_a_range_given_as_dates_or_times_in_utc8(self):
+        start, end = weekly_report.window(now=self.NOW, since="2026-11-17", until="2026-11-23")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-17T00:00:00+08:00", "2026-11-24T00:00:00+08:00"))
+        start, end = weekly_report.window(now=self.NOW, since="2026-11-17 08:30", until="2026-11-24T10:00Z")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-17T08:30:00+08:00", "2026-11-24T18:00:00+08:00"))
+
+    def test_an_end_alone_takes_the_seven_days_before_it(self):
+        start, end = weekly_report.window(now=self.NOW, until="2026-11-16")
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-11-10T00:00:00+08:00", "2026-11-17T00:00:00+08:00"))
+
+    def test_an_empty_range_is_refused(self):
+        with self.assertRaises(ValueError):
+            weekly_report.window(now=self.NOW, since="2026-11-24 10:00")
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(weekly_report.main(["--since", "2026-11-24", "--until", "2026-11-20"]), 2)
+        self.assertIn("empty", err.getvalue())
+
+    @staticmethod
+    def pull(n, created, merged=None, closed=None, head="b", title="t", updated=None, state="open"):
+        return {"number": n, "title": title, "user": {"login": "u"}, "html_url": "h%d" % n, "head": {"ref": head},
+                "created_at": created, "merged_at": merged, "closed_at": closed or merged, "updated_at": updated or created,
+                "state": state}
+
+    def test_merged_closed_and_open_are_told_apart_at_the_range(self):
+        start, end = weekly_report.window(now=self.NOW)
+        pulls = [self.pull(1, "2026-11-10T00:00:00Z", merged="2026-11-16T15:59:59Z"),  # 23:59:59 UTC+8, the day before
+                 self.pull(2, "2026-11-10T00:00:00Z", merged="2026-11-16T16:00:00Z"),  # 00:00 UTC+8, the first second
+                 self.pull(3, "2026-11-18T00:00:00Z", closed="2026-11-19T00:00:00Z"),
+                 self.pull(4, "2026-11-23T00:00:00Z"),
+                 self.pull(5, "2026-11-12T00:00:00Z", closed="2026-11-24T02:00:00Z"),  # closed after the end: open at it
+                 self.pull(6, "2026-11-24T02:00:00Z")]                                 # opened after the end
+        got = weekly_report.sort_pulls(pulls, start, end)
+        self.assertEqual([[p["number"] for p in got[k]] for k in ("merged", "closed", "open")], [[2], [3], [4, 5]])
+
+    def test_a_kind_from_the_branch_or_the_title(self):
+        k = weekly_report.kind_hint
+        self.assertEqual([k("inferpilot/133537752860-qwen35-encoder-sdpa", "[Fix] [AMD] x"),
+                          k("inferpilot/50386-int8-w8a8-rocm", "[Fix] [AMD] x"), k("fangyuan/pard2", "[Feat] [AMD] PARD2: x"),
+                          k("inferpilot/x", "[Perf] y"), k("inferpilot/gfx942-mla-fp8-ps0-startup", "[Fix] [AMD] aiter: x")],
+                         ["ci", "issue", "feature", "perf", ""])
+
+    def test_the_change_is_counted_with_git_and_with_github_only_when_git_cannot(self):
+        files = {"files": [{"filename": "a.py", "additions": 0, "deletions": 0},
+                           {"filename": "b.md", "additions": 3, "deletions": 1}]}
+        for counted, want in (({"files": 2, "insertions": 50, "deletions": 1}, {"insertions": 50, "counted_by": "git"}),
+                              (None, {"insertions": 3, "counted_by": "github"})):
+            with mock.patch.object(weekly_report._github, "get", return_value=files), \
+                    mock.patch.object(weekly_report, "git_change", return_value=counted):
+                got = weekly_report.change("o/r", "a1", "b2")
+            self.assertEqual({k: got[k] for k in want}, want)
+            self.assertEqual((got["files"], got["deletions"], got["paths"]), (2, 1, ["a.py", "b.md"]))
+
+    def test_git_counts_only_in_a_checkout_of_the_repository(self):
+        out = {"remote": "https://github.com/At1a8/inferpilot.git\n",
+               "diff": " 92 files changed, 11497 insertions(+), 1017 deletions(-)\n"}
+        with mock.patch.object(weekly_report, "git",
+                               side_effect=lambda *a: subprocess.CompletedProcess(a, 0, out.get(a[0], ""), "")):
+            self.assertEqual(weekly_report.git_change("At1a8/inferpilot", "a1", "b2"),
+                             {"files": 92, "insertions": 11497, "deletions": 1017})
+            self.assertIsNone(weekly_report.git_change("someone/else", "a1", "b2"))
+
+    def test_upstream_pulls_from_inferpilot_branches_and_feature_skills_in_the_range(self):
+        start, end = weekly_report.window(now=self.NOW)
+        prs = {1: self.pull(1, "2026-11-01T00:00:00Z", head="inferpilot/50386-x", updated="2026-11-23T00:00:00Z"),
+               2: self.pull(2, "2026-11-01T00:00:00Z", head="someone/x", updated="2026-11-23T00:00:00Z"),
+               3: self.pull(3, "2026-11-01T00:00:00Z", head="inferpilot/9-old"),
+               4: self.pull(4, "2026-11-01T00:00:00Z", head="fangyuan/pard2", title="[Feat] [AMD] PARD2",
+                            updated="2026-11-20T00:00:00Z")}
+        with mock.patch.object(weekly_report._github, "search_issues", return_value=[{"number": n} for n in (1, 2, 3)]), \
+                mock.patch.object(weekly_report._github, "get", side_effect=lambda path, params=None: prs[int(path.rsplit("/", 1)[1])]):
+            got = weekly_report.upstream_pulls("o/s", start, end, {4: "feature_skill:pard2"})
+        self.assertEqual([(p["number"], p["kind_hint"], p["source"]) for p in got],
+                         [(1, "issue", "branch"), (4, "feature", "feature_skill:pard2")])
+
+    def test_a_github_failure_exits_1(self):
+        with mock.patch.object(weekly_report, "collect", side_effect=weekly_report.urllib.error.URLError("down")), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(weekly_report.main([]), 1)
+        self.assertIn("down", err.getvalue())
 
 
 class DailyReportTest(unittest.TestCase):
