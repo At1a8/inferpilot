@@ -341,6 +341,8 @@ const scenarios = [
     });
     const ver = r.calls.filter((c) => c.key === 'verify_engineer:verify');
     check(ver.length === 1 && ver[0].ins.time_limit_min === 120, `one call, told 120 min: ${ver.map((c) => c.ins.time_limit_min)}`);
+    const unit = r.calls.find((c) => c.key === 'test_engineer:unit');
+    check(unit && unit.ins.time_limit_min === 120, `the test engineer is told its limit too: ${unit && unit.ins.time_limit_min}`);
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);
     const told = async (ms) => (await run({ mode: 'feature', task: 't', agent_timeout_ms: ms })).calls
