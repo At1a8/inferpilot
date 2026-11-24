@@ -415,6 +415,65 @@ const scenarios = [
     });
     check(noClaim.result.status === 'blocked' && noClaim.result.stopped_at === 'Design', `a design that does not state its claim: ${noClaim.result.status}`);
   }],
+  ['feature: resume_from verify measures the claim the run had; nothing before Verify runs again', async () => {
+    const r = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(eqList(r.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
+    check(!r.keys.some((k) => ['director:spec', 'analyst:recon', 'architect:design', 'implementer:implement', 'test_engineer:unit'].includes(k)),
+      `nothing before Verify: ${r.keys}`);
+    check(r.calls.find((c) => c.key === 'director:setup').ins.resume_run_dir === RUN, 'Setup reuses the run directory');
+    const pe = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(pe && pe.ins.claim === '+20% output tok/s at equal HBM', `the claim the run had: ${pe && pe.ins.claim}`);
+    check(r.result.done.map((d) => d.wp).join() === 'WP1,WP2', `the packages the run verified: ${JSON.stringify(r.result.done)}`);
+    const rv = r.calls.find((c) => c.key === 'reviewer:review');
+    check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
+    const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
+    check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
+  }],
+  ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
+    const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(eqList(r.phases, ['Setup', 'Verify', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
+    check(!r.keys.some((k) => /^(issue_triager:(triage|reproduce)|investigator:diagnose|implementer:implement)$/.test(k)), `nothing before Verify: ${r.keys}`);
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && eqList(v.ins.extra_gates, [{ gate: 'issue_repro', cmd: 'bash repro.sh', expect: 'fixed' }]), `the run's reproduction is the gate: ${v && JSON.stringify(v.ins.extra_gates)}`);
+    const reply = r.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.triage_path === `${RUN}/issue_triage.md`, 'the reply is rewritten from the run\'s triage record');
+    check(r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && p.summary.includes('c_WP2')), 'the record says where it resumed');
+  }],
+  ['issue: resume_from verify measures nothing on a branch that moved, or without the gate the run recorded', async () => {
+    const moved = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': () => ({ head_ok: false, head: 'f00d', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: 'bash repro.sh', perf_claim: '' }),
+    });
+    check(moved.result.status === 'blocked' && moved.result.stopped_at === 'Setup' && !moved.keys.includes('verify_engineer:verify'),
+      `a moved branch: ${moved.result.status} at ${moved.result.stopped_at}`);
+    check(moved.result.phases.some((p) => p.phase === 'Setup' && p.summary.includes('f00d')), 'the stop names the head');
+    const noGate = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': () => ({ head_ok: true, head: 'c_WP1', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: '', perf_claim: '' }),
+    });
+    check(noGate.result.stopped_at === 'Setup' && !noGate.keys.includes('verify_engineer:verify'), 'no reproduction recorded: nothing to gate on');
+    const nothing = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'director:resume': () => null });
+    check(nothing.result.stopped_at === 'Setup' && !nothing.keys.includes('verify_engineer:verify'), 'nothing restored: nothing measured');
+  }],
+  ['issue: a Verify that ended without a result offers to run Verify again in the same run directory', async () => {
+    const r = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:verify': () => null });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Verify', `status ${r.result.status}`);
+    check(r.result.next.rerun_with && r.result.next.rerun_with.resume_from === 'verify' && r.result.next.rerun_with.run_dir === RUN,
+      `rerun_with ${JSON.stringify(r.result.next.rerun_with)}`);
+    check(r.result.next.say.startsWith('Verify ended without a result'), `say: ${r.result.next.say}`);
+    const failed = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
+    });
+    check(failed.result.stopped_at === 'Verify' && !failed.result.next.rerun_with, 'a measured failure is not offered again as it is');
+  }],
+  ['ci: resume_from verify gates on the failing test the run recorded', async () => {
+    const r = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(!r.keys.includes('ci_guardian:classify') && !r.keys.includes('ci_guardian:bisect'), 'no classify, no bisect');
+    const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(v && v.ins.extra_gates[0].gate === 'failing_test' && v.ins.extra_gates[0].cmd === 'pytest test_x.py', `gate ${v && JSON.stringify(v.ins.extra_gates)}`);
+    check(!r.keys.includes('perf_engineer:perf_eval'), 'a CI fix is not measured for speed');
+  }],
   ['agents: a timed-out call is not retried and goes on the attention list', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 3, agent_timeout_ms: 100 }, {
       'verify_engineer:verify': async () => {
@@ -711,6 +770,48 @@ const scenarios = [
     check(r.keys.includes('implementer:rollback'), 'rollback called');
     check(!r.keys.includes('verify_engineer:verify'), 'no verification of a failed package');
   }],
+  ['implement: a unit gate with checks still running is finished by one more call, which spends no fix round', async () => {
+    const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', evidence: 'runs 1-5 pass' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const units = r.calls.filter((c) => c.key === 'test_engineer:unit');
+    check(units.length === 3, `WP1 twice, WP2 once: ${units.length}`);
+    check(units[1] && units[1].ins.commit === 'c_WP1' && String(units[1].ins.incomplete).includes('pid 4242')
+      && units[1].ins.earlier_evidence === 'runs 1-3 pass', 'the second call finishes the same commit, told what is left');
+    check(units[0].ins.time_limit_min > 0, `the test engineer is told its limit: ${units[0].ins.time_limit_min}`);
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 2 && !r.keys.includes('implementer:rollback'),
+      'no fix round and no rollback for a gate without a result');
+  }],
+  ['implement: a unit gate still without a result stops the package for a human: not rolled back, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'DCP1 never started: the GPUs were taken' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
+    check(r.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'one call to finish it, no more');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 1, 'no fix round');
+    check(!r.keys.includes('implementer:rollback'), 'nothing measured went against the change: no rollback');
+    const imp = r.result.phases.find((p) => p.phase === 'Implement');
+    check(imp && imp.verdict === 'incomplete' && imp.summary.includes('DCP1 never started'), `the stop says why: ${imp && imp.summary}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('unverified')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+    const nothing = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'run 3 still going' } : null),
+    });
+    check(nothing.result.stopped_at === 'Implement' && !nothing.keys.includes('implementer:rollback')
+      && nothing.result.attention.some((a) => a.wp === 'WP1'), 'a finishing call that returns nothing leaves the gate without a result too');
+    const failed = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: '', failure_summary: 'run 2 diverged' }),
+    });
+    check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
+      'a check that failed is a failure: rolled back as before');
+  }],
   ['feature: baseline that does not reproduce blocks at Setup', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', baseline: 'spread 9% > 2%', gpu_ids: '0' }),
@@ -778,6 +879,37 @@ const scenarios = [
     check(fr && fr.ins.status === 'fixed_on_main' && fr.ins.stopped_at === 'Reproduce', 'a conclusion without a fix gets its reply too');
     const early = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': () => null });
     check(!early.keys.includes('issue_triager:reply'), 'no triage, no reply to rewrite');
+  }],
+  ['issue: the reviewer checks the reply draft against the run; what it finds is rewritten once, and what is left the user hears of', async () => {
+    const clean = await run({ mode: 'issue', task: 'i' });
+    const chk = clean.calls.find((c) => c.key === 'reviewer:reply');
+    check(chk && chk.ins.reply_draft_path === `${RUN}/reply_draft.md` && chk.ins.status === 'ready_for_review',
+      'the reviewer reads the rewritten draft and how the run ended');
+    check(clean.keys.indexOf('reviewer:reply') > clean.keys.indexOf('issue_triager:reply')
+      && clean.keys.indexOf('reviewer:reply') < clean.keys.indexOf('director:report'), 'after the draft, before the report');
+    check(!chk.prompt.includes('Return it in\n`leads`'), 'a closing phase hands on no leads');
+    check(clean.result.next.user.some((u) => u.startsWith('post the reply draft on the issue:')), 'a clean draft is the user\'s to post');
+    const finding = { claim: 'a human reviewed the fix', issue: 'nobody did: the PR is a draft for review', evidence: 'run.json' };
+    const fixed = await run({ mode: 'issue', task: 'i', review_model: 'other-model' }, {
+      'reviewer:reply': (ins, n) => ({ findings: n === 1 ? [finding] : [], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }),
+    });
+    const rewrite = fixed.calls.filter((c) => c.key === 'issue_triager:reply')[1];
+    check(rewrite && JSON.stringify(rewrite.ins.reply_findings).includes('a human reviewed the fix'), 'the findings go back to the triager');
+    check(fixed.calls.filter((c) => c.key === 'reviewer:reply').map((c) => c.model).join() === 'other-model,other-model',
+      'review_model reaches the reply check too');
+    check(fixed.result.reply_draft_path === `${RUN}/reply_draft_2.md` && fixed.result.next.user.some((u) => u.startsWith('post the reply draft')),
+      `the rewritten draft, checked clean: ${fixed.result.reply_draft_path}`);
+    check(fixed.result.phases.some((p) => p.phase === 'Reply' && p.verdict === 'checked'), 'the check is in the record');
+    const left = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }) });
+    check(left.keys.filter((k) => k === 'reviewer:reply').length === 2 && left.keys.filter((k) => k === 'issue_triager:reply').length === 2,
+      'one rewrite, checked once more, no further round');
+    const say = (left.result.next.user || []).find((u) => u.includes('reply draft'));
+    check(say && say.startsWith('read the reply draft against what the run showed before posting it') && say.includes('nobody did'),
+      `what is left reaches the user: ${say}`);
+    const unchecked = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => null });
+    const u = (unchecked.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(unchecked.result.status === 'ready_for_review' && u && u.includes('not checked'), `a draft nobody checked is not offered for posting as is: ${u}`);
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
@@ -1356,6 +1488,8 @@ const scenarios = [
     const setupIns = image.calls.find((c) => c.key === 'director:setup').ins;
     check(setupIns.framework_dir === '/sgl-workspace/sglang', `sglang defaults to the image's checkout: ${setupIns.framework_dir}`);
     check(asks(await run({ mode: 'issue', task: 't', resume_from: 'implement', run_dir: RUN }), 'resume_from'), 'resume outside feature asked');
+    check(asks(await run({ mode: 'scan', resume_from: 'verify', run_dir: RUN }), 'resume_from'), 'a scan has nothing to resume');
+    check(asks(await run({ mode: 'issue', task: 't', resume_from: 'verify' }), 'run_dir'), 'resume_from verify without its run directory asked');
     let msg = '';
     try { await run({ mode: 'issue', task: 't', inferpilot_dir: '' }); } catch (e) { msg = e.message; }
     check(msg.includes('args.inferpilot_dir is required'), `no InferPilot checkout is still an error: ${msg}`);
@@ -1469,6 +1603,10 @@ const scenarios = [
           `${where}: asks ${JSON.stringify(n.ask)}, runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'awaiting_design_review' || (r.status === 'stopped' && r.stopped_at === 'Design' && r.mode === 'feature')) {
         check(again && again.resume_from === 'implement' && again.run_dir === r.run_dir, `${where}: runs again with ${JSON.stringify(again)}`);
+      } else if (r.status === 'blocked' && r.stopped_at === 'Verify'
+        && r.phases.some((p) => p.phase === 'Verify' && p.summary === 'the verify engineer returned nothing')) {
+        check(again && again.resume_from === 'verify' && again.run_dir === r.run_dir && again.stop_after === '',
+          `${where}: a Verify without a result runs again from Verify: ${JSON.stringify(again)}`);
       } else if (r.status === 'stopped') {
         check(again && again.stop_after === '', `${where}: runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'busy') {

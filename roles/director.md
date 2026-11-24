@@ -185,6 +185,34 @@ Return:
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
+## PHASE=resume (resume_from=verify, right after Setup)
+
+Inputs: `resume_run_dir`, the run directory Setup reused. The run's Verify ended without a result (its
+verify engineer returned nothing or timed out, its servers went with the call), and only Verify and what
+comes after it run again, on the commit the run's Implement verified. Change nothing.
+
+1. From `RUN_DIR/experiment_ledger.md` and `run_report.md` (or `validation_report.md`): the work packages
+   Implement verified, each with its commit and evidence, and the last of those commits. `head_ok` is
+   true only when the task branch's head in the worktree is that commit and the worktree is clean:
+   a branch that moved after Implement (a commit, an edit, a reset) is not what the run verified.
+2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
+   from `issue_triage.md` and the ledger's Reproduce section); `ci`, the failing test
+   (`failing_test_cmd`, from `ci_triage.md`). Leave it empty when the run directory does not record it.
+3. `perf_claim`: the claim the run's Performance phase was to measure (the spec's, the design's, the
+   plan's, or an issue's reproduction), empty when it had none.
+4. The paths later phases read, those that exist: `triage_path`, `reply_draft_path` (`issue`),
+   `spec_path`, `design_path` (`feature`), `analysis_path` (`perf`).
+5. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
+   no result (the report and ledger say).
+
+Return:
+
+```json
+{"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
+ "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_claim": "",
+ "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md", "notes": ""}
+```
+
 ## PHASE=spec (feature)
 
 1. Identify the source of truth (upstream PR, design or paper) and its commit; list unmerged

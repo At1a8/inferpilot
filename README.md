@@ -41,7 +41,8 @@ questions, one per field, each with options or a default. A complete definition 
 
 Every implementation runs one work package at a time; an independent test engineer re-runs its unit
 test, checks that the test fails without the change, and runs the feature-off check; a package that
-keeps failing is rolled back. Verification failures go to an investigator that runs the controls
+keeps failing is rolled back, while one whose gate has no result yet is finished by one more call and
+otherwise stops for a human, never rolled back. Verification failures go to an investigator that runs the controls
 before any instrumentation and returns a fix, a proof that the failure is pre-existing on the
 baseline, or an inconclusive verdict that stops the task. Before the PR, a reviewer reads the diff and
 its evidence the way a maintainer would, starting from a catalog of known reward hacks — changes that
@@ -99,7 +100,7 @@ the roles:
 | `verify_engineer` | Verify | runs the correctness gates (G0, G2–G4, composability, the mode's gate) on fresh servers against a same-pattern baseline, classifying and counting every failure |
 | `investigator` | Investigate, Diagnose | runs the controls first, then one-mechanism-at-a-time experiments with a hypothesis ledger; returns fix work packages, a known issue the baseline shares, an inconclusive verdict, or (for an issue) a root cause outside the AMD side; probes only behind switches |
 | `perf_engineer` | Profile, Performance | checks the run took the intended path, turns a steady-state trace into fixed tables (kernels, overlap, fuse patterns, layers), metrics and opportunities with upper bounds; evaluates changes at equal budget on the fixed workload, against noise and the guard workloads the task names (a held-out point and more guards when the task asks), checking the known measurement hacks |
-| `reviewer` | Review | reads the diff and its evidence as a maintainer would, starting from the catalog of known reward hacks: shapes, dtypes, parallel layouts, graphs, fallbacks, do-no-harm, the framework's conventions, a fair benchmark; requested changes, and a test for every confirmed hack, come back as work packages; can run on another model (`review_model`) |
+| `reviewer` | Review, Reply | reads the diff and its evidence as a maintainer would, starting from the catalog of known reward hacks: shapes, dtypes, parallel layouts, graphs, fallbacks, do-no-harm, the framework's conventions, a fair benchmark; requested changes, and a test for every confirmed hack, come back as work packages; checks an issue's reply draft against the run, claim by claim, before the report; can run on another model (`review_model`) |
 | `kernel_liaison` | Kernel | turns a kernel hand-off into the back end's task, runs `command` back ends, judges the result on the back end's own verification and returns a gain as a work package |
 | `pr_engineer` | PR | changes no code: checks hygiene, lint and CI registration (gaps go back as work packages), arranges one commit per work package without changing the tree, trial-merges main to report conflicts, checks feature off on the final commit, writes the PR body and the push command |
 | `curator` | Report | writes what the run proved into `knowledge/` (known issues, feature skills, CUDA → AMD rows, new reward hacks, method lessons), every number traceable to the run, and proposes it as a pull request to InferPilot's repository |
@@ -469,7 +470,8 @@ the container with its status. A run directory holds:
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>.log` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
-| `knowledge_pr.md` | the description of the curator's pull request to InferPilot's repository |
+| `reply_draft.md`, `reply_check.md` | an issue's reply draft, for you to post, and the reviewer's check of it against the run |
+| `knowledge_pr.md`, `knowledge.patch` | the description of the curator's pull request to InferPilot's repository, and its change, which `scripts/propose_knowledge.py --patch` proposes later from any checkout |
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
 
 A scan's `daily_report.md` is written to be shared, and `scripts/daily_report.py check` has made sure
@@ -578,7 +580,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `bisect_fixed` | `issue`: `true` bisects between the reporter's commit and main, with the reproduction as the test, when the first fails and the second passes, and names the commit that fixed it |
 | `confirm_leads` | default `false`: leads, the problems roles met that are not the task's, are listed in the report with how to reproduce them, and Spinoff runs nothing on the GPUs; `true` checks each on the base commit before the report and drafts an issue for those that show there |
 | `stop_after` | stop after the named phase of the mode (e.g. `Design`, `Reproduce`); a phase the mode does not run comes back as a question |
-| `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md` |
+| `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md`. Every mode but `scan`: `verify` runs Verify and the phases after it again in a run whose Verify ended without a result, on the commit its Implement verified (a branch that moved since stops the run); such a run's `next.rerun_with` says so |
 | `auto_approve_design` | `feature`, default `true`: a design the architect flags, or L3 work, goes on to Implement, and the report says no human approved the design. `false` makes such a design wait at Design for a human (`awaiting_design_review`). `stop_after` still stops |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's own workload and goal, each off by default: `held_out` measures the gain again at a held-out operating point (half the concurrency) and requires it to hold there; `guards` adds guard workloads of InferPilot's choosing to the ones the goal names; `sweep` measures points beyond the workload's own (more concurrencies or lengths) |
 | `tune` | `feature`, default `false`: the feature runs at the configuration of the target PR or design (for FLy, vLLM's window 2, threshold 0.3, top-k 3) and has to work there; `true` adds a work package that chooses its knobs by measurement |

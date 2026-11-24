@@ -30,7 +30,8 @@
 #                     in a venv of its own)
 #   Judge-graded sets: JUDGE_KEY (default LLM_GATEWAY_KEY), JUDGE_URL (default the AMD LLM gateway),
 #   JUDGE_MODEL (default Claude-Opus-5; never the model under test), JUDGE_NTID (the gateway's user
-#   header, which its SDK route requires)
+#   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades, and
+#   where evalscope writes it (its configs, its log) it is replaced by <JUDGE_KEY> once the run ends.
 #
 # Before each set the server's prefix cache is flushed; after it, /server_info's speculative accept
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
@@ -153,12 +154,30 @@ sampling_settings() {
          "chat_template_kwargs=${TEMPLATE_KWARGS} top_p=${TOP_P:-server} top_k=${TOP_K:-server}"
 }
 
+# evalscope keeps its arguments, the judge's among them, in the run's configs and log: the results of a
+# run hold no key (knowledge/guardrails.md, secrets).
+redact_key() {  # <dir>
+    [ -n "${JUDGE_KEY}" ] || return 0
+    KEY="${JUDGE_KEY}" python3 - "$1" <<'EOF'
+import os, sys
+key = os.environ["KEY"].encode()
+for root, _, files in os.walk(sys.argv[1]):
+    for name in files:
+        path = os.path.join(root, name)
+        with open(path, "rb") as f:
+            data = f.read()
+        if key in data:
+            with open(path, "wb") as f:
+                f.write(data.replace(key, b"<JUDGE_KEY>"))
+EOF
+}
+
 FAILED=0
 SUMMARY=""
 
 run_one() {  # <set>
     local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line complete
-    local -a limit_arg=() args_arg=()
+    local -a limit_arg=() args_arg=() judge_arg=()
     dataset_profile "${ds}"
     batch=${BATCH:-${DS_BATCH}}
     work_dir="${RESULT_ROOT}/${TAG}_${ds}"
@@ -200,8 +219,12 @@ run_one() {  # <set>
          "results ${run_dir}; log ${log}"
     curl -s -X POST --max-time 60 "${SERVER_URL}/flush_cache" > /dev/null
 
-    # The gateway wants its key in a header as well, which evalscope's CLI passes through model_args.
-    judge_args="{\"model_id\": \"${JUDGE_MODEL}\", \"api_url\": \"${JUDGE_URL}\", \"api_key\": \"${JUDGE_KEY}\", \"model_args\": {\"default_headers\": {\"Ocp-Apim-Subscription-Key\": \"${JUDGE_KEY}\", \"user\": \"${JUDGE_NTID}\"}}}"
+    # Only a set a judge grades gets the judge. The gateway wants its key in a header as well, which
+    # evalscope's CLI passes through model_args.
+    if [ "${DS_JUDGE}" = 1 ]; then
+        judge_args="{\"model_id\": \"${JUDGE_MODEL}\", \"api_url\": \"${JUDGE_URL}\", \"api_key\": \"${JUDGE_KEY}\", \"model_args\": {\"default_headers\": {\"Ocp-Apim-Subscription-Key\": \"${JUDGE_KEY}\", \"user\": \"${JUDGE_NTID}\"}}}"
+        judge_arg=(--judge-strategy auto --judge-model-args "${judge_args}")
+    fi
     "${EVALSCOPE}" eval \
         --model "${MODEL}" \
         --api-url "${API_URL}" \
@@ -210,8 +233,7 @@ run_one() {  # <set>
         --dataset-hub "${DATASET_HUB}" \
         "${args_arg[@]}" \
         --generation-config "${gen_cfg}" \
-        --judge-strategy auto \
-        --judge-model-args "${judge_args}" \
+        "${judge_arg[@]}" \
         --eval-batch-size "${batch}" \
         --stream \
         --ignore-errors \
@@ -220,6 +242,7 @@ run_one() {  # <set>
         --no-timestamp \
         --repeats 1 > "${log}" 2>&1
     rc=$?
+    redact_key "${run_dir}"
 
     accept=$(curl -s --max-time 20 "${SERVER_URL}/server_info" | python3 -c \
         "import json,sys; print([s.get('avg_spec_accept_length') for s in json.load(sys.stdin)['internal_states']])" \

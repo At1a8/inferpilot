@@ -3,6 +3,7 @@
 
     python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md
     python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md --dry-run
+    python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md --patch RUN_DIR/knowledge.patch
 
 Only changes under knowledge/ go in. They are applied as a patch onto the current origin/main in a
 throwaway worktree, committed on inferpilot/knowledge/<run directory name> and pushed there, never to main;
@@ -12,6 +13,12 @@ and pull request. It pushes with GITHUB_TOKEN, the token every GitHub script of 
 Contents and Pull requests: read and write on this repository (README step 1). The repository is public: added lines or a body that name a
 local path, this machine or an internal site stop it, as in scripts/daily_report.py. Without the token,
 or on any failure, the changes stay where they are. Standard library and git only.
+
+The patch is also written to RUN_DIR/knowledge.patch, which outlives the checkout: --patch proposes it later,
+from any checkout. Runs started from the same main give their new known issues the same next KI- number:
+a number main has taken since is replaced, in the entry and in every line the patch adds, by the next free
+one on main, and the pull request says which ("renumbered"); entries main added at the end of the file
+are kept beside this run's.
 """
 from __future__ import annotations
 
@@ -19,6 +26,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +40,10 @@ from daily_report import default_repo, leaks, this_host  # noqa: E402
 INFERPILOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKER = "<!-- inferpilot:knowledge -->"
 AUTHOR = ["-c", "user.name=InferPilot curator", "-c", "user.email=inferpilot-curator@users.noreply.github.com"]
+KNOWN = "knowledge/known_issues.md"
+KI_HEADING = re.compile(r"^## (KI-(\d+))\b", re.M)
+KI_REF = re.compile(r"\bKI-\d+\b")
+PATCHED = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.M)
 
 
 def api(method: str, path: str, token: str, data: dict | None = None):
@@ -75,6 +87,55 @@ def added(diff: str) -> str:
     return "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
 
 
+def patched(diff: str) -> list:
+    """The paths a patch touches."""
+    return sorted({p for pair in PATCHED.findall(diff) for p in pair if p != "dev/null"})
+
+
+def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
+    """New known issues of the patch (headings of known_issues.md that `ours`, the checkout's HEAD, lacks)
+    whose number `main` has taken: each gets the next free number on main, in every line the patch adds."""
+    had, taken = {m[0] for m in KI_HEADING.findall(ours)}, {m[0] for m in KI_HEADING.findall(main)}
+    new, in_known = [], False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            in_known = line.endswith(" b/" + KNOWN)
+        elif in_known and line.startswith("+") and not line.startswith("+++"):
+            m = KI_HEADING.match(line[1:])
+            if m and m.group(1) not in had and m.group(1) not in new:
+                new.append(m.group(1))
+    used = taken | had | set(new)
+    nxt = max([int(k[3:]) for k in used] + [0]) + 1
+    mapping = {}
+    for ki in new:
+        if ki in taken:
+            mapping[ki] = "KI-%03d" % nxt
+            nxt += 1
+    if not mapping:
+        return diff, {}
+    out = [KI_REF.sub(lambda m: mapping.get(m.group(0), m.group(0)), l) if l.startswith("+") and not l.startswith("+++") else l
+           for l in diff.splitlines(keepends=True)]
+    return "".join(out), mapping
+
+
+def preimage(inferpilot: str, diff: str, path: str) -> str:
+    """The file the patch was made against: its blob from the patch's index line (--binary writes it whole),
+    else HEAD's."""
+    m = re.search(r"^diff --git a/%s b/%s\n(?:(?!diff --git ).*\n)*?index ([0-9a-f]+)\.\." % (re.escape(path), re.escape(path)),
+                  diff, re.M)
+    text = git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
+    return text or git(inferpilot, "show", "HEAD:" + path, check=False)
+
+
+def with_renumbering(body: str, mapping: dict) -> str:
+    if not mapping:
+        return body
+    pairs = ", ".join("%s is %s here" % (k, v) for k, v in mapping.items())
+    text = KI_REF.sub(lambda m: mapping.get(m.group(0), m.group(0)), body)
+    return text.rstrip() + "\n\nNumbered against main when proposed: %s; the run's own files keep %s.\n" % (
+        pairs, ", ".join(mapping))
+
+
 def auth_env(token: str) -> dict:
     """The token as an HTTP header in git's environment, never on a command line."""
     basic = base64.b64encode(("x-access-token:%s" % token).encode()).decode()
@@ -82,25 +143,41 @@ def auth_env(token: str) -> dict:
             "GIT_CONFIG_VALUE_0": "AUTHORIZATION: basic " + basic}
 
 
-def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str, push_url: str, token: str) -> str:
-    """Apply the patch onto origin/main in a throwaway worktree, commit, push the branch; the commit."""
+def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str, push_url: str,
+                  token: str) -> tuple[str, dict]:
+    """Apply the patch onto origin/main in a throwaway worktree, commit, push the branch; the commit, and the
+    known issues renumbered against main."""
     git(inferpilot, "fetch", "-q", push_url, "+refs/heads/main:refs/remotes/origin/main", env=auth_env(token))
+    diff, mapping = renumber(diff, preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False))
     wt = tempfile.mkdtemp(prefix="inferpilot-knowledge-")
     os.rmdir(wt)
     git(inferpilot, "worktree", "add", "-q", "--detach", wt, "origin/main")
+    tmp = tempfile.mkdtemp(prefix="inferpilot-knowledge-patch-")
     try:
         git(wt, "checkout", "-q", "-B", branch)
-        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
+        patch_file, attrs = os.path.join(tmp, "knowledge.patch"), os.path.join(tmp, "attributes")
+        with open(patch_file, "w") as f:
             f.write(diff)
-        try:
-            git(wt, "apply", "--3way", "--index", f.name)
-        finally:
-            os.unlink(f.name)
+        # The known issues are a list: what main appended since this checkout and what this run appends
+        # are both kept (git's union merge), rather than stopping on the conflict.
+        with open(attrs, "w") as f:
+            f.write("%s merge=union\n" % KNOWN)
+        git(wt, "-c", "core.attributesFile=" + attrs, "apply", "--3way", "--index", patch_file)
+        known = os.path.join(wt, KNOWN)
+        if KNOWN in patched(diff) and os.path.isfile(known):
+            with open(known, encoding="utf-8") as f:
+                text = f.read()
+            tidy = re.sub(r"([^\n])\n(## KI-)", r"\1\n\n\2", text)
+            if tidy != text:
+                with open(known, "w", encoding="utf-8") as f:
+                    f.write(tidy)
+                git(wt, "add", KNOWN)
         git(wt, *AUTHOR, "commit", "-q", "-m", title, "-m", "From the InferPilot run %s." % run)
         sha = git(wt, "rev-parse", "HEAD").strip()
         git(wt, "push", "-q", "--force", push_url, "HEAD:refs/heads/%s" % branch, env=auth_env(token))
-        return sha
+        return sha, mapping
     finally:
+        shutil.rmtree(tmp, ignore_errors=True)
         git(inferpilot, "worktree", "remove", "--force", wt, check=False)
         git(inferpilot, "branch", "-D", branch, check=False)
 
@@ -139,35 +216,55 @@ def main(argv=None) -> int:
     ap.add_argument("--inferpilot-dir", default=INFERPILOT, help=argparse.SUPPRESS)
     ap.add_argument("--push-url", default="", help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help="show what would be proposed")
+    ap.add_argument("--patch", default="", help="propose this patch of knowledge/ (a run's knowledge.patch), not the checkout's changes")
     a = ap.parse_args(argv)
     run = os.path.basename(os.path.normpath(a.run_dir))
     branch, title = "inferpilot/knowledge/%s" % run, a.title or "knowledge: what %s learned" % run
+    saved = a.patch
     try:
-        tracked, untracked = changed(a.inferpilot_dir)
-        if not tracked and not untracked:
-            print(json.dumps({"action": "none", "reason": "no changes under knowledge/"}))
-            return 0
-        diff = patch(a.inferpilot_dir, tracked, untracked)
+        if a.patch:
+            diff = open(a.patch, encoding="utf-8").read()
+            tracked, untracked = [], []  # the checkout's own knowledge/ is not this patch: nothing to restore
+            files = patched(diff)
+            outside = [f for f in files if not f.startswith("knowledge/")]
+            if not files or outside:
+                print("propose_knowledge: %s is not a patch of knowledge/%s" % (
+                    a.patch, ": it touches " + ", ".join(outside) if outside else ""), file=sys.stderr)
+                return 1
+        else:
+            tracked, untracked = changed(a.inferpilot_dir)
+            if not tracked and not untracked:
+                print(json.dumps({"action": "none", "reason": "no changes under knowledge/"}))
+                return 0
+            diff = patch(a.inferpilot_dir, tracked, untracked)
+            files = tracked + untracked
+            if os.path.isdir(a.run_dir):
+                saved = os.path.join(a.run_dir, "knowledge.patch")
+                with open(saved, "w", encoding="utf-8") as f:
+                    f.write(diff)
         body = open(a.body, encoding="utf-8").read()
         bad = leaks(added(diff), this_host()) + leaks(body, this_host())
         if bad:
             print("propose_knowledge: not proposed; it names something local or internal:\n  " + "\n  ".join(bad), file=sys.stderr)
             return 3
-        files = tracked + untracked
         if a.dry_run:
-            print(json.dumps({"dry_run": True, "branch": branch, "title": title, "files": files}, indent=1))
+            print(json.dumps({"dry_run": True, "branch": branch, "title": title, "files": files, "patch": saved}, indent=1))
             return 0
         token = os.environ.get("GITHUB_TOKEN", "")
         repo = a.repo or default_repo()
         if not token or not repo:
-            print("propose_knowledge: %s; the changes stay in %s/knowledge. Propose them later with:\n  python3 %s "
-                  "--run-dir %s --body %s" % ("GITHUB_TOKEN is not set" if not token else "no GitHub repository",
-                                              a.inferpilot_dir, sys.argv[0], a.run_dir, a.body), file=sys.stderr)
+            where = saved if a.patch else "%s/knowledge%s" % (a.inferpilot_dir, " and in %s" % saved if saved else "")
+            later = " --patch %s" % saved if saved else ""
+            print("propose_knowledge: %s; the changes stay in %s. Propose them later%s with:\n  python3 %s "
+                  "--run-dir %s --body %s%s" % ("GITHUB_TOKEN is not set" if not token else "no GitHub repository", where,
+                                                ", from any checkout," if saved else "", sys.argv[0], a.run_dir, a.body, later),
+                  file=sys.stderr)
             return 2
-        sha = commit_branch(a.inferpilot_dir, branch, diff, title, run, a.push_url or "https://github.com/%s.git" % repo, token)
-        pr = open_pr(repo, branch, title, body, token)
+        sha, mapping = commit_branch(a.inferpilot_dir, branch, diff, title, run, a.push_url or "https://github.com/%s.git" % repo, token)
+        pr = open_pr(repo, branch, title, with_renumbering(body, mapping), token)
         restore(a.inferpilot_dir, tracked, untracked)
-        print(json.dumps({**pr, "branch": branch, "commit": sha, "files": files}, indent=1))
+        print(json.dumps({**pr, "branch": branch, "commit": sha, "files": files, **({"renumbered": mapping} if mapping else {})},
+                         indent=1))
         return 0
     except urllib.error.HTTPError as e:
         print("propose_knowledge: HTTP %d from GitHub%s; the changes stay where they are" % (

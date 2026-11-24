@@ -28,8 +28,9 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
    InferPilot's template the user took, or the run's own launch script when the task has none; the
    feature arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; for accuracy on the template
    server, the `accuracy_server_env` of `RUN_DIR/scripts/harness.json` on top); confirm the effective
-   flags from the `server_args=` line of each log. InferPilot checked their GPUs just before the round
-   (PHASE=gpus).
+   flags from the `server_args=` line of each log. Start each server and each long suite detached and
+   wait for it in this call (`env_hygiene.md`, *Servers*): one that goes with a tool call leaves the
+   round with nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus).
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.

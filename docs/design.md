@@ -161,8 +161,9 @@ directory is not visible: `run_lock.py release --force` frees a lock whose run i
   its source's scenarios; `stop_after` any phase; with
   `auto_approve_design: false`, L3 tasks and designs the architect flags stop at Design
   (`awaiting_design_review`) and continue with `resume_from: "implement"` (by default they go on, and
-  the report says no human approved the design); the PR is prepared, never
-  pushed; issue replies are drafts; a scan's daily report is checked to name nothing about the machine
+  the report says no human approved the design); a run whose Verify ended without a result continues
+  with `resume_from: "verify"` on the commit its Implement verified; the PR is prepared, never
+  pushed; issue replies are drafts, checked against the run by the reviewer before the report; a scan's daily report is checked to name nothing about the machine
   (`scripts/daily_report.py`), and a shared copy is where the next scan, in any container, continues
   from. The two posts both go to InferPilot's own repository, with the user's `GITHUB_TOKEN`: the daily
   report, as an issue (`scripts/share_daily_report.py`; when the token cannot write there, a human shares
@@ -224,6 +225,6 @@ ROCm notes,
 the task-collection and audit scripts, InferPilot's own runner for use outside Claude Code (Claude and
 Cursor CLI backends), a dry run of every control path on it, offline unit
 tests. Not yet: shared server control and A/B runners (the director writes a launch script per run), a
-persistent ecosystem-matrix store, queue → run automation, resume for modes other than `feature`,
-framework maps for vLLM and ATOM, and validation of the workflow itself on a real port against the
+persistent ecosystem-matrix store, queue → run automation, resume from phases other than Implement
+(feature) and Verify, framework maps for vLLM and ATOM, and validation of the workflow itself on a real port against the
 hand-driven HiSparse V2 run.

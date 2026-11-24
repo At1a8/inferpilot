@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0-G4 against a same-pattern baseline, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), or "verify" with args.run_dir (every mode but scan: Verify and what follows again, on the commit Implement verified, in a run whose Verify ended without a result), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -15,7 +15,7 @@ export const meta = {
     { title: 'Bisect', detail: 'ci_guardian: culprit commit, confirmation, fix work packages [ci]; the commit that fixed it, when the reporter\'s code fails and main does not [issue, bisect_fixed]' },
     { title: 'Profile', detail: 'perf_engineer: trace metrics and the opportunity list [perf]' },
     { title: 'Plan', detail: 'architect: performance work packages, kernel hand-offs, PRs to apply [perf]' },
-    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on failure' },
+    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on a measured failure' },
     { title: 'Kernel', detail: 'kernel_liaison: kernel hand-offs to args.kernel_backend (none records them; geak runs the kernel lane of a GEAK checkout as an outside program; command runs a kernel agent CLI); gains integrated as work packages' },
     { title: 'Verify', detail: 'verify_engineer: G0-G4 against the same-pattern baseline plus mode gates; investigator loop on failure' },
     { title: 'Investigate', detail: 'investigator: controls first, hypothesis ledger, fix or baseline bug' },
@@ -25,7 +25,7 @@ export const meta = {
     { title: 'Collect', detail: 'scout: the AMD CI on main, user issues, upstream changes (platform gates, host syncs on request) -> candidates; asks first when a report from the last 24 hours exists [scan]' },
     { title: 'Dispatch', detail: 'dispatcher: type, level, priority, dependencies, effort, ranking, ecosystem-matrix changes -> the daily report [scan]' },
     { title: 'Spinoff', detail: 'issue_triager: for each problem the run found that is not its own (a failure the baseline shares, or a lead a role reported), the upstream issue that tracks it or an issue draft for a human to file, and the definition that starts it; leads are listed, and checked on the base commit only with confirm_leads [when there are any]' },
-    { title: 'Reply', detail: 'issue_triager: the reply draft rewritten from how the run ended; the Triage draft is kept beside it [issue]' },
+    { title: 'Reply', detail: 'issue_triager: the reply draft rewritten from how the run ended; the Triage draft is kept beside it; reviewer: the draft checked against the run, what it finds rewritten once [issue]' },
     { title: 'Report', detail: 'director: final report for every outcome of a run that has its run directory (for a scan, the daily report, shared as an issue in InferPilot\'s own repository, else by a human), then frees the machine; curator: knowledge updates, proposed as a pull request to InferPilot\'s own repository' },
   ],
 };
@@ -229,12 +229,18 @@ function missingFields(a) {
     ask('kernel_backend_command', 'Which command runs a kernel task (with {task_dir}, {out_dir} and {gpu_ids})?',
       'the command back end runs it for every kernel hand-off');
   }
+  // implement: a feature run that stopped at Design; verify: a run whose Verify ended without a result.
   const resume = String(a.resume_from || '').trim().toLowerCase();
-  if (resume && !(mode === 'feature' && resume === 'implement')) {
-    ask('resume_from', 'resume_from supports only "implement" in mode=feature: drop it, or is this a feature run?',
-      'only an approved feature design can be resumed', ['implement']);
+  const resumable = mode === 'feature' ? ['implement', 'verify'] : mode === 'scan' ? [] : ['verify'];
+  if (resume && !resumable.includes(resume)) {
+    ask('resume_from', mode === 'scan' ? 'A scan cannot be resumed: drop resume_from?'
+      : `resume_from in mode=${mode} supports ${resumable.map((r) => `"${r}"`).join(' and ')}: which, or drop it?`,
+    'implement continues an approved feature design; verify runs Verify again on the commit a run verified in Implement', resumable);
   }
-  if (resume && !a.run_dir) ask('run_dir', 'Which run stopped at Design (its run directory)?', 'the resumed run continues in it');
+  if (resume && !a.run_dir) {
+    ask('run_dir', resume === 'verify' ? 'Which run should Verify run again in (its run directory)?'
+      : 'Which run stopped at Design (its run directory)?', 'the resumed run continues in it');
+  }
   const stop = String(a.stop_after || '').trim().toLowerCase();
   if (stop && !STOP_PHASES[mode].some((p) => p.toLowerCase() === stop)) {
     ask('stop_after', `After which phase of mode=${mode} should the run stop?`,
@@ -489,7 +495,7 @@ const LEAD = S({ title: str, observed: str, where: str, evidence: str, reproduce
 function takesLeads(role, sub) {
   if (['intake', 'scout', 'dispatcher', 'curator'].includes(role)) return false;
   return MODE !== 'scan' && !(role === 'director' && sub === 'report')
-    && !(role === 'issue_triager' && (sub === 'spinoff' || sub === 'reply'));
+    && !(role === 'issue_triager' && (sub === 'spinoff' || sub === 'reply')) && !(role === 'reviewer' && sub === 'reply');
 }
 const withLeads = (schema) => (schema && schema.type === 'object'
   ? { ...schema, properties: { ...schema.properties, leads: arr(LEAD) } } : schema);
@@ -587,6 +593,10 @@ const TRIAGE = S({
 const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str },
   ['reproduced', 'repro_cmd', 'evidence']);
 const REPLY = S({ reply_draft_path: str, summary: str }, ['reply_draft_path']);
+// The reviewer's check of the reply draft: each claim the run does not bear out, what the run shows
+// instead and where; none when the draft says only what the run showed.
+const REPLY_CHECK = S({ findings: arr(S({ claim: str, issue: str, evidence: str }, ['claim', 'issue'])),
+  check_path: str, summary: str }, ['findings', 'check_path']);
 // tracked: upstream names the issue or PR that already tracks it; drafted: draft_path, an issue for a
 // human to file; unconfirmed: a lead the base commit did not show, note says what would.
 const SPINOFF = S({
@@ -653,11 +663,14 @@ const IMPL = S({
   kernel_handoff: { type: ['object', 'null'] },
   notes: str,
 }, ['wp', 'status']);
+// incomplete: the checks that have no result yet, none of those that ran having failed, and where the
+// runs still going write; '' when every check has a result. A gate without a result is not a failed one.
 const UNIT = S({
   wp: str,
   unit_pass: bool,
   feature_off_unchanged: bool,
   fails_without_change: { type: 'string', enum: ['parent', 'mutant', 'no', 'n/a'] },
+  incomplete: str,
   failure_summary: str,
   evidence: str,
 }, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change']);
@@ -736,6 +749,23 @@ const K_COLLECT = S({
   integrate_wp: { type: ['object', 'null'], properties: WP.properties, required: WP.required },
   notes: str,
 }, ['status']);
+// resume_from=verify: what the resumed run had, restored from its run directory. head_ok: the branch head
+// is the commit its Implement last verified; the mode's gate command and the claim are the ones its Verify
+// and Performance were given.
+const RESUMED = S({
+  head_ok: bool,
+  head: str,
+  verified_work_packages: arr(S({ wp: str, commit: str, evidence: str }, ['wp', 'commit'])),
+  repro_cmd: str,        // issue: the issue_repro gate
+  failing_test_cmd: str, // ci: the failing_test gate
+  perf_claim: str,       // '' for none
+  triage_path: str,
+  reply_draft_path: str,
+  spec_path: str,
+  design_path: str,
+  analysis_path: str,
+  notes: str,
+}, ['head_ok', 'verified_work_packages', 'perf_claim']);
 const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
@@ -766,6 +796,41 @@ function checkedOnBase(s) {
       + `${imp || 'a path it did not record'}, not from a base worktree of this run.` };
 }
 
+// The reply draft goes to the issue's author and maintainers: the reviewer checks it against the run, and
+// what it finds goes back to the triager, once; what is still left, or a draft nobody checked, the user
+// hears of before posting it.
+async function checkReply(replyIns) {
+  const opts = REVIEW_MODEL ? { model: REVIEW_MODEL } : undefined;
+  for (let round = 0; ; round++) {
+    const chk = await call('reviewer', 'reply', inputs({ ...replyIns, reply_draft_path: C.reply_draft_path, round }),
+      REPLY_CHECK, `reviewer:reply#${round}`, opts);
+    if (!chk) {
+      C.reply_findings = [{ claim: 'the whole draft', issue: 'not checked: the reviewer returned nothing' }];
+      note('Reply', 'unchecked', 'the reviewer returned nothing: the reply draft is not checked against the run');
+      return;
+    }
+    if (chk.check_path) C.reply_check_path = chk.check_path;
+    const findings = (chk.findings || []).filter((f) => f && f.claim);
+    if (!findings.length) {
+      C.reply_findings = [];
+      note('Reply', 'checked', `${round ? 'rewritten from the reviewer\'s findings; ' : ''}it says only what the run showed`);
+      return;
+    }
+    C.reply_findings = findings;
+    if (round >= 1) {
+      note('Reply', 'findings', `${findings.length} claim(s) of the rewritten draft the run does not bear out: ${C.reply_check_path || ''}`);
+      return;
+    }
+    const again = await call('issue_triager', 'reply', inputs({ ...replyIns, reply_findings: findings }), REPLY,
+      'issue_triager:reply#fix');
+    if (!again || !String(again.reply_draft_path || '').trim()) {
+      note('Reply', 'findings', `${findings.length} claim(s) the run does not bear out, and the rewrite returned nothing`);
+      return;
+    }
+    C.reply_draft_path = again.reply_draft_path;
+  }
+}
+
 async function finish(status, at) {
   R.status = status;
   R.stopped_at = at || '';
@@ -791,11 +856,17 @@ async function finish(status, at) {
     // The Triage draft predates every result: by now it promises steps that were done, or changed.
     if (MODE === 'issue' && C.triage_path && at !== 'Triage') {
       enter('Reply');
-      const rp = await call('issue_triager', 'reply',
-        inputs({ status, stopped_at: at || '', phases: R.phases, spinoffs: R.spinoffs }), REPLY);
-      if (rp && String(rp.reply_draft_path || '').trim()) C.reply_draft_path = rp.reply_draft_path;
+      const replyIns = { status, stopped_at: at || '', phases: R.phases, spinoffs: R.spinoffs };
+      const rp = await call('issue_triager', 'reply', inputs(replyIns), REPLY);
+      if (rp && String(rp.reply_draft_path || '').trim()) {
+        C.reply_draft_path = rp.reply_draft_path;
+        await checkReply(replyIns);
+      }
     }
-    if (MODE === 'issue') R.reply_draft_path = C.reply_draft_path || '';
+    if (MODE === 'issue') {
+      R.reply_draft_path = C.reply_draft_path || '';
+      if (C.reply_findings) R.reply_findings = C.reply_findings;
+    }
     enter('Report');
     // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
@@ -855,6 +926,10 @@ function nextSteps(status, at) {
     out.say = `Stopped after ${at}, as ${stopAfterNow !== STOP_AFTER ? 'the control file' : 'stop_after'} asked. To go on, run again `
       + `without stop_after: the task starts over.${report}`;
     out.rerun_with = { stop_after: '' };
+  } else if (status === 'blocked' && at === 'Verify' && verifyUnfinished) {
+    out.say = `Verify ended without a result: ${last}. Nothing was measured against the change; to verify the same commit `
+      + `again, run again from Verify in this run directory, once what the attention list names is stopped.${report}`;
+    out.rerun_with = { resume_from: 'verify', run_dir: C.run_dir, stop_after: '' };
   } else if (status === 'busy') {
     out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
       + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
@@ -876,7 +951,13 @@ function nextSteps(status, at) {
       ? `the director timed out and may still share ${C.run_dir}/daily_report.md: once it has stopped, share it as a new issue in InferPilot's repository unless that day's is there already (README step 5)`
       : `share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository, unless that day's is there already (README step 5)`);
   }
-  if (R.reply_draft_path) user.push(`post the reply draft on the issue: ${R.reply_draft_path}`);
+  if (R.reply_draft_path) {
+    const left = R.reply_findings || [];
+    user.push(left.length
+      ? `read the reply draft against what the run showed before posting it: ${left.map((f) => `${f.claim}: ${f.issue}`).join('; ')}`
+        + `${C.reply_check_path ? ` (${C.reply_check_path})` : ''}; the draft: ${R.reply_draft_path}`
+      : `post the reply draft on the issue: ${R.reply_draft_path}`);
+  }
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
@@ -982,12 +1063,25 @@ async function setup(requireBaseline) {
 
 // One work package at a time: implement, then an independent unit + feature-off
 // gate; failed rounds feed the test engineer's findings back; after the last round
-// the package is rolled back to the last verified commit and the task stops.
+// the package is rolled back to the last verified commit and the task stops. A gate
+// that has no result is no failure: it costs no round and rolls nothing back.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
 function stalled(wp, label) {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
   return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
+}
+// A unit gate with checks that have no result, none of those that ran having failed.
+const unfinished = (ut) => !!ut && String(ut.incomplete || '').trim() !== '';
+// Still without a result after the call that was to finish it: nothing measured went against the change,
+// so it is not rolled back; the package stops with its commit, on the attention list for a human.
+function noResult(wp, commit, what) {
+  const missing = String(what || '').trim() || 'the test engineer returned nothing';
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `the unit gate of ${wp.id} has no result (${missing}): `
+    + `commit ${commit} stays in the worktree, unverified; stop what the gate left running before reusing its GPUs` });
+  note('Implement', 'incomplete', `${wp.id}: the unit gate has no result after the call that was to finish it `
+    + `(${missing}); not rolled back`);
+  return { ok: false, failed_wp: wp.id, reason: `the unit gate of ${wp.id} has no result` };
 }
 
 async function implementAll(wps) {
@@ -1027,9 +1121,20 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit',
-        inputs({ work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test }), UNIT, utLabel);
+      const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test,
+        time_limit_min: minutes(timeoutFor('test_engineer')) };
+      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel);
       if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      // A gate with checks still to give a result is finished by one more call, which spends no fix round
+      // and reads the runs the first one left going.
+      if (unfinished(ut)) {
+        const finLabel = `${utLabel}+finish`;
+        const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: ut.incomplete,
+          earlier_evidence: ut.evidence || '' }), UNIT, finLabel);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return stalled(wp, finLabel);
+        if (!fin || unfinished(fin)) return noResult(wp, im.commit, fin ? fin.incomplete : ut.incomplete);
+        ut = fin;
+      }
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
@@ -1062,6 +1167,8 @@ async function implementAll(wps) {
 // Verify against the same-pattern baseline; a failure goes to the investigator,
 // whose verdict decides: fix work packages (implemented, then re-verified), a
 // baseline bug (recorded; the gate is re-judged on what remains) or a stop.
+// A Verify that ended without a result (verifyUnfinished) can run again on the same commit (resume_from=verify).
+let verifyUnfinished = false;
 async function verifyLoop(extraGates) {
   for (let round = 0; ; round++) {
     enter('Verify');
@@ -1094,6 +1201,7 @@ async function verifyLoop(extraGates) {
     }
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
+      verifyUnfinished = true;
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
@@ -1330,7 +1438,11 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   const ks = await kernelStage();
   if (!wps.length && ks.integrated === 0) return finish('no_gain', 'Kernel');
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
+  return fromVerify(extraGates, perfClaim, runPerf);
+}
 
+// Verify -> (Performance) -> Review -> PR: the rest of deliver(), where a run resumed from Verify starts.
+async function fromVerify(extraGates, perfClaim, runPerf) {
   const ver = await verifyLoop(extraGates);
   if (!ver.ok) return ended(ver, 'Verify');
   if (stopHere('Verify')) return finish('stopped', 'Verify');
@@ -1369,6 +1481,33 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   }
 }
 
+// resume_from=verify: Verify, and the route after it, again on a run directory whose Verify ended without
+// a result. The director restores what the run had; a branch that moved since Implement verified it, or a
+// mode gate the run directory does not record, stops the run before anything is measured.
+async function resumeVerify(claimOf) {
+  // The run this one resumes passed every stop before Verify: one named for them now never holds.
+  for (const p of STOP_PHASES[MODE].slice(0, STOP_PHASES[MODE].indexOf('Verify'))) STOPS_PASSED.add(p.toLowerCase());
+  const rs = await call('director', 'resume', inputs(), RESUMED);
+  const cmd = !rs ? '' : String((MODE === 'issue' ? rs.repro_cmd : MODE === 'ci' ? rs.failing_test_cmd : 'none') || '').trim();
+  const done = (rs && Array.isArray(rs.verified_work_packages) ? rs.verified_work_packages : []).filter((d) => d && d.wp && d.commit);
+  const why = !rs ? 'the director restored nothing from the run directory'
+    : rs.head_ok !== true ? `the branch is no longer the commit Implement verified${rs.head ? ` (its head: ${rs.head})` : ''}; `
+        + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`
+      : !done.length ? 'the run directory records no verified work package'
+        : !cmd ? `the run directory records no ${MODE === 'issue' ? 'reproduction command (issue_repro)' : 'failing test command (failing_test)'}` : '';
+  if (why) {
+    note('Setup', 'fail', `resume_from verify: ${why}`);
+    return finish('blocked', 'Setup');
+  }
+  R.done = done;
+  Object.assign(C, pick(rs, ['triage_path', 'reply_draft_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
+  note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: ${done.map((d) => d.wp).join(', ')}`);
+  const claim = claimOf(String(rs.perf_claim || '').trim());
+  if (MODE === 'issue') return fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, !!claim);
+  if (MODE === 'ci') return fromVerify([{ gate: 'failing_test', cmd, expect: 'pass on every lane it failed on' }], '', false);
+  return fromVerify([], MODE === 'perf' ? claim || 'the planned gain' : claim, true);
+}
+
 // ---------------------------------------------------------------------------
 // Modes
 // ---------------------------------------------------------------------------
@@ -1380,6 +1519,7 @@ async function runFeature() {
   // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
   // reproduce the source's numbers: what it measures is reported, never a claim.
   const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : c || '');
+  if (RESUME === 'verify') return resumeVerify(claimOf);
 
   // Resume after a human approved design.md (a run that stopped at Design).
   if (RESUME === 'implement') {
@@ -1446,6 +1586,7 @@ async function runFeature() {
 async function runIssue() {
   const early = await start(false);
   if (early) return early;
+  if (RESUME === 'verify') return resumeVerify((c) => c);
 
   enter('Triage');
   const tri = await call('issue_triager', 'triage', inputs(), TRIAGE);
@@ -1529,6 +1670,7 @@ async function runIssue() {
 async function runCi() {
   const early = await start(false);
   if (early) return early;
+  if (RESUME === 'verify') return resumeVerify((c) => c);
 
   enter('Classify');
   const cl = await call('ci_guardian', 'classify', inputs(), CLASSIFY);
@@ -1564,6 +1706,7 @@ async function runCi() {
 async function runPerf() {
   const early = await start(true);
   if (early) return early;
+  if (RESUME === 'verify') return resumeVerify((c) => c);
 
   enter('Profile');
   const pf = await call('perf_engineer', 'profile', inputs(), PROFILE);
