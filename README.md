@@ -566,7 +566,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `accuracy_script` | your script that measures accuracy against `API_URL` and writes its results under `RESULT_ROOT`, run unchanged for every arm; optional: without one, InferPilot's `templates/harness/accuracy.sh` (`scripts/eval_accuracy.sh`) |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}` (`python3 scripts/harness.py show` lists them): each parameter takes the task's value, else the one the tests of the feature's source use (vLLM's `--max-model-len 4096` for PARD-2), else for the server the model's sglang cookbook recipe, else the template's default ([`templates/task_definition.md`](templates/task_definition.md) §1.2) |
 | `container` | only when InferPilot runs on the host: the framework's container, reached with `docker exec` |
-| `exp_root` | where run directories go (default `<inferpilot_dir>/exp`, which git ignores) |
+| `exp_root` | where run directories go (default `<inferpilot_dir>/exp`, which git ignores). On a host mount they outlive the container, and a retry in a new container takes the task's commits from `RUN_DIR/branch.bundle` instead of writing them again: use one where the container can go away mid-run (a preemptible node, a job's time limit) |
 | `kernel_backend` | `none` (default) \| `geak` \| `command`: where kernel hand-offs go |
 | `kernel_backend_dir` | `geak` back end: the GEAK checkout whose kernel lane runs as an outside program |
 | `kernel_backend_command` | `command` back end: shell command with `{task_dir}`, `{out_dir}`, `{gpu_ids}`, `{budget}`; for `geak` it replaces the default command |

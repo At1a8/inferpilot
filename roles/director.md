@@ -38,7 +38,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    waiting does not fix: release the lock and return `lock: "acquired"`, `run_dir: ""`, `gpu_ids: ""`,
    `baseline_status: "fail"` with its message in `baseline`; the run stops at Setup with it.
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
-   exists in `framework_dir` and is checked out there (check it out when the checkout is clean), and
+   exists in `framework_dir` (restored from its bundle when it does not, step 2) and is checked out
+   there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
@@ -58,8 +59,26 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      starts it on main, or that putting it on main failed there (the script warned): say so, and that
      `$INFERPILOT_IMAGE_PINNED` is `1` when it was started from a given image.
    - `git -C <framework_dir> fetch origin`, then `git -C <framework_dir> checkout -b inferpilot/<slug> <base>`
-     (the base commit the task names, default `origin/main`); on a retry or a resume, check out the
-     branch that is already there.
+     (the base commit the task names, default `origin/main`); on a resume, check out the branch that is
+     already there. Write the base's full SHA (`git -C <framework_dir> rev-parse <base>`) to
+     `RUN_DIR/run.json` as `base_commit`, which a retry and a resume read.
+   - A retry runs every phase again, Reproduce and the baseline included, and they must not see the
+     earlier attempt's fix: its branch starts from the base like a new one. Before the `checkout -b`,
+     when the earlier branch is still in `framework_dir` with commits beyond the `base_commit` the
+     earlier attempt wrote to `run.json`, refresh `RUN_DIR/branch.bundle` from it (`implementer.md`,
+     PHASE=implement step 4) and rename it `inferpilot/<slug>-attempt-<time>`. Then, with a bundle, put
+     its commits on the task's side ref, never checked out, for the implementer to take them from:
+     `git -C <framework_dir> fetch RUN_DIR/branch.bundle +inferpilot/<slug>:refs/inferpilot/restored/<slug>`,
+     and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
+     update-ref -d refs/inferpilot/restored/<slug>`), so an earlier retry's commits are not taken again;
+     `RUN_DIR/failed/branch.bundle` alone means every commit was rolled back, and still holds them: say
+     so.
+   - A resume skips the phases before it, so its branch is the one it stopped with. When it is not in
+     `framework_dir` (a preempted node, a job past its time limit, a replaced container), restore it
+     from the bundle after the fetch: `git -C <framework_dir> fetch RUN_DIR/branch.bundle
+     inferpilot/<slug>:inferpilot/<slug>`, check it out, and list the restored commits in `notes`.
+     Without a bundle, or when the fetch fails, start it from the base and say in `notes` that the
+     earlier commits are lost.
    - `feature` and `perf` also get the base commit as a worktree of the same repository, for the
      baseline arm while the task branch carries the change: `git -C <framework_dir> worktree add
      --detach RUN_DIR/base <base>`.

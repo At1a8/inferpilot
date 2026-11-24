@@ -50,8 +50,12 @@ belongs to a host user, and the rules below are about those.
   into the ROCm environment.
 - The checkout is the container's, and a task's branch and commits stay in it; the PR engineer writes
   them to `RUN_DIR/patches`, so the change can leave the container with the run directory (README step
-  5). Run directories are the container's too, in `<inferpilot_dir>/exp`. A task starts only from a clean
-  checkout: changes left there stop Setup and are never discarded.
+  5). Before that, the implementer keeps `RUN_DIR/branch.bundle` in step with the branch after every
+  commit and rollback. Run directories are the container's too, in `<inferpilot_dir>/exp`: where the
+  container can go away mid-run (a preemptible node, a job's time limit), put `exp_root` on a host
+  mount, and a retry in a new container takes the commits from the bundle instead of writing them
+  again. A task starts only from a clean checkout: changes left there stop Setup and are never
+  discarded.
 - Run every server, test and benchmark from the tree under test, first on `PYTHONPATH` (sglang:
   `PYTHONPATH=<tree>/python`), and check it once per launch script:
   `python -c "import sglang; print(sglang.__file__)"` must print a path inside that tree. The feature

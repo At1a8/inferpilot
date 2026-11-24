@@ -325,7 +325,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
 | `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
-| `exp_root` | 运行目录放在哪里（默认 `<inferpilot_dir>/exp`，git 会忽略它） |
+| `exp_root` | 运行目录放在哪里（默认 `<inferpilot_dir>/exp`，git 会忽略它）。放在宿主机挂载目录里时，运行目录比容器活得久，换一个新容器重试时能从 `RUN_DIR/branch.bundle` 取回任务的提交，不用再写一遍：容器可能中途消失时（会被抢占的节点、作业到了时间上限）就这样用 |
 | `kernel_backend` | `none`（默认）\| `geak` \| `command`：kernel hand-off 交给谁 |
 | `kernel_backend_dir` | `geak` 后端：GEAK checkout，其中的 kernel lane 作为外部程序运行 |
 | `kernel_backend_command` | `command` 后端：带 `{task_dir}`、`{out_dir}`、`{gpu_ids}`、`{budget}` 占位符的 shell 命令；用于 `geak` 时替换默认命令 |
