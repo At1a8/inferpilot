@@ -1603,6 +1603,54 @@ class ScanIssuesTest(unittest.TestCase):
                          [(43815, "merged", False), (52001, "open", True), (52002, "open", False), (52003, "open", True)],
                          "a title ending in fix does not close with a body opening with the issue; a closing title does")
 
+    def test_an_amd_gpu_named_only_in_the_body_is_collected(self):
+        new = {"created_at": "2026-11-20T08:00:00Z", "updated_at": "2026-11-20T08:00:00Z"}
+        by_title = {"number": 1, "title": "[Bug] ROCm: aiter MLA decode NaN", "body": "", **new}
+        both = {"number": 2, "title": "[Bug] hang on MI300X", "body": "8x MI300X", **new}
+        by_body = {"number": 3, "title": "[Bug] attention-DP ranks pick different graph variants",
+                   "body": "Steps:\n1. launch\n\nHardware: 8xMI355X, TP8\n", **new}
+        no_gpu = {"number": 4, "title": "[Bug] Tools and JSON schema cannot be combined",
+                  "body": "ROCM used to build PyTorch: N/A\nHIP runtime version: N/A\nCPU: AMD EPYC 9654", **new}
+
+        def search(query, **_):
+            if "in:title" in query:
+                return [by_title, both] if "ROCm" in query or "MI300X" in query else []
+            return [both, by_body, no_gpu]
+
+        with mock.patch.object(scan_issues.gh, "search_issues", side_effect=search) as s:
+            items = scan_issues.collect("sgl-project/sglang", None, None)
+        body_queries = [c.args[0] for c in s.call_args_list if "in:body" in c.args[0]]
+        self.assertTrue(body_queries, "the body is searched too")
+        for q in body_queries:
+            self.assertIsNone(re.search(r"\b(AMD|ROCm|HIP)\b", q), "collect_env and the CPU say these in CUDA reports: " + q)
+        self.assertEqual({it["number"]: it["found_in"] for it in items}, {1: "title", 2: "title", 3: "body"},
+                         "a title match stays one; a body search hit is kept only when gpu_lines finds a GPU name")
+        now = scan_issues.parse_time("2026-11-23T00:00:00Z")
+        rows = {it["number"]: scan_issues.summarize(it, now) for it in items}
+        self.assertEqual(rows[3]["gpu_lines"], ["Hardware: 8xMI355X, TP8"])
+        self.assertNotIn("gpu_lines", rows[1])
+
+        with mock.patch.object(scan_issues.gh, "get", return_value={"number": 5, "title": "t", **new}):
+            self.assertEqual(scan_issues.collect("sgl-project/sglang", 5, None)[0]["found_in"], "issue")
+
+    def test_gpu_names(self):
+        for text in ("8xMI300X", "8x MI355X, TP8", "MI300A", "tested on MI35x", "MI30X nightly", "mi325x",
+                     "libaiter_gfx942.so", "module_fmha_v3_fwd_gfx950_bf16", "tuned_MI300X.csv", "gfx942:sramecc+"):
+            with self.subTest(text=text):
+                self.assertEqual(scan_issues.gpu_lines(text), [text])
+        for text in ("MI3000", "XIAOMI300", "MI250X", "gfx9500", "gfx1100", "agfx942", "CPU: AMD EPYC 9654",
+                     "ROCM used to build PyTorch: N/A", "HIP runtime version: N/A"):
+            with self.subTest(text=text):
+                self.assertEqual(scan_issues.gpu_lines(text), [])
+
+    def test_gpu_lines_show_the_name_and_stop_at_three(self):
+        long = "A" * 300 + " the run on 8x MI355X hangs " + "B" * 300
+        (cut,) = scan_issues.gpu_lines(long)
+        self.assertIn("8x MI355X", cut, "a name past the first 200 characters is still in the line")
+        self.assertLessEqual(len(cut), 206)
+        body = "a MI300X\nb gfx942\na MI300X\nc MI355X\nd MI308X"
+        self.assertEqual(scan_issues.gpu_lines(body), ["a MI300X", "b gfx942", "c MI355X"])
+
     def test_projected_auto_close(self):
         self.assertEqual(scan_issues.projected_auto_close("2026-09-09T10:00:00Z"), "2026-11-09")
         self.assertEqual(scan_issues.projected_auto_close("2026-09-09T00:00:00Z"), "2026-11-08")

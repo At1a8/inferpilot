@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Collect open AMD-related issues with the facts triage needs (knowledge/issue_triage.md).
 
+An issue is AMD-related when its title has an AMD word (AMD, ROCm, MI3xx, aiter, gfx9xx, HIP, MoRI) or its
+body names an AMD GPU (MI3xx, MI30x / MI35x, gfx942, gfx950). `found_in` says which (`title`, `body`, or
+`issue` for --issue); a body match also carries up to three lines that name the GPU (`gpu_lines`), since
+many of them only mention it.
+
 For each issue: kind (user issue, roadmap, tracker, internal), age, reporter association, linked PRs
 that cite the issue explicitly (with their state, and `closes` when one closes it with a GitHub keyword:
 Fixes, Closes or Resolves #N), replies from anyone but the reporter (with --with-comments), and the
@@ -29,6 +34,16 @@ TITLE_KEYWORDS = [
     "MI300X OR MI355X OR MI325X OR MI308X OR MI300",
     "aiter OR gfx950 OR gfx942 OR HIP OR mori",
 ]
+# The body only by GPU name: torch's collect_env puts "ROCM used to build PyTorch: N/A" and "HIP runtime
+# version: N/A" in CUDA reports, and an AMD EPYC host says AMD.
+BODY_KEYWORDS = [
+    "MI300X OR MI325X OR MI308X OR MI300A OR MI300",
+    "MI355X OR MI350X OR MI35X OR MI30X",
+    "gfx950 OR gfx942",
+]
+# 8xMI355X and libaiter_gfx942.so are common: no \b there
+_GPU = re.compile(r"(?:(?<![A-Za-z0-9])|(?<=\dx))(?:MI3\d\d[AX]?|MI3[05]X)(?![A-Za-z0-9])"
+                  r"|(?<![A-Za-z0-9])gfx9(?:4[02]|50)(?![0-9])", re.I)
 MAINTAINER_ASSOC = {"COLLABORATOR", "MEMBER", "OWNER"}
 INACTIVE_DAYS = 60
 
@@ -61,6 +76,24 @@ def closes_issue(text: str, number: int, repo: str = DEFAULT_REPO) -> bool:
     keyword = r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+"
     ref = rf"(?:(?:{re.escape(repo)})?#|https://github\.com/{re.escape(repo)}/issues/){number}\b"
     return re.search(keyword + ref, text or "", re.I) is not None
+
+
+def gpu_lines(body: str, most: int = 3, width: int = 200) -> list[str]:
+    """Up to `most` distinct lines of an issue body that name an AMD GPU, each cut to `width` characters
+    around the first name, so a long line still shows it."""
+    out: list[str] = []
+    for line in (body or "").splitlines():
+        line = line.strip()
+        m = _GPU.search(line)
+        if not m:
+            continue
+        start = max(0, min(m.start() - width // 2, len(line) - width))
+        cut = ("..." if start else "") + line[start:start + width] + ("..." if start + width < len(line) else "")
+        if cut not in out:
+            out.append(cut)
+        if len(out) == most:
+            break
+    return out
 
 
 def parse_time(s: str) -> dt.datetime:
@@ -128,16 +161,23 @@ def summarize(it: dict, now: dt.datetime) -> dict:
         "comments": it.get("comments", 0),
         "reactions": (it.get("reactions") or {}).get("total_count", 0),
         "projected_auto_close": projected_auto_close(it["updated_at"]) if it.get("updated_at") else "",
+        "found_in": it.get("found_in", ""),
+        **({"gpu_lines": gpu_lines(it.get("body", ""))} if it.get("found_in") == "body" else {}),
     }
 
 
 def collect(repo: str, issue: int | None, limit: int | None) -> list[dict]:
     if issue:
-        return [gh.get(f"/repos/{repo}/issues/{issue}")]
+        return [{**gh.get(f"/repos/{repo}/issues/{issue}"), "found_in": "issue"}]
     seen: dict[int, dict] = {}
     for kw in TITLE_KEYWORDS:
         for it in gh.search_issues(f"repo:{repo} is:issue is:open {kw} in:title"):
-            seen.setdefault(it["number"], it)
+            seen.setdefault(it["number"], {**it, "found_in": "title"})
+    # GitHub's search matches loosely; a body hit counts only where a GPU name is really there
+    for kw in BODY_KEYWORDS:
+        for it in gh.search_issues(f"repo:{repo} is:issue is:open {kw} in:body"):
+            if it["number"] not in seen and gpu_lines(it.get("body", "")):
+                seen[it["number"]] = {**it, "found_in": "body"}
     items = sorted(seen.values(), key=lambda i: i["number"])
     return items[:limit] if limit else items
 
