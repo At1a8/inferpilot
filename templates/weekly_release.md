@@ -3,7 +3,8 @@
 <!-- A week of InferPilot in the shape of an sglang release note: Highlights a reader acts on, then the full
      notes by area, Breaking Changes & Upgrade Notes, Contributors and the Full Changelog. A progress report,
      not posted to GitHub, in English (`weekly_release.md`) and in Chinese (`weekly_release.zh-CN.md`): the
-     same sections, tables, inline code, numbers and links, as `tests/test_templates.py` checks. It is written
+     same sections under the same English names, the same tables, inline code, numbers and links, as
+     `tests/test_templates.py` checks. It is written
      from the repositories, not from any machine's runs: InferPilot's pull requests of the range, merged,
      closed or still open at its end, whose merged ones the notes list, and the sglang pull requests from its
      work, pushed from `inferpilot/<slug>` branches or recorded by its pull requests as its ports. Every line

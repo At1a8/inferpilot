@@ -1,6 +1,6 @@
 ---
 name: inferpilot-weekly-naming
-description: Naming conventions for InferPilot's weekly report (周报) in Chinese and English - the report title, its time range (scripts/weekly_report.py) and file names, the section headings, and the bold short titles of the Highlights. Use when writing, updating or reviewing an InferPilot weekly report or its templates (templates/weekly_release.md, templates/weekly_release.zh-CN.md), or when naming a new section of it.
+description: Naming conventions for InferPilot's weekly report (周报) in Chinese and English - the report title, its time range (scripts/weekly_report.py) and file names, the section headings (English in both versions), and the bold short titles of the Highlights. Use when writing, updating or reviewing an InferPilot weekly report or its templates (templates/weekly_release.md, templates/weekly_release.zh-CN.md), or when naming a new section of it.
 ---
 
 # InferPilot 周报命名规范
@@ -21,46 +21,51 @@ description: Naming conventions for InferPilot's weekly report (周报) in Chine
 
 ## 章节名的规律
 
-1. **写做了什么，不写在哪里、是谁的**：`<对象> <动作>`，动作用 移植、修复、优化、安装、支持、更新。
-   - 移植到 AMD 的特性 → AMD feature 移植
-   - 用户 issue → issue 修复
-   - main 上的 CI → CI 修复
-2. **对象要具体**：各模式 → 各任务模式优化；容器与安装 → 容器与环境安装。
-3. **工程术语保留英文，不硬译**：运行器与 backend → Runtime & Backend。
-4. **大小写**：InferPilot 的组件名首字母大写（Runtime、Backend、Workflow、Gate、Kernel），例如 Workflow 与 gate → Workflow 与 Gate；GitHub 上的普通名词小写（issue、feature、release）；缩写和产品名照原样（AMD、CI、PR、GitHub、Cursor、PARD-2）。
-5. **中英文之间空一格**：AMD feature 移植、issue 修复。
-6. **并列**：中文标题用“与”（容器与环境安装、Workflow 与 Gate）；Runtime & Backend 是固定写法。
-7. **英文版一一对应**：移植 → porting，优化 → optimization，修复 → fixes，支持 → support；句首大写，组件名同样大写，并列用 &。
-8. **InferPilot 是总标题**，不单独成一节；它自己的 PR 按下表分类。某一节这周没有内容，就不写这一节。
+章节名只有一套英文名：中文周报也用下表的英文章节名，只翻译正文和亮点的小标题。
+
+1. **写做了什么，不写在哪里、是谁的**：`<对象> <动作>`，动作用 porting、fixes、optimization、setup、support、updates。
+   - Features brought to AMD → AMD feature porting
+   - User issues → Issue fixes
+   - CI on main → CI fixes
+2. **对象要具体**：Modes → Task mode optimization；Containers and setup → Container & environment setup。
+3. **用代码里的名字**：Runner and backends → Runtime & Backend（代码在 `runtime/`）。
+4. **大小写**：句首大写；InferPilot 的组件名首字母大写（Runtime、Backend、Workflow、Gate、Kernel），例如 Workflow and gates → Workflow & Gate；GitHub 上的普通名词小写（issue、feature、release）；缩写和产品名照原样（AMD、CI、PR、GitHub、Cursor、PARD-2）。
+5. **并列用 &**：Runtime & Backend、Workflow & Gate、Tests & GitHub CI，和 sglang 的 Breaking Changes & Upgrade Notes 一样。
+6. **InferPilot 是总标题**，不单独成一节；它自己的 PR 按下表分类。某一节这周没有内容，就不写这一节。
 
 ## 章节名对照表
 
-| 英文版 | 中文版 | 写什么 |
-|---|---|---|
-| Highlights | 亮点 | 三到六条，每条带加粗小标题 |
-| Upstream pull requests | 上游 PR | 来自 InferPilot 工作的 sglang PR 一览表 |
-| Full Notes | 完整说明 | 以下各节 |
-| AMD feature porting | AMD feature 移植 | 上游 PR 表里类型为 feature 的 PR |
-| Issue fixes | issue 修复 | 类型为 issue 的 PR，挂在它来自的 issue 下；修的是 issue 引出的另一个问题时写明修了什么 |
-| CI fixes | CI 修复 | 类型为 ci 的 PR |
-| Performance | 性能 | 类型为 perf 的 PR，单独测得的 G5 收益 |
-| Kernels | Kernel | 在 AMD 上支持的 kernel；feature 本身不算 kernel 优化 |
-| Runtime & Backend | Runtime & Backend | runner、运行角色的 agent（Claude Code、claude -p、Cursor）、日志、控制、结果 |
-| Workflow & Gate | Workflow 与 Gate | 各模式共用的阶段、gate、harness |
-| Task mode optimization | 各任务模式优化 | 只改某一种模式（feature、issue、ci、perf）的 PR |
-| Daily community updates | 每日社区更新 | scan、日报和日报的分享 |
-| Container & environment setup | 容器与环境安装 | run_docker.sh、镜像、bootstrap |
-| Tests & GitHub CI | 测试与 GitHub CI | InferPilot 自己的测试和 CI |
-| Knowledge | 知识库 | feature skill、已知问题、sglang skill、ROCm 说明 |
-| Breaking Changes & Upgrade Notes | 不兼容变更与升级说明 | 用户下次运行前必须改的东西 |
-| Numbers | 数据 | PR 数、main 的改动规模 |
-| Contributors | 贡献者 | 编写、推送、review、合入的人 |
+中英文周报都用这里的章节名。
 
-上游 PR 表里的每一行，都按类型（feature、issue、ci、perf）放进完整说明里对应的一节。
+| 章节名 | 写什么 |
+|---|---|
+| Highlights | 三到六条，每条带加粗小标题 |
+| Upstream pull requests | 来自 InferPilot 工作的 sglang PR 一览表 |
+| Full Notes | 以下各节 |
+| AMD feature porting | Upstream pull requests 表里类型为 feature 的 PR |
+| Issue fixes | 类型为 issue 的 PR，挂在它来自的 issue 下；修的是 issue 引出的另一个问题时写明修了什么 |
+| CI fixes | 类型为 ci 的 PR |
+| Performance | 类型为 perf 的 PR，单独测得的 G5 收益 |
+| Kernels | 在 AMD 上支持的 kernel；feature 本身不算 kernel 优化 |
+| Runtime & Backend | runner、运行角色的 agent（Claude Code、claude -p、Cursor）、日志、控制、结果 |
+| Workflow & Gate | 各模式共用的阶段、gate、harness |
+| Task mode optimization | 只改某一种模式（feature、issue、ci、perf）的 PR |
+| Daily community updates | scan、日报和日报的分享 |
+| Container & environment setup | run_docker.sh、镜像、bootstrap |
+| Tests & GitHub CI | InferPilot 自己的测试和 CI |
+| Knowledge | feature skill、已知问题、sglang skill、ROCm 说明 |
+| Breaking Changes & Upgrade Notes | 用户下次运行前必须改的东西 |
+| Numbers | PR 数、main 的改动规模 |
+| Contributors | 编写、推送、review、合入的人 |
+
+Upstream pull requests 表里的每一行，都按类型（feature、issue、ci、perf）放进 Full Notes 里对应的一节。
 
 ## 亮点的小标题
 
-每条以加粗小标题开头（中文 `* **小标题：** 正文`，英文 `* **Title:** text`），几个字说清能力或结果。收尾的 `**` 后面空一格：紧跟中文时，标点后的加粗不会生效。
+小标题跟着正文的语言：英文周报写英文，中文周报写中文。每条以加粗小标题开头（中文 `* **小标题：** 正文`，英文 `* **Title:** text`），几个字说清能力或结果。收尾的 `**` 后面空一格：紧跟中文时，标点后的加粗不会生效。
+
+- 中文小标题：工程术语保留英文，组件名首字母大写（Backend、Workflow），中英文之间空一格，并列用“与”。
+- 英文小标题与中文一一对应：移植 → porting，优化 → optimization，修复 → fixes，支持 → support。
 
 | 类型 | 写法 | 例子（中文 / 英文） |
 |---|---|---|
@@ -72,4 +77,4 @@ description: Naming conventions for InferPilot's weekly report (周报) in Chine
 
 ## 新加一节时
 
-先在对照表里找；没有合适的，按上面的规律起中英文两个名字，同时加进两个模板。`tests/test_templates.py` 会检查两个模板的章节、表格、行内代码、数字和链接一致。
+先在对照表里找；没有合适的，按上面的规律起一个英文名，加进对照表，两个模板里都用这个名字。`tests/test_templates.py` 会检查两个模板的标题和这张表一致，以及两个模板的表格、行内代码、数字和链接一致。

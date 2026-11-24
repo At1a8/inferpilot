@@ -86,10 +86,10 @@ class WeeklyReleaseTest(unittest.TestCase):
     def test_its_headings_are_the_naming_skills(self):
         table = NAMING.read_text(encoding="utf-8").split("## 章节名对照表", 1)[1].split("\n## ", 1)[0]
         rows = [[c.strip() for c in line.strip().strip("|").split("|")] for line in table.splitlines()
-                if line.startswith("| ") and not line.startswith("| 英文版")]
-        for body, column in ((self.body, 0), (self.zh, 1)):
-            self.assertEqual(re.findall(r"^#{1,2} (.+)$", body, re.M)[1:], [row[column] for row in rows],
-                             "the template's headings and the naming skill's table differ")
+                if line.startswith("| ") and not line.startswith("| 章节名")]
+        for body in (self.body, self.zh):
+            self.assertEqual(re.findall(r"^#{1,2} (.+)$", body, re.M)[1:], [row[0] for row in rows],
+                             "the template's headings and the naming skill's table differ: both use its English names")
 
 
 if __name__ == "__main__":
