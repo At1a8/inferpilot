@@ -25,7 +25,7 @@ export const meta = {
     { title: 'Collect', detail: 'scout: the AMD CI on main, user issues, upstream changes (platform gates, host syncs on request) -> candidates; asks first when a report from the last 24 hours exists [scan]' },
     { title: 'Dispatch', detail: 'dispatcher: type, level, priority, dependencies, effort, ranking, ecosystem-matrix changes -> the daily report [scan]' },
     { title: 'Spinoff', detail: 'issue_triager: for each problem the run found that is not its own (a failure the baseline shares, or a lead a role reported), the upstream issue that tracks it or an issue draft for a human to file, and the definition that starts it; leads are listed, and checked on the base commit only with confirm_leads [when there are any]' },
-    { title: 'Reply', detail: 'issue_triager: the reply draft rewritten from how the run ended; the Triage draft is kept beside it [issue]' },
+    { title: 'Reply', detail: 'issue_triager: the reply draft rewritten from how the run ended; the Triage draft is kept beside it; reviewer: the draft checked against the run, what it finds rewritten once [issue]' },
     { title: 'Report', detail: 'director: final report for every outcome of a run that has its run directory (for a scan, the daily report, shared as an issue in InferPilot\'s own repository, else by a human), then frees the machine; curator: knowledge updates, proposed as a pull request to InferPilot\'s own repository' },
   ],
 };
@@ -489,7 +489,7 @@ const LEAD = S({ title: str, observed: str, where: str, evidence: str, reproduce
 function takesLeads(role, sub) {
   if (['intake', 'scout', 'dispatcher', 'curator'].includes(role)) return false;
   return MODE !== 'scan' && !(role === 'director' && sub === 'report')
-    && !(role === 'issue_triager' && (sub === 'spinoff' || sub === 'reply'));
+    && !(role === 'issue_triager' && (sub === 'spinoff' || sub === 'reply')) && !(role === 'reviewer' && sub === 'reply');
 }
 const withLeads = (schema) => (schema && schema.type === 'object'
   ? { ...schema, properties: { ...schema.properties, leads: arr(LEAD) } } : schema);
@@ -587,6 +587,10 @@ const TRIAGE = S({
 const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str },
   ['reproduced', 'repro_cmd', 'evidence']);
 const REPLY = S({ reply_draft_path: str, summary: str }, ['reply_draft_path']);
+// The reviewer's check of the reply draft: each claim the run does not bear out, what the run shows
+// instead and where; none when the draft says only what the run showed.
+const REPLY_CHECK = S({ findings: arr(S({ claim: str, issue: str, evidence: str }, ['claim', 'issue'])),
+  check_path: str, summary: str }, ['findings', 'check_path']);
 // tracked: upstream names the issue or PR that already tracks it; drafted: draft_path, an issue for a
 // human to file; unconfirmed: a lead the base commit did not show, note says what would.
 const SPINOFF = S({
@@ -766,6 +770,41 @@ function checkedOnBase(s) {
       + `${imp || 'a path it did not record'}, not from a base worktree of this run.` };
 }
 
+// The reply draft goes to the issue's author and maintainers: the reviewer checks it against the run, and
+// what it finds goes back to the triager, once; what is still left, or a draft nobody checked, the user
+// hears of before posting it.
+async function checkReply(replyIns) {
+  const opts = REVIEW_MODEL ? { model: REVIEW_MODEL } : undefined;
+  for (let round = 0; ; round++) {
+    const chk = await call('reviewer', 'reply', inputs({ ...replyIns, reply_draft_path: C.reply_draft_path, round }),
+      REPLY_CHECK, `reviewer:reply#${round}`, opts);
+    if (!chk) {
+      C.reply_findings = [{ claim: 'the whole draft', issue: 'not checked: the reviewer returned nothing' }];
+      note('Reply', 'unchecked', 'the reviewer returned nothing: the reply draft is not checked against the run');
+      return;
+    }
+    if (chk.check_path) C.reply_check_path = chk.check_path;
+    const findings = (chk.findings || []).filter((f) => f && f.claim);
+    if (!findings.length) {
+      C.reply_findings = [];
+      note('Reply', 'checked', `${round ? 'rewritten from the reviewer\'s findings; ' : ''}it says only what the run showed`);
+      return;
+    }
+    C.reply_findings = findings;
+    if (round >= 1) {
+      note('Reply', 'findings', `${findings.length} claim(s) of the rewritten draft the run does not bear out: ${C.reply_check_path || ''}`);
+      return;
+    }
+    const again = await call('issue_triager', 'reply', inputs({ ...replyIns, reply_findings: findings }), REPLY,
+      'issue_triager:reply#fix');
+    if (!again || !String(again.reply_draft_path || '').trim()) {
+      note('Reply', 'findings', `${findings.length} claim(s) the run does not bear out, and the rewrite returned nothing`);
+      return;
+    }
+    C.reply_draft_path = again.reply_draft_path;
+  }
+}
+
 async function finish(status, at) {
   R.status = status;
   R.stopped_at = at || '';
@@ -791,11 +830,23 @@ async function finish(status, at) {
     // The Triage draft predates every result: by now it promises steps that were done, or changed.
     if (MODE === 'issue' && C.triage_path && at !== 'Triage') {
       enter('Reply');
-      const rp = await call('issue_triager', 'reply',
-        inputs({ status, stopped_at: at || '', phases: R.phases, spinoffs: R.spinoffs }), REPLY);
-      if (rp && String(rp.reply_draft_path || '').trim()) C.reply_draft_path = rp.reply_draft_path;
+      const replyIns = { status, stopped_at: at || '', phases: R.phases, spinoffs: R.spinoffs };
+      const rp = await call('issue_triager', 'reply', inputs(replyIns), REPLY);
+      if (rp && String(rp.reply_draft_path || '').trim()) {
+        C.reply_draft_path = rp.reply_draft_path;
+        await checkReply(replyIns);
+      }
     }
-    if (MODE === 'issue') R.reply_draft_path = C.reply_draft_path || '';
+    if (MODE === 'issue') {
+      R.reply_draft_path = C.reply_draft_path || '';
+      // Only a draft the reviewer checked clean is the user's to post as it is.
+      if (R.reply_draft_path && !C.reply_findings) {
+        C.reply_findings = [{ claim: 'the whole draft', issue: at === 'Triage'
+          ? 'not checked by the reviewer: the run ended at Triage, before the check'
+          : 'not checked: the triager returned no draft rewritten from how the run ended, so this is an earlier draft' }];
+      }
+      if (C.reply_findings) R.reply_findings = C.reply_findings;
+    }
     enter('Report');
     // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
@@ -834,7 +885,8 @@ const ENDED = { blocked: 'Blocked', handed_off: 'Handed over', triaged: 'Triaged
   dropped: 'Dropped, with no measured gain' };
 function nextSteps(status, at) {
   const report = R.report_path ? ` The report: ${R.report_path}.` : '';
-  const last = (R.phases[R.phases.length - 1] || {}).summary || '';
+  // Where the run ended, not what a closing phase (the reply check) recorded after it.
+  const last = ([...R.phases].reverse().find((p) => !CLOSING.has(p.phase)) || {}).summary || '';
   const out = { say: `${ENDED[status] || `Ended ${status}`} at ${at}${last ? `: ${last}` : ''}.${report}` };
   if (status === 'blocked') out.say += ' Fix what it names, or change the task, then run it again.';
   if (status === 'ready_for_review') {
@@ -877,7 +929,13 @@ function nextSteps(status, at) {
       ? `the director timed out and may still share ${C.run_dir}/daily_report.md: once it has stopped, share it as a new issue in InferPilot's repository unless that day's is there already (README step 5)`
       : `share ${C.run_dir}/daily_report.md as a new issue in InferPilot's repository, unless that day's is there already (README step 5)`);
   }
-  if (R.reply_draft_path) user.push(`post the reply draft on the issue: ${R.reply_draft_path}`);
+  if (R.reply_draft_path) {
+    const left = R.reply_findings || [];
+    user.push(left.length
+      ? `read the reply draft against what the run showed before posting it: ${left.map((f) => `${f.claim}: ${f.issue}`).join('; ')}`
+        + `${C.reply_check_path ? ` (${C.reply_check_path})` : ''}; the draft: ${R.reply_draft_path}`
+      : `post the reply draft on the issue: ${R.reply_draft_path}`);
+  }
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
