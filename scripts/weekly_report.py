@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """What InferPilot's weekly report counts (templates/weekly_release.md), from GitHub: the range, InferPilot's pull
 requests in it (merged, closed without merge, still open at its end), main at its start and at its end with the
-change between, and the sglang pull requests from InferPilot's work. Read only: GitHub through _github, which reads
-GITHUB_TOKEN; the change counted with git in this checkout when its origin is the repository (fetching main when a
-commit is missing), else from GitHub, whose compare leaves some files' counts at 0 (counted_by says which).
+change between, and the sglang pull requests from InferPilot's work. It reads GitHub through _github, which reads
+GITHUB_TOKEN, and, when this checkout's origin is the repository, fetches origin's main to read git: main at a
+time along its first-parent line (where commits landed, not when they were written), and the change with
+`git diff --numstat` under LC_ALL=C. Without git, both come from GitHub, whose compare stops at 300 files and leaves
+some files' counts at 0: found_by, counted_by and complete say so.
 
 The range runs from 00:00 seven days before its end to its end, in UTC+8; its end is now unless --until gives
 another. --since and --until take a date or a date and a time, in UTC+8 unless they carry an offset: a date starts
@@ -13,11 +15,14 @@ at its 00:00 for --since and takes its whole day for --until.
     python3 scripts/weekly_report.py --since 2026-11-17 --until 2026-11-23  # the 17th to the 23rd, whole days
     python3 scripts/weekly_report.py --since "2026-11-17 00:00" --until "2026-11-24 10:00"
 
-The sglang pull requests are those pushed from inferpilot/<slug> branches (source "branch"), and those a feature skill
-changed in the range names as its reference_pr (source "feature_skill:<id>"): a skill may record a hand-written port,
-so the report's writer decides which of those are InferPilot's. kind_hint guesses a pull request's kind from its
-branch (a CI job's number: ci; an issue's: issue) or its title ([Perf]: perf; [Feat]: feature), empty when neither
-tells. Exit 1 when GitHub cannot be read, 2 when the range is empty or a time cannot be read.
+A pull request's state is its state at the range's end, from its merge and close times and, when it was reopened,
+its events. The sglang pull requests are those pushed from inferpilot/<slug> branches (source "branch") and those a
+feature skill of the range's end names as its reference_pr (source "feature_skill:<id>"; a skill may record a
+hand-written port, so the report's writer decides which are InferPilot's): "pulls" holds those opened, merged,
+closed or given commits in the range, "open_at_end" every one still open at its end. kind_hint guesses a pull
+request's kind from its branch (a CI job's number: ci; an issue's: issue) or its title ([Perf]: perf; [Feat]:
+feature), empty when neither tells. Exit 1 when GitHub cannot be read, 2 when the range is empty or a time cannot be
+read.
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ import base64
 import datetime as dt
 import http.client
 import json
+import os
 import re
 import subprocess
 import sys
@@ -38,8 +44,10 @@ ROOT = Path(__file__).resolve().parent.parent
 UTC8 = dt.timezone(dt.timedelta(hours=8), "UTC+8")
 REPO = "At1a8/inferpilot"
 UPSTREAM = "sgl-project/sglang"
+SKILLS = "knowledge/feature_skills"
 SKILL = re.compile(r"^knowledge/feature_skills/([^/_][^/]*)/SKILL\.md$")
 REFERENCE_PR = re.compile(r'^reference_pr:\s*"?sgl-project/sglang#(\d+)"?', re.M)
+GITHUB_FILES = 300
 
 
 def parse_time(text: str) -> dt.datetime:
@@ -68,6 +76,10 @@ def utc(t: dt.datetime) -> str:
     return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def before(stamp: str | None, t: dt.datetime) -> bool:
+    return bool(stamp) and parse_time(stamp) < t
+
+
 def within(stamp: str | None, start: dt.datetime, end: dt.datetime) -> bool:
     return bool(stamp) and start <= parse_time(stamp) < end
 
@@ -90,94 +102,172 @@ def brief(p: dict) -> dict:
             "closed_at": p.get("closed_at")}
 
 
-def sort_pulls(pulls: list, start: dt.datetime, end: dt.datetime) -> dict:
+def at_end(p: dict, end: dt.datetime, events) -> tuple:
+    """(state, closed_at) of a pull request at end: merged, closed or open. Its fields tell, unless it was open at
+    some point after end (open now, or closed or merged after end): then its last close or reopen event before end
+    does. events(number) lists its issue events."""
+    if before(p.get("merged_at"), end):
+        return "merged", p["merged_at"]
+    if p.get("state") == "closed" and before(p.get("closed_at"), end):
+        return "closed", p["closed_at"]
+    last = None
+    for e in events(p["number"]):
+        if e.get("event") in ("closed", "reopened") and before(e.get("created_at"), end):
+            if last is None or parse_time(e["created_at"]) >= parse_time(last["created_at"]):
+                last = e
+    if last and last["event"] == "closed":
+        return "closed", last["created_at"]
+    return "open", None
+
+
+def sort_pulls(pulls: list, start: dt.datetime, end: dt.datetime, events) -> dict:
     """InferPilot's pull requests merged in the range, closed in it without merge, and open at its end."""
-    merged = [brief(p) for p in pulls if within(p.get("merged_at"), start, end)]
-    closed = [brief(p) for p in pulls if not p.get("merged_at") and within(p.get("closed_at"), start, end)]
-    still = [brief(p) for p in pulls if parse_time(p["created_at"]) < end
-             and not (p.get("closed_at") and parse_time(p["closed_at"]) < end)]
-    return {"merged": sorted(merged, key=lambda p: p["merged_at"]), "closed": closed, "open": still}
-
-
-def main_at(repo: str, t: dt.datetime) -> str:
-    commits = _github.get("/repos/%s/commits" % repo, {"sha": "main", "until": utc(t), "per_page": 1})
-    return commits[0]["sha"] if commits else ""
-
-
-def git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, timeout=120)
-
-
-def git_change(repo: str, base: str, head: str) -> dict | None:
-    """`git diff --shortstat` in this checkout when its origin is repo, fetching main when it lacks a commit; None
-    when it cannot tell."""
-    try:
-        if repo.lower() not in git("remote", "get-url", "origin").stdout.lower():
-            return None
-        if any(git("cat-file", "-e", c + "^{commit}").returncode for c in (base, head)):
-            git("fetch", "-q", "origin", "main")
-        out = git("diff", "--shortstat", base, head)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode:
-        return None
-    n = {k: int(v) for v, k in re.findall(r"(\d+) (file|insertion|deletion)", out.stdout)}
-    return {"files": n.get("file", 0), "insertions": n.get("insertion", 0), "deletions": n.get("deletion", 0)}
-
-
-def change(repo: str, base: str, head: str) -> dict:
-    """The change from base to head: its numbers from git (GitHub's compare leaves some files' counts at 0), from
-    GitHub when git cannot tell (counted_by says which), and the paths it touches."""
-    if not base or not head or base == head:
-        return {"files": 0, "insertions": 0, "deletions": 0, "counted_by": "", "paths": []}
-    files = _github.get("/repos/%s/compare/%s...%s" % (repo, base, head)).get("files", [])
-    counted, by = git_change(repo, base, head), "git"
-    if counted is None:
-        counted, by = {"files": len(files), "insertions": sum(f.get("additions", 0) for f in files),
-                       "deletions": sum(f.get("deletions", 0) for f in files)}, "github"
-    return {**counted, "counted_by": by, "paths": [f["filename"] for f in files]}
-
-
-def skill_prs(repo: str, paths: list, ref: str) -> dict:
-    """sglang pull request number -> the feature skill changed in the range that names it as its reference_pr."""
-    out = {}
-    for path in paths:
-        m = SKILL.match(path)
-        if not m:
+    out = {"merged": [], "closed": [], "open": []}
+    for p in pulls:
+        if not before(p["created_at"], end):
             continue
-        try:
-            d = _github.get("/repos/%s/contents/%s" % (repo, path), {"ref": ref})
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                continue
-            raise
-        for n in REFERENCE_PR.findall(base64.b64decode(d.get("content", "")).decode("utf-8", "replace")):
-            out.setdefault(int(n), "feature_skill:" + m.group(1))
+        state, closed = at_end(p, end, events)
+        if state == "merged" and within(closed, start, end):
+            out["merged"].append(brief(p))
+        elif state == "closed" and within(closed, start, end):
+            out["closed"].append(brief(p))
+        elif state == "open":
+            out["open"].append(brief(p))
+    out["merged"].sort(key=lambda p: p["merged_at"])
     return out
 
 
-def upstream_pulls(upstream: str, start: dt.datetime, end: dt.datetime, recorded: dict) -> list:
-    """The sglang pull requests from InferPilot's work opened, merged, closed or updated in the range."""
+def git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, timeout=120,
+                          env={**os.environ, "LC_ALL": "C", "LANGUAGE": ""})
+
+
+def git_ready(repo: str) -> bool:
+    """Whether this checkout's origin is repo and its main could be fetched."""
+    try:
+        if repo.lower() not in git("remote", "get-url", "origin").stdout.lower():
+            return False
+        return git("fetch", "-q", "origin", "main").returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def main_at(repo: str, t: dt.datetime, use_git: bool) -> tuple:
+    """(sha, found_by): main as it stood at t, along its first-parent line with git, else GitHub's newest commit
+    on main dated before t."""
+    if use_git:
+        out = git("rev-list", "-1", "--first-parent", "--before=" + t.strftime("%Y-%m-%d %H:%M:%S %z"), "origin/main")
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip(), "git"
+    commits = _github.get("/repos/%s/commits" % repo, {"sha": "main", "until": utc(t), "per_page": 1})
+    return (commits[0]["sha"] if commits else ""), "github"
+
+
+def numstat(text: str) -> list:
+    """(added, deleted, path) from `git diff --numstat -z`; a renamed file by its new path, a binary one with 0 lines."""
+    fields, out, i = text.split("\0"), [], 0
+    while i < len(fields) and fields[i]:
+        added, deleted, path = fields[i].split("\t", 2)
+        if path:
+            i += 1
+        else:
+            path, i = fields[i + 2], i + 3
+        out.append((int(added) if added.isdigit() else 0, int(deleted) if deleted.isdigit() else 0, path))
+    return out
+
+
+def change(repo: str, base: str, head: str, use_git: bool) -> dict:
+    """The change from base to head: its numbers and every path it touches, from git, else from GitHub."""
+    if not base or not head or base == head:
+        return {"files": 0, "insertions": 0, "deletions": 0, "counted_by": "", "complete": True, "paths": []}
+    if use_git:
+        out = git("diff", "--numstat", "-z", base, head)
+        if out.returncode == 0:
+            rows = numstat(out.stdout)
+            return {"files": len(rows), "insertions": sum(r[0] for r in rows), "deletions": sum(r[1] for r in rows),
+                    "counted_by": "git", "complete": True, "paths": [r[2] for r in rows]}
+    files = _github.get("/repos/%s/compare/%s...%s" % (repo, base, head)).get("files", [])
+    return {"files": len(files), "insertions": sum(f.get("additions", 0) for f in files),
+            "deletions": sum(f.get("deletions", 0) for f in files), "counted_by": "github",
+            "complete": len(files) < GITHUB_FILES, "paths": [f["filename"] for f in files]}
+
+
+def recorded_ports(repo: str, head: str, use_git: bool) -> dict:
+    """sglang pull request number -> the feature skill of head that names it as its reference_pr."""
+    skills = {}
+    if use_git:
+        listed = git("ls-tree", "-r", "--name-only", head, SKILLS)
+        if listed.returncode == 0:
+            for path in listed.stdout.splitlines():
+                if SKILL.match(path):
+                    shown = git("show", "%s:%s" % (head, path))
+                    if shown.returncode == 0:
+                        skills[path] = shown.stdout
+    if not skills:
+        for d in _github.get("/repos/%s/contents/%s" % (repo, SKILLS), {"ref": head}):
+            path = "%s/%s/SKILL.md" % (SKILLS, d["name"])
+            if d.get("type") != "dir" or not SKILL.match(path):
+                continue
+            try:
+                f = _github.get("/repos/%s/contents/%s" % (repo, path), {"ref": head})
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    continue
+                raise
+            skills[path] = base64.b64decode(f.get("content", "")).decode("utf-8", "replace")
+    out = {}
+    for path, text in sorted(skills.items()):
+        for n in REFERENCE_PR.findall(text):
+            out.setdefault(int(n), "feature_skill:" + SKILL.match(path).group(1))
+    return out
+
+
+def events_of(repo: str):
+    cache = {}
+
+    def events(number: int) -> list:
+        if number not in cache:
+            cache[number] = _github.paginate("/repos/%s/issues/%d/events" % (repo, number))
+        return cache[number]
+    return events
+
+
+def active(repo: str, p: dict, closed: str | None, start: dt.datetime, end: dt.datetime) -> bool:
+    """Whether a pull request was opened, merged or closed (closed: its merge or close time at the range's end) or
+    given a commit in the range."""
+    if within(p["created_at"], start, end) or within(closed, start, end):
+        return True
+    commits = _github.paginate("/repos/%s/pulls/%d/commits" % (repo, p["number"]), max_pages=3)
+    return any(within((c.get("commit") or {}).get("committer", {}).get("date"), start, end) for c in commits)
+
+
+def upstream_pulls(upstream: str, start: dt.datetime, end: dt.datetime, recorded: dict) -> dict:
+    """The sglang pull requests from InferPilot's work: those active in the range, and those open at its end."""
     found = {}
-    query = "repo:%s is:pr head:inferpilot updated:>=%s" % (upstream, (start - dt.timedelta(days=1)).date().isoformat())
-    for item in _github.search_issues(query):
+    for item in _github.search_issues("repo:%s is:pr head:inferpilot" % upstream):
         found.setdefault(item["number"], "branch")
     for n, source in recorded.items():
         found.setdefault(n, source)
-    out = []
+    events = events_of(upstream)
+    out = {"pulls": [], "open_at_end": []}
     for n, source in sorted(found.items()):
         p = _github.get("/repos/%s/pulls/%d" % (upstream, n))
         if source == "branch" and not p["head"]["ref"].startswith("inferpilot/"):
             continue
-        if not any(within(p.get(k), start, end) for k in ("created_at", "merged_at", "closed_at", "updated_at")):
+        if not before(p["created_at"], end):
             continue
-        out.append({**brief(p), "state": "merged" if p.get("merged_at") else p["state"], "updated_at": p["updated_at"],
-                    "kind_hint": kind_hint(p["head"]["ref"], p["title"]), "source": source})
+        state, closed = at_end(p, end, events)
+        row = {**brief(p), "state": state, "kind_hint": kind_hint(p["head"]["ref"], p["title"]), "source": source}
+        if state == "open":
+            out["open_at_end"].append(row)
+        if active(upstream, p, closed, start, end):
+            out["pulls"].append(row)
     return out
 
 
 def collect(repo: str, upstream: str, start: dt.datetime, end: dt.datetime) -> dict:
-    pulls = sort_pulls(_github.paginate("/repos/%s/pulls" % repo, {"state": "all"}), start, end)
+    use_git = git_ready(repo)
+    pulls = sort_pulls(_github.paginate("/repos/%s/pulls" % repo, {"state": "all"}), start, end, events_of(repo))
     for p in pulls["merged"]:
         merger = _github.get("/repos/%s/pulls/%d" % (repo, p["number"])).get("merged_by") or {}
         p["merged_by"] = merger.get("login", "")
@@ -186,18 +276,19 @@ def collect(repo: str, upstream: str, start: dt.datetime, end: dt.datetime) -> d
         contributors.setdefault(p["author"], {"wrote": 0, "merged": 0})["wrote"] += 1
         if p["merged_by"]:
             contributors.setdefault(p["merged_by"], {"wrote": 0, "merged": 0})["merged"] += 1
-    base, head = main_at(repo, start), main_at(repo, end)
-    diff = change(repo, base, head)
+    (base, found_base), (head, found_head) = main_at(repo, start, use_git), main_at(repo, end, use_git)
+    diff = change(repo, base, head, use_git)
     return {"range": {"since": start.isoformat(), "until": end.isoformat()},
-            "inferpilot": {"repo": repo, **pulls, "contributors": contributors, "main": {"since": base, "until": head},
+            "inferpilot": {"repo": repo, **pulls, "contributors": contributors,
+                           "main": {"since": base, "until": head, "found_by": found_base if found_base == found_head else "git and github"},
                            "change": {k: v for k, v in diff.items() if k != "paths"}},
-            "upstream": {"repo": upstream, "pulls": upstream_pulls(upstream, start, end, skill_prs(repo, diff["paths"], head))}}
+            "upstream": {"repo": upstream, **upstream_pulls(upstream, start, end, recorded_ports(repo, head, use_git))}}
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="What InferPilot's weekly report counts, from GitHub, as JSON. Read only.")
     ap.add_argument("--since", default="", help="the range's start: a date or a date and a time (default: 00:00 seven days before its end)")
-    ap.add_argument("--until", default="", help="the range's end: a date or a date and a time (default: now)")
+    ap.add_argument("--until", default="", help="the range's end: a date (its whole day) or a date and a time (default: now)")
     ap.add_argument("--repo", default=REPO, help="InferPilot's repository (default: %(default)s)")
     ap.add_argument("--upstream", default=UPSTREAM, help="the framework's repository (default: %(default)s)")
     a = ap.parse_args(argv)
