@@ -283,11 +283,15 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
 - `ready_for_review`: write `RUN_DIR/validation_report.md` (`templates/validation_report.md`); every
   number points at an artifact. Its *Before pushing* section is what the human runs before pushing
   (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes `RUN_DIR/base`,
-  and the checkout may be on another branch by the time the human runs it. For each test and
+  the lock release frees the machine, and the checkout may be on another branch by the time the human
+  runs it. It takes the machine's lock for `RUN_DIR/rerun` and checks every GPU idle before each arm's
+  servers start (`scripts/run_lock.py`, `scripts/gpu_status.py --check all`). For each test and
   measurement the PR body cites, it makes each arm's tree again from its commit (the base commit and the
-  branch's head), launches each arm's server with that tree first on `PYTHONPATH` and checks the import
-  (`env_hygiene.md`, *The code under test*), gives the client and accuracy commands and the numbers to
-  compare with, with the run's spread; then the PR body path and the push command.
+  branch's head), runs every command of an arm (server, tests, reproduction, benchmark client) with that
+  tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under test*), measures as
+  the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per arm, the same rounds
+  in the same order) and gives the numbers to compare with, with the run's spread. Then it removes the
+  worktrees, releases the lock, and gives the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
   `fixed_on_main`, `diagnosed`, `handed_off`, `dropped`, `queued`): write `RUN_DIR/run_report.md` with what was
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
