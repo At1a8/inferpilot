@@ -15,15 +15,21 @@ Inputs: `work_package`, `round` (0 for the first attempt), `feedback` (the test 
 the previous round), `verified_work_packages`.
 
 On a retry, Setup leaves what the earlier attempt committed on `refs/inferpilot/restored/<slug>`
-(`director.md`, Setup step 2). When that ref holds a commit whose subject is this package's `<wp>:
-<goal>`, take the package's commits from it instead of writing the change: the ones after the previous
-package's commit on the ref (or after `<base>`) up to that one, which includes an `apply_pr` package's
-commits from the PR (`git -C <worktree> log --reverse --format='%H %s'
-<base>..refs/inferpilot/restored/<slug>` lists them in order). Cherry-pick them in that order onto the
-task branch and go on from step 4: the test engineer checks them like any other. A commit whose change
-the base already has (the PR was merged in between) stops the cherry-pick as empty: `git cherry-pick
---skip` it and say so in `notes`. On a conflict, `git cherry-pick --abort` and write the package.
-Commits no package of this attempt names stay on the side ref.
+(`director.md`, Setup step 2). Take from it only when `round` is 0 and `feedback` is empty: a later
+round fixes what is on the task branch, from step 1. When that ref holds a commit whose subject is this
+package's `<wp>: <goal>`, and no later commit on it reverts that one (`This reverts commit <sha>` in
+its message: a kernel rolled back with `revert`, written again instead), take the package's commits
+from it instead of writing the change: the ones after the previous package's commit on the ref (or
+after `<base>`) up to that one, which includes an `apply_pr` package's commits from the PR (`git -C
+<worktree> log --reverse --format='%H %s' <base>..refs/inferpilot/restored/<slug>` lists them in
+order). With the worktree clean, record its HEAD, then cherry-pick them in that order onto the task
+branch. A commit whose change the base already has (the PR was merged in between) stops the
+cherry-pick as empty: `git cherry-pick --skip` it and say so in `notes`. On a conflict, `git
+cherry-pick --abort`, go back to the recorded HEAD (`git reset --hard <recorded HEAD>`; the commits
+stay on the side ref) and write the package from step 1. Once they apply, a `kernel` package whose
+speed matters still returns its hand-off (step 3): reuse `RUN_DIR/handoffs/K-<wp>/` when the earlier
+attempt left it and its paths exist, else write it. Then go on from step 4: the test engineer checks
+the commits like any other. Commits no package of this attempt names stay on the side ref.
 
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:

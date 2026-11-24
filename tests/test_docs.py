@@ -373,6 +373,35 @@ class BranchBundleTest(unittest.TestCase):
                 git("cherry-pick", line.split()[0], cwd=d / "retry")
             self.assertEqual(git("rev-parse", "HEAD^{tree}", cwd=d / "retry"), git("rev-parse", wp1 + "^{tree}", cwd=old))
 
+            # the second commit conflicts: --abort keeps the first, the recorded HEAD takes it back out
+            git("checkout", "-q", "-b", "other", base, cwd=origin)
+            (origin / "WP1").write_text("someone else's WP1")
+            git("add", "WP1", cwd=origin)
+            git("commit", "-q", "-m", "another WP1", cwd=origin)
+            git("checkout", "-q", "main", cwd=origin)
+            r = fresh("conflict")
+            git("checkout", "-q", "-b", "inferpilot/t", "origin/other", cwd=d / "conflict")
+            self.assertEqual(run(retry, **r).returncode, 0)
+            recorded = git("rev-parse", "HEAD", cwd=d / "conflict")
+            picks = git("log", "--reverse", "--format=%H", "%s..%s" % (base, side), cwd=d / "conflict").split()
+            git("cherry-pick", picks[0], cwd=d / "conflict")
+            bad = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "cherry-pick", picks[1]],
+                                 cwd=d / "conflict", capture_output=True, text=True)
+            self.assertNotEqual(bad.returncode, 0, "the test meant a conflict")
+            git("cherry-pick", "--abort", cwd=d / "conflict")
+            self.assertNotEqual(git("rev-parse", "HEAD", cwd=d / "conflict"), recorded)
+            git("reset", "-q", "--hard", recorded, cwd=d / "conflict")
+            self.assertEqual(git("rev-parse", "HEAD", cwd=d / "conflict"), recorded)
+
+            # a kernel rolled back with revert: the message the implementer looks for is git's own
+            (d / "conflict" / "kernel").write_text("k")
+            git("add", "kernel", cwd=d / "conflict")
+            git("commit", "-q", "-m", "WP3: a kernel", cwd=d / "conflict")
+            k = git("rev-parse", "HEAD", cwd=d / "conflict")
+            git("revert", "--no-edit", k, cwd=d / "conflict")
+            self.assertIn("This reverts commit %s" % k, git("log", "-1", "--format=%B", cwd=d / "conflict"))
+            self.assertIn("This reverts commit", re.sub(r"\s+", " ", (ROOT / "roles/implementer.md").read_text()))
+
             # main moved on and merged the PR: its commit comes up empty and is skipped, WP1 still applies
             (origin / "pr").write_text("pr")
             git("add", "pr", cwd=origin)

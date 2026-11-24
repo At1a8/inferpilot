@@ -60,13 +60,17 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      `$INFERPILOT_IMAGE_PINNED` is `1` when it was started from a given image.
    - `git -C <framework_dir> fetch origin`, then `git -C <framework_dir> checkout -b inferpilot/<slug> <base>`
      (the base commit the task names, default `origin/main`); on a resume, check out the branch that is
-     already there. Write the base's full SHA (`git -C <framework_dir> rev-parse <base>`) to
-     `RUN_DIR/run.json` as `base_commit`, which a retry and a resume read.
+     already there. Read the `base_commit` an earlier attempt wrote to `RUN_DIR/run.json` before
+     writing to it. A resume keeps it: that SHA is `<base>` throughout, and `run.json` keeps it. A new
+     attempt resolves the base's full SHA after the fetch (`git -C <framework_dir> rev-parse <base>`)
+     and writes it to `run.json` as `base_commit`; a retry does so only after the earlier branch is
+     taken care of (next item).
    - A retry runs every phase again, Reproduce and the baseline included, and they must not see the
      earlier attempt's fix: its branch starts from the base like a new one. Before the `checkout -b`,
-     when the earlier branch is still in `framework_dir` with commits beyond the `base_commit` the
-     earlier attempt wrote to `run.json`, refresh `RUN_DIR/branch.bundle` from it (`implementer.md`,
-     PHASE=implement step 4) and rename it `inferpilot/<slug>-attempt-<time>`. Then, with a bundle, put
+     when the earlier branch is still in `framework_dir`, refresh `RUN_DIR/branch.bundle` from it
+     (`implementer.md`, PHASE=implement step 4) when it has commits beyond the earlier attempt's
+     `base_commit`, and rename it `inferpilot/<slug>-attempt-<time>` either way, so `checkout -b` can
+     create the branch. Then, with a bundle, put
      its commits on the task's side ref, never checked out, for the implementer to take them from:
      `git -C <framework_dir> fetch RUN_DIR/branch.bundle +inferpilot/<slug>:refs/inferpilot/restored/<slug>`,
      and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
@@ -81,7 +85,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      earlier commits are lost.
    - `feature` and `perf` also get the base commit as a worktree of the same repository, for the
      baseline arm while the task branch carries the change: `git -C <framework_dir> worktree add
-     --detach RUN_DIR/base <base>`.
+     --detach RUN_DIR/base <base>`. On a retry or a resume an earlier attempt may have left
+     `RUN_DIR/base`: reuse it only when `git -C <framework_dir> worktree list` shows it registered
+     with this checkout, clean, at `<base>`. Registered here at another commit, remove it with `git -C
+     <framework_dir> worktree remove RUN_DIR/base`, never `--force`: local changes there stop Setup.
+     Left from a container that is gone, so not registered here, move it to `RUN_DIR/failed/base-<time>`
+     intact. Then add it as above.
    - After git writes, `scripts/restore_owner.sh <framework_dir>/.git` (nothing to do for the image's
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
