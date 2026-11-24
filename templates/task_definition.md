@@ -26,7 +26,7 @@ of it.
 | `stop_after` | stop after this phase | optional | optional | optional | optional | optional |
 | `bisect_fixed` | when the reporter's code fails and main passes, find the commit that fixed it | | optional | | | |
 | `confirm_leads` | default `false`: leads are listed with how to reproduce them; `true`: each is checked on the base commit, and those that show there are drafted as issues | optional | optional | optional | optional | |
-| `resume_from`, `run_dir` | `implement`: continue after a human approved the design | optional | | | | |
+| `resume_from`, `run_dir` | `implement`: continue after a human approved the design (feature); `verify`: Verify again on the commit Implement verified, in a run whose Verify ended without a result | optional | optional | optional | optional | |
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
 | `tune` | default `false`: the feature runs at the configuration of the target PR or design; `true`: a work package chooses its knobs by measurement | optional | | | | |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's workload and goal, each off by default: a held-out operating point the gain must also hold at, guard workloads of InferPilot's choosing, points beyond the workload's own | optional | optional | | optional | |

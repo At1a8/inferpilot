@@ -40,7 +40,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` (restored from its bundle when it does not, step 2) and is checked out
    there (check it out when the checkout is clean), and
-   re-run one baseline smoke to confirm the environment still matches the ledger.
+   re-run one baseline smoke to confirm the environment still matches the ledger. With `resume_from:
+   verify`, first check, reading only, what the resume needs (PHASE=resume, steps 1 and 2): the branch
+   head is the last commit the ledger's Implement verified, the checkout is clean, and for `issue` and
+   `ci` the run directory records the gate command. When one fails, run no smoke and return the run
+   directory with `baseline_status: "fail"` and what differs in `baseline`.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -213,6 +217,38 @@ Return:
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
+## PHASE=resume (resume_from=verify, right after Setup)
+
+Inputs: `resume_run_dir`, the run directory Setup reused. The run's Verify ended without a result (its
+verify engineer returned nothing or timed out, its servers went with the call), and only Verify and what
+comes after it run again, on the commit the run's Implement verified. Change nothing.
+
+1. From `RUN_DIR/experiment_ledger.md` and `run_report.md` (or `validation_report.md`): the work packages
+   Implement verified, each with its commit and evidence, and the last of those commits. `head_ok` is
+   true only when the task branch's head in the worktree is that commit and the worktree is clean:
+   a branch that moved after Implement (a commit, an edit, a reset) is not what the run verified.
+2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
+   from `issue_triage.md` and the ledger's Reproduce section); `ci`, the failing test
+   (`failing_test_cmd`, from `ci_triage.md`). Leave it empty when the run directory does not record it.
+3. `perf_claim`: the claim the run's Performance phase was to measure (the spec's, the design's, the
+   plan's, or an issue's reproduction), empty when it had none.
+4. The paths later phases read, those that exist: `triage_path`, `reply_draft_path` (`issue`),
+   `spec_path`, `design_path` (`feature`), `analysis_path` (`perf`).
+5. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
+   `RUN_DIR/handoffs.json` (empty lists when it wrote none): Verify judges a failure the baseline shares
+   by the first, and an integrated kernel is reverted to its `commit` by the second.
+6. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
+   no result (the report and ledger say).
+
+Return:
+
+```json
+{"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
+ "known_issues": [], "handoffs": [],
+ "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_claim": "",
+ "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md", "notes": ""}
+```
+
 ## PHASE=spec (feature)
 
 1. Identify the source of truth (upstream PR, design or paper) and its commit; list unmerged
@@ -328,8 +364,11 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
   `bisect_fixed` run that would.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
-  `integration_failed`, `rejected`, `not_integrated`) and package paths. A `not_integrated` hand-off's
-  back end found a gain that the run, stopped by the control file, never integrated: give its speedup.
+  `integration_failed`, `rejected`, `not_integrated`) and package paths. Write `handoffs` and
+  `known_issues` as given to `RUN_DIR/handoffs.json` and `RUN_DIR/known_issues.json`, which a run
+  resumed from Verify restores; a run that stopped at Setup writes neither: it has none of its own, and
+  a resumed one would empty those it was to restore. A `not_integrated` hand-off's back end found a
+  gain that the run, stopped by the control file, never integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
