@@ -4,6 +4,7 @@
     python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md
     python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md --dry-run
     python3 scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md --patch RUN_DIR/knowledge.patch
+    python3 scripts/propose_knowledge.py --run-dir RUN_DIR --reapply
 
 Only changes under knowledge/ go in. They are applied as a patch onto the current origin/main in a
 throwaway worktree, committed on inferpilot/knowledge/<run directory name> and pushed there, never to main;
@@ -20,6 +21,13 @@ started from the same main give their new known issues the same next KI- number:
 since is replaced, in the entry and in every line the patch adds, by the next free one on main, and the
 pull request says which ("renumbered"). Entries main added at the end of the file are kept beside this
 run's; an existing entry that main and the patch both changed stops it (exit 4) for a human to reconcile.
+
+A run resumed from Verify proposes on its first part's branch, which the proposal rebuilds from main and
+this checkout's changes: --reapply, before its curator edits anything, puts the first part's
+RUN_DIR/knowledge.patch back in the checkout (unstaged, its new known issues numbered against the
+checkout's HEAD), unless the checkout holds it already, so the pull request keeps both parts. A patch it
+cannot put back (exit 4: it does not apply there) is moved to knowledge.<n>.patch, where no proposal
+overwrites it.
 """
 from __future__ import annotations
 
@@ -176,18 +184,11 @@ def auth_env(token: str) -> dict:
             "GIT_CONFIG_VALUE_0": "AUTHORIZATION: basic " + basic}
 
 
-def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str, push_url: str,
-                  token: str) -> tuple[str, dict]:
-    """Apply the patch onto origin/main in a throwaway worktree, commit, push the branch; the commit, and the
-    known issues renumbered against main."""
-    git(inferpilot, "fetch", "-q", push_url, "+refs/heads/main:refs/remotes/origin/main", env=auth_env(token))
-    diff, mapping = renumber(diff, preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False))
-    wt = tempfile.mkdtemp(prefix="inferpilot-knowledge-")
-    os.rmdir(wt)
-    git(inferpilot, "worktree", "add", "-q", "--detach", wt, "origin/main")
+def apply_in(wt: str, diff: str) -> None:
+    """Apply the patch in worktree `wt`, staged. RuntimeError when it does not apply there, or when what it
+    staged reaches outside knowledge/."""
     tmp = tempfile.mkdtemp(prefix="inferpilot-knowledge-patch-")
     try:
-        git(wt, "checkout", "-q", "-B", branch)
         patch_file = os.path.join(tmp, "knowledge.patch")
         with open(patch_file, "w") as f:
             f.write(diff)
@@ -221,14 +222,66 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
         outside = [f for f in staged if not f.startswith("knowledge/")]
         if outside:
             raise RuntimeError("the patch changes more than knowledge/: %s" % ", ".join(outside))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str, push_url: str,
+                  token: str) -> tuple[str, dict]:
+    """Apply the patch onto origin/main in a throwaway worktree, commit, push the branch; the commit, and the
+    known issues renumbered against main."""
+    git(inferpilot, "fetch", "-q", push_url, "+refs/heads/main:refs/remotes/origin/main", env=auth_env(token))
+    diff, mapping = renumber(diff, preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False))
+    wt = tempfile.mkdtemp(prefix="inferpilot-knowledge-")
+    os.rmdir(wt)
+    git(inferpilot, "worktree", "add", "-q", "--detach", wt, "origin/main")
+    try:
+        git(wt, "checkout", "-q", "-B", branch)
+        apply_in(wt, diff)
         git(wt, *AUTHOR, "commit", "-q", "-m", title, "-m", "From the InferPilot run %s." % run)
         sha = git(wt, "rev-parse", "HEAD").strip()
         git(wt, "push", "-q", "--force", push_url, "HEAD:refs/heads/%s" % branch, env=auth_env(token))
         return sha, mapping
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
         git(inferpilot, "worktree", "remove", "--force", wt, check=False)
         git(inferpilot, "branch", "-D", branch, check=False)
+
+
+def holds(inferpilot: str, diff: str) -> bool:
+    """The checkout's working tree has the patch applied."""
+    return subprocess.run(["git", "-C", inferpilot, "apply", "-R", "--check"], input=diff,
+                          capture_output=True, text=True).returncode == 0
+
+
+def reapply(inferpilot: str, diff: str) -> tuple[str, list, dict]:
+    """Put a saved patch back in the checkout's working tree, nothing staged, its new known issues numbered
+    against the checkout's HEAD: 'present' when the checkout holds it already, otherwise 'restored'."""
+    if holds(inferpilot, diff):
+        return "present", patched(diff), {}
+    diff, mapping = renumber(diff, preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "HEAD:" + KNOWN, check=False))
+    wt = tempfile.mkdtemp(prefix="inferpilot-knowledge-")
+    os.rmdir(wt)
+    git(inferpilot, "worktree", "add", "-q", "--detach", wt, "HEAD")
+    try:
+        apply_in(wt, diff)
+        result = git(wt, "diff", "--cached", "--binary", "HEAD")
+    finally:
+        git(inferpilot, "worktree", "remove", "--force", wt, check=False)
+    if holds(inferpilot, result):
+        return "present", patched(result), mapping
+    p = subprocess.run(["git", "-C", inferpilot, "apply"], input=result, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError("git apply: %s" % (p.stderr or p.stdout).strip()[:300])
+    return "restored", patched(result), mapping
+
+
+def aside(saved: str) -> str:
+    """Move a saved patch out of the next proposal's way, to the first free knowledge.<n>.patch beside it."""
+    stem, n = saved[:-len(".patch")], 1
+    while os.path.exists("%s.%d.patch" % (stem, n)):
+        n += 1
+    os.replace(saved, "%s.%d.patch" % (stem, n))
+    return "%s.%d.patch" % (stem, n)
 
 
 def open_pr(repo: str, branch: str, title: str, body: str, token: str) -> dict:
@@ -259,30 +312,50 @@ def restore(inferpilot: str, tracked: list, untracked: list) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Propose the curator's knowledge/ changes as a pull request.")
     ap.add_argument("--run-dir", required=True, help="the run whose curator made the changes")
-    ap.add_argument("--body", required=True, help="the pull request's description, e.g. RUN_DIR/knowledge_pr.md")
+    ap.add_argument("--body", default="", help="the pull request's description, e.g. RUN_DIR/knowledge_pr.md (not needed with --reapply)")
     ap.add_argument("--title", default="", help="default: knowledge: what <run> learned")
     ap.add_argument("--repo", default="", help="owner/name (default: the origin of this checkout)")
     ap.add_argument("--inferpilot-dir", default=INFERPILOT, help=argparse.SUPPRESS)
     ap.add_argument("--push-url", default="", help=argparse.SUPPRESS)
-    ap.add_argument("--dry-run", action="store_true", help="show what would be proposed")
-    ap.add_argument("--patch", default="", help="propose this patch of knowledge/ (a run's knowledge.patch), not the checkout's changes")
+    ap.add_argument("--dry-run", action="store_true", help="show what would be proposed, or put back")
+    given = ap.add_mutually_exclusive_group()
+    given.add_argument("--patch", default="", help="propose this patch of knowledge/ (a run's knowledge.patch), not the checkout's changes")
+    given.add_argument("--reapply", action="store_true",
+                       help="a run resumed from Verify: put RUN_DIR/knowledge.patch, what its first part changed, back in the checkout")
     a = ap.parse_args(argv)
+    if not a.body and not a.reapply:
+        ap.error("the following arguments are required: --body")
     run = os.path.basename(os.path.normpath(a.run_dir))
     branch, title = "inferpilot/knowledge/%s" % run, a.title or "knowledge: what %s learned" % run
-    saved = a.patch
+    saved = os.path.join(a.run_dir, "knowledge.patch") if a.reapply else a.patch
     try:
-        if a.patch:
-            diff = open(a.patch, encoding="utf-8").read()
-            # The checkout that saved it, holding just these edits still, reads main again once they are
-            # proposed; any other checkout, or one with more edits, is left as it is.
-            mine = changed(a.inferpilot_dir)
-            tracked, untracked = mine if (mine[0] or mine[1]) and patch(a.inferpilot_dir, *mine) == diff else ([], [])
+        if a.reapply and not os.path.isfile(saved):
+            print(json.dumps({"action": "none", "reason": "no knowledge.patch in the run directory"}))
+            return 0
+        if a.patch or a.reapply:
+            diff = open(saved, encoding="utf-8").read()
             files = patched(diff)
             outside = [f for f in files if not f.startswith("knowledge/")]
             if not files or outside:
                 print("propose_knowledge: %s is not a patch of knowledge/%s" % (
-                    a.patch, ": it touches " + ", ".join(outside) if outside else ""), file=sys.stderr)
+                    saved, ": it touches " + ", ".join(outside) if outside else ""), file=sys.stderr)
                 return 1
+            if a.reapply:
+                if a.dry_run:
+                    print(json.dumps({"dry_run": True, "reapply": saved, "files": files}, indent=1))
+                    return 0
+                try:
+                    action, files, mapping = reapply(a.inferpilot_dir, diff)
+                except RuntimeError as e:
+                    print("propose_knowledge: %s; the checkout is left as it is, and the patch is kept as %s, out of "
+                          "the next proposal's way" % (e, aside(saved)), file=sys.stderr)
+                    return 4 if "apply" in str(e) else 1
+                print(json.dumps({"action": action, "files": files, **({"renumbered": mapping} if mapping else {})}, indent=1))
+                return 0
+            # The checkout that saved it, holding just these edits still, reads main again once they are
+            # proposed; any other checkout, or one with more edits, is left as it is.
+            mine = changed(a.inferpilot_dir)
+            tracked, untracked = mine if (mine[0] or mine[1]) and patch(a.inferpilot_dir, *mine) == diff else ([], [])
         else:
             tracked, untracked = changed(a.inferpilot_dir)
             if not tracked and not untracked:

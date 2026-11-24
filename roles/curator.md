@@ -9,7 +9,17 @@ Read: `knowledge/feature_skills/README.md`, `knowledge/known_issues.md`, `knowle
 
 ## PHASE=learn (every outcome)
 
-Inputs: `status`, `report_path`, `phases`, `known_issues`.
+Inputs: `status`, `report_path`, `phases`, `known_issues`, `resume_from`.
+
+A run resumed from Verify (`resume_from: verify`) proposes on its first part's branch and pull request,
+which step 6 rebuilds from your edits alone. So before you edit anything, run
+`python3 <inferpilot_dir>/scripts/propose_knowledge.py --run-dir RUN_DIR --reapply`: it puts what the first
+part changed in `knowledge/` (`RUN_DIR/knowledge.patch`) back in the checkout, unless the checkout holds it
+already, and returns `renumbered` as step 1 says when the checkout's main has taken a number. Edit on top
+of it: a known issue it put back is updated, not added again, and `RUN_DIR/knowledge_pr.md` keeps the
+first part's items beside this part's. When it fails (exit 4: it does not apply to this checkout), it has
+moved the patch to the `knowledge.<n>.patch` it names: what you propose is then this part's alone, so say
+so in `notes` and in the description.
 
 1. **Known issues:** add every entry in `known_issues` to `knowledge/known_issues.md` (next `KI-` number;
    symptom · reproduction · excluded · workaround · status), or update the status of an existing entry

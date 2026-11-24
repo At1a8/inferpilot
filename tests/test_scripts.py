@@ -1101,6 +1101,17 @@ class ProposeKnowledgeTest(unittest.TestCase):
                                          *extra])
         return rc, out.getvalue(), err.getvalue()
 
+    def reapply(self, inferpilot=None):
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            rc = propose_knowledge.main(["--run-dir", str(self.run), "--reapply",
+                                         "--inferpilot-dir", str(inferpilot or self.inferpilot)])
+        return rc, out.getvalue(), err.getvalue()
+
+    def status(self, checkout=None):
+        import subprocess
+        return subprocess.run(["git", "-C", str(checkout or self.inferpilot), "status", "--porcelain", "--untracked-files=all"],
+                              capture_output=True, text=True, check=True).stdout
+
     @staticmethod
     def github(calls):
         def fake(method, path, token="", data=None):
@@ -1263,6 +1274,85 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.assertEqual(self.propose()[0], 3)
         self.assertIn("/data/models/x", (self.inferpilot / "knowledge" / "known_issues.md").read_text(), "left as it was")
         self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_a_run_resumed_from_verify_proposes_both_parts_on_its_branch(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        first = "# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nfirst part\n"
+        known.write_text(first)
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("dcp 8: see KI-001\n")
+        self.assertEqual(self.propose(api=self.github([]))[0], 0)
+        self.assertEqual(known.read_text(), "# Known issues\n", "the first part's edits went to its branch")
+        rc, out, err = self.reapply()
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "restored"), err)
+        self.assertEqual(known.read_text(), first)
+        self.assertEqual(self.status(), " M knowledge/known_issues.md\n?? knowledge/dispatch.md\n", "back as edits, nothing staged")
+        self.assertEqual(json.loads(self.reapply()[1])["action"], "present", "and only once")
+        known.write_text(first + "\n## KI-002 — the resumed Verify's\nsecond part\n")
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        branch = "inferpilot/knowledge/%s:" % self.run.name
+        self.assertEqual(self.show(branch + "knowledge/known_issues.md"), first + "\n## KI-002 — the resumed Verify's\nsecond part\n",
+                         "the second proposal keeps the first part's entry")
+        self.assertEqual(self.show(branch + "knowledge/dispatch.md"), "dcp 8: see KI-001\n")
+        saved = (self.run / "knowledge.patch").read_text()
+        self.assertTrue("+## KI-001" in saved and "+## KI-002" in saved, "the saved patch holds both parts")
+
+    def test_reapply_leaves_a_checkout_that_still_holds_the_first_part_as_it_is(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        self.assertEqual(self.propose(token="")[0], 2, "no token: the edits stay in the checkout")
+        rc, out, err = self.reapply()
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "present"), err)
+        self.assertEqual(known.read_text(), "# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n", "not added twice")
+
+    def test_reapply_in_another_checkout_numbers_the_first_part_against_its_main(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nours\n")
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("dcp 8: see KI-001\n")
+        self.assertEqual(self.propose(token="")[0], 2)
+        shutil.rmtree(self.inferpilot)  # the task's container is gone, and the checkout with it
+        self._main_and_checkout_have("# Known issues\n\n## KI-001 — aiter import segfault\nmain\n")
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        rc, out, err = self.reapply(inferpilot=fresh)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-001": "KI-002"})
+        self.assertEqual((fresh / "knowledge" / "known_issues.md").read_text(),
+                         "# Known issues\n\n## KI-001 — aiter import segfault\nmain\n\n## KI-002 — GLM-5.3 dcp 8\nours\n")
+        self.assertEqual((fresh / "knowledge" / "dispatch.md").read_text(), "dcp 8: see KI-002\n")
+        self.assertEqual(json.loads(self.reapply(inferpilot=fresh)[1])["action"], "present", "and only once")
+
+    def test_a_first_part_that_does_not_apply_is_kept_out_of_the_next_proposals_way(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text(base.replace("open", "fixed by #123"))
+        self.assertEqual(self.propose(token="")[0], 2)
+        git("checkout", "-q", "--", "knowledge", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("open", "workaround: AITER_X=0"))
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        git("pull", "-q", cwd=self.inferpilot)
+        rc, _, err = self.reapply()
+        self.assertEqual(rc, 4, err)
+        kept = self.run / "knowledge.1.patch"
+        self.assertIn(str(kept), err)
+        self.assertTrue(kept.is_file() and not (self.run / "knowledge.patch").exists())
+        self.assertEqual(self.status(), "", "the checkout is left as it is")
+        known.write_text(known.read_text() + "\n## KI-002 — the resumed Verify's\n")
+        self.assertEqual(self.propose(token="")[0], 2)
+        self.assertIn("+Status: fixed by #123", kept.read_text(), "the next proposal leaves the first part's change where it was kept")
+
+    def test_reapply_without_a_saved_patch_or_with_one_reaching_outside_knowledge(self):
+        rc, out, _ = self.reapply()
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "none"))
+        (self.run / "knowledge.patch").write_text("diff --git a/inferpilot.js b/inferpilot.js\n--- a/inferpilot.js\n"
+                                                  "+++ b/inferpilot.js\n@@ -1 +1 @@\n-// inferpilot\n+// changed\n")
+        rc, _, err = self.reapply()
+        self.assertEqual(rc, 1, err)
+        self.assertEqual((self.inferpilot / "inferpilot.js").read_text(), "// inferpilot\n")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            propose_knowledge.main(["--run-dir", str(self.run)])  # a proposal needs its description
 
 
 class RunLockTest(unittest.TestCase):

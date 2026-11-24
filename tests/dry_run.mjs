@@ -428,6 +428,8 @@ const scenarios = [
     check(r.result.done.map((d) => d.wp).join() === 'WP1,WP2', `the packages the run verified: ${JSON.stringify(r.result.done)}`);
     const rv = r.calls.find((c) => c.key === 'reviewer:review');
     check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
+    const learn = r.calls.find((c) => c.key === 'curator:learn');
+    check(learn && learn.ins.resume_from === 'verify', 'the curator is told, so it puts back what the first part proposed before adding to it');
     const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
     check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
   }],
