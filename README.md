@@ -469,7 +469,7 @@ the container with its status. A run directory holds:
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>.log` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
-| `knowledge_pr.md` | the description of the curator's pull request to InferPilot's repository |
+| `knowledge_pr.md`, `knowledge.patch` | the description of the curator's pull request to InferPilot's repository, and its change, which `scripts/propose_knowledge.py --patch` proposes later from any checkout |
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |
 
 A scan's `daily_report.md` is written to be shared, and `scripts/daily_report.py check` has made sure

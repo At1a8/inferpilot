@@ -1060,15 +1060,146 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.show = lambda ref: subprocess.run(["git", "--git-dir", str(self.origin), "show", ref],
                                                capture_output=True, text=True).stdout
 
-    def propose(self, token="t", api=None):
+    def propose(self, token="t", api=None, extra=(), inferpilot=None):
         env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
         if token:
             env["GITHUB_TOKEN"] = token
         with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()) as out, \
                 redirect_stderr(io.StringIO()) as err, mock.patch.object(propose_knowledge, "api", side_effect=api):
             rc = propose_knowledge.main(["--run-dir", str(self.run), "--body", str(self.body), "--repo", "At1a8/inferpilot",
-                                         "--inferpilot-dir", str(self.inferpilot), "--push-url", str(self.origin)])
+                                         "--inferpilot-dir", str(inferpilot or self.inferpilot), "--push-url", str(self.origin),
+                                         *extra])
         return rc, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def github(calls):
+        def fake(method, path, token="", data=None):
+            calls.append((method, path, data))
+            return [] if method == "GET" else {"number": 12, "html_url": "https://github.com/At1a8/inferpilot/pull/12"}
+        return fake
+
+    def test_a_known_issue_numbered_on_an_older_main_takes_the_next_free_number(self):
+        other = self.origin.parent / "other"
+        git("clone", "-q", "-b", "main", str(self.origin), str(other))
+        (other / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — aiter import segfault\nmain\n")
+        git("commit", "-qam", "another run's known issue, merged meanwhile", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nours\n")
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("dcp 8: see KI-001\n")
+        calls = []
+        rc, out, err = self.propose(api=self.github(calls))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-001": "KI-002"})
+        branch = "inferpilot/knowledge/" + self.run.name
+        known = self.show(branch + ":knowledge/known_issues.md")
+        self.assertIn("## KI-001 — aiter import segfault\nmain\n\n## KI-002 — GLM-5.3 dcp 8\nours\n", known,
+                      "main's entry kept, this run's after it with the next number")
+        self.assertEqual(self.show(branch + ":knowledge/dispatch.md"), "dcp 8: see KI-002\n", "its references follow")
+        body = calls[1][2]["body"]
+        self.assertTrue(body.startswith("KI-002: GLM-5.3") and "KI-001 is KI-002 here" in body, body)
+
+    def test_the_patch_outlives_the_checkout_and_is_proposed_later_from_another(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        rc, _, err = self.propose(token="")
+        self.assertEqual(rc, 2)
+        self.assertIn("--patch %s" % saved, err)
+        self.assertIn("+## KI-001 — GLM-5.3 dcp 8", saved.read_text())
+        shutil.rmtree(self.inferpilot)  # the task's container is gone, and the checkout with it
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        calls = []
+        rc, out, err = self.propose(api=self.github(calls), extra=["--patch", str(saved)], inferpilot=fresh)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("## KI-001 — GLM-5.3 dcp 8", self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name))
+        self.assertEqual((fresh / "knowledge" / "known_issues.md").read_text(), "# Known issues\n", "that checkout is left as it is")
+        outside = self.run / "outside.patch"
+        outside.write_text(saved.read_text().replace("knowledge/known_issues.md", "inferpilot.js"))
+        self.assertEqual(self.propose(extra=["--patch", str(outside)], inferpilot=fresh)[0], 1, "only knowledge/ goes in")
+
+    def test_proposed_later_from_the_checkout_that_saved_it_that_checkout_reads_main_again(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(known.read_text(), "# Known issues\n", "the proposed edits leave the checkout that held them")
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n\n## KI-002 — more\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("KI-002 — more", known.read_text(), "edits beyond the saved patch stay")
+
+    def test_a_saved_patch_reaching_outside_knowledge_by_any_path_is_not_pushed(self):
+        import subprocess
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        (self.inferpilot / "odd dir").mkdir()
+        (self.inferpilot / "odd dir" / "x.sh").write_text("echo outside\n")
+        git("add", "-N", "odd dir/x.sh", cwd=self.inferpilot)
+        sneaky = self.run / "sneaky.patch"
+        sneaky.write_text(subprocess.run(["git", "-C", str(self.inferpilot), "diff", "--binary"],
+                                         capture_output=True, text=True, check=True).stdout)
+        self.assertIn("diff --git a/odd dir/x.sh b/odd dir/x.sh", sneaky.read_text())
+        git("reset", "-q", cwd=self.inferpilot)
+        git("checkout", "-q", "--", "knowledge", cwd=self.inferpilot)
+        shutil.rmtree(self.inferpilot / "odd dir")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(sneaky)])
+        self.assertEqual(rc, 1, err)
+        self.assertIn("odd dir/x.sh", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def _main_and_checkout_have(self, text):
+        other = self.origin.parent / "other"
+        if not other.exists():
+            git("clone", "-q", "-b", "main", str(self.origin), str(other))
+        (other / "knowledge" / "known_issues.md").write_text(text)
+        git("commit", "-qam", "main", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        return other
+
+    def test_an_entry_main_and_the_run_both_changed_stops_for_a_human(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("open", "workaround: AITER_X=0"))
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #123"))
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("knowledge/known_issues.md", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_an_entry_the_run_changed_and_one_main_appended_are_both_kept(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base + "\n## KI-002 — main's\nmain\n")
+        git("commit", "-qam", "main appends", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(
+            base.replace("open", "fixed by #123") + "\n## KI-002 — GLM-5.3 dcp 8\nours\n")
+        rc, out, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-002": "KI-003"})
+        known = self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name)
+        for want in ("Status: fixed by #123\n", "## KI-002 — main's\nmain\n", "## KI-003 — GLM-5.3 dcp 8\nours\n"):
+            self.assertIn(want, known)
+        self.assertNotIn("Status: open", known)
+        self.assertNotIn("<<<<<<<", known)
+
+    def test_without_the_file_it_was_made_against_the_patch_itself_tells_its_new_known_issues(self):
+        diff = ("diff --git a/knowledge/known_issues.md b/knowledge/known_issues.md\n"
+                "index %s..%s 100644\n--- a/knowledge/known_issues.md\n+++ b/knowledge/known_issues.md\n"
+                "@@ -1,4 +1,7 @@\n # Known issues\n \n-## KI-001 — aiter segfault\n+## KI-001 — aiter import segfault\n main\n"
+                "+\n+## KI-002 — GLM-5.3 dcp 8\n+see KI-001 and KI-002\n" % ("1" * 40, "2" * 40))
+        self.assertEqual(propose_knowledge.preimage(str(self.inferpilot), diff, propose_knowledge.KNOWN), "",
+                         "a blob this checkout lacks: not its HEAD, which may hold main's entries")
+        main = "# Known issues\n\n## KI-001 — aiter segfault\nmain\n\n## KI-002 — another run's\n"
+        out, mapping = propose_knowledge.renumber(diff, "", main)
+        self.assertEqual(mapping, {"KI-002": "KI-003"}, "the KI-001 the patch edits is main's own")
+        self.assertIn("+## KI-001 — aiter import segfault\n", out)
+        self.assertIn("+## KI-003 — GLM-5.3 dcp 8\n+see KI-001 and KI-003\n", out)
 
     def test_only_knowledge_goes_to_its_branch_and_the_checkout_reads_main_again(self):
         (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\nKI-001 GLM-5.3 dcp 8\n")
