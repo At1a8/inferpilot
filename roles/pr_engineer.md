@@ -86,8 +86,9 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    not run it. Also write the branch's commits to `RUN_DIR/patches` (`git -C <worktree> format-patch
    <base>..inferpilot/<slug> -o RUN_DIR/patches`), so the change leaves the container with the run directory:
    on the host, `git am` puts them on the same base in the human's own checkout, to push from there
-   (README step 5). A worktree on a host mount: first give it back to its owner
-   (`scripts/restore_owner.sh <worktree>`) and check that nothing in `.git` is still root's
+   (README step 5). Refresh `RUN_DIR/branch.bundle` from the rearranged branch the same way
+   (`implementer.md`, PHASE=implement step 4). A worktree on a host mount: first give it back to its
+   owner (`scripts/restore_owner.sh <worktree>`) and check that nothing in `.git` is still root's
    (`env_hygiene.md`).
 
 Return:

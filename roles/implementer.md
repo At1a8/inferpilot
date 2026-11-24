@@ -14,6 +14,23 @@ worktree.
 Inputs: `work_package`, `round` (0 for the first attempt), `feedback` (the test engineer's finding from
 the previous round), `verified_work_packages`.
 
+On a retry, Setup leaves what the earlier attempt committed on `refs/inferpilot/restored/<slug>`
+(`director.md`, Setup step 2). Take from it only when `round` is 0 and `feedback` is empty: a later
+round fixes what is on the task branch, from step 1. When that ref holds a commit whose subject is this
+package's `<wp>: <goal>`, and no later commit on it reverts that one (`This reverts commit <sha>` in
+its message: a kernel rolled back with `revert`, written again instead), take the package's commits
+from it instead of writing the change: the ones after the previous package's commit on the ref (or
+after `<base>`) up to that one, which includes an `apply_pr` package's commits from the PR (`git -C
+<worktree> log --reverse --format='%H %s' <base>..refs/inferpilot/restored/<slug>` lists them in
+order). With the worktree clean, record its HEAD, then cherry-pick them in that order onto the task
+branch. A commit whose change the base already has (the PR was merged in between) stops the
+cherry-pick as empty: `git cherry-pick --skip` it and say so in `notes`. On a conflict, `git
+cherry-pick --abort`, go back to the recorded HEAD (`git reset --hard <recorded HEAD>`; the commits
+stay on the side ref) and write the package from step 1. Once they apply, a `kernel` package whose
+speed matters still returns its hand-off (step 3): reuse `RUN_DIR/handoffs/K-<wp>/` when the earlier
+attempt left it and its paths exist, else write it. Then go on from step 4: the test engineer checks
+the commits like any other. Commits no package of this attempt names stay on the side ref.
+
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:
    - feature off ⇒ every new hook is a no-op; unsupported configurations are rejected at startup;
@@ -40,7 +57,10 @@ the previous round), `verified_work_packages`.
    register new tests where CI discovers them, document a user-visible switch, and keep debug
    instrumentation behind an off-by-default switch. Commit once per work package (`<wp>: <goal>`) on the
    task branch in the worktree, then give the files back to their owner (`scripts/restore_owner.sh
-   <worktree>`). Never push.
+   <worktree>`). Never push. Then refresh the branch's copy in the run directory: `git -C <worktree>
+   bundle create RUN_DIR/branch.bundle <base>..inferpilot/<slug>`, `<base>` the task's base commit.
+   With `exp_root` on a host mount it outlives the container, and a retry, in this container or a new
+   one, takes the commits from it instead of writing them again (`director.md`, Setup step 2).
 5. `unit_test_cmd`: the exact command the test engineer should run (absolute paths, environment). The
    test must be able to fail — on the parent commit when the package changes behaviour, on a copy of
    the change broken in one way when it keeps behaviour (`knowledge/reward_hacks.md` T1); the test
@@ -69,7 +89,10 @@ Inputs: `work_package` (id `ALL` means the whole task), `reason`, `verified_work
    With `revert` set (the commit of an integrated kernel that failed Verify), undo only that commit
    instead — `git revert --no-edit <commit>` — so the functional kernel is back and every later package
    stays; save its diff as in step 1.
-3. Confirm `git status` is clean in the worktree.
+3. Confirm `git status` is clean in the worktree, and refresh `RUN_DIR/branch.bundle` as in
+   PHASE=implement step 4, so a retry does not bring the rolled-back commits back. With no commit left
+   beyond the base, `git bundle create` refuses an empty bundle and the old one stays: move it to
+   `RUN_DIR/failed/` instead.
 
 Return:
 
