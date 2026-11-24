@@ -1028,8 +1028,8 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit',
-        inputs({ work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test }), UNIT, utLabel);
+      const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
+        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: minutes(timeoutFor('test_engineer')) }), UNIT, utLabel);
       if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
