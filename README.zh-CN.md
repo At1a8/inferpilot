@@ -262,6 +262,8 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 
 scan 的 `daily_report.md` 就是为分享而写的，`scripts/daily_report.py check` 已经确认它不含本机信息。`GITHUB_TOKEN` 能写这个仓库时（第 1 步），director 会把它作为标题为 `InferPilot daily report <date>` 的 issue 分享到 InferPilot 仓库（当天的已经在那里时除外），结果里会给出它的链接。没有这样的 token、而当天的日报还不在那里时，在 GitHub 上 InferPilot 仓库里新建一个 issue，用这个标题，把整个文件粘贴进去；或者设好 token 后运行 `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`。Dispatch 失败的 scan 什么都不分享：它留下的日报可能不完整。文件第一行是一个隐藏标记，下一次 scan 不管在哪个容器里，都能靠它在那里找到这份日报，并标出之后的变化。
 
+push 之前，先读完每一行改动，再按 `validation_report.md` 中 *Before pushing* 一节亲自重跑 PR 的测试和测量：这一节会先占住机器并确认所有 GPU 空闲，按各自的 commit 重新建出两边的代码树，检查每条命令导入的是哪份代码，并按运行时的方式测量，因为到那时运行已经释放了机器，也删掉了它的基线 worktree。新 PR 的描述在 checklist 下面有一行 `Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; reviewed and measured by AMD engineers.`，说的就是你做了这些；给已有 PR 写的验证评论没有这一行。你的结果和描述里的数字相差超出正常波动时，把描述里的换成你的。没重跑过的 PR 不要 push，这一行也要一字不改：在 GitHub 上搜索时就是靠它找出所有 InferPilot 的 PR。
+
 InferPilot 从不 push。任务的分支 `inferpilot/<slug>` 在 `/sgl-workspace/sglang` 里，报告给出确切的 `git -C /sgl-workspace/sglang push ...`：可以在容器里用有 push 权限的凭据执行它。运行目录随容器保留和删除；要保留某次运行，或者要在宿主机上 push（你的 git 凭据在那里），就在宿主机上把它复制出来（`<name>` 是容器名，`<run>` 是运行目录的名字）：
 
 ```bash

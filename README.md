@@ -481,6 +481,16 @@ issue there on GitHub, give it that title and paste the whole file, or run
 whose Dispatch failed shares nothing: the report it left may be partial. Its first line, a hidden marker, lets the next scan, in any container, find it
 there and mark what changed since.
 
+Before you push, read every changed line and re-run the PR's tests and measurements yourself, as the
+*Before pushing* section of `validation_report.md` gives them: it takes the machine and checks that
+every GPU is idle, makes each arm's tree again from its commit, checks which code each command imports
+and measures as the run did, since by then the run has freed the machine and removed its baseline
+worktree. A new PR's description has, under its checklist, the line
+`Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; reviewed and measured by AMD engineers.`,
+which says you did; a verification comment for an existing PR has none. Where your result differs from
+the description's by more than run-to-run noise, put yours in it. Don't push a PR you have not re-run,
+and keep that line word for word: a search of GitHub finds every InferPilot PR by it.
+
 InferPilot never pushes. The task's branch, `inferpilot/<slug>`, is in `/sgl-workspace/sglang`, and the report
 gives the exact `git -C /sgl-workspace/sglang push ...`: run it here with credentials that can push.
 Run directories go with the container; to keep one, or to push from the host, where your git

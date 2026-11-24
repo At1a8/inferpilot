@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 NAMING = ROOT / ".cursor" / "skills" / "inferpilot-weekly-naming" / "SKILL.md"
 PLACEHOLDER = re.compile(r"<[^<>]*>")
 URL = re.compile(r"https://(?:[^\s<>()]|<[^<>]*>)+|(?<=\]\()<[^<>]*>(?=\))")
+ATTRIBUTION = ("Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; "
+               "reviewed and measured by AMD engineers.")
 
 
 def urls(text):
@@ -20,7 +22,8 @@ def urls(text):
 
 
 class PrBodyTest(unittest.TestCase):
-    """templates/pr_body.md is sglang's PR template (.github/pull_request_template.md) with placeholders."""
+    """templates/pr_body.md is sglang's PR template (.github/pull_request_template.md) with placeholders and
+    InferPilot's attribution line."""
 
     body = (ROOT / "templates" / "pr_body.md").read_text(encoding="utf-8")
 
@@ -38,6 +41,23 @@ class PrBodyTest(unittest.TestCase):
         self.assertEqual(len(items), len(starts))
         for item, start in zip(items, starts):
             self.assertTrue(item.startswith(start), item)
+
+    def test_attribution_line_after_the_checklist(self):
+        self.assertEqual(self.body.count(ATTRIBUTION), 1)
+        line = self.body.index(ATTRIBUTION)
+        self.assertLess(self.body.index("## Checklist"), line)
+        self.assertLess(line, self.body.index("## Review and Merge Process"))
+
+
+class AttributionTest(unittest.TestCase):
+    """Every file that gives the attribution line gives it word for word: one wording is what a search of
+    upstream PR bodies finds."""
+
+    def test_one_wording(self):
+        for name in ("templates/pr_body.md", "knowledge/pr_playbook.md", "README.md", "README.zh-CN.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn(ATTRIBUTION, text, name)
+            self.assertEqual(text.count("Developed with the [InferPilot]"), text.count(ATTRIBUTION), name)
 
 
 class ScanTemplatesTest(unittest.TestCase):

@@ -62,3 +62,23 @@
 ## Lessons
 
 <!-- At most a few; say where each was recorded (feature skill, method docs, known_issues). -->
+
+## Before pushing
+
+<!-- What the human runs before pushing, in a fresh shell, relying on none of what Report undoes or
+     leaves to chance: RUN_DIR/base, which it removes, the machine, whose lock it frees, and the branch
+     the checkout is on by then.
+     - The machine first: `mkdir -p RUN_DIR/rerun/logs && python3 <inferpilot_dir>/scripts/run_lock.py
+       acquire --run-dir RUN_DIR/rerun --mode rerun --task '<the PR>'`, which exits 1 while another task
+       holds it; then `python3 <inferpilot_dir>/scripts/gpu_status.py --check all` before each arm's
+       servers start, since a number measured next to another job is not a measurement.
+     - For each test and measurement the PR body cites: each arm's tree made again from its commit
+       (`git -C <framework_dir> worktree add --detach <dir> <commit>`: the base commit and the branch's
+       head); every command of an arm, its server, tests, reproduction and benchmark client alike, with
+       that tree first on PYTHONPATH, and `python -c "import sglang; print(sglang.__file__)"` under the
+       same PYTHONPATH printing a path inside it (`env_hygiene.md`, *The code under test*); the
+       measurement as the run made it (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
+       arm, the same rounds in the same order), its logs under RUN_DIR/rerun/logs; the numbers the PR body
+       gives, with the run's spread.
+     - Then the worktrees removed, `run_lock.py release --run-dir RUN_DIR/rerun`, the PR body path and the
+       push command. -->

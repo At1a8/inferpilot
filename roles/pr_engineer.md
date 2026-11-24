@@ -60,8 +60,8 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    - **Trailers:** a `Co-Authored-By` or "Generated with" line the agent's tool added stays only if the
      target repository's convention allows it; otherwise drop it here. One that names `root` or this host
      (`Signed-off-by: root <root@…>`, which resetting the author leaves in the message) goes whatever the
-     convention. Either way, disclose AI assistance in the PR body where the repository asks for it
-     (`guardrails.md`).
+     convention. Either way, the PR body carries the attribution line (step 5), and a repository that
+     asks for an AI trailer on each commit gets one (`pr_playbook.md` §Attribution).
 3. **Upstream:** `git fetch origin`, then trial-merge the latest main in a throwaway worktree and record
    the conflicts. Do not update the branch: a merged tree is not the tree that was verified.
    `merges_cleanly` false puts the conflicts in the PR body for the human, who merges and re-runs the
@@ -70,11 +70,12 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
 5. **Description:** write `RUN_DIR/pr_body.md` from `templates/pr_body.md` and the validation report,
    following `pr_playbook.md` §Description (the template kept as it is, Motivation in at most 100 words,
    one sentence per changed file, HIP-only checked and said, GSM8K 1319 at the defaults, one speed
-   scenario against the baseline, the way a person writes); title in the repository's convention
+   scenario against the baseline, the way a person writes) and §Attribution (its line word for word,
+   where that section puts it); title in the repository's convention
    (sglang: `[Type] [Hardware] scope: title`). When the task was to push an existing PR, write the
-   verification comment for that PR instead, at the same path. Run the leak scan again with
-   `--body RUN_DIR/pr_body.md`, and write the body so that it finds nothing there: model ids, not
-   local paths. The body gives **the command that shows the change works**: for a feature or a
+   verification comment for that PR instead, at the same path, with no attribution line. Run the leak
+   scan again with `--body RUN_DIR/pr_body.md`, and write the body so that it finds nothing there: model
+   ids, not local paths. The body gives **the command that shows the change works**: for a feature or a
    performance change the launch command, for a CI fix `failing_test_cmd`, for an issue fix the
    reproduction (the steps of `repro_cmd`, with no run-directory path). Run it once on the final commit,
    as written except that a model id points at this machine's copy of that model (the local weights the
