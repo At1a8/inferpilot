@@ -267,7 +267,7 @@ def reapply(inferpilot: str, diff: str) -> tuple[str, list, dict]:
         result = git(wt, "diff", "--cached", "--binary", "HEAD")
     finally:
         git(inferpilot, "worktree", "remove", "--force", wt, check=False)
-    if holds(inferpilot, result):
+    if not result.strip() or holds(inferpilot, result):
         return "present", patched(result), mapping
     p = subprocess.run(["git", "-C", inferpilot, "apply"], input=result, capture_output=True, text=True)
     if p.returncode != 0:

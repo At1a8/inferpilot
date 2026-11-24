@@ -1343,6 +1343,25 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.assertEqual(self.propose(token="")[0], 2)
         self.assertIn("+Status: fixed by #123", kept.read_text(), "the next proposal leaves the first part's change where it was kept")
 
+    def test_reapply_of_a_change_main_merged_meanwhile_puts_nothing_back(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\nWorkaround: none\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text(base.replace("open", "fixed by #123"))
+        self.assertEqual(self.propose(token="")[0], 2)
+        git("checkout", "-q", "--", "knowledge", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #123"))
+        git("commit", "-qam", "the first part's change, merged", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        git("pull", "-q", cwd=self.inferpilot)
+        local = base.replace("open", "fixed by #123").replace("none", "AITER_X=0")
+        known.write_text(local)  # an edit beside it hides the change from a plain check
+        rc, out, err = self.reapply()
+        self.assertEqual((rc, json.loads(out)["action"]), (0, "present"), err)
+        self.assertEqual(known.read_text(), local)
+        self.assertTrue((self.run / "knowledge.patch").is_file(), "not moved aside")
+
     def test_reapply_without_a_saved_patch_or_with_one_reaching_outside_knowledge(self):
         rc, out, _ = self.reapply()
         self.assertEqual((rc, json.loads(out)["action"]), (0, "none"))
