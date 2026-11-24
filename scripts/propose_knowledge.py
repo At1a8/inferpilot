@@ -93,17 +93,19 @@ def patched(diff: str) -> list:
 
 
 def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
-    """New known issues of the patch (headings of known_issues.md that `ours`, the checkout's HEAD, lacks)
-    whose number `main` has taken: each gets the next free number on main, in every line the patch adds."""
+    """New known issues of the patch (headings it adds to known_issues.md that neither `ours`, the file it was
+    made against, nor its own context and removed lines have) whose number `main` has taken: each gets the
+    next free number on main, in every line the patch adds."""
     had, taken = {m[0] for m in KI_HEADING.findall(ours)}, {m[0] for m in KI_HEADING.findall(main)}
-    new, in_known = [], False
+    adds, in_known = [], False
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             in_known = line.endswith(" b/" + KNOWN)
-        elif in_known and line.startswith("+") and not line.startswith("+++"):
+        elif in_known and line and line[0] in "+- " and not line.startswith(("+++", "---")):
             m = KI_HEADING.match(line[1:])
-            if m and m.group(1) not in had and m.group(1) not in new:
-                new.append(m.group(1))
+            if m:
+                (adds.append if line[0] == "+" else had.add)(m.group(1))
+    new = [ki for ki in dict.fromkeys(adds) if ki not in had]
     used = taken | had | set(new)
     nxt = max([int(k[3:]) for k in used] + [0]) + 1
     mapping = {}
@@ -119,12 +121,11 @@ def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
 
 
 def preimage(inferpilot: str, diff: str, path: str) -> str:
-    """The file the patch was made against: its blob from the patch's index line (--binary writes it whole),
-    else HEAD's."""
+    """The file the patch was made against: its blob from the patch's index line (--binary writes it whole).
+    Empty when this checkout lacks the blob: its HEAD may already hold main's entries under the same numbers."""
     m = re.search(r"^diff --git a/%s b/%s\n(?:(?!diff --git ).*\n)*?index ([0-9a-f]+)\.\." % (re.escape(path), re.escape(path)),
                   diff, re.M)
-    text = git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
-    return text or git(inferpilot, "show", "HEAD:" + path, check=False)
+    return git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
 
 
 def with_renumbering(body: str, mapping: dict) -> str:

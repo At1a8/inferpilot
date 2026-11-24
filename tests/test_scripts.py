@@ -625,6 +625,8 @@ class EvalAccuracyTest(unittest.TestCase):
             mkdir -p "$wd/configs" "$wd/run/reports/fake-model"
             echo "judge_model_args: $jm" > "$wd/configs/task_config.yaml"
             echo "judge_model_args=$jm"
+            # the script stopped while evalscope runs (a timeout, the agent's call ending)
+            [ -n "${FAKE_STOPPED:-}" ] && { kill -TERM "$PPID"; exit 143; }
             # every question answered, unless FAKE_NUM says how many were
             case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
             echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
@@ -723,6 +725,9 @@ class EvalAccuracyTest(unittest.TestCase):
         run = next((self.tmp / "results" / "eval_simple_qa").iterdir())
         self.assertIn("<JUDGE_KEY>", (run / "configs" / "task_config.yaml").read_text())
         self.assertIn("<JUDGE_KEY>", (run / "evalscope.log").read_text())
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200", FAKE_STOPPED="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(holding_key(), [], "a run stopped on its way keeps the key")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
         def sent():
@@ -1141,6 +1146,19 @@ class ProposeKnowledgeTest(unittest.TestCase):
         outside = self.run / "outside.patch"
         outside.write_text(saved.read_text().replace("knowledge/known_issues.md", "inferpilot.js"))
         self.assertEqual(self.propose(extra=["--patch", str(outside)], inferpilot=fresh)[0], 1, "only knowledge/ goes in")
+
+    def test_without_the_file_it_was_made_against_the_patch_itself_tells_its_new_known_issues(self):
+        diff = ("diff --git a/knowledge/known_issues.md b/knowledge/known_issues.md\n"
+                "index %s..%s 100644\n--- a/knowledge/known_issues.md\n+++ b/knowledge/known_issues.md\n"
+                "@@ -1,4 +1,7 @@\n # Known issues\n \n-## KI-001 — aiter segfault\n+## KI-001 — aiter import segfault\n main\n"
+                "+\n+## KI-002 — GLM-5.3 dcp 8\n+see KI-001 and KI-002\n" % ("1" * 40, "2" * 40))
+        self.assertEqual(propose_knowledge.preimage(str(self.inferpilot), diff, propose_knowledge.KNOWN), "",
+                         "a blob this checkout lacks: not its HEAD, which may hold main's entries")
+        main = "# Known issues\n\n## KI-001 — aiter segfault\nmain\n\n## KI-002 — another run's\n"
+        out, mapping = propose_knowledge.renumber(diff, "", main)
+        self.assertEqual(mapping, {"KI-002": "KI-003"}, "the KI-001 the patch edits is main's own")
+        self.assertIn("+## KI-001 — aiter import segfault\n", out)
+        self.assertIn("+## KI-003 — GLM-5.3 dcp 8\n+see KI-001 and KI-003\n", out)
 
     def test_only_knowledge_goes_to_its_branch_and_the_checkout_reads_main_again(self):
         (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\nKI-001 GLM-5.3 dcp 8\n")

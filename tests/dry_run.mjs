@@ -460,7 +460,8 @@ const scenarios = [
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Verify', `status ${r.result.status}`);
     check(r.result.next.rerun_with && r.result.next.rerun_with.resume_from === 'verify' && r.result.next.rerun_with.run_dir === RUN,
       `rerun_with ${JSON.stringify(r.result.next.rerun_with)}`);
-    check(r.result.next.say.startsWith('Verify ended without a result'), `say: ${r.result.next.say}`);
+    check(r.result.next.say.startsWith('Verify ended without a result: the verify engineer returned nothing'),
+      `say names why, not the reply check after it: ${r.result.next.say}`);
     const failed = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
     });

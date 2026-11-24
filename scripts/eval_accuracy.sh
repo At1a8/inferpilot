@@ -31,7 +31,8 @@
 #   Judge-graded sets: JUDGE_KEY (default LLM_GATEWAY_KEY), JUDGE_URL (default the AMD LLM gateway),
 #   JUDGE_MODEL (default Claude-Opus-5; never the model under test), JUDGE_NTID (the gateway's user
 #   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades, and
-#   where evalscope writes it (its configs, its log) it is replaced by <JUDGE_KEY> once the run ends.
+#   where evalscope writes it (its configs, its log) it is replaced by <JUDGE_KEY> once the run ends or
+#   is stopped (not by SIGKILL).
 #
 # Before each set the server's prefix cache is flushed; after it, /server_info's speculative accept
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
@@ -157,7 +158,7 @@ sampling_settings() {
 # evalscope keeps its arguments, the judge's among them, in the run's configs and log: the results of a
 # run hold no key (knowledge/guardrails.md, secrets).
 redact_key() {  # <dir>
-    [ -n "${JUDGE_KEY}" ] || return 0
+    [ -n "${JUDGE_KEY}" ] && [ -d "$1" ] || return 0
     KEY="${JUDGE_KEY}" python3 - "$1" <<'EOF'
 import os, sys
 key = os.environ["KEY"].encode()
@@ -171,6 +172,9 @@ for root, _, files in os.walk(sys.argv[1]):
                 f.write(data.replace(key, b"<JUDGE_KEY>"))
 EOF
 }
+# A run stopped on its way (SIGTERM, SIGINT, a timeout) is redacted as it exits; only SIGKILL leaves the key.
+REDACT_DIR=""
+trap 'redact_key "${REDACT_DIR}"' EXIT
 
 FAILED=0
 SUMMARY=""
@@ -225,6 +229,7 @@ run_one() {  # <set>
         judge_args="{\"model_id\": \"${JUDGE_MODEL}\", \"api_url\": \"${JUDGE_URL}\", \"api_key\": \"${JUDGE_KEY}\", \"model_args\": {\"default_headers\": {\"Ocp-Apim-Subscription-Key\": \"${JUDGE_KEY}\", \"user\": \"${JUDGE_NTID}\"}}}"
         judge_arg=(--judge-strategy auto --judge-model-args "${judge_args}")
     fi
+    REDACT_DIR="${run_dir}"
     "${EVALSCOPE}" eval \
         --model "${MODEL}" \
         --api-url "${API_URL}" \
@@ -243,6 +248,7 @@ run_one() {  # <set>
         --repeats 1 > "${log}" 2>&1
     rc=$?
     redact_key "${run_dir}"
+    REDACT_DIR=""
 
     accept=$(curl -s --max-time 20 "${SERVER_URL}/server_info" | python3 -c \
         "import json,sys; print([s.get('avg_spec_accept_length') for s in json.load(sys.stdin)['internal_states']])" \

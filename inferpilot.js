@@ -905,7 +905,8 @@ const ENDED = { blocked: 'Blocked', handed_off: 'Handed over', triaged: 'Triaged
   dropped: 'Dropped, with no measured gain' };
 function nextSteps(status, at) {
   const report = R.report_path ? ` The report: ${R.report_path}.` : '';
-  const last = (R.phases[R.phases.length - 1] || {}).summary || '';
+  // Where the run ended, not what a closing phase (the reply check) recorded after it.
+  const last = ([...R.phases].reverse().find((p) => !CLOSING.has(p.phase)) || {}).summary || '';
   const out = { say: `${ENDED[status] || `Ended ${status}`} at ${at}${last ? `: ${last}` : ''}.${report}` };
   if (status === 'blocked') out.say += ' Fix what it names, or change the task, then run it again.';
   if (status === 'ready_for_review') {
@@ -1503,6 +1504,8 @@ async function resumeVerify(claimOf) {
   Object.assign(C, pick(rs, ['triage_path', 'reply_draft_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: ${done.map((d) => d.wp).join(', ')}`);
   const claim = claimOf(String(rs.perf_claim || '').trim());
+  const rest = ROUTES[MODE].slice(ROUTES[MODE].indexOf('Verify'));
+  logRoute(['Setup', ...(MODE === 'issue' && claim ? rest.flatMap((t) => (t === 'Verify' ? [t, 'Performance'] : [t])) : rest)]);
   if (MODE === 'issue') return fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, !!claim);
   if (MODE === 'ci') return fromVerify([{ gate: 'failing_test', cmd, expect: 'pass on every lane it failed on' }], '', false);
   return fromVerify([], MODE === 'perf' ? claim || 'the planned gain' : claim, true);
