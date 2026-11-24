@@ -329,12 +329,12 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   `bisect_fixed` run that would.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
-  `integration_held` hand-off's unit gate has no result: its integration commit is still on the branch,
-  unverified. Write `handoffs` and `known_issues` as given to `RUN_DIR/handoffs.json` and
-  `RUN_DIR/known_issues.json`, which a run resumed from Verify restores; a run that stopped at Setup
-  writes neither: it has none of its own, and a resumed one would empty those it was to restore. A
-  `not_integrated` hand-off's back end found a gain that the run, stopped by the control file, never
-  integrated: give its speedup.
+  `integration_held` hand-off's unit gate has no result: its integration commit (`commit`, empty when the
+  implementer made none) is still on the branch, unverified. Write `handoffs` and `known_issues` as
+  given to `RUN_DIR/handoffs.json` and `RUN_DIR/known_issues.json`, which a run resumed from Verify
+  restores; a run that stopped at Setup writes neither: it has none of its own, and a resumed one would
+  empty those it was to restore. A `not_integrated` hand-off's back end found a gain that the run,
+  stopped by the control file, never integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of

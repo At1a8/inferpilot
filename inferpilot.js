@@ -1080,9 +1080,9 @@ async function setup(requireBaseline) {
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
 // Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
-function stalled(wp, label) {
+function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
-  return { ok: false, held: true, failed_wp: wp.id, reason: `${label} timed out` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
 }
 // A unit gate with checks that have no result, none of those that ran having failed.
 const unfinished = (ut) => !!ut && String(ut.incomplete || '').trim() !== '';
@@ -1097,7 +1097,7 @@ function noResult(wp, commit, what) {
   note('Implement', 'incomplete', `${wp.id}: the unit gate has no result after the call that was to finish it `
     + `(${missing}); not rolled back`);
   leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
-  return { ok: false, held: true, failed_wp: wp.id, reason: `the unit gate of ${wp.id} has no result` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `the unit gate of ${wp.id} has no result` };
 }
 
 async function implementAll(wps) {
@@ -1140,7 +1140,7 @@ async function implementAll(wps) {
       const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test,
         time_limit_min: minutes(timeoutFor('test_engineer')) };
       let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
       // A gate without its result, checks still to give one or no answer at all, is finished by one more
       // call, which spends no fix round and reads the runs the first one left going.
       if (!ut || unfinished(ut)) {
@@ -1148,7 +1148,7 @@ async function implementAll(wps) {
         const finLabel = `${utLabel}+finish`;
         const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
           earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel);
-        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return stalled(wp, finLabel);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return stalled(wp, finLabel, im.commit);
         if (!fin || unfinished(fin)) {
           return noResult(wp, im.commit, fin ? fin.incomplete : `the call to finish it returned no answer; before it: ${left}`);
         }
@@ -1438,6 +1438,7 @@ async function kernelStage() {
       // Not rolled back (a gate without a result, a call that timed out): the commit stays, so the run stops.
       if (r.held) {
         h.status = 'integration_held';
+        h.commit = r.commit || '';
         note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`);
         return { integrated, held: r.reason };
       }
