@@ -11,7 +11,8 @@ Read: `knowledge/dispatch.md` (all of it), `knowledge/issue_triage.md` §2, `kno
 Input: `candidates_path`.
 
 1. Drop duplicates and candidates that are not tasks (already fixed, not AMD, roadmap or tracker
-   issues), each with the reason.
+   issues), each with the reason. An issue found by its body (`found_in: body`) is not AMD only when its
+   `gpu_lines` show the GPU is beside the point, not because its title does not say AMD.
 2. For each remaining candidate decide: gap type (§1), level (§2), the CUDA dependencies and their AMD
    starting points (§3), the subsystems it touches, an effort estimate (agent hours, GPU hours), and the
    priority: every open AMD user issue gets P0, P1 or P2 by `issue_triage.md` §2 against the quarter's

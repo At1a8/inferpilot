@@ -56,8 +56,9 @@ prints its date, URL, `age_hours` and body (`{}` when there is none).
      — framework skills that InferPilot's index names but the framework dropped, and new ones it does not
      name yet; the report lists them for the curator, they are not tasks.
 4. Merge into `RUN_DIR/candidates.json`: one entry per candidate with `source`, `ref` (PR, issue,
-   cluster, file:line), `title`, `evidence`. Mark entries already present in the previous queue
-   as `seen`.
+   cluster, file:line), `title`, `evidence`; an issue found by its body (`found_in: body`) has its
+   `gpu_lines` in `evidence`, the only sign of AMD the dispatcher gets. Mark entries already present in
+   the previous queue as `seen`.
 5. Remove the worktree: `git -C <framework_dir> worktree remove --force RUN_DIR/main`.
 
 Return:

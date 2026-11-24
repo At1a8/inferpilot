@@ -8,8 +8,10 @@ anyone but the reporter, and issues untouched for 60 days are closed automatical
 ## 1. Intake
 
 - **In scope:** open issues whose title or labels mention AMD, ROCm, MI3xx, aiter, gfx9xx, HIP or MoRI,
-  plus customer requests imported by hand. `scripts/scan_issues.py` collects them with the linked PRs,
-  the reply status and the projected auto-close date.
+  or whose body names an AMD GPU (MI3xx, MI30x / MI35x, gfx942, gfx950), plus customer requests imported
+  by hand. `scripts/scan_issues.py` collects them with the linked PRs, the reply status and the projected
+  auto-close date. A body match (`found_in: body`) carries up to three lines that name the GPU
+  (`gpu_lines`): many only mention it, and some are AMD bugs whose title does not say so.
 - **Not user issues** (list them, do not triage them): roadmaps, `[Failure Tracker]` issues (those are
   `ci_triage.md` input), internal tracking issues (AITER upgrade readiness, PR review trackers, CI plans).
 - **Not AMD** although the title mentions HIP or ROCm: e.g. an NVIDIA crash whose title says that a
