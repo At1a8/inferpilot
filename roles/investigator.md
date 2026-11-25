@@ -18,11 +18,13 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
 2. **Controls first**, before any instrumentation: same-pattern baseline; feature off on the branch;
    an untouched upstream checkout when the branch carries other people's commits. When
    `integrated_kernels` is not empty, also the failing gate with their commits reverted in a throwaway
-   worktree — the functional kernel back, the one each hand-off was tuned from. A failed G4 comes with
-   its same-pattern baseline control already run, in the Controls section of the ledger
-   (`roles/verify_engineer.md`): use it, since a second run of more than 48 hours does not fit your
-   limit. When that control failed the same way, the verdict is `baseline_bug`; InferPilot then reports
-   G4 as failed with the known issue, without blocking the change.
+   worktree — the functional kernel back, the one each hand-off was tuned from.
+   **A failed G4** comes with its same-pattern baseline control already run, in the Controls section of
+   the ledger (`roles/verify_engineer.md`): use it. Its other controls are as long as the failure took
+   to show: run one only when it fits your limit, as when the failure came early or a shorter load
+   shows the same signature, and never start a run that cannot finish in it. Otherwise work from what
+   the two runs left (their logs, the trend of their samples), and when that does not decide it, return
+   `inconclusive` with the long controls still to run.
 3. Keep the hypothesis ledger in `RUN_DIR/experiment_ledger.md`; write the expected outcome before
    each experiment. Use toggle bisection (one mechanism off per experiment, effective flags checked).
 4. Follow the stop rules: after about five experiments that did not narrow the space, re-run the
@@ -30,7 +32,12 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
 5. Verdict:
    - `baseline_bug`: the same-pattern baseline fails the same way at a comparable rate. Return a
      `known_issue` entry in the `known_issues.md` format (symptom, reproduction, excluded, workaround,
-     status).
+     status). For G4, one run an arm, that is the same failure at a comparable time
+     (`validation_doctrine.md`): the same signature, or a drift at least as large, and not much later
+     than the feature arm showed it. Hour 31 against the baseline's hour 27 is; hour 1 against hour 47 is
+     a change in rate, which is the change's. InferPilot then reports G4 as failed with the known issue,
+     without blocking the change. A control that ended another way first, or was interrupted, shows
+     nothing about this failure: the verdict is `inconclusive`.
    - `kernel_regression`: the failure goes away with an integrated kernel reverted. Name its hand-offs
      in `kernel_handoffs` and describe the failing case in `counterexample` — gate, shapes, dtype,
      configuration and the command that shows it — so the kernel back end can be given it as a test.

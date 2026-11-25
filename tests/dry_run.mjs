@@ -316,12 +316,13 @@ const scenarios = [
     check(inv && eqList(inv.ins.failures.map((f) => f.gate), ['G2']), 'the investigator gets the blocking failures only');
   }],
   ['feature: a G4 failure the baseline shares is recorded once, then reported as failed without blocking', async () => {
-    const r = await run({ mode: 'feature', task: 't', stability: true }, {
+    const r = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' }, {
       'verify_engineer:verify': (ins, n) => (n === 1
         ? { all_pass: false, gates: { G4: 'fail' },
           failures: [{ gate: 'G4', failure_class: 'crash', counts: 'feature: hour 31; baseline control: hour 27' }] }
-        : { all_pass: (ins.known_issues || []).length === 1, gates: { G4: 'fail: the baseline too (KI-009)' },
-          failures: [{ gate: 'G4', failure_class: 'crash', blocking: false }] }),
+        // not blocking only once the known issue has reached the verify engineer: without it, a second investigation
+        : { all_pass: false, gates: { G4: 'fail on 1a2b3c4: the baseline too (KI-009)' },
+          failures: [{ gate: 'G4', failure_class: 'crash', blocking: !(ins.known_issues || []).some((k) => k.id === 'KI-009') }] }),
       'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-009', title: 'the server does not hold the load' },
         summary: 'the control in the ledger failed the same way' }),
     });
@@ -331,6 +332,8 @@ const scenarios = [
     const inv = r.calls.find((c) => c.key === 'investigator:investigate');
     check(inv && inv.ins.failures.length === 1 && inv.ins.failures[0].gate === 'G4' && inv.ins.failures[0].counts.includes('baseline control'),
       'the investigator gets the failure with what its control showed');
+    const second = r.calls.filter((c) => c.key === 'verify_engineer:verify')[1];
+    check(second && (second.ins.known_issues || []).some((k) => k.id === 'KI-009'), 'the next round is given the known issue');
     check(r.result.known_issues.length === 1 && r.result.known_issues[0].id === 'KI-009' && r.keys.includes('issue_triager:spinoff'),
       'the known issue is recorded, and someone hears of it');
     check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'pass' && /missed without blocking: G4/.test(p.summary)),
@@ -1181,12 +1184,12 @@ const scenarios = [
     check(off.length >= 3 && off.every((c) => c.ins.long_context === false && c.ins.stability === false),
       `off for every role: ${JSON.stringify(off.map((c) => [c.key, c.ins.long_context, c.ins.stability]))}`);
     check(!('long_context' in plain.result.task_def) && !('stability' in plain.result.task_def), 'and not in the definition the run records');
-    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true' });
+    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh' });
     const sp = asked.calls.find((c) => c.key === 'director:spec');
     const ve = asked.calls.find((c) => c.key === 'verify_engineer:verify');
     check(sp && sp.ins.long_context === true && sp.ins.stability === true, 'on for the spec when the task sets them');
     check(ve && ve.ins.long_context === true && ve.ins.stability === true, 'on for the verify engineer, which runs G3 and G4 only then');
-    const one = await run({ mode: 'feature', task: 't', stability: true });
+    const one = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' });
     const ov = one.calls.find((c) => c.key === 'verify_engineer:verify');
     check(ov && ov.ins.stability === true && ov.ins.long_context === false, 'each on its own');
   }],
@@ -1568,6 +1571,16 @@ const scenarios = [
     check(asks(await run({ mode: 'magic', task: 't' }), 'mode'), 'unknown mode asked');
     check(asks(await run({ mode: 'issue' }), 'task'), 'missing task asked');
     check(asks(await run({ mode: 'issue', task: 't', framework: 'vllm', framework_dir: '' }), 'framework_dir'), 'missing checkout asked');
+    check(asks(await run({ mode: 'issue', task: 't', client_script: '/s/client.sh', stability: 'yes' }), 'stability'),
+      'a gate field that is neither true nor false is asked about, not read as off');
+    check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
+    check(asks(await run({ mode: 'issue', task: 't', stability: true }), 'client_script'), 'G4 without the client it runs asked');
+    const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
+    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
+    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });
+    const g4verify = g4.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(g4.result.status !== 'needs_input' && g4verify && g4verify.ins.stability === true && g4verify.ins.long_context === false,
+      `true and false as words or values start the run: ${g4.result.status}`);
     const image = await run({ mode: 'issue', task: 't', framework_dir: '' });
     const setupIns = image.calls.find((c) => c.key === 'director:setup').ins;
     check(setupIns.framework_dir === '/sgl-workspace/sglang', `sglang defaults to the image's checkout: ${setupIns.framework_dir}`);
@@ -1628,7 +1641,8 @@ const scenarios = [
     check(r.result.mode === 'issue' && r.result.task_def.task.endsWith('/38849'), `mode ${r.result.mode}, task ${r.result.task_def.task}`);
   }],
   ['intake: a gate the request asks for is kept beside a goal the caller gave', async () => {
-    const r = await run({ request: 'port this PR and run the 48-hour stability test', mode: 'feature', task: 't', goal: '20% faster' }, {
+    const r = await run({ request: 'port this PR and run the 48-hour stability test', mode: 'feature', task: 't', goal: '20% faster',
+      client_script: '/s/client.sh' }, {
       'intake:define': () => ({ status: 'ready', questions: [],
         task_def: { mode: 'feature', task: 't', goal: 'the port passes its gates', stability: true } }),
     });
@@ -1642,6 +1656,18 @@ const scenarios = [
     });
     const ov = off.calls.find((c) => c.key === 'verify_engineer:verify');
     check(ov && ov.ins.stability === false, 'a field the caller set still wins over the intake');
+  }],
+  ['intake: a gate field the intake fills with another word than true or false is asked for again, never read as off', async () => {
+    const answers = [];
+    const r = await run({ request: 'port this PR and run the stability test', mode: 'feature', task: 't', client_script: '/s/client.sh' }, {
+      'intake:define': (ins, n) => {
+        answers.push(n === 1 ? 'yes' : true);
+        return { status: 'ready', questions: [], task_def: { mode: 'feature', task: 't', stability: answers[answers.length - 1] } };
+      },
+    }, { schemaRetries: 1 });
+    check(answers.length === 2 && answers[0] === 'yes', `"yes" does not match the schema, and the intake answers again: ${JSON.stringify(answers)}`);
+    const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ve && ve.ins.stability === true, 'the gate the request asked for is on');
   }],
   ['intake: a request outside InferPilot is rejected with what to do instead', async () => {
     const r = await run({ request: 'push my branch and comment on the PR' }, {

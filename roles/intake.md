@@ -43,7 +43,9 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
    - `long_context`, `stability`: `true` only when the request or an answer asks, in whatever words, for
      the long-context gate (G3) or for the stability run of more than 48 hours (G4). Both are off by
      default and never follow from the kind of change (`knowledge/validation_doctrine.md`). They are
-     fields of their own, so a `goal` the caller gave does not drop what the request asked.
+     fields of their own, so a `goal` the caller gave does not drop what the request asked. G4 keeps
+     the task's performance test running: with `stability` on, a task without a `client_script` is
+     asked for one, as a perf task is.
    - feature skills (feature mode): `python3 <inferpilot_dir>/scripts/find_skill.py "<request, task title>"`;
      list each candidate in `assumptions` as `feature skill candidate: <id> (<status>)`. The director
      makes the choice at Spec.

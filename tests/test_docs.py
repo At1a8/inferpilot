@@ -282,9 +282,11 @@ class EnvironmentTest(unittest.TestCase):
 
 class LongGatesTest(unittest.TestCase):
     """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
-    and hands to every role; G4 is one throughput test of more than 48 hours, judged between its first
-    hours and its last, whose failure gets its baseline control in the same round and is never reported
-    as a pass (knowledge/validation_doctrine.md). The roles, the templates and both READMEs say the same."""
+    and hands to every role. G4 is the task's performance client run back to back for more than 48 hours
+    (scripts/stability.sh), once in a run, judged between its first hours and its last; its failure gets
+    its baseline control in the same round, is the baseline's only at a comparable time, and is never
+    reported as a pass (knowledge/validation_doctrine.md). The roles, the templates and both READMEs say
+    the same."""
 
     FLAGS = ("long_context", "stability")
 
@@ -302,7 +304,8 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("each off by default", row[0])
         for flag in self.FLAGS:
             self.assertIn("'%s'" % flag, keys, "inferpilot.js does not take %s" % flag)
-            self.assertRegex(intake, r"\n  %s: " % flag, "the intake cannot set %s from a request" % flag)
+            self.assertIn("\n  %s: { enum: [true, false, 'true', 'false', ''] }," % flag, intake,
+                          "the intake's %s is not true or false: another word would be read as off" % flag)
             self.assertRegex(src, r"\nconst [A-Z_]+ = on\(A\.%s\);" % flag, "%s is not off unless the task sets it" % flag)
             self.assertRegex(src, r"\n  %s: [A-Z_]+,\n" % flag, "%s does not reach the roles" % flag)
             self.assertIn("args.%s" % flag, src, "inferpilot.js's whenToUse does not name %s" % flag)
@@ -343,10 +346,13 @@ class LongGatesTest(unittest.TestCase):
 
     def test_a_drift_is_judged_between_the_first_hours_and_the_last(self):
         """Not by the spread of the whole run: a steady fall from 100 to 50 lies within its own range."""
-        window = ("the median of the last 6 hours is no lower in throughput, and no higher in memory, than the "
-                  "median of the first 6 by more than the range of the samples within the first 6")
+        hourly = ("Each hour of the run has one value of throughput and one of memory: the median of the passes "
+                  "that ended in it, the first pass left out as warm-up.")
+        window = ("The median of the last 6 hours' values is no lower in throughput, and no higher in memory, than "
+                  "the median of the first 6 hours' by more than the range of those first 6 values.")
         for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md"):
             text = self.flat(path)
+            self.assertIn(hourly, text, "%s does not say what an hour's value is" % path)
             self.assertIn(window, text, "%s does not compare the first hours with the last" % path)
             self.assertNotRegex(text, r"beyond the spread of (?:its hourly|the) samples", path)
 
@@ -355,13 +361,53 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("A failed G4 gets its control in this round", verify)
         self.assertIn("its estimate counts G4 twice, its run and the control a failure would need", verify)
         self.assertIn("A known issue never turns a failed G4 into a pass** (step 4 does not apply to it)", verify)
-        self.assertIn("do not run G4 again: report it as failed, with that issue, in `failures` with `blocking: false`",
-                      verify)
+        self.assertIn("until `known_issues` holds it as the baseline's: from then on report it as failed, with that "
+                      "issue, in `failures` with `blocking: false`", verify)
         investigator = self.flat("roles/investigator.md")
-        self.assertIn("A failed G4 comes with its same-pattern baseline control already run", investigator)
+        self.assertIn("comes with its same-pattern baseline control already run", investigator)
         doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertIn("A failed G4 gets its baseline control in the same round, and stays failed", doctrine)
         self.assertIn("G4 keeps its verdict even so", doctrine)
+
+    def test_a_g4_failure_is_the_baselines_only_at_a_comparable_time(self):
+        """The same signature is not enough: hour 1 against the baseline's hour 47 is a change in rate."""
+        for path in ("knowledge/validation_doctrine.md", "roles/investigator.md"):
+            text = self.flat(path)
+            self.assertIn("the same failure at a comparable time", text, path)
+            self.assertRegex(text, r"Hour 31 against the baseline's hour 27 is(?: comparable)?; hour 1 against hour 47 is a "
+                                   r"change in rate, which is the change's", path)
+            self.assertRegex(text, r"A control that ended another way first, or was interrupted, (?:says|shows) nothing "
+                                   r"about this failure", path)
+            self.assertIn("`inconclusive`", text, path)
+
+    def test_the_investigator_starts_no_control_it_cannot_finish(self):
+        investigator = self.flat("roles/investigator.md")
+        self.assertIn("never start a run that cannot finish in it", investigator)
+        self.assertIn("return `inconclusive` with the long controls still to run", investigator)
+
+    def test_g4_runs_once_in_a_run_and_its_result_names_its_commit(self):
+        self.assertIn("G4 runs once in a run, and its result names its commit", self.flat("knowledge/validation_doctrine.md"))
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("**G4 runs once in a run.** Write the commit it ran on", verify)
+        self.assertIn("say in `gates` that this commit has not been through G4", verify)
+        self.assertIn("Only a G4 whose failure was the change's is run again, on the fix", verify)
+        self.assertIn("the code handed over has not been through G4", self.flat("roles/director.md"))
+        self.assertIn("G4 runs once in a run", self.flat("templates/task_definition.md"))
+        self.assertIn("once in a run", EN)
+        self.assertIn("一次运行里只跑一次", ZH)
+
+    def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
+        doctrine = self.flat("knowledge/validation_doctrine.md")
+        self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)
+        self.assertNotIn("throughput_test.py", doctrine, "a finite batch looped lets the concurrency drain")
+        for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md", "templates/task_definition.md",
+                     "templates/feature_spec.md", "README.md", "README.zh-CN.md"):
+            self.assertIn("scripts/stability.sh", self.flat(path), "%s does not name G4's script" % path)
+        self.assertTrue((ROOT / "scripts" / "stability.sh").is_file())
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertRegex(src, r"asked\(a\.stability\) === 'true' && !a\.client_script", "stability is on without a client to run")
+        for field in self.FLAGS:
+            self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
 
 
 class FlagsTest(unittest.TestCase):

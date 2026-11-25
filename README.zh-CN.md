@@ -343,7 +343,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
-| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即一次高并发、长 prompt 的吞吐量测试，连续运行 48 小时以上，带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
+| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任务需要有 `client_script`），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
 | `review_model` | reviewer 使用的模型，随它的 agent 调用一起传入（InferPilot 的 runner 把它作为命令行工具的 `--model` 传入；在 Claude Code 里取决于它的 Workflow 工具） |
 | `max_fix_rounds`、`max_investigate_rounds`、`max_review_rounds`、`max_work_packages` | 预算 |
 | `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer 和 investigator 为 6 小时；Verify 一轮需要更长时间时，会说明需要多久并获得一次延长，除非给了 `agent_timeout_ms` |
@@ -372,6 +372,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/scan_issues.py` | 开放的 AMD issue，附关联 PR（以及其中哪些会关闭这个 issue）、回复情况和预计的 60 天自动关闭日期 |
 | `scripts/scan_ci.py` | 从 main 上 AMD CI 自己的运行和日志读出现状（每个失败 job：从何时开始失败、上次通过的时间、失败的测试、第一条错误），以及 Failure Tracker 的失败簇 |
 | `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；有题没拿到答案的测试集不出成绩；key 只从环境变量读取 |
+| `scripts/stability.sh` | G4 的负载，在 `stability` 打开时使用：对同一个 server 把这次运行的 `client_script` 一遍接一遍地运行，直到过了 `HOURS`（G4 用 48；正在跑的那一遍会跑完），每一遍在 `OUT_DIR/stability.jsonl` 里记一行：client 的退出状态和结果，以及每张 GPU 和主机已用的内存。第一遍失败时就结束 |
 | `scripts/harness.py` | InferPilot 的模板（`templates/harness/`）：`show` 列出 server、性能压测 client 和精度三个模板的参数和默认值；`render` 生成一次运行要用的脚本（没有自己脚本的用户选了模板的 server 或 client、任务没带精度脚本时的精度脚本、Spec 的备用 client），参数先取任务给的值，再取 feature 源头测试用的值，server 的参数再取模型的 sglang cookbook 配方（`--cookbook`），最后用默认值，并写出 `harness.json`，记录每个值的来源 |
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |

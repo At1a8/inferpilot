@@ -267,9 +267,11 @@ Return:
    most twice and judged on the median. The feature's knobs take the values of the target PR or design;
    only with `tune` on are they chosen by measurement (`perf_evaluation.md` §3).
 6. Long context and stability: G3 is a criterion only with `long_context` on, G4 only with `stability`
-   on (`validation_doctrine.md`: G3's needle runs; G4's throughput test of more than 48 hours at high
-   concurrency on long prompts). With its field off, a gate's row says `not run: not asked` and is no
-   criterion; never add one from the kind of change, nor from `goal`.
+   on (`validation_doctrine.md`: G3's needle runs; G4, the run's `client_script` run back to back for
+   more than 48 hours). With its field off, a gate's row says `not run: not asked` and is no criterion;
+   never add one from the kind of change, nor from `goal`. G4's row names the workload it keeps up, the
+   task's at its highest concurrency, and says so when the feature does not engage on it: G4 then shows
+   the server's stability, not the feature path's.
 
 Return:
 
@@ -314,6 +316,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
   template server followed, and each rendered parameter's value and source
   (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
+- G4 (`stability`): give its verdict with the commit it ran on (the verify engineer's `gates`, the
+  ledger). It runs once in a run: when the branch's head is a later commit, say near the top that the
+  code handed over has not been through G4, and since which commit. A G4 that failed where the baseline
+  failed too is reported as failed, with the known issue.
 - A Design phase with the verdict `auto_approved` (`auto_approve_design`): no human approved the
   design. Say so near the top, with what the architect wanted a human to review, so the PR's reviewer
   checks it there.
