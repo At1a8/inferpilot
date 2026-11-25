@@ -317,7 +317,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `answers` | 对 `needs_input` 结果的回答，格式为 `{"<field>": <value>}`，与之前相同的参数一起传入 |
 | `mode` | `feature` \| `issue` \| `ci` \| `perf` \| `scan`（必填；没给时从 `request` 推断） |
 | `task` | 上游 PR / 设计、issue URL、CI job / 簇，或性能目标（`scan` 以外必填） |
-| `goal` | 什么算完成；可以测量的模式要写成可测量的；spec 和性能计划都要回应它。长上下文门禁（G3）和 48 小时以上的稳定性运行（G4）只有它要求时才跑 |
+| `goal` | 什么算完成；可以测量的模式要写成可测量的；spec 和性能计划都要回应它 |
 | `framework_dir` | 每个任务在其中工作的框架 checkout，任务从当前的 main 开自己的分支（sglang 默认用镜像里的 `/sgl-workspace/sglang`，镜像就是从这里安装 sglang 的） |
 | `model_path` | 基线和各项门禁运行的模型（`feature` 和 `perf` 必填） |
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
@@ -343,6 +343,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
+| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即一次高并发、长 prompt 的吞吐量测试，连续运行 48 小时以上，带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
 | `review_model` | reviewer 使用的模型，随它的 agent 调用一起传入（InferPilot 的 runner 把它作为命令行工具的 `--model` 传入；在 Claude Code 里取决于它的 Workflow 工具） |
 | `max_fix_rounds`、`max_investigate_rounds`、`max_review_rounds`、`max_work_packages` | 预算 |
 | `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer 和 investigator 为 6 小时；Verify 一轮需要更长时间时，会说明需要多久并获得一次延长，除非给了 `agent_timeout_ms` |

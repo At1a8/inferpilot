@@ -262,10 +262,10 @@ Return:
    A/B round on the task's workload (`perf_evaluation.md` §3). A result that misses is reproduced at
    most twice and judged on the median. The feature's knobs take the values of the target PR or design;
    only with `tune` on are they chosen by measurement (`perf_evaluation.md` §3).
-6. Long context and stability: G3 and G4 are criteria only when `goal` asks for them
-   (`validation_doctrine.md`: G3's needle runs; G4's throughput test of more than 48 hours at high
-   concurrency on long prompts). A row nobody asked for says `not run: not asked` and is no criterion;
-   never add one from the kind of change.
+6. Long context and stability: G3 is a criterion only with `long_context` on, G4 only with `stability`
+   on (`validation_doctrine.md`: G3's needle runs; G4's throughput test of more than 48 hours at high
+   concurrency on long prompts). With its field off, a gate's row says `not run: not asked` and is no
+   criterion; never add one from the kind of change, nor from `goal`.
 
 Return:
 

@@ -53,20 +53,35 @@ clock can start before your session does.
      `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
      dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,
      PD transfer checks).
-   - **G3 and G4 only when `goal` or the acceptance matrix asks;** one nobody asked for is `not run: not
-     asked` in `gates` (`validation_doctrine.md`).
+   - **G3 only with `long_context` on, G4 only with `stability` on;** one the task did not ask for is
+     `not run: not asked` in `gates` (`validation_doctrine.md`). Never run either on your own reading of
+     the change or of `goal`.
      - G3 long context sized so the feature engages, at two or more concurrencies, at least 4 runs each
        (6 when an intermittent failure is being judged), fixed seeds, prefix cache flushed between runs.
      - G4 stability is one run, not repeated and not taken to other concurrencies: a throughput test at
        high concurrency on long prompts, sized so the feature engages, on one server kept up for more
-       than 48 hours without a restart. Its length is set, so it needs no reference run and is never
-       `slow`. Write its throughput and memory at least once an hour to a file in `RUN_DIR/logs`: the
-       samples are its evidence, and they show the machine lock that the run is alive. It passes when
-       the server neither crashes, hangs nor runs out of memory, no request fails, and neither
-       throughput falls nor memory grows over the run beyond the spread of the samples; the baseline
-       runs it only as the control when it fails. It starts after everything else in the round, the
-       other data sets included, and such a round does not fit the default limit: it says what it needs
-       first (`needs_min`, below).
+       than 48 hours without a restart. It starts after everything else in the round, the other data
+       sets included. Its length is set, so it needs no reference run and is never `slow`. After a
+       warm-up pass of the load, write its throughput and memory at least once an hour to a file in
+       `RUN_DIR/logs`: the samples are its evidence, and they show the machine lock that the run is
+       alive.
+     - G4 passes when the server neither crashes, hangs nor runs out of memory, no request fails, and
+       neither throughput falls nor memory grows from the first 6 hours to the last 6: the median of
+       the last 6 hours is no lower in throughput, and no higher in memory, than the median of the
+       first 6 by more than the range of the samples within the first 6. Never judge a drift by the
+       spread of the whole run, which holds the drift.
+     - **A failed G4 gets its control in this round:** the same test on the baseline, for its full
+       length unless the baseline fails the same way sooner, written with the failure to the Controls
+       section of the ledger, where the investigator finds it; the failure's `counts` says how far
+       each arm got. One control serves the run: a later round uses the one in the ledger.
+     - **A known issue never turns a failed G4 into a pass** (step 4 does not apply to it): a server
+       that did not hold the load is not reported as stable. A G4 failure is blocking, and goes to the
+       investigator with its control, until `known_issues` holds it as the baseline's. In a round that
+       is given it there, do not run G4 again: report it as failed, with that issue, in `failures` with
+       `blocking: false`.
+     - **A round with G4 says what it needs first** (`needs_min`, below): it does not fit the default
+       limit, and its estimate counts G4 twice, its run and the control a failure would need, since no
+       later call has that time.
    - **Other data sets last, one after another, and only when `goal` or the acceptance matrix asks:**
      gpqa_diamond and simple_qa (through evalscope) when `goal` says the change may lose accuracy, and the
      sets the goal adds; each once per arm, at most 1 point below the baseline.
@@ -111,3 +126,6 @@ Return:
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
 did not run are `not run`.
+
+A G4 failure that `known_issues` holds as the baseline's is in `failures` with `"blocking": false`, and
+in `gates` as `"G4": "fail: crash at hour 31, the baseline's control at hour 27 (KI-007)"`.

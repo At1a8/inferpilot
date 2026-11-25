@@ -30,6 +30,7 @@ of it.
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
 | `tune` | default `false`: the feature runs at the configuration of the target PR or design; `true`: a work package chooses its knobs by measurement | optional | | | | |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's workload and goal, each off by default: a held-out operating point the gain must also hold at, guard workloads of InferPilot's choosing, points beyond the workload's own | optional | optional | | optional | |
+| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack on long prompts), `stability` runs G4 (one throughput test at high concurrency on long prompts, kept up for more than 48 hours) | optional | optional | | optional | |
 | `kernel_backend` with `kernel_backend_dir` or `kernel_backend_command` | where kernel hand-offs go | optional | optional | optional | optional | |
 
 `inferpilot.js` checks the required fields (and a back end's own field) for every definition; one that
@@ -60,9 +61,12 @@ the user.
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more
   runs are named there too. It runs through InferPilot's `accuracy.sh` (§1.2), which fixes the settings
   for every arm.
-- **Long context and stability** (G3, G4) run only when `goal` asks for them: G3 on needle-in-a-haystack
-  prompts, G4 as a throughput test at high concurrency on long prompts kept up for more than 48 hours
-  (`../knowledge/validation_doctrine.md`). A task that does not ask is reported with both `not run`.
+- **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
+  on needle-in-a-haystack prompts, G4 as one throughput test at high concurrency on long prompts kept up
+  for more than 48 hours (`../knowledge/validation_doctrine.md`). `goal` does not turn them on; from a
+  request in plain words, the intake sets them. A task that sets neither is reported with both as
+  `not run: not asked`. With `stability` on, a Verify round asks for a limit of about 6 days, and uses
+  it in full only when G4 fails and the baseline runs the same test as its control.
 
 ```bash
 # server.sh

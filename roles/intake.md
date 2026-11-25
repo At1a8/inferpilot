@@ -40,6 +40,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
      a context length, thinking off. Only what the request states; the feature's source and the
      templates fill the rest at Setup. The accuracy sets come from `goal`, never from here.
+   - `long_context`, `stability`: `true` only when the request or an answer asks, in whatever words, for
+     the long-context gate (G3) or for the stability run of more than 48 hours (G4). Both are off by
+     default and never follow from the kind of change (`knowledge/validation_doctrine.md`). They are
+     fields of their own, so a `goal` the caller gave does not drop what the request asked.
    - feature skills (feature mode): `python3 <inferpilot_dir>/scripts/find_skill.py "<request, task title>"`;
      list each candidate in `assumptions` as `feature skill candidate: <id> (<status>)`. The director
      makes the choice at Spec.
@@ -54,9 +58,8 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
    one word.
 5. **`goal`:** one line saying what done means — measurable when the mode measures (perf: metric,
    target, workload). What the user says about accuracy goes in it as said: that the change may lose
-   accuracy, or sets to run besides gsm8k (`knowledge/acceptance.md` §1.1). So does a request for the
-   long-context gate (G3) or the stability run of more than 48 hours (G4), which run only when asked
-   (`knowledge/validation_doctrine.md`). Never infer either from the kind of change.
+   accuracy, or sets to run besides gsm8k (`knowledge/acceptance.md` §1.1). Never infer it from the kind
+   of change.
 6. **Status.** `ready`: every required field is set and nothing open would change the task.
    `needs_input`: questions to answer first. `rejected`: outside what InferPilot does or against
    `guardrails.md` (pushing or posting, a non-AMD target, tuning one kernel on its own — the kernel

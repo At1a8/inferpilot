@@ -18,7 +18,11 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
 2. **Controls first**, before any instrumentation: same-pattern baseline; feature off on the branch;
    an untouched upstream checkout when the branch carries other people's commits. When
    `integrated_kernels` is not empty, also the failing gate with their commits reverted in a throwaway
-   worktree — the functional kernel back, the one each hand-off was tuned from.
+   worktree — the functional kernel back, the one each hand-off was tuned from. A failed G4 comes with
+   its same-pattern baseline control already run, in the Controls section of the ledger
+   (`roles/verify_engineer.md`): use it, since a second run of more than 48 hours does not fit your
+   limit. When that control failed the same way, the verdict is `baseline_bug`; InferPilot then reports
+   G4 as failed with the known issue, without blocking the change.
 3. Keep the hypothesis ledger in `RUN_DIR/experiment_ledger.md`; write the expected outcome before
    each experiment. Use toggle bisection (one mechanism off per experiment, effective flags checked).
 4. Follow the stop rules: after about five experiments that did not narrow the space, re-run the

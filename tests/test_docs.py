@@ -265,44 +265,87 @@ class EnvironmentTest(unittest.TestCase):
 
 
 class LongGatesTest(unittest.TestCase):
-    """G3 and G4 run only when the task asks, and G4 is one throughput test of more than 48 hours
-    (knowledge/validation_doctrine.md). The roles that take the user's words, write the spec and run the
-    round, the templates they fill and both READMEs say the same."""
+    """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
+    and hands to every role; G4 is one throughput test of more than 48 hours, judged between its first
+    hours and its last, whose failure gets its baseline control in the same round and is never reported
+    as a pass (knowledge/validation_doctrine.md). The roles, the templates and both READMEs say the same."""
+
+    FLAGS = ("long_context", "stability")
 
     @staticmethod
-    def said(path):
-        """A file's paragraphs, list items and table rows that name both gates, each on one line."""
-        text = (ROOT / path).read_text(encoding="utf-8")
-        parts = re.split(r"\n(?=[ \t]*(?:\d+\.|[-*]) |\|)|\n[ \t]*\n", text)
-        return [" ".join(p.split()) for p in parts if re.search(r"\bG3\b", p) and re.search(r"\bG4\b", p)]
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
-    def test_g3_and_g4_run_only_when_the_task_asks(self):
-        for path in ("knowledge/validation_doctrine.md", "roles/intake.md", "roles/director.md",
-                     "roles/verify_engineer.md", "templates/task_definition.md", "README.md"):
-            asked = [i for i in self.said(path) if re.search(r"\bonly when\b[^.]*\basks?\b|\bwhen the task asks\b|\bonly when asked\b", i)]
-            self.assertTrue(asked, "%s does not say that G3 and G4 run only when the task asks" % path)
-        self.assertIn("只有它要求时才跑", "".join(self.said("README.zh-CN.md")))
+    def test_the_task_definition_takes_the_two_fields_off_by_default(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `long_context`, `stability` |")]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the two fields")
+        self.assertIn("each off by default", row[0])
+        for flag in self.FLAGS:
+            self.assertIn("'%s'" % flag, keys, "inferpilot.js does not take %s" % flag)
+            self.assertRegex(intake, r"\n  %s: " % flag, "the intake cannot set %s from a request" % flag)
+            self.assertRegex(src, r"\nconst [A-Z_]+ = on\(A\.%s\);" % flag, "%s is not off unless the task sets it" % flag)
+            self.assertRegex(src, r"\n  %s: [A-Z_]+,\n" % flag, "%s does not reach the roles" % flag)
+            self.assertIn("args.%s" % flag, src, "inferpilot.js's whenToUse does not name %s" % flag)
+            for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+                self.assertIn(flag, table_names(text), "%s has no row for %s" % (name, flag))
+
+    def test_g3_and_g4_run_only_when_the_task_sets_their_field(self):
+        for path in ("knowledge/validation_doctrine.md", "knowledge/acceptance.md", "knowledge/dev_methodology.md",
+                     "roles/intake.md", "roles/director.md", "roles/verify_engineer.md",
+                     "templates/task_definition.md", "templates/feature_spec.md"):
+            text = self.flat(path)
+            for flag in self.FLAGS:
+                self.assertIn("`%s`" % flag, text, "%s does not name %s" % (path, flag))
+            self.assertNotRegex(text, r"G3 and G4[^.|]*`goal`[^.|]* asks", "%s still makes `goal` the switch" % path)
+        self.assertIn("G3 only with `long_context` on, G4 only with `stability` on", self.flat("roles/verify_engineer.md"))
+        self.assertIn("`goal` does not turn a gate on", self.flat("knowledge/validation_doctrine.md"))
+        self.assertIn("a `goal` the caller gave does not drop what the request asked", self.flat("roles/intake.md"))
         spec = (ROOT / "templates" / "feature_spec.md").read_text(encoding="utf-8")
-        for gate in ("G3", "G4"):
+        for gate, flag in zip(("G3", "G4"), self.FLAGS):
             row = [line for line in spec.splitlines() if line.startswith("| %s " % gate)]
             self.assertEqual(len(row), 1, gate)
-            self.assertIn("only when `goal` asks", row[0], gate)
+            self.assertIn("only with `%s` on; else `not run: not asked`" % flag, row[0], gate)
         acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
-        profile = [line for line in acceptance.splitlines() if line.startswith("| Stability | ") and "(G4)" in line]
+        profile = [line for line in acceptance.splitlines() if line.startswith("| Stability | ") and "G4)" in line]
         self.assertEqual(len(profile), 1)
         self.assertNotIn("required", profile[0], "no profile makes G4 required")
 
     def test_g4_is_one_run_of_more_than_48_hours(self):
         for path in ("knowledge/validation_doctrine.md", "knowledge/acceptance.md", "roles/verify_engineer.md",
-                     "roles/director.md", "templates/task_definition.md", "templates/feature_spec.md"):
-            text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
-            self.assertRegex(text, r"more than 48 h(?:ours)?\b", "%s does not give G4 its 48 hours" % path)
-        verify = " ".join((ROOT / "roles" / "verify_engineer.md").read_text(encoding="utf-8").split())
+                     "roles/director.md", "roles/intake.md", "templates/task_definition.md", "templates/feature_spec.md"):
+            self.assertRegex(self.flat(path), r"more than 48 h(?:ours)?\b", "%s does not give G4 its 48 hours" % path)
+        verify = self.flat("roles/verify_engineer.md")
         self.assertNotIn("G3/G4 at two or more concurrencies", verify, "G4 is one run, at one concurrency")
         self.assertIn("G4 stability is one run, not repeated and not taken to other concurrencies", verify)
-        doctrine = " ".join((ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").split())
+        doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertNotIn("Run G3/G4 at more than one concurrency", doctrine)
         self.assertIn("G4 is the exception: one run of more than 48 hours", doctrine)
+
+    def test_a_drift_is_judged_between_the_first_hours_and_the_last(self):
+        """Not by the spread of the whole run: a steady fall from 100 to 50 lies within its own range."""
+        window = ("the median of the last 6 hours is no lower in throughput, and no higher in memory, than the "
+                  "median of the first 6 by more than the range of the samples within the first 6")
+        for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md"):
+            text = self.flat(path)
+            self.assertIn(window, text, "%s does not compare the first hours with the last" % path)
+            self.assertNotRegex(text, r"beyond the spread of (?:its hourly|the) samples", path)
+
+    def test_a_failed_g4_gets_its_control_in_the_round_and_stays_failed(self):
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("A failed G4 gets its control in this round", verify)
+        self.assertIn("its estimate counts G4 twice, its run and the control a failure would need", verify)
+        self.assertIn("A known issue never turns a failed G4 into a pass** (step 4 does not apply to it)", verify)
+        self.assertIn("do not run G4 again: report it as failed, with that issue, in `failures` with `blocking: false`",
+                      verify)
+        investigator = self.flat("roles/investigator.md")
+        self.assertIn("A failed G4 comes with its same-pattern baseline control already run", investigator)
+        doctrine = self.flat("knowledge/validation_doctrine.md")
+        self.assertIn("A failed G4 gets its baseline control in the same round, and stays failed", doctrine)
+        self.assertIn("G4 keeps its verdict even so", doctrine)
 
 
 class FlagsTest(unittest.TestCase):

@@ -45,8 +45,8 @@
 | G0 feature off | | the baseline's tests pass; accuracy and throughput as the baseline's |
 | G1 unit / oracle | | all cases pass, including self-check mode |
 | G2 accuracy | gsm8k (1319); gpqa_diamond and simple_qa as well when `goal` says the change may lose accuracy | each at most 1 point below the baseline |
-| G3 long context (only when `goal` asks; else `not run: not asked`) | | e.g. NIAH pass rate within baseline spread, feature engaged |
-| G4 stability (only when `goal` asks; else `not run: not asked`) | a throughput test at high concurrency on long prompts, kept up for more than 48 hours | no crash, hang, out-of-memory or failed request; throughput does not fall and memory does not grow over the run |
+| G3 long context (only with `long_context` on; else `not run: not asked`) | | e.g. NIAH pass rate within baseline spread, feature engaged |
+| G4 stability (only with `stability` on; else `not run: not asked`) | a throughput test at high concurrency on long prompts, kept up for more than 48 hours | no crash, hang, out-of-memory or failed request; from the first 6 hours to the last 6, throughput no lower and memory no higher than the range of the first 6 hours' samples allows |
 | G5 performance | | e.g. >= +X% output tok/s at equal HBM on <workload> |
 
 ## Non-goals and unsupported combinations

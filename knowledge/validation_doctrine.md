@@ -15,8 +15,8 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 | G0 feature off | the change is inert when disabled | baseline suites on the feature branch with the switch off |
 | G1 unit / oracle | each new kernel or data structure does what it claims | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1) |
 | G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
-| G3 long context | the feature's own data path is exercised and correct | when the task asks: needle-in-a-haystack, single and multi-needle |
-| G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks: a throughput test at high concurrency on long prompts, kept up for more than 48 hours |
+| G3 long context | the feature's own data path is exercised and correct | when the task asks (`long_context`): needle-in-a-haystack, single and multi-needle |
+| G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks (`stability`): a throughput test at high concurrency on long prompts, kept up for more than 48 hours |
 | G5 performance | the claimed benefit exists on the task's workload; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
 
 Notes per gate:
@@ -49,16 +49,27 @@ Notes per gate:
   afresh (never evalscope's cache), flushes the prefix cache before each set and reads the accept length
   after it; both arms use the same settings.
 - **G3 and G4 run only when the task asks.** Neither is part of every task: G3's repeated long-context
-  runs and G4's two days are spent only when the user's request or `goal` asks for the long-context gate
-  or the stability run, and no role infers it from the kind of change. A gate nobody asked for is
-  reported `not run: not asked`.
+  runs and G4's two days are spent only when the task sets `long_context` (G3) or `stability` (G4), two
+  fields of the task definition that are off by default (`templates/task_definition.md`). The intake
+  sets one when the user's request asks for that gate; no role infers it from the kind of change, and
+  `goal` does not turn a gate on. A gate the task did not ask for is reported `not run: not asked`.
 - **G4 is one throughput test of more than 48 hours.** One server under a throughput load of long
   prompts at high concurrency, kept up for more than 48 hours without a restart: one run, not repeated
-  and not taken to other concurrencies. It passes when the server neither crashes, hangs nor runs out of
-  memory, no request fails, and neither throughput falls nor memory grows over the run beyond the spread
-  of its hourly samples; throughput against the baseline is G5's. The baseline runs the same test only
-  as the control when it fails (*Same-pattern baseline control* below). G4 runs after everything else
-  in its round, and that round asks for its time (`roles/verify_engineer.md`).
+  and not taken to other concurrencies, after everything else in its round. Throughput and memory are
+  sampled at least once an hour, after a warm-up pass of the load. It passes when the server neither
+  crashes, hangs nor runs out of memory, no request fails, and neither throughput falls nor memory
+  grows from the first 6 hours to the last 6: the median of the last 6 hours is no lower in throughput,
+  and no higher in memory, than the median of the first 6 by more than the range of the samples within
+  the first 6. The spread of the whole run is no measure of a drift: the drift is inside it. Throughput
+  against the baseline is G5's.
+- **A failed G4 gets its baseline control in the same round, and stays failed.** The verify engineer
+  runs the same test on the baseline, for its full length unless the baseline fails the same way
+  sooner, and the round asks for the time of both runs before it starts: no later call has two days
+  (`roles/verify_engineer.md`). The control says whose the failure is, never that there was none: a
+  server that did not hold the load is not reported as stable. A failure the baseline does not share is
+  the change's, and is investigated. One it shares is the baseline's: the investigator records it as a
+  known issue, G4 is not run again, and it is reported as failed with that issue, without blocking the
+  change.
 - **G3/G4 must be sized so the feature engages.** For a memory-tier feature that means total context
   well above the device pool (force eviction/demotion), and concurrency high enough that several engaged
   requests decode in the same batch. Log the engagement (e.g. demotion counters) and attach it.
@@ -118,7 +129,8 @@ Before instrumenting any failure, reproduce **the same scheduling pattern on bas
    pool with `--max-total-tokens`, send the same prompts in the same waves.
 3. Compare the failure taxonomy over repeated runs. Only a difference beyond the noise is attributable
    to the feature; a failure present on baseline goes to `known_issues.md` and the feature is judged on
-   the remainder.
+   the remainder. G4 keeps its verdict even so: a failure the baseline shares does not block the change,
+   and G4 is still reported as failed (*Notes per gate*).
 
 Also run the **original upstream code** (an untouched checkout of the framework) when the branch carries
 other people's commits, so a failure can be pinned to "framework", "dependency PR" or "this change".
