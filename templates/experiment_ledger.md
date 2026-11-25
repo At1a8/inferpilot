@@ -37,7 +37,7 @@
 | Control | Pattern reproduced | Runs | Results | Conclusion |
 |---|---|---|---|---|
 | same-pattern baseline | | | | |
-| feature off on branch | | | | |
+| feature off on branch (without a switch: the change's commits reverted) | | | | |
 | untouched upstream code | | | | |
 
 ## Hypothesis ledger (investigate loop)

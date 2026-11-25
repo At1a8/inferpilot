@@ -15,7 +15,10 @@ Run these before adding any instrumentation, in this order:
 
 1. **Same-pattern baseline** (see `validation_doctrine.md`). If baseline fails the same way, stop: record
    it in `known_issues.md` and judge the feature on what remains.
-2. **Feature off on the branch** — separates "my change" from "everything else on the branch".
+2. **Feature off on the branch** — separates "my change" from "everything else on the branch". A
+   change without a switch has nothing to turn off (`validation_doctrine.md`, G0): run the failing gate
+   with the change's commits reverted in a throwaway worktree of the branch instead. When the branch
+   carries nothing else, the same-pattern baseline is already this control.
 3. **Untouched upstream checkout** — separates "framework" from "dependency PR" when the branch carries
    cherry-picked commits.
 
@@ -72,7 +75,8 @@ CPU/GPU race — that single result rules out a whole family of hypotheses.
 ## 6. Fix and lock it in
 
 Add the regression test that would have caught it (unit test, or a validation case sized to trigger it),
-then re-run the gate that failed and G0.
+then re-run the gate that failed and G0 or, for a change without a switch, the existing tests of the
+modules it touches, judged against the tree without the change (`validation_doctrine.md`).
 
 ## Stop rules
 

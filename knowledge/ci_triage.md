@@ -59,8 +59,10 @@ from 10-02 to at least 10-25) had no owner.
 ## 4. Gates for a CI fix
 
 - The failing test passes on the fix, on every lane it failed on (extra gate `failing_test`).
-- The existing tests of the module the fix touches still pass. G0 (`validation_doctrine.md`) only when
-  the fix is behind a feature's switch: most CI fixes have none, and nothing to turn off.
+- The existing tests of the module the fix touches still pass, judged against the tree without the
+  fix; one the regression kept from running at all (the module did not import) is judged against the
+  culprit's parent. G0 (`validation_doctrine.md`) only when the fix is behind a feature's switch: most
+  CI fixes have none, and nothing to turn off.
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output

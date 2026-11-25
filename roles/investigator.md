@@ -15,10 +15,12 @@ Inputs: `failures` (from the verify engineer), `round`, `known_issues`, `integra
 kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
 
 1. Write each symptom precisely: which requests, which step, how often, which configuration; classify it.
-2. **Controls first**, before any instrumentation: same-pattern baseline; feature off on the branch;
-   an untouched upstream checkout when the branch carries other people's commits. When
-   `integrated_kernels` is not empty, also the failing gate with their commits reverted in a throwaway
-   worktree — the functional kernel back, the one each hand-off was tuned from.
+2. **Controls first**, before any instrumentation: same-pattern baseline; feature off on the branch,
+   or, for a change without a switch (`validation_doctrine.md`: it has no G0), the failing gate with
+   the change's commits reverted in a throwaway worktree, which the same-pattern baseline already is
+   when the branch carries nothing else; an untouched upstream checkout when the branch carries other
+   people's commits. When `integrated_kernels` is not empty, also the failing gate with their commits
+   reverted in a throwaway worktree — the functional kernel back, the one each hand-off was tuned from.
    **A failed G4** comes with its same-pattern baseline control already run, in the Controls section of
    the ledger (`roles/verify_engineer.md`): use it. Its other controls are as long as the failure took
    to show: run one only when it fits your limit, as when the failure came early or a shorter load

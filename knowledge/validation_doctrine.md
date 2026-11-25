@@ -112,9 +112,25 @@ Notes per gate:
   with the switch off, since its failure needs the switch on. A change without a switch, which nothing
   turns off (most issue and CI fixes, a performance change that is always on), has no G0. Where it
   takes effect the base commit fails or is slower, which `issue_repro`, `failing_test` and G5 judge.
-  What it must leave alone is shown another way: the existing tests of the modules it touches that
-  pass on its parent still pass (`roles/test_engineer.md`), and the review finds that it takes effect
-  only in the case it is for (`roles/reviewer.md`).
+  What it must leave alone is shown another way (next note): by the existing tests of the modules it
+  touches, per work package (`roles/test_engineer.md`) and on the final commit
+  (`roles/pr_engineer.md`), and by the review, which finds that it takes effect only in the case it is
+  for (`roles/reviewer.md`).
+- **Without a switch, a change is judged against the tree without it, never as an absolute pass.**
+  That tree is a work package's parent, and the branch's base for the final commit. An existing test
+  of a module the change touches that fails with the change is run again without it, with the same
+  command and environment, and is unchanged only when it fails there the same way: the same test, the
+  same error. One that passes there is the change's, and so is one that fails there another way (an
+  assertion without the change, a crash with it). One the tree without the change cannot run at all
+  because of the failure being fixed (a module that did not import) has no result there: it is run on
+  the last commit that could run it, the culprit's parent for a CI fix (`ci_triage.md` §3), and
+  compared with that; where the run knows no such commit, it is the change's. A server smoke is
+  compared only with a baseline of a case the change is meant to keep: any baseline for a change that
+  keeps behaviour (a performance change), one on a configuration outside its case for a fix. On the
+  case a fix is for, the baseline is the failure, and the server is meant to behave differently with
+  the fix: the package's own test, which fails without the change (G1), and the mode's gate judge
+  that difference. An investigator's "feature off on the branch" control is, for such a change, the
+  failing gate with the change's commits reverted (`debugging_playbook.md` §1).
 - **A change to config construction: compare the built config, not only a server smoke**, in G0 when
   it has a switch and in the review when it has none. Diff `get_config(...).to_dict()` from the change
   and the parent tree for every config shape the changed code branches on (with and without the field

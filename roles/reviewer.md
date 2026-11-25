@@ -25,10 +25,15 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
    (`validation_doctrine.md`) and takes effect only in the case it is for: name every other case its
    code branches on (another model, config shape, dtype, platform or flag) and what the change does
    there, comparing the built configs when it changes how a config is built. A change of behaviour
-   there that the task does not need is a `major` finding; one the change cannot avoid is a `minor`
-   one, for the PR description to say. The CUDA path does not change (HIP-only or behind a switch);
-   debug instrumentation is off by default and costs nothing when off; no new host sync on the hot
-   path; serving APIs, metrics and server arguments change only as the task requires.
+   there is a `major` finding, whose work package narrows the change to its case. It is a `minor`
+   one, for the PR description to say, only when the change cannot avoid it and the evidence shows
+   that case is no worse for it (sglang #41299: a text config got its own rope_theta in place of a
+   default filled in by mistake, a correction). One the change cannot avoid that makes a supported
+   case worse, or that nothing can show to be harmless, is a `major` finding no work package can
+   close: the verdict is `blocked`, and a human decides the scope. The CUDA path does not change
+   (HIP-only or behind a switch); debug instrumentation is off by default and costs nothing when off;
+   no new host sync on the hot path; serving APIs, metrics and server arguments change only as the
+   task requires.
 4. **Conventions.** The framework's code-style rules, with its linters run on the changed files (the PR
    changes no code, so what fails here is a finding); tests present and registered where its CI runs
    them (`register_amd_ci` only for AMD paths), and no more than cover the change (`pr_playbook.md`);

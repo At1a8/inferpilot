@@ -448,12 +448,20 @@ def items(path):
 class FeatureOffTest(unittest.TestCase):
     """G0 turns a feature off, so it runs only where the change has a switch (knowledge/validation_doctrine.md).
     Every mode that changes code still answers for it: the roles that report it say what they report for a
-    change without a switch, and the documents of the modes that fix things ask for it only where there is one."""
+    change without a switch, and the documents of the modes that fix things ask for it only where there is one.
+    Such a change is judged against the tree without it: a test by how it fails there, not by an absolute pass;
+    a smoke only where the change is meant to keep what the server does; the review lets no regression through
+    as minor; and the investigator's feature-off control becomes the change reverted."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
     def test_the_doctrine_gives_g0_only_to_a_change_with_a_switch(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G0 needs a switch.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say where G0 runs")
-        for said in ("without a switch", "has no G0", "`roles/test_engineer.md`", "`roles/reviewer.md`"):
+        for said in ("without a switch", "has no G0", "`roles/test_engineer.md`", "`roles/pr_engineer.md`",
+                     "`roles/reviewer.md`"):
             self.assertIn(said, note[0])
 
     def test_every_role_that_reports_g0_says_what_it_reports_without_a_switch(self):
@@ -471,6 +479,61 @@ class FeatureOffTest(unittest.TestCase):
             for item in named:
                 self.assertIn("only when the fix is behind a feature's switch", item, path)
                 self.assertIn("existing tests of the module", item, "%s: what a fix without a switch shows instead" % path)
+
+    def test_without_a_switch_a_test_is_judged_by_how_it_fails_without_the_change(self):
+        """Not by a pass on the change alone, which a test the base already fails never gives; not by pass or
+        fail alone, which takes an assertion that became a crash for no change; and a test the fix made
+        runnable has no result on the parent to be compared with."""
+        self.assertIn("judged against the tree without it, never as an absolute pass",
+                      self.flat("knowledge/validation_doctrine.md"))
+        for path, same in (("knowledge/validation_doctrine.md", "fails there the same way: the same test, the same error"),
+                           ("roles/test_engineer.md", "fails there the same way, the same test with the same error"),
+                           ("roles/pr_engineer.md", "fails the same way on the base, the same test with the same error"),
+                           ("knowledge/pr_playbook.md", "or fail the same way on the base")):
+            self.assertIn(same, self.flat(path), "%s does not say which failure the change did not cause" % path)
+        for path in ("knowledge/validation_doctrine.md", "roles/test_engineer.md", "roles/pr_engineer.md"):
+            text = self.flat(path)
+            self.assertIn("fails there another way", text, "%s takes a failure that changed for no change" % path)
+            self.assertIn("cannot run at all because of the failure", text,
+                          "%s: a test the fix made runnable has no result without the fix" % path)
+            self.assertIn("the last commit that could run it, the culprit's parent for a CI fix", text, path)
+        engineer, pr = self.flat("roles/test_engineer.md"), self.flat("roles/pr_engineer.md")
+        self.assertIn("each one that fails again on the parent", engineer, "nothing asks for the parent's result")
+        self.assertNotIn("no test which passes on the parent fails", engineer)
+        self.assertIn("each one that fails again on the base", pr, "nothing asks for the base's result")
+        self.assertIn("`feature_off_final` is then true when", pr, "the PR engineer is not told when the check passes")
+
+    def test_without_a_switch_the_smoke_is_compared_only_where_the_change_keeps_what_the_server_does(self):
+        """The baseline of the case a fix is for is the failure: a smoke that had to match it would have a
+        correct fix rolled back at Implement, before the mode's gate could judge it."""
+        doctrine, engineer = self.flat("knowledge/validation_doctrine.md"), self.flat("roles/test_engineer.md")
+        self.assertIn("A server smoke is compared only with a baseline of a case the change is meant to keep", doctrine)
+        self.assertIn("**The smoke,** for a package on the serving path, only against a baseline of a case the package "
+                      "is meant to keep", engineer)
+        for name, text in (("the doctrine", doctrine), ("the test engineer", engineer)):
+            self.assertIn("meant to behave differently with the fix", text, name)
+            self.assertRegex(text, r"the mode's gate[^.]* judge that difference", name)
+        self.assertNotIn("matches its baseline", engineer)
+
+    def test_the_review_lets_no_regression_outside_the_changes_case_through_as_minor(self):
+        harm = [i for i in items("roles/reviewer.md") if "**Do-no-harm.**" in i]
+        self.assertEqual(len(harm), 1)
+        self.assertIn("is a `major` finding, whose work package narrows the change to its case", harm[0])
+        self.assertIn("only when the change cannot avoid it and the evidence shows that case is no worse for it", harm[0])
+        self.assertIn("the verdict is `blocked`", harm[0], "a regression the change cannot avoid is a human's to accept")
+        self.assertNotIn("one the change cannot avoid is a `minor`", harm[0])
+
+    def test_the_control_that_turns_the_feature_off_has_a_form_without_a_switch(self):
+        for path in ("roles/investigator.md", "knowledge/debugging_playbook.md", "templates/experiment_ledger.md"):
+            named = [i for i in items(path) if re.search(r"feature off on (?:the )?branch", i, re.I)]
+            self.assertTrue(named, "%s has no feature-off control" % path)
+            for item in named:
+                self.assertIn("without a switch", item, "%s asks a change with nothing to turn off for this control" % path)
+                self.assertIn("the change's commits reverted", item, path)
+        again = [i for i in items("knowledge/debugging_playbook.md") if re.search(r"\bG0\b", i)]
+        self.assertTrue(again)
+        for item in again:
+            self.assertIn("without a switch", item, "the playbook runs G0 again after a fix, switch or no switch")
 
 
 BUNDLE = "RUN_DIR/branch.bundle"
