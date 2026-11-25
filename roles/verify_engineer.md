@@ -22,7 +22,9 @@ Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
 
 Inputs: `extra_gates` (mode gates such as `issue_repro` or `failing_test`), `round`, `known_issues`
 (failures already proven pre-existing in this run), `time_limit_min` (minutes from this call's start
-after which InferPilot stops waiting and never reads the answer; 0: no limit).
+after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
+`deadline_utc`, that moment: an answer InferPilot cannot use is asked for again under the same limit,
+so count from the deadline, not from when you started.
 
 1. Launch the feature build and the baseline with the run's `server_script` as Setup did (the task's,
    InferPilot's template the user took, or the run's own launch script when the task has none; the
@@ -64,7 +66,7 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
      output add nothing) for three times the longest such pause in this run's healthy runs is hung, however
      much of the round is left: it is stopped, and its gate fails as a hang, with how far it got.
    - **The round fits in `time_limit_min`, or says what it needs.** With `time_limit_min` above 0, the
-     round ends 30 minutes before it, which leaves time for the ledger and the answer. Estimate the round
+     round ends 30 minutes before `deadline_utc`, which leaves time for the ledger and the answer. Estimate the round
      before its first suite, from the references, and again before each suite, from the times of this
      round. When the rest does not fit, start nothing more and return `all_pass` false with `needs_min`:
      the limit, in minutes from the round's start, that the whole round needs (the estimate and half as

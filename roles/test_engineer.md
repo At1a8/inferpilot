@@ -10,12 +10,16 @@ Read: `knowledge/validation_doctrine.md` (G0, G1), `knowledge/reward_hacks.md` (
 ## PHASE=unit
 
 Inputs: `work_package`, `commit`, `unit_test_cmd`, `time_limit_min` (minutes from this call's start
-after which InferPilot stops waiting and never reads the answer; 0: no limit).
+after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
+`deadline_utc`, that moment: an answer InferPilot cannot use is asked for again under the same limit,
+so count from the deadline, not from when you started.
 
 0. **A run longer than one tool call** (a server, a driver of several runs) starts detached and is
    waited for in this call (`env_hygiene.md`, *Servers*): it writes each result to its log or a file as
-   it ends, and you poll them until every check has its result. Never return while a check you need is
-   still running, and leave 15 minutes of `time_limit_min` for the ledger and the answer.
+   it ends, and you poll them until every check has its result, or until only the reserve is left: a
+   quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`, for the ledger and the answer.
+   A check still running then is not waited for: the gate fails, and `failure_summary` names the check,
+   its PID and its log.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template

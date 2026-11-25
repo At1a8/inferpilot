@@ -1,15 +1,18 @@
 """What the code reads and what the docs say stay in step: every environment variable that setup, the
 container script and the runner read is in the READMEs, every other script names the ones it reads in
 its own header, every variable the READMEs' tables list is read by something, the command-line flags
-the READMEs and AGENTS.md give exist, and the branch bundle the roles write is the one a retry or a
-resume takes the task's commits from, with commands that do it. Offline.
+the READMEs and AGENTS.md give exist, the branch bundle the roles write is the one a retry or a
+resume takes the task's commits from, with commands that do it, and the detached launcher of
+knowledge/env_hygiene.md leaves the run's exit status. Offline.
 
     python3 -m unittest discover -s tests
 """
 import ast
 import re
+import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -428,6 +431,30 @@ class BranchBundleTest(unittest.TestCase):
             # rollback of ALL: nothing beyond the base, which implementer.md says git refuses to bundle
             git("reset", "-q", "--hard", base, cwd=old)
             self.assertNotEqual(run(create, **subs).returncode, 0, "an empty bundle was written")
+
+
+class DetachedRunTest(unittest.TestCase):
+    """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
+    documented launcher leaves its exit status where that shell reads it."""
+
+    def test_a_run_that_writes_its_results_and_fails_is_seen_to_fail(self):
+        launch = doc_command("knowledge/env_hygiene.md", "setsid nohup")
+        self.assertIsNotNone(launch, "env_hygiene.md gives no detached launcher")
+        if not shutil.which("setsid"):
+            self.skipTest("no setsid here")
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "perf.log"
+            cmd = launch.replace("<command>", 'sh -c "echo results written; exit 3"').replace("<log>", str(log))
+            subprocess.run(["bash", "-c", cmd], check=True, timeout=30)
+            status = Path("%s.exit" % log)
+            for _ in range(200):
+                if status.exists() and status.read_text().strip():
+                    break
+                time.sleep(0.05)
+            self.assertEqual(status.read_text().strip() if status.exists() else None, "3")
+            self.assertIn("results written", log.read_text())
+        text = re.sub(r"\s+", " ", (ROOT / "knowledge/env_hygiene.md").read_text())
+        self.assertIn("A run is done when `<log>.exit` has its status, and passed only when that is 0", text)
 
 
 if __name__ == "__main__":

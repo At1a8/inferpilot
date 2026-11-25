@@ -40,7 +40,7 @@ function makeBackend(overrides) {
     const key = `${m[1]}:${m[2]}`;
     const n = (counts[key] = (counts[key] || 0) + 1);
     const ins = parseInputs(prompt);
-    calls.push({ key, n, ins, model, prompt });
+    calls.push({ key, n, ins, model, prompt, at: Date.now() });
     const contract = /## Output contract[\s\S]*?```json\n([\s\S]*?)\n```/.exec(prompt);
     if (contract) CONTRACTS.set(key, JSON.parse(contract[1]).required || []);
     const f = (overrides && overrides[key]) || DEFAULTS[key];
@@ -57,7 +57,7 @@ const asWorkflowTool = (rt, args) => new AsyncFunction('agent', 'parallel', 'pip
   scriptBody(readFileSync(SCRIPT, 'utf8')))(rt.agent, rt.parallel, rt.pipeline, rt.phase, rt.log,
   async () => { throw new Error('workflow(): not used'); }, args, { total: null, spent: () => 0, remaining: () => Infinity });
 
-async function run(args, overrides, { control, workflowTool } = {}) {
+async function run(args, overrides, { control, workflowTool, schemaRetries = 0 } = {}) {
   const phases = [];
   const heads = [];
   const lines = [];
@@ -66,7 +66,7 @@ async function run(args, overrides, { control, workflowTool } = {}) {
   const rt = createRuntime({
     backend,
     concurrency: 2,
-    schemaRetries: 0,
+    schemaRetries,
     ...(control ? { control } : {}),
     log: (msg) => {
       lines.push(msg);
@@ -335,6 +335,21 @@ const scenarios = [
     });
     check(failing.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'a blocking failure is no reason to ask for time');
   }],
+  ['feature: an answer asked for again has what is left of the limit, not all of it', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
+      'verify_engineer:verify': async (ins, n) => {
+        if (n > 1) return { all_pass: true, failures: [] };
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return { failures: [] };
+      },
+    }, { schemaRetries: 1 });
+    const [first, again] = r.calls.filter((c) => c.key === 'verify_engineer:verify');
+    check(first && again && first.ins.deadline_utc && again.ins.deadline_utc === first.ins.deadline_utc && again.ins.time_limit_min === 120,
+      `the retry runs under the first one's deadline: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
+    check(again && Date.parse(again.ins.deadline_utc) - again.at < 120 * 60000 - 200,
+      'which leaves the retry less than the whole limit');
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+  }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
@@ -343,6 +358,18 @@ const scenarios = [
     check(ver.length === 1 && ver[0].ins.time_limit_min === 120, `one call, told 120 min: ${ver.map((c) => c.ins.time_limit_min)}`);
     const unit = r.calls.find((c) => c.key === 'test_engineer:unit');
     check(unit && unit.ins.time_limit_min === 120, `the test engineer is told its limit too: ${unit && unit.ins.time_limit_min}`);
+    const ends = unit && Date.parse(unit.ins.deadline_utc);
+    check(Math.abs(ends - (unit.at + 120 * 60000)) < 5000, `and the moment it ends: ${unit && unit.ins.deadline_utc}`);
+    const unlimited = await run({ mode: 'feature', task: 't', agent_timeout_ms: 0 });
+    check(unlimited.calls.filter((c) => /^(test|verify)_engineer:(unit|verify)$/.test(c.key)).every((c) => !('deadline_utc' in c.ins)),
+      'no limit, no deadline');
+    const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
+      && unitDoc.includes('the gate fails, and `failure_summary` names the check, its PID and its log'),
+      'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
+    const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
+    check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
+      'both engineers count from the deadline');
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);
     const told = async (ms) => (await run({ mode: 'feature', task: 't', agent_timeout_ms: ms })).calls

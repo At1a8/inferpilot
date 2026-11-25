@@ -499,8 +499,12 @@ async function call(role, sub, ins, schema, label, opts) {
   const ms = timeoutFor(role);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+    // The engine asks again for an unusable answer with the same prompt, under this attempt's one timeout:
+    // a role told its limit gets the moment it ends, which stays true for those retries.
+    const told = ins.time_limit_min > 0 && ms > 0
+      ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
-      const r = await withTimeout(agent(rolePrompt(role, sub, ins, attempt, leads),
+      const r = await withTimeout(agent(rolePrompt(role, sub, told, attempt, leads),
         { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
