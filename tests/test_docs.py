@@ -7,9 +7,11 @@ resume takes the task's commits from, with commands that do it. Offline.
     python3 -m unittest discover -s tests
 """
 import ast
+import os
 import re
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -292,6 +294,36 @@ def doc_command(path, start):
     text = re.sub(r"\s+", " ", (ROOT / path).read_text())
     m = re.search(r"`(%s[^`]*)`" % re.escape(start), text)
     return m.group(1) if m else None
+
+
+class EarlierRunStillRunningTest(unittest.TestCase):
+    """A run resumed from Verify looks, before its smoke, for what a call that timed out left running: the
+    documented command names the processes another runner started, each with its tag, and none of this
+    run's."""
+
+    def test_the_documented_command_lists_another_runs_processes_and_none_of_this_runs(self):
+        cmd = doc_command("roles/director.md", "for f in $(grep -l -s -z '^INFERPILOT_RUN_TAG='")
+        self.assertIsNotNone(cmd, "director.md gives no command that finds what an earlier run left running")
+        mine, theirs = "resumed-%d" % os.getpid(), "earlier-%d" % os.getpid()
+        procs = [subprocess.Popen(["sleep", "30"], env=dict(os.environ, INFERPILOT_RUN_TAG=tag)) for tag in (mine, theirs)]
+        try:
+            for proc in procs:
+                for _ in range(200):
+                    if Path("/proc/%d/cmdline" % proc.pid).read_bytes().startswith(b"sleep"):
+                        break
+                    time.sleep(0.05)
+            out = subprocess.run(["bash", "-c", cmd], env=dict(os.environ, INFERPILOT_RUN_TAG=mine), capture_output=True,
+                                 text=True, timeout=60)
+            lines = out.stdout.splitlines()
+            self.assertIn("/proc/%d INFERPILOT_RUN_TAG=%s" % (procs[1].pid, theirs), lines, out.stderr)
+            self.assertEqual([line for line in lines if line.endswith("=" + mine)], [], "a process of this run is listed")
+        finally:
+            for proc in procs:
+                proc.kill()
+                proc.wait()
+        doc = re.sub(r"\s+", " ", (ROOT / "roles/director.md").read_text())
+        self.assertIn("lists the processes a runner other than this run's started, each with its tag", doc)
+        self.assertIn("Stop nothing: it may be writing the run's results", doc)
 
 
 class BranchBundleTest(unittest.TestCase):

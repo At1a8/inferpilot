@@ -477,6 +477,77 @@ const scenarios = [
     const rv = r.calls.find((c) => c.key === 'implementer:rollback' && c.ins.revert);
     check(rv && rv.ins.revert === 'c_K', `a kernel regression reverts the commit the run integrated: ${rv && JSON.stringify(rv.ins)}`);
   }],
+  ['resume_from verify: settings are compared with their boundaries and as the harness renders them; the task and the goal stay the run\'s', async () => {
+    const resumed = (mode, extra, args = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN, ...args }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra(ins) }) });
+    const saved = (fields) => (ins) => ({ task_definition: { ...ins.task_def, ...fields } });
+    const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
+      && r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
+    const split = await resumed('feature', saved({ harness: { DATASET: 'prompts.jsonl,SEED:2' } }),
+      { harness: { DATASET: 'prompts.jsonl', SEED: 2 } });
+    check(stoppedFor(split, '(harness not as its run.json has them)'), `a comma in a path is not a second setting: ${split.result.status}`);
+    const load = { input_len: 8192, output_len: 1024, concurrency: 64 };
+    const nested = await resumed('feature', saved({ workload: { ...load, dataset: 'a,dataset_seed:2' } }),
+      { workload: { ...load, dataset: 'a', dataset_seed: 2 }, client_script: '/s/client.sh' });
+    check(stoppedFor(nested, '(workload not as its run.json has them)'), `nor in a workload: ${nested.result.status}`);
+    const flagOff = await resumed('feature', saved({ harness: { TOP_P: false } }), { harness: { TOP_P: '' } });
+    check(stoppedFor(flagOff, '(harness not as its run.json has them)'), `a flag false renders 0, an empty line the default: ${flagOff.result.status}`);
+    for (const [why, was, now] of [['a flag false and 0 render the same line', { PREFIX_CACHE: false }, { PREFIX_CACHE: 0 }],
+      ['a flag true and 1', { PREFIX_CACHE: true }, '{"PREFIX_CACHE": "1"}'], ['a list and its items', { CONCS: [1, 8] }, { CONCS: '1 8' }],
+      ['an empty line is no setting', { TP: 4, SEED: '' }, { TP: '4' }], ['no harness and an empty one', {}, '']]) {
+      const same = await resumed('feature', saved({ harness: was }), { harness: now });
+      check(same.result.status === 'ready_for_review', `${why}: ${same.result.status}`);
+    }
+    const goal = await resumed('feature', saved({ goal: 'no accuracy loss: also gpqa_diamond' }), { goal: 'quick check' });
+    const v = goal.calls.find((c) => c.key === 'verify_engineer:verify');
+    const pe = goal.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(v && v.ins.goal === 'no accuracy loss: also gpqa_diamond' && pe && pe.ins.goal === v.ins.goal,
+      `Verify and Performance get the goal the run had, with the data sets it names: ${v && v.ins.goal}`);
+    check(goal.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
+      && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it')), 'and the run says so');
+    const other = await resumed('issue', () => ({ task_definition: { mode: 'issue', task: 'sglang#1: wrong logprobs' } }), { task: 'sglang#2: a crash' });
+    const reply = other.calls.find((c) => c.key === 'issue_triager:reply');
+    check(other.calls.find((c) => c.key === 'verify_engineer:verify').ins.task === 'sglang#1: wrong logprobs'
+      && reply && reply.ins.task === 'sglang#1: wrong logprobs', `the issue stays the one the run directory is about: ${reply && reply.ins.task}`);
+    const unchanged = await resumed('feature', () => ({}), { goal: 'as before' });
+    check(unchanged.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && !p.summary.includes('not the run\'s')),
+      'a goal that is the run\'s is not reported as another');
+  }],
+  ['resume_from verify: stops at Setup without the records Verify and Reply read; no package left is a state of its own', async () => {
+    const resumed = (mode, extra) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra }) });
+    const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
+      && r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
+    check(stoppedFor(await resumed('issue', { triage_path: '' }), 'records no issue_triage.md'), 'an issue without its triage record would skip Reply');
+    check(stoppedFor(await resumed('feature', { spec_path: '' }), 'records no feature_spec.md'), 'a feature without its spec has no acceptance matrix');
+    check(stoppedFor(await resumed('feature', { design_path: '' }), 'records no design.md'), 'nor, without its design, a test plan');
+    const rejected = { id: 'O2', owner: 'kernel_workflow', status: 'rejected', retries: 1 };
+    const kernelOnly = await resumed('perf', { verified_work_packages: [], handoffs: [rejected], head: 'c_revert' });
+    check(kernelOnly.keys.includes('verify_engineer:verify') && kernelOnly.result.stopped_at !== 'Setup',
+      `a kernel-only plan whose integration was reverted is verified again: ${kernelOnly.result.status} at ${kernelOnly.result.stopped_at}`);
+    check(kernelOnly.result.phases.some((p) => p.phase === 'Setup' && p.summary.includes('no work package left, its kernel integration reverted')),
+      'and the run says what it verifies');
+    check(stoppedFor(await resumed('perf', { verified_work_packages: null, handoffs: [rejected] }), 'records no verified work package'),
+      'packages the run directory does not record are not none');
+    check(stoppedFor(await resumed('perf', { verified_work_packages: [] }), 'records no verified work package'), 'an empty list without a kernel hand-off');
+    check(stoppedFor(await resumed('feature', { verified_work_packages: [], handoffs: [rejected] }), 'records no verified work package'),
+      'or outside perf');
+    const setup = (await run({ mode: 'perf', task: 'p', apply_prs: ['#46329', '#46400'] })).calls.find((c) => c.key === 'director:setup');
+    check(JSON.stringify(setup.ins.apply_prs) === '["#46329","#46400"]', `Setup is given apply_prs, which it records in run.json: ${JSON.stringify(setup.ins.apply_prs)}`);
+    const one = (await run({ mode: 'perf', task: 'p', apply_prs: '#46329' })).calls.find((c) => c.key === 'architect:perf_plan');
+    check(JSON.stringify(one.ins.apply_prs) === '["#46329"]', 'and the plan the same list');
+    const doc = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
+    check(doc.includes('first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6)')
+      && doc.includes('its triage record (`issue`, `ci`), its spec and design (`feature`), the claim its Performance was to judge, and `known_issues.json` and `handoffs.json`')
+      && doc.includes('run no smoke, so that nothing is measured'), 'Setup checks everything a resume needs before its smoke');
+    check(doc.includes('one that timed out is not cancelled, and its agent may still be running and start more servers, which idle GPUs do not show')
+      && doc.includes('one that timed out was not cancelled, which is why Setup looked for what it left before its smoke')
+      && !doc.includes('its servers went with the call'), 'a timed-out Verify is not taken for gone');
+    check(doc.includes('`verified_work_packages` is `[]` only when the report says none was left')
+      && doc.includes('The `task` and the `goal` stay the ones `run.json` has') && doc.includes('a flag `false` is `0`, not an unset line')
+      && doc.includes('A resume without its triage record, or a `feature` without its spec or its design, stops'),
+      'the director is told what each of these restores or stops');
+  }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
     const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);

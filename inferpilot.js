@@ -312,6 +312,7 @@ const HELD_OUT = on(A.held_out);
 const GUARDS = on(A.guards);
 const SWEEP = on(A.sweep);
 const TUNE = on(A.tune);
+const APPLY_PRS = (Array.isArray(A.apply_prs) ? A.apply_prs : (A.apply_prs ? [A.apply_prs] : [])).map(String);
 const BISECT_FIXED = on(A.bisect_fixed);
 // leads cost GPU time only when asked: by default Spinoff lists them and runs nothing
 const CONFIRM_LEADS = on(A.confirm_leads);
@@ -336,6 +337,7 @@ const C = {
   client_script: String(A.client_script || ''),
   accuracy_script: String(A.accuracy_script || ''),
   harness: A.harness ? (typeof A.harness === 'string' ? A.harness : JSON.stringify(A.harness)) : '',
+  apply_prs: APPLY_PRS,
   goal: String(A.goal || ''),
   held_out: HELD_OUT,
   guards: GUARDS,
@@ -752,7 +754,9 @@ const K_COLLECT = S({
 const RESUMED = S({
   head_ok: bool,
   head: str,
-  verified_work_packages: arr(S({ wp: str, commit: str, evidence: str }, ['wp', 'commit'])),
+  // [] when the run's report says none was left (a kernel-only plan whose integration was reverted), null
+  // when the run directory does not record them
+  verified_work_packages: { type: ['array', 'null'], items: S({ wp: str, commit: str, evidence: str }, ['wp', 'commit']) },
   known_issues: { type: ['array', 'null'], items: obj },
   handoffs: { type: ['array', 'null'], items: obj },
   task_definition: { type: ['object', 'null'] },
@@ -775,13 +779,14 @@ const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_scr
   'held_out', 'guards', 'sweep', 'tune'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
 // One form for a setting however it was written down: JSON as an object or in a string, a flag unset or
-// false, a list of one as that one.
-function canon(v) {
+// false, a list of one as that one. Compared as JSON, which keeps the boundaries of every value: a comma
+// or a colon in a path is not a second setting.
+function plain(v) {
   if (typeof v === 'string') {
     const t = v.trim();
     if (/^[[{]/.test(t)) {
       try {
-        return canon(JSON.parse(t));
+        return plain(JSON.parse(t));
       } catch (e) {
         return t;
       }
@@ -789,10 +794,28 @@ function canon(v) {
     return t === 'false' ? '' : t;
   }
   if (v === undefined || v === null || v === false) return '';
-  if (Array.isArray(v)) return v.length < 2 ? canon(v[0]) : `[${v.map(canon).join(',')}]`;
-  if (typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${k}:${canon(v[k])}`).join(',')}}`;
+  if (Array.isArray(v)) return v.length < 2 ? plain(v[0]) : v.map(plain);
+  if (typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, plain(v[k])]));
   return String(v);
 }
+// `harness` holds parameter lines, read as scripts/harness.py renders them (value_of): a flag is 1 or 0,
+// so false is a value and not an unset line; a list is its items; a line with nothing is no setting.
+function harnessLines(v) {
+  let h = v;
+  if (typeof h === 'string' && /^\s*\{/.test(h)) {
+    try {
+      h = JSON.parse(h);
+    } catch (e) {
+      return plain(h);
+    }
+  }
+  if (!h || typeof h !== 'object' || Array.isArray(h)) return plain(h);
+  const line = (x) => (typeof x === 'boolean' ? (x ? '1' : '0')
+    : Array.isArray(x) ? x.map(String).join(' ') : x === null || x === undefined ? '' : String(x).trim());
+  const lines = Object.keys(h).sort().map((k) => [k, line(h[k])]).filter(([, text]) => text !== '');
+  return lines.length ? lines : '';
+}
+const canon = (v, key = '') => JSON.stringify(key === 'harness' ? harnessLines(v) : plain(v));
 const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
@@ -1447,9 +1470,13 @@ async function resumeVerify(claimOf) {
   for (const p of STOP_PHASES[MODE].slice(0, STOP_PHASES[MODE].indexOf('Verify'))) STOPS_PASSED.add(p.toLowerCase());
   const rs = await call('director', 'resume', inputs({ task_def: R.task_def }), RESUMED);
   const cmd = !rs ? '' : String((MODE === 'issue' ? rs.repro_cmd : MODE === 'ci' ? rs.failing_test_cmd : 'none') || '').trim();
-  const done = (rs && Array.isArray(rs.verified_work_packages) ? rs.verified_work_packages : []).filter((d) => d && d.wp && d.commit);
+  const recorded = !!rs && Array.isArray(rs.verified_work_packages);
+  const done = (recorded ? rs.verified_work_packages : []).filter((d) => d && d.wp && d.commit);
+  // None left is a state only a plan of kernel hand-offs reaches, its integration reverted.
+  const noneLeft = recorded && !rs.verified_work_packages.length && MODE === 'perf'
+    && Array.isArray(rs.handoffs) && rs.handoffs.some((h) => h && h.owner === 'kernel_workflow');
   const saved = rs && rs.task_definition && typeof rs.task_definition === 'object' ? rs.task_definition : null;
-  const changed = saved ? MEASURED.filter((k) => canon(saved[k]) !== canon(GIVEN[k])) : [];
+  const changed = saved ? MEASURED.filter((k) => canon(saved[k], k) !== canon(GIVEN[k], k)) : [];
   const restored = rs ? String(rs.perf_claim || '').trim() : '';
   const lost = rs ? ['known_issues', 'handoffs'].filter((k) => !Array.isArray(rs[k])) : [];
   const why = !rs ? ['the director restored nothing from the run directory'] : [
@@ -1458,9 +1485,14 @@ async function resumeVerify(claimOf) {
     !saved && 'the run directory records no task definition (run.json)',
     changed.length && `this run would measure otherwise than the one it resumes (${changed.join(', ')} not as its run.json has them); `
       + 'a changed task is verified in a run of its own',
-    !done.length && 'the run directory records no verified work package',
+    !done.length && !noneLeft && 'the run directory records no verified work package',
     !cmd && `the run directory records no ${MODE === 'issue' ? 'reproduction command (issue_repro)' : 'failing test command (failing_test)'}`,
     MODE === 'ci' && !String(rs.triage_path || '').trim() && 'the run directory records no ci_triage.md, which names the lanes the test failed on',
+    MODE === 'issue' && !String(rs.triage_path || '').trim()
+      && 'the run directory records no issue_triage.md, which holds the issue\'s classification and what Reply answers',
+    ...(MODE === 'feature' ? [['spec_path', 'feature_spec.md, whose acceptance matrix Verify measures'],
+      ['design_path', 'design.md, whose test plan Verify runs']] : [])
+      .map(([k, what]) => !String(rs[k] || '').trim() && `the run directory records no ${what}`),
     rs.perf_required === true && !restored && 'the run was to measure a claim its run directory does not record',
     lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
       + 'and what a kernel regression reverts would be lost',
@@ -1474,7 +1506,14 @@ async function resumeVerify(claimOf) {
   R.handoffs.push(...rs.handoffs.filter((h) => h && h.id));
   // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
-  note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: ${done.map((d) => d.wp).join(', ')}`);
+  // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
+  // Performance ran, and the task the issue or PR its triage, reproduction and reply are about.
+  const own = ['task', 'goal'].filter((k) => k in saved && canon(saved[k]) !== canon(C[k]));
+  for (const k of own) C[k] = typeof saved[k] === 'string' ? saved[k] : saved[k] ? JSON.stringify(saved[k]) : '';
+  note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: `
+    + `${done.map((d) => d.wp).join(', ') || 'no work package left, its kernel integration reverted'}`
+    + `${own.length ? `; the ${own.join(' and the ')} it was given ${own.length > 1 ? 'are' : 'is'} not the run's, which `
+      + `${own.length > 1 ? 'stay' : 'stays'} as run.json has ${own.length > 1 ? 'them' : 'it'}` : ''}`);
   if (MODE === 'feature' && rs.design_auto_approved === true) {
     note('Design', 'auto_approved', 'restored from the run this one resumes: no human approved its design');
   }
@@ -1707,8 +1746,7 @@ async function runPerf() {
   if (stopHere('Profile')) return finish('stopped', 'Profile');
 
   enter('Plan');
-  const applyPrs = Array.isArray(A.apply_prs) ? A.apply_prs : (A.apply_prs ? [String(A.apply_prs)] : []);
-  const plan = await call('architect', 'perf_plan', inputs({ opportunities: opps, apply_prs: applyPrs }), PERF_PLAN);
+  const plan = await call('architect', 'perf_plan', inputs({ opportunities: opps, apply_prs: APPLY_PRS }), PERF_PLAN);
   if (!plan || plan.gate_ok !== true) {
     note('Plan', 'fail', 'plan gate not met');
     return finish('blocked', 'Plan');

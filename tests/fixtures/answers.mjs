@@ -15,7 +15,8 @@ export const DEFAULTS = {
     known_issues: [], handoffs: [], task_definition: ins.task_def || {}, design_auto_approved: false,
     repro_cmd: ins.mode === 'issue' ? 'bash repro.sh' : '', failing_test_cmd: ins.mode === 'ci' ? 'pytest test_x.py' : '',
     perf_required: ['feature', 'perf'].includes(ins.mode), perf_claim: ['feature', 'perf'].includes(ins.mode) ? '+20% output tok/s at equal HBM' : '',
-    ...(ins.mode === 'issue' ? { triage_path: `${RUN}/issue_triage.md` } : ins.mode === 'ci' ? { triage_path: `${RUN}/ci_triage.md` } : {}) }),
+    ...(ins.mode === 'issue' ? { triage_path: `${RUN}/issue_triage.md` } : ins.mode === 'ci' ? { triage_path: `${RUN}/ci_triage.md` }
+      : ins.mode === 'feature' ? { spec_path: `${RUN}/feature_spec.md`, design_path: `${RUN}/design.md` } : {}) }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': (ins) => ({ report_path: `${RUN}/run_report.md`, summary: 'done',
     ...('share_daily_report' in ins ? { daily_report_url: '', daily_report_action: '' } : {}) }),
