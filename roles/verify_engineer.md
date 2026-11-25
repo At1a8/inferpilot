@@ -23,8 +23,8 @@ Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
 Inputs: `extra_gates` (mode gates such as `issue_repro` or `failing_test`), `round`, `known_issues`
 (failures already proven pre-existing in this run), `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
-`deadline_utc`, that moment: an answer InferPilot cannot use is asked for again under the same limit,
-so count from the deadline, not from when you started.
+`deadline_utc`, that moment: count from the deadline, not from when you started, since the call's
+clock can start before your session does.
 
 1. Launch the feature build and the baseline with the run's `server_script` as Setup did (the task's,
    InferPilot's template the user took, or the run's own launch script when the task has none; the

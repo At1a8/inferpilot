@@ -11,18 +11,22 @@ Read: `knowledge/validation_doctrine.md` (G0, G1), `knowledge/reward_hacks.md` (
 
 Inputs: `work_package`, `commit`, `unit_test_cmd`, `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
-`deadline_utc`, that moment: an answer InferPilot cannot use is asked for again under the same limit,
-so count from the deadline, not from when you started.
+`deadline_utc`, that moment: count from the deadline, not from when you started, since the call's
+clock can start before your session does.
 
 0. **A run longer than one tool call** (a server, a driver of several runs) starts detached and is
-   waited for in this call (`env_hygiene.md`, *Servers*): poll until every run has its exit status
-   (`<log>.exit`) and every check its result, or until only the reserve is left: a quarter of
-   `time_limit_min`, at most 15 minutes, before `deadline_utc`, for the ledger and the answer. A run
-   whose status is not 0 fails its check, whatever results it wrote. A check still running at the
-   reserve is not waited for: the gate fails, and `failure_summary` names the check, how far it got and
-   its log. Before you return, whatever the gate's result, stop every server and run this call started,
-   from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have exited,
-   since a fix round, a rollback or the next work package works in this worktree and on these GPUs next.
+   waited for in this call (`env_hygiene.md`, *Servers*): poll each server until it is up, each run that
+   ends by itself (a suite, a driver) until it has its exit status (`<log>.exit`), and every check until
+   it has its result, or until only the reserve is left: a quarter of `time_limit_min`, at most 15
+   minutes, before `deadline_utc`, for the ledger and the answer. A run whose status is not 0, or whose
+   wrapper is gone without one, fails its check, whatever results it wrote; a control of step 3, which
+   must fail, runs from a driver that exits 0 only when the test fails the way it should, not when it
+   crashes or never starts. A check still running at the reserve is not waited for: the gate fails, and
+   `failure_summary` names the check, how far it got and its log. A server stopped once the checks that
+   use it are done has failed nothing. Before you return, whatever the gate's result, stop every server
+   and run this call started, from their launch records (`env_hygiene.md`, *Servers*, Killing), and
+   wait until they have exited, since a fix round, a rollback or the next work package works in this
+   worktree and on these GPUs next.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template

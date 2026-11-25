@@ -102,8 +102,13 @@ return { a, b, par, nested, n: args.n, budget: budget.remaining() };`);
     check(scriptBody('export const meta = {};\n  export async function f() {}\nconst s = "export x";').startsWith('const meta'), 'export is stripped');
   }],
   ['engine: retries run out; concurrency is bounded', async () => {
-    const rt = createRuntime({ backend: { name: 'fake', runAgent: async () => ({ text: 'never json' }) }, schemaRetries: 1, log: quiet });
+    let asked = 0;
+    const rt = createRuntime({ backend: { name: 'fake', runAgent: async () => { asked++; return { text: 'never json' }; } }, schemaRetries: 1, log: quiet });
     await rejects(rt.agent('q', { schema: SCHEMA }), /no JSON object/, 'an answer that never parses throws');
+    check(asked === 2, `asked again once: ${asked}`);
+    asked = 0;
+    await rejects(rt.agent('q', { schema: SCHEMA, schemaRetries: 0 }), /no JSON object/, 'and with no retries, at once');
+    check(asked === 1, `a call that asks for no retries is asked once: ${asked}`);
     let now = 0;
     let most = 0;
     const slow = { name: 'slow', async runAgent() {

@@ -77,27 +77,33 @@ belongs to a host user, and the rules below are about those.
   with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container logs are often UTC, the host may be another
   zone; the Z says which).
 - A server, or any run longer than one tool call (a benchmark, a driver of several runs), starts detached
-  from the agent's shell, from a script (the launch script, or one written for the run with a quoted
-  heredoc, `cat > <script> <<'EOF'`, which keeps the command's own quotes), and writes its exit status
-  when it ends:
-  `setsid nohup bash -c 'bash "$1" > "$2" 2>&1; echo $? > "$2.exit"' _ <script> <log> > /dev/null 2>&1 < /dev/null &`,
-  its PID recorded, leading its own process group. The script runs in a shell of its own, so an `exit`,
-  an `exec` or `set -e` in it ends that shell and the status is still written. An agent CLI may stop the
-  background jobs of its shell when a tool call or the agent's call ends, and a server stopped that way
-  leaves a log that ends in the middle of startup with no error. Wait for it in the same call: poll its
-  health endpoint, its log or result file and `kill -0 <pid>`, each poll a short tool call, until it is
-  up or done. A run is done when `<log>.exit` has its status, and passed only when that is 0: a later
-  tool shell cannot `wait` for it, and a run can write its results and still fail
-  (`templates/harness/perf.sh` can). Before the call that started it returns, stop it from its launch
-  record (Killing, below) and wait until it has exited: the next call works on these GPUs and in this
-  worktree.
+  from the agent's shell. It runs a bash script, the script's own arguments after it (`gsm8k` for
+  `<accuracy_script> gsm8k`): the launch script, or one written for the run with a quoted heredoc
+  (`cat > <script> <<'EOF'`, which keeps the command's own quotes) when the command is not a bash script
+  or needs more than arguments (a Python suite, its environment). The wrapper writes its own PID, and the
+  script's exit status when it ends:
+  `setsid nohup bash -c 'log=$1; shift; echo $$ > "$log.pid"; bash "$@" > "$log" 2>&1; echo $? > "$log.exit"' _ <log> <script> [<arg>...] > /dev/null 2>&1 < /dev/null &`.
+  The run's PID is the one in `<log>.pid`, once the file has it, not `$!`: in a shell with job control
+  `setsid` forks, and `$!` is then a parent that is gone at once. The wrapper leads its own process
+  group. The script runs in a shell of its own, so an `exit`, an `exec` or `set -e` in it ends that
+  shell and the status is still written. An agent CLI may stop the background jobs of its shell when a
+  tool call or the agent's call ends, and a server stopped that way leaves a log that ends in the middle
+  of startup with no error. Wait for it in the same call: poll its health endpoint, its log or result
+  file and `kill -0 <pid>`, each poll a short tool call, until it is up or done. A run is done when
+  `<log>.exit` has its status, and passed only when that is 0: a later tool shell cannot `wait` for it,
+  and a run can write its results and still fail (`templates/harness/perf.sh` can). A wrapper that is
+  gone with no status in `<log>.exit`, read once it is gone, was stopped with its run (its group killed,
+  or every process of the container): the run did not pass. A server has no status until it is stopped:
+  it is waited for until it is up, and stopping it once the checks that use it are done fails nothing.
+  Before the call that started it returns, stop it from its launch record (Killing, below) and wait
+  until it has exited: the next call works on these GPUs and in this worktree.
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`
   differ. Probe the health endpoint rather than trusting a `pgrep` miss.
 - Killing: `pkill -f` patterns inside `bash -lc "..."` match the shell itself; use `'[s]glang serve'`
-  style patterns. Better, record the server's identity at launch (its PID, and whether it leads its
-  own process group) and kill from that record: the PID and its descendants (`setsid` workers keep
+  style patterns. Better, record the server's identity at launch (its PID, `<log>.pid` for one started
+  detached, and whether it leads its own process group) and kill from that record: the PID and its descendants (`setsid` workers keep
   VRAM otherwise), the whole group only when the launch proved the group is the server's. Never look
   the group up at kill time: a recycled PID belongs to a stranger, and a teardown that did this once
   TERMed a container's PID 1.

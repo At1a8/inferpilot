@@ -3,14 +3,16 @@ container script and the runner read is in the READMEs, every other script names
 its own header, every variable the READMEs' tables list is read by something, the command-line flags
 the READMEs and AGENTS.md give exist, the branch bundle the roles write is the one a retry or a
 resume takes the task's commits from, with commands that do it, and the detached launcher of
-knowledge/env_hygiene.md leaves the run's exit status. Offline.
+knowledge/env_hygiene.md leaves the run's PID and exit status. Offline.
 
     python3 -m unittest discover -s tests
 """
 import ast
+import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -434,43 +436,92 @@ class BranchBundleTest(unittest.TestCase):
             self.assertNotEqual(run(create, **subs).returncode, 0, "an empty bundle was written")
 
 
+def alive(pid):
+    """Whether pid runs: a zombie nobody has reaped yet does not."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
 class DetachedRunTest(unittest.TestCase):
     """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
-    documented launcher leaves its exit status where that shell reads it, whatever the script does with
-    quotes of its own, `exit`, `exec` or `set -e`."""
+    documented launcher leaves the run's PID and exit status where that shell reads them, whatever the
+    script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control."""
 
-    # (the script, the status it ends with, what its log has)
+    # (the script, its arguments, the status it ends with, what its log has)
     SCRIPTS = (
-        ("EXTRA_ARGS='--foo 1' sh -c 'echo \"results written $EXTRA_ARGS\"'\nexec sh -c 'exit 3'\necho never\n",
+        ("EXTRA_ARGS='--foo 1' sh -c 'echo \"results written $EXTRA_ARGS\"'\nexec sh -c 'exit 3'\necho never\n", [],
          "3", "results written --foo 1"),
-        ("set -e\necho results written\nfalse\necho never\n", "1", "results written"),
-        ("echo results written\nexit 4\necho never\n", "4", "results written"),
+        ("set -e\necho results written\nfalse\necho never\n", [], "1", "results written"),
+        ("echo results written\nexit 4\necho never\n", [], "4", "results written"),
+        ('printf "%s|" "$#" "$@"; echo\n', ["gsm8k", "two words"], "0", "2|gsm8k|two words|"),
     )
 
-    def test_a_run_that_writes_its_results_and_fails_is_seen_to_fail(self):
-        launch = doc_command("knowledge/env_hygiene.md", "setsid nohup")
-        self.assertIsNotNone(launch, "env_hygiene.md gives no detached launcher")
+    def setUp(self):
+        self.launch = doc_command("knowledge/env_hygiene.md", "setsid nohup")
+        self.assertIsNotNone(self.launch, "env_hygiene.md gives no detached launcher")
         if not shutil.which("setsid"):
             self.skipTest("no setsid here")
-        for body, code, output in self.SCRIPTS:
+        self.doc = re.sub(r"\s+", " ", (ROOT / "knowledge/env_hygiene.md").read_text())
+
+    def start(self, d, body, args=(), job_control=False):
+        """Launch body with the documented launcher, from a directory whose name has a space; its log."""
+        (Path(d) / "a run").mkdir()
+        script, log = Path(d) / "a run" / "run.sh", Path(d) / "a run" / "run.log"
+        script.write_text(body)
+        cmd = (self.launch.replace("<log>", shlex.quote(str(log))).replace("<script>", shlex.quote(str(script)))
+               .replace("[<arg>...]", " ".join(shlex.quote(a) for a in args)))
+        subprocess.run(["bash", "-c", ("set -m; " if job_control else "") + cmd], check=True, timeout=30)
+        return log
+
+    @staticmethod
+    def read(path):
+        """What path holds once it holds something; None when it is still empty after 10 s."""
+        for _ in range(200):
+            if path.exists() and path.read_text().strip():
+                return path.read_text().strip()
+            time.sleep(0.05)
+        return None
+
+    def test_a_run_that_writes_its_results_and_fails_is_seen_to_fail(self):
+        for body, args, code, output in self.SCRIPTS:
             with self.subTest(script=body), tempfile.TemporaryDirectory() as d:
-                (Path(d) / "a run").mkdir()
-                script, log = Path(d) / "a run" / "run.sh", Path(d) / "a run" / "run.log"
-                script.write_text(body)
-                cmd = launch.replace("<script>", shlex.quote(str(script))).replace("<log>", shlex.quote(str(log)))
-                subprocess.run(["bash", "-c", cmd], check=True, timeout=30)
-                status = Path("%s.exit" % log)
-                for _ in range(200):
-                    if status.exists() and status.read_text().strip():
-                        break
-                    time.sleep(0.05)
-                self.assertEqual(status.read_text().strip() if status.exists() else None, code)
+                log = self.start(d, body, args)
+                self.assertEqual(self.read(Path("%s.exit" % log)), code)
                 self.assertIn(output, log.read_text())
                 self.assertNotIn("never", log.read_text())
-        text = re.sub(r"\s+", " ", (ROOT / "knowledge/env_hygiene.md").read_text())
-        self.assertIn("A run is done when `<log>.exit` has its status, and passed only when that is 0", text)
+        self.assertIn("A run is done when `<log>.exit` has its status, and passed only when that is 0", self.doc)
         self.assertIn("The script runs in a shell of its own, so an `exit`, an `exec` or `set -e` in it ends that "
-                      "shell and the status is still written", text)
+                      "shell and the status is still written", self.doc)
+
+    def test_the_pid_it_records_is_the_run_s_in_a_shell_with_job_control(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 2\n", job_control=True)
+            pid = self.read(Path("%s.pid" % log))
+            self.assertIsNotNone(pid, "the wrapper wrote no PID")
+            pid = int(pid)
+            self.assertTrue(alive(pid), "the recorded PID is gone while its run goes on")
+            self.assertEqual((os.getsid(pid), os.getpgid(pid)), (pid, pid), "the recorded PID leads no session and group of its own")
+            self.assertEqual(self.read(Path("%s.exit" % log)), "0")
+        self.assertIn("The run's PID is the one in `<log>.pid`, once the file has it, not `$!`", self.doc)
+
+    def test_a_run_stopped_with_its_wrapper_leaves_no_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 30\n")
+            pid = int(self.read(Path("%s.pid" % log)))
+            os.killpg(pid, signal.SIGTERM)
+            for _ in range(200):
+                if not alive(pid):
+                    break
+                time.sleep(0.05)
+            self.assertFalse(alive(pid), "the wrapper outlived its group")
+            self.assertFalse(Path("%s.exit" % log).exists(), "a wrapper stopped with its run wrote a status")
+        self.assertIn("A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with its run", self.doc)
 
 
 if __name__ == "__main__":

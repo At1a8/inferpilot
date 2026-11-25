@@ -335,22 +335,29 @@ const scenarios = [
     });
     check(failing.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'a blocking failure is no reason to ask for time');
   }],
-  ['feature: an answer asked for again has what is left of the limit, not all of it', async () => {
-    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
-      'verify_engineer:verify': async (ins, n) => {
-        if (n > 1) return { all_pass: true, failures: [] };
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        return { failures: [] };
-      },
-    }, { schemaRetries: 1 });
-    const [first, again] = r.calls.filter((c) => c.key === 'verify_engineer:verify');
-    check(first && again && first.ins.deadline_utc && again.ins.deadline_utc === first.ins.deadline_utc && again.ins.time_limit_min === 120,
-      `the retry runs under the first one's deadline: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
-    check(again && Date.parse(again.ins.deadline_utc) - again.at < 120 * 60000 - 200,
-      'which leaves the retry less than the whole limit');
-    check(first && again && !first.prompt.includes('may have left work behind') && again.prompt.startsWith(first.prompt)
-      && again.prompt.includes('may have left work behind') && again.prompt.includes('never start a second server'),
-      'and tells it that the session before may have left work behind, which it must not start again');
+  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
+    // The first answer of each, 300 ms late, is one InferPilot cannot use.
+    const once = (key) => async (ins, n) => {
+      if (n > 1) return DEFAULTS[key](ins, n);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return {};
+    };
+    const keys = ['test_engineer:unit', 'verify_engineer:verify', 'director:spec'];
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000, agent_retries: 2 },
+      Object.fromEntries(keys.map((k) => [k, once(k)])), { schemaRetries: 1 });
+    for (const key of keys.slice(0, 2)) {
+      const [first, again] = r.calls.filter((c) => c.key === key);
+      check(first && again && !first.prompt.includes('This is attempt') && again.prompt.includes('This is attempt 2: an earlier attempt '
+        + 'of this call failed and may have left work behind') && !again.prompt.includes('An earlier session of this same request'),
+        `${key}: not asked again by the engine but by the call's next attempt, which checks first what the one before left`);
+      check(first && again && again.ins.time_limit_min === 120
+        && Date.parse(again.ins.deadline_utc) - Date.parse(first.ins.deadline_utc) >= 250,
+        `${key}: with a limit of its own: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
+    }
+    const [spec, specAgain] = r.calls.filter((c) => c.key === 'director:spec');
+    check(spec && specAgain && specAgain.prompt.startsWith(spec.prompt) && specAgain.prompt.includes('An earlier session of this same request')
+      && specAgain.prompt.includes('never start a second server'),
+      'a role the engine asks again is told that the session before may have left work behind');
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
   }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
@@ -370,9 +377,13 @@ const scenarios = [
     check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
       && unitDoc.includes('the gate fails, and `failure_summary` names the check, how far it got and its log'),
       'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
-    check(unitDoc.includes('poll until every run has its exit status (`<log>.exit`) and every check its result')
-      && unitDoc.includes('A run whose status is not 0 fails its check, whatever results it wrote'),
-      'the gate waits for each run\'s exit status, and a run that exits otherwise than 0 fails its check');
+    check(unitDoc.includes('poll each server until it is up, each run that ends by itself (a suite, a driver) until it has its exit '
+      + 'status (`<log>.exit`), and every check until it has its result')
+      && unitDoc.includes('A run whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it wrote'),
+      'the gate waits for a server to be up and for each run\'s exit status; a run that exits otherwise than 0, or with none, fails its check');
+    check(unitDoc.includes('a control of step 3, which must fail, runs from a driver that exits 0 only when the test fails the way it should')
+      && unitDoc.includes('A server stopped once the checks that use it are done has failed nothing'),
+      'neither a control that must fail nor a server stopped when its checks are done fails the gate');
     check(unitDoc.includes('Before you return, whatever the gate\'s result, stop every server and run this call started, '
       + 'from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have exited'),
       'the test engineer stops what it started before every return');

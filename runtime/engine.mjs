@@ -118,7 +118,8 @@ export function createRuntime({
   };
 
   // With a schema, the answer is the validated JSON object; a reply that does not parse or validate is
-  // asked for again, and after the last attempt the error is thrown to the script.
+  // asked for again (opts.schemaRetries times, when the script says), and after the last attempt the
+  // error is thrown to the script.
   async function agent(prompt, opts = {}) {
     if (++state.agents > MAX_AGENTS) throw new Error(`more than ${MAX_AGENTS} agent calls`);
     const id = state.agents;
@@ -165,7 +166,8 @@ export function createRuntime({
     try {
       log(`  -> [${where}] ${label} (${backend.name})`);
       let last;
-      for (let attempt = 1; attempt <= (opts.schema ? schemaRetries + 1 : 1); attempt++) {
+      const retries = Number.isInteger(opts.schemaRetries) ? opts.schemaRetries : schemaRetries;
+      for (let attempt = 1; attempt <= (opts.schema ? retries + 1 : 1); attempt++) {
         const { text, usage } = await backend.runAgent({
           prompt: full, label, cwd: opts.cwd, env: opts.env, model: opts.model, timeoutMs: agentTimeoutMs, onProgress: show,
           onText: say,
