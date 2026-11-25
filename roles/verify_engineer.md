@@ -41,9 +41,20 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
      `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
      dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,
      PD transfer checks).
-   - G3 long context sized so the feature engages; G4 stability under capacity pressure. G3/G4 at two or
-     more concurrencies, at least 4 runs each (6 when an intermittent failure is being judged), fixed
-     seeds, prefix cache flushed between runs.
+   - **G3 and G4 only when `goal` or the acceptance matrix asks;** one nobody asked for is `not run: not
+     asked` in `gates` (`validation_doctrine.md`).
+     - G3 long context sized so the feature engages, at two or more concurrencies, at least 4 runs each
+       (6 when an intermittent failure is being judged), fixed seeds, prefix cache flushed between runs.
+     - G4 stability is one run, not repeated and not taken to other concurrencies: a throughput test at
+       high concurrency on long prompts, sized so the feature engages, on one server kept up for more
+       than 48 hours without a restart. Its length is set, so it needs no reference run and is never
+       `slow`. Write its throughput and memory at least once an hour to a file in `RUN_DIR/logs`: the
+       samples are its evidence, and they show the machine lock that the run is alive. It passes when
+       the server neither crashes, hangs nor runs out of memory, no request fails, and neither
+       throughput falls nor memory grows over the run beyond the spread of the samples; the baseline
+       runs it only as the control when it fails. It starts after everything else in the round, the
+       other data sets included, and such a round does not fit the default limit: it says what it needs
+       first (`needs_min`, below).
    - **Other data sets last, one after another, and only when `goal` or the acceptance matrix asks:**
      gpqa_diamond and simple_qa (through evalscope) when `goal` says the change may lose accuracy, and the
      sets the goal adds; each once per arm, at most 1 point below the baseline.
@@ -80,8 +91,8 @@ Return:
 
 ```json
 {"all_pass": false,
- "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "pass", "G4": "fail"},
- "failures": [{"gate": "G4", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g4_*.json", "blocking": true}],
+ "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "fail", "G4": "not run: not asked"},
+ "failures": [{"gate": "G3", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g3_*.json", "blocking": true}],
  "ledger_path": "/abs/RUN_DIR/experiment_ledger.md", "summary": "<one line per gate>"}
 ```
 

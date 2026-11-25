@@ -257,6 +257,47 @@ class EnvironmentTest(unittest.TestCase):
                               for name in sorted(table_names(EN)) if ENV_NAME.match(name) and name not in read])
 
 
+class LongGatesTest(unittest.TestCase):
+    """G3 and G4 run only when the task asks, and G4 is one throughput test of more than 48 hours
+    (knowledge/validation_doctrine.md). The roles that take the user's words, write the spec and run the
+    round, the templates they fill and both READMEs say the same."""
+
+    @staticmethod
+    def said(path):
+        """A file's paragraphs, list items and table rows that name both gates, each on one line."""
+        text = (ROOT / path).read_text(encoding="utf-8")
+        parts = re.split(r"\n(?=[ \t]*(?:\d+\.|[-*]) |\|)|\n[ \t]*\n", text)
+        return [" ".join(p.split()) for p in parts if re.search(r"\bG3\b", p) and re.search(r"\bG4\b", p)]
+
+    def test_g3_and_g4_run_only_when_the_task_asks(self):
+        for path in ("knowledge/validation_doctrine.md", "roles/intake.md", "roles/director.md",
+                     "roles/verify_engineer.md", "templates/task_definition.md", "README.md"):
+            asked = [i for i in self.said(path) if re.search(r"\bonly when\b[^.]*\basks?\b|\bwhen the task asks\b|\bonly when asked\b", i)]
+            self.assertTrue(asked, "%s does not say that G3 and G4 run only when the task asks" % path)
+        self.assertIn("只有它要求时才跑", "".join(self.said("README.zh-CN.md")))
+        spec = (ROOT / "templates" / "feature_spec.md").read_text(encoding="utf-8")
+        for gate in ("G3", "G4"):
+            row = [line for line in spec.splitlines() if line.startswith("| %s " % gate)]
+            self.assertEqual(len(row), 1, gate)
+            self.assertIn("only when `goal` asks", row[0], gate)
+        acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
+        profile = [line for line in acceptance.splitlines() if line.startswith("| Stability | ") and "(G4)" in line]
+        self.assertEqual(len(profile), 1)
+        self.assertNotIn("required", profile[0], "no profile makes G4 required")
+
+    def test_g4_is_one_run_of_more_than_48_hours(self):
+        for path in ("knowledge/validation_doctrine.md", "knowledge/acceptance.md", "roles/verify_engineer.md",
+                     "roles/director.md", "templates/task_definition.md", "templates/feature_spec.md"):
+            text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
+            self.assertRegex(text, r"more than 48 h(?:ours)?\b", "%s does not give G4 its 48 hours" % path)
+        verify = " ".join((ROOT / "roles" / "verify_engineer.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("G3/G4 at two or more concurrencies", verify, "G4 is one run, at one concurrency")
+        self.assertIn("G4 stability is one run, not repeated and not taken to other concurrencies", verify)
+        doctrine = " ".join((ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").split())
+        self.assertNotIn("Run G3/G4 at more than one concurrency", doctrine)
+        self.assertIn("G4 is the exception: one run of more than 48 hours", doctrine)
+
+
 class FlagsTest(unittest.TestCase):
     def test_bootstrap_flags_the_docs_give_exist_and_every_one_is_documented(self):
         defined = argparse_flags(ROOT / "inferpilot" / "bootstrap.py")

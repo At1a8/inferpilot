@@ -1,9 +1,9 @@
 # Validation doctrine — what "correct" means for a framework feature
 
-A feature passes when every gate below holds **relative to baseline in the same pattern**. Absolute
-pass rates mean little on a low-precision serving stack: the baseline itself has a non-zero failure
-rate on long-context tests, so the question is always "does the feature change the failure rate or the
-failure kind beyond the measured noise?".
+A feature passes when every gate below that its task runs holds **relative to baseline in the same
+pattern**. Absolute pass rates mean little on a low-precision serving stack: the baseline itself has a
+non-zero failure rate on long-context tests, so the question is always "does the feature change the
+failure rate or the failure kind beyond the measured noise?".
 
 Which of these gates a task needs, how its acceptance criteria are written and who confirms them:
 [`acceptance.md`](acceptance.md).
@@ -15,8 +15,8 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 | G0 feature off | the change is inert when disabled | baseline suites on the feature branch with the switch off |
 | G1 unit / oracle | each new kernel or data structure does what it claims | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1) |
 | G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
-| G3 long context | the feature's own data path is exercised and correct | needle-in-a-haystack: single and multi-needle |
-| G4 stability | no crash / hang / collapse under capacity pressure | many long prompts at high concurrency |
+| G3 long context | the feature's own data path is exercised and correct | when the task asks: needle-in-a-haystack, single and multi-needle |
+| G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks: a throughput test at high concurrency on long prompts, kept up for more than 48 hours |
 | G5 performance | the claimed benefit exists on the task's workload; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
 
 Notes per gate:
@@ -29,7 +29,8 @@ Notes per gate:
   item that misses is reported, never investigated, and stops nothing.
 - **G2 does not prove a long-context feature works.** Short prompts may never engage it (HiSparse V2
   only admits requests longer than its 5120-token reservation; GSM8K prompts are ~1k tokens). G2 is a
-  regression check for the non-feature path; G3 must exercise the feature path.
+  regression check for the non-feature path; G3 must exercise the feature path. When G3 is not run,
+  nothing has checked the outputs of that path, and the report shows G3 as `not run`.
 - **G2 compares scores, not tokens.** Outputs need not match the baseline token for token: batch
   composition, kernel choice and speculative verification all flip near-ties, and chasing those flips
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
@@ -47,6 +48,17 @@ Notes per gate:
 - **Harness:** evalscope for every set, through `scripts/eval_accuracy.sh`, which samples every run
   afresh (never evalscope's cache), flushes the prefix cache before each set and reads the accept length
   after it; both arms use the same settings.
+- **G3 and G4 run only when the task asks.** Neither is part of every task: G3's repeated long-context
+  runs and G4's two days are spent only when the user's request or `goal` asks for the long-context gate
+  or the stability run, and no role infers it from the kind of change. A gate nobody asked for is
+  reported `not run: not asked`.
+- **G4 is one throughput test of more than 48 hours.** One server under a throughput load of long
+  prompts at high concurrency, kept up for more than 48 hours without a restart: one run, not repeated
+  and not taken to other concurrencies. It passes when the server neither crashes, hangs nor runs out of
+  memory, no request fails, and neither throughput falls nor memory grows over the run beyond the spread
+  of its hourly samples; throughput against the baseline is G5's. The baseline runs the same test only
+  as the control when it fails (*Same-pattern baseline control* below). G4 runs after everything else
+  in its round, and that round asks for its time (`roles/verify_engineer.md`).
 - **G3/G4 must be sized so the feature engages.** For a memory-tier feature that means total context
   well above the device pool (force eviction/demotion), and concurrency high enough that several engaged
   requests decode in the same batch. Log the engagement (e.g. demotion counters) and attach it.
@@ -59,7 +71,7 @@ Notes per gate:
   the text config's own 5e6: a correction, but a behaviour change G0 should have reported, and only the
   review found it. A short greedy smoke is a weak G0 here: one of three default-rope runs with identical
   built configs gave a different 16-token text.
-- **Run G3/G4 at more than one concurrency.** Concurrency 1 often passes when concurrency 8–32 fails;
+- **Run G3 at more than one concurrency.** Concurrency 1 often passes when concurrency 8–32 fails;
   the batch-level interactions are where bugs live.
 
 ## Failure taxonomy — classify before counting
@@ -88,7 +100,8 @@ How to tell them apart quickly:
 ## Noise characterization
 
 - Repeat every configuration **≥4 times** (≥6 when hunting an intermittent failure) and report the
-  distribution, e.g. `27/32, 31/32, 32/32, 25/32`, not an average.
+  distribution, e.g. `27/32, 31/32, 32/32, 25/32`, not an average. G4 is the exception: one run of more
+  than 48 hours.
 - Use the same prompts in every configuration (fixed seed) and flush the prefix cache between runs.
 - A configuration "fixes" an intermittent failure only when its failing-run rate is clearly below the
   baseline rate; one clean run after three failing runs is not evidence.
@@ -126,5 +139,8 @@ The `hisparse-v2` skill records concrete settings and expected numbers; in short
 
 - **G2:** gsm8k, all 1319 questions, once, with `scripts/eval_accuracy.sh` (its default set).
 - **G3:** NIAH single-needle and 8-needle prompts of ~30–37k tokens at concurrency 1, 8 and 16.
-- **G4:** 32 prompts × ~37k tokens, 8 needles, concurrency 32, `max_new_tokens` 120, fixed seed, on a
-  device pool small enough to force the feature's memory path, plus the same-pattern baseline control.
+- **G4:** not yet run there as a test of more than 48 hours. Its load would be the skill's throughput
+  load (`scripts/throughput_test.py`: 32 prompts × 30,000 tokens at concurrency 32, on a device pool
+  small enough to force the feature's memory path), repeated without a pause. What the skill records as
+  G4 is the earlier rule's: short runs, at least four, of 32 prompts × ~37k tokens with 8 needles at
+  concurrency 32, with the same-pattern baseline control.

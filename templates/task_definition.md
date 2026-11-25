@@ -60,6 +60,9 @@ the user.
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more
   runs are named there too. It runs through InferPilot's `accuracy.sh` (§1.2), which fixes the settings
   for every arm.
+- **Long context and stability** (G3, G4) run only when `goal` asks for them: G3 on needle-in-a-haystack
+  prompts, G4 as a throughput test at high concurrency on long prompts kept up for more than 48 hours
+  (`../knowledge/validation_doctrine.md`). A task that does not ask is reported with both `not run`.
 
 ```bash
 # server.sh
@@ -133,7 +136,7 @@ server's context leaves beside a question.
 
 ```json
 {"mode": "feature", "task": "https://github.com/sgl-project/sglang/pull/<n>",
- "goal": "the feature passes G0–G5 on DeepSeek-V4.1 at TP4",
+ "goal": "the feature passes its gates on DeepSeek-V4.1 at TP4",
  "model_path": "/mnt/models/DeepSeek-V4.1-Flash", "gpu_ids": "0,1,2,3",
  "server_script": "/workspace/scripts/server.sh"}
 ```

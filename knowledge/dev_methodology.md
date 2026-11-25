@@ -98,8 +98,9 @@ practice. Artifacts live in the run's working directory; the templates are in `.
 
 ### 5. Integrate & verify
 
-- Run the suites in `validation_doctrine.md`: accuracy, long-context retrieval, stability under capacity
-  pressure, each at several concurrencies, each against baseline in the same pattern.
+- Run the suites in `validation_doctrine.md` against baseline in the same pattern: accuracy, and, when
+  the task asks for them, long-context retrieval at several concurrencies (G3) and the stability run of
+  more than 48 hours (G4).
 - Any failure enters the **investigate loop** (`debugging_playbook.md`): classify, run controls, keep a
   hypothesis ledger. Fixes come back here.
 - **Artifact:** validation section of `experiment_ledger.md`.

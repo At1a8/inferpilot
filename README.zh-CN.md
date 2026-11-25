@@ -55,7 +55,7 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `ci_guardian` | Classify、Bisect | 给变红的 job 分类（代码回归、依赖升级、测试缺陷、偶发、基础设施），后两类移交出去；找到并确认引入问题的 commit，规划修复；对已在 main 上修复的 issue，设置 `bisect_fixed` 时找出修复它的 commit |
 | `implementer` | Implement | 一次一个工作包，diff 尽量小，关闭特性时行为不变，只影响 HIP 或放在开关后面，提交时已通过 lint、测试已注册；编写带单元测试的功能性 kernel（调优走 hand-off）；应用现成的 PR 和验证过的 kernel 收益；回滚失败的工作包 |
 | `test_engineer` | Implement | 在每个工作包的 commit 上重新运行它的单元测试，检查这个测试确实可能失败（改变行为的改动在父 commit 上验证，不改变行为的改动在故意改坏的副本上验证），并检查关闭特性时行为不变 |
-| `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2–G4、组合性、模式专属门禁），对每个失败分类计数 |
+| `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数 |
 | `investigator` | Investigate、Diagnose | 先跑对照实验，再一次只验证一个机制，并维护假设台账；返回修复工作包、基线同样存在的已知问题、无法定论的结论，或者（对 issue 而言）不在 AMD 这一侧的根因；探测代码只放在开关后面 |
 | `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack |
 | `reviewer` | Review | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；可以换用另一个模型（`review_model`） |
@@ -317,7 +317,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `answers` | 对 `needs_input` 结果的回答，格式为 `{"<field>": <value>}`，与之前相同的参数一起传入 |
 | `mode` | `feature` \| `issue` \| `ci` \| `perf` \| `scan`（必填；没给时从 `request` 推断） |
 | `task` | 上游 PR / 设计、issue URL、CI job / 簇，或性能目标（`scan` 以外必填） |
-| `goal` | 什么算完成；可以测量的模式要写成可测量的；spec 和性能计划都要回应它 |
+| `goal` | 什么算完成；可以测量的模式要写成可测量的；spec 和性能计划都要回应它。长上下文门禁（G3）和 48 小时以上的稳定性运行（G4）只有它要求时才跑 |
 | `framework_dir` | 每个任务在其中工作的框架 checkout，任务从当前的 main 开自己的分支（sglang 默认用镜像里的 `/sgl-workspace/sglang`，镜像就是从这里安装 sglang 的） |
 | `model_path` | 基线和各项门禁运行的模型（`feature` 和 `perf` 必填） |
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
