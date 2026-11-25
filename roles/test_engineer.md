@@ -18,8 +18,10 @@ so count from the deadline, not from when you started.
    waited for in this call (`env_hygiene.md`, *Servers*): it writes each result to its log or a file as
    it ends, and you poll them until every check has its result, or until only the reserve is left: a
    quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`, for the ledger and the answer.
-   A check still running then is not waited for: the gate fails, and `failure_summary` names the check,
-   its PID and its log.
+   A check still running then is not waited for: stop it from its launch record (`env_hygiene.md`,
+   *Servers*, Killing) and wait until it has exited, since a fix round or a rollback works in this
+   worktree and on these GPUs next. The gate fails, and `failure_summary` names the check, how far it
+   got and its log.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template

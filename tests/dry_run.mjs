@@ -365,8 +365,11 @@ const scenarios = [
       'no limit, no deadline');
     const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
     check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
-      && unitDoc.includes('the gate fails, and `failure_summary` names the check, its PID and its log'),
+      && unitDoc.includes('The gate fails, and `failure_summary` names the check, how far it got and its log'),
       'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
+    check(unitDoc.includes('stop it from its launch record (`env_hygiene.md`, *Servers*, Killing) and wait until it has exited, '
+      + 'since a fix round or a rollback works in this worktree and on these GPUs next'),
+      'a check the gate stops waiting for is stopped before the gate fails');
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
       'both engineers count from the deadline');
