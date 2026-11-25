@@ -25,16 +25,19 @@ Notes per gate:
   own that the hardware does not change (accept length for speculative decoding): for the same models,
   prompts, sampling and draft length, a correct port gives the source's value, near-tie flips aside.
   The test of the work package that completes the feature's path measures it on the source's own prompt
-  set and settings, and passes within the tolerance the spec names, above or below. Where the source
-  reports no value, the reference implementation run on the same prompts gives it; with neither, the
-  spec says so and the metric is reported, not judged. It belongs to G1 because nothing else shows that
-  this unit is right: with exact verification the target verifies every token, so a broken draft path
-  leaves the outputs correct, G2 passes, and only the accept length falls (PARD-2 with its draft input
-  shifted by one position: about 2 tokens a step instead of about 7.5). On vLLM's case of four sets the
-  port accepts 7.52 / 8.42 / 8.56 / 3.97 tokens a step where vLLM reports 7.72 / 8.09 / 8.72 / 4.02, on
-  other hardware and at another speed-up (`feature_skills/pard2`). G2's data sets are no place for the
-  comparison: other prompts give another number (6.65 on PARD-2's gsm8k test, 5-shot), which G2 records
-  as its engagement number and does not judge.
+  set and settings, and passes within the tolerance the spec names, above or below. A pass holds for
+  the commit it was measured on: a later package, an integrated kernel or a repair can change the path
+  without its own test or G2 showing it, so every Verify round measures the metric again on the commit
+  it verifies (`roles/verify_engineer.md`). Where the source reports no value, the reference
+  implementation run on the same prompts gives it; with neither, the spec says so and the metric is
+  reported, not judged. It belongs to G1 because nothing else shows that this unit is right: with exact
+  verification the target verifies every token, so a broken draft path leaves the outputs correct, G2
+  passes, and only the accept length falls (PARD-2 with its draft input shifted by one position: about
+  2 tokens a step instead of about 7.5). On vLLM's case of four sets the port accepts 7.52 / 8.42 /
+  8.56 / 3.97 tokens a step where vLLM reports 7.72 / 8.09 / 8.72 / 4.02, on other hardware and at
+  another speed-up (`feature_skills/pard2`). G2's data sets are no place for the comparison: other
+  prompts give another number (6.65 on PARD-2's gsm8k test, 5-shot), which G2 records as its engagement
+  number and does not judge.
 - **gsm8k first.** gsm8k (1319) runs before every other gate, and a blocking failure ends the round: an
   hour of long-context runs on a build that already fails accuracy is wasted. Other data sets run last,
   one after another, only when the goal or the matrix asks. No gate has a fixed time cap: every limit

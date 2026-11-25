@@ -76,8 +76,9 @@ def about_the_metric(name, phase=None):
 class FeatureMetricTest(unittest.TestCase):
     """templates/feature_spec.md asks a port for its feature's own metric (accept length for speculative
     decoding) in G1, against the source's value, when there is a value to compare with. The doctrine and
-    the roles that write the spec, plan the work package, write its test and run it say the same: where it
-    is judged, on whose prompts, and that the unit gate runs the measurement whatever command it is given."""
+    the roles that write the spec, plan the work package, write its test, run it and verify the branch say
+    the same: where it is judged, on whose prompts, that the unit gate runs the measurement whatever command
+    it is given, and that every Verify round measures it again on the commit it verifies."""
 
     def test_the_spec_template_asks_for_it_in_g1(self):
         spec = (ROOT / "templates" / "feature_spec.md").read_text(encoding="utf-8")
@@ -88,7 +89,8 @@ class FeatureMetricTest(unittest.TestCase):
 
     def test_the_doctrine_and_the_roles_judge_it_in_g1_on_the_sources_prompts(self):
         for name, phase in (("knowledge/validation_doctrine.md", None), ("roles/director.md", "## PHASE=spec"),
-                            ("roles/architect.md", "## PHASE=design"), ("roles/test_engineer.md", "## PHASE=unit")):
+                            ("roles/architect.md", "## PHASE=design"), ("roles/test_engineer.md", "## PHASE=unit"),
+                            ("roles/verify_engineer.md", "## PHASE=verify")):
             where = about_the_metric(name, phase)
             self.assertTrue(where, "%s does not name the feature's own metric" % name)
             self.assertIn("G1", where, "%s does not say the feature's own metric is judged in G1" % name)
@@ -107,6 +109,13 @@ class FeatureMetricTest(unittest.TestCase):
             self.assertIn(named, tester, "roles/test_engineer.md: a narrower command could close the package")
         self.assertIn("`unit_test_cmd`", about_the_metric("roles/implementer.md", "## PHASE=implement"),
                       "roles/implementer.md does not say its command is the measurement")
+
+    def test_every_verify_round_measures_it_again_on_the_commit_it_verifies(self):
+        verify = about_the_metric("roles/verify_engineer.md", "## PHASE=verify")
+        for said in ("again", "blocking", "commit", "`gates`"):
+            self.assertIn(said, verify, "roles/verify_engineer.md: a package's pass could stand for a later commit")
+        self.assertRegex(about_the_metric("knowledge/validation_doctrine.md"), r"every Verify round measures the metric again",
+                         "knowledge/validation_doctrine.md does not say the pass holds for its commit only")
 
 
 class ScanTemplatesTest(unittest.TestCase):

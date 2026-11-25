@@ -32,7 +32,14 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
    (PHASE=gpus).
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
-   reported `not run`; a report-only item that misses stops nothing.
+   reported `not run`; a report-only item that misses stops nothing. A port whose spec gives the
+   feature's own metric a tolerance has one more blocking gate, right after gsm8k: G1's measurement of
+   it again (`validation_doctrine.md`, G1; the test of the work package that judged it), on the
+   source's prompt set and settings, within the spec's tolerance of the source's value, above or
+   below. That package passed on its own commit, and a later package, an integrated kernel or a repair
+   may have changed the path since: measure on the commit this round verifies (the task worktree's
+   `HEAD`), and give `gates` each value with the source's, and that commit
+   (`"G1": "pass <value> vs the source's <value> (tolerance <t>) at <sha>"`).
    - **gsm8k (1319) first**, G2's first set, with the run's `accuracy_script` (`<accuracy_script> gsm8k`:
      the task's own, or InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's
      settings; the same for both arms): once per arm, at most 1 point below the baseline, with no

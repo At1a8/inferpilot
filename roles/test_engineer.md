@@ -21,7 +21,7 @@ Inputs: `work_package`, `commit`, `unit_test_cmd`.
    leaves the measurement out or narrows it, run it yourself as well, on the source's prompt set and
    settings as the spec gives them. `unit_pass` is true only when the value lies within the spec's
    tolerance of the source's, above or below; put the value, the source's and the tolerance in the
-   ledger.
+   ledger, on this commit's row: Verify measures it again on the commit it verifies.
 3. **The test must be able to fail (T1).** Prove it in a throwaway worktree under `RUN_DIR`, with the
    worktree path in the command replaced:
    - a package that **changes behaviour** (a feature, a fix): check out the parent
