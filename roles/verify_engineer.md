@@ -74,7 +74,10 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
    (feature counters, log lines).
 4. A failure that matches an entry in `known_issues` at the baseline's rate does not fail the gate; a
    rate or a class beyond the baseline's does.
-5. Record everything in the Run log and Controls sections of `RUN_DIR/experiment_ledger.md`.
+5. Record everything in the Run log and Controls sections of `RUN_DIR/experiment_ledger.md`. Each
+   round's first Run log row, written before anything starts, is the round and the commit it runs on
+   (`git -C <worktree> rev-parse HEAD`, the worktree clean): a run resumed from Verify runs again on
+   that commit.
 
 Return:
 

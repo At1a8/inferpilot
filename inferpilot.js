@@ -744,25 +744,55 @@ const K_COLLECT = S({
   notes: str,
 }, ['status']);
 // resume_from=verify: what the resumed run had, restored from its run directory. head_ok: the branch head
-// is the commit its Implement last verified; the mode's gate command and the claim are the ones its Verify
-// and Performance were given; known_issues and handoffs as its report wrote them (Verify judges a failure
-// the baseline shares by the first, and reverts an integrated kernel by the second).
+// is the commit its last Verify round ran on; the mode's gate command and the claim are the ones its Verify
+// and Performance were given, perf_required whether its Performance was to judge a claim at all;
+// known_issues and handoffs as its report wrote them (Verify judges a failure the baseline shares by the
+// first, and reverts an integrated kernel by the second), null when the run directory lost them;
+// task_definition as its run.json recorded it.
 const RESUMED = S({
   head_ok: bool,
   head: str,
   verified_work_packages: arr(S({ wp: str, commit: str, evidence: str }, ['wp', 'commit'])),
-  known_issues: arr(obj),
-  handoffs: arr(obj),
+  known_issues: { type: ['array', 'null'], items: obj },
+  handoffs: { type: ['array', 'null'], items: obj },
+  task_definition: { type: ['object', 'null'] },
   repro_cmd: str,        // issue: the issue_repro gate
   failing_test_cmd: str, // ci: the failing_test gate
+  perf_required: bool,
   perf_claim: str,       // '' for none
+  design_auto_approved: bool, // feature: its Design went on to Implement with no human's approval
   triage_path: str,
-  reply_draft_path: str,
   spec_path: str,
   design_path: str,
   analysis_path: str,
   notes: str,
-}, ['head_ok', 'verified_work_packages', 'perf_claim']);
+}, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'task_definition', 'perf_required', 'perf_claim',
+  'design_auto_approved']);
+// What a resumed run must measure as the run it resumes did; the machine, the task's wording and the
+// operator settings may differ. GIVEN holds them as Setup is given them and records them in run.json:
+// Setup's rendered scripts replace a template's in C later.
+const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs',
+  'held_out', 'guards', 'sweep', 'tune'];
+const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
+// One form for a setting however it was written down: JSON as an object or in a string, a flag unset or
+// false, a list of one as that one.
+function canon(v) {
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (/^[[{]/.test(t)) {
+      try {
+        return canon(JSON.parse(t));
+      } catch (e) {
+        return t;
+      }
+    }
+    return t === 'false' ? '' : t;
+  }
+  if (v === undefined || v === null || v === false) return '';
+  if (Array.isArray(v)) return v.length < 2 ? canon(v[0]) : `[${v.map(canon).join(',')}]`;
+  if (typeof v === 'object') return `{${Object.keys(v).sort().map((k) => `${k}:${canon(v[k])}`).join(',')}}`;
+  return String(v);
+}
 const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
@@ -1409,29 +1439,46 @@ async function fromVerify(extraGates, perfClaim, runPerf) {
 }
 
 // resume_from=verify: Verify, and the route after it, again on a run directory whose Verify ended without
-// a result. The director restores what the run had; a branch that moved since Implement verified it, or a
-// mode gate the run directory does not record, stops the run before anything is measured.
+// a result. The director restores what the run had; a branch that moved since its last Verify round
+// started, a task that would measure otherwise, or anything of the run's that its directory no longer
+// records stops the run before anything is measured.
 async function resumeVerify(claimOf) {
   // The run this one resumes passed every stop before Verify: one named for them now never holds.
   for (const p of STOP_PHASES[MODE].slice(0, STOP_PHASES[MODE].indexOf('Verify'))) STOPS_PASSED.add(p.toLowerCase());
-  const rs = await call('director', 'resume', inputs(), RESUMED);
+  const rs = await call('director', 'resume', inputs({ task_def: R.task_def }), RESUMED);
   const cmd = !rs ? '' : String((MODE === 'issue' ? rs.repro_cmd : MODE === 'ci' ? rs.failing_test_cmd : 'none') || '').trim();
   const done = (rs && Array.isArray(rs.verified_work_packages) ? rs.verified_work_packages : []).filter((d) => d && d.wp && d.commit);
-  const why = !rs ? 'the director restored nothing from the run directory'
-    : rs.head_ok !== true ? `the branch is no longer the commit Implement verified${rs.head ? ` (its head: ${rs.head})` : ''}; `
-        + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`
-      : !done.length ? 'the run directory records no verified work package'
-        : !cmd ? `the run directory records no ${MODE === 'issue' ? 'reproduction command (issue_repro)' : 'failing test command (failing_test)'}` : '';
-  if (why) {
-    note('Setup', 'fail', `resume_from verify: ${why}`);
+  const saved = rs && rs.task_definition && typeof rs.task_definition === 'object' ? rs.task_definition : null;
+  const changed = saved ? MEASURED.filter((k) => canon(saved[k]) !== canon(GIVEN[k])) : [];
+  const restored = rs ? String(rs.perf_claim || '').trim() : '';
+  const lost = rs ? ['known_issues', 'handoffs'].filter((k) => !Array.isArray(rs[k])) : [];
+  const why = !rs ? ['the director restored nothing from the run directory'] : [
+    rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
+      + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
+    !saved && 'the run directory records no task definition (run.json)',
+    changed.length && `this run would measure otherwise than the one it resumes (${changed.join(', ')} not as its run.json has them); `
+      + 'a changed task is verified in a run of its own',
+    !done.length && 'the run directory records no verified work package',
+    !cmd && `the run directory records no ${MODE === 'issue' ? 'reproduction command (issue_repro)' : 'failing test command (failing_test)'}`,
+    MODE === 'ci' && !String(rs.triage_path || '').trim() && 'the run directory records no ci_triage.md, which names the lanes the test failed on',
+    rs.perf_required === true && !restored && 'the run was to measure a claim its run directory does not record',
+    lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
+      + 'and what a kernel regression reverts would be lost',
+  ].filter(Boolean);
+  if (why.length) {
+    note('Setup', 'fail', `resume_from verify: ${why.join('; ')}`);
     return finish('blocked', 'Setup');
   }
   R.done = done;
-  R.known_issues.push(...(Array.isArray(rs.known_issues) ? rs.known_issues : []).filter((k) => k && typeof k === 'object'));
-  R.handoffs.push(...(Array.isArray(rs.handoffs) ? rs.handoffs : []).filter((h) => h && h.id));
-  Object.assign(C, pick(rs, ['triage_path', 'reply_draft_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
+  R.known_issues.push(...rs.known_issues.filter((k) => k && typeof k === 'object'));
+  R.handoffs.push(...rs.handoffs.filter((h) => h && h.id));
+  // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
+  Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: ${done.map((d) => d.wp).join(', ')}`);
-  const claim = claimOf(String(rs.perf_claim || '').trim());
+  if (MODE === 'feature' && rs.design_auto_approved === true) {
+    note('Design', 'auto_approved', 'restored from the run this one resumes: no human approved its design');
+  }
+  const claim = claimOf(restored);
   const rest = ROUTES[MODE].slice(ROUTES[MODE].indexOf('Verify'));
   logRoute(['Setup', ...(MODE === 'issue' && claim ? rest.flatMap((t) => (t === 'Verify' ? [t, 'Performance'] : [t])) : rest)]);
   if (MODE === 'issue') return fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, !!claim);

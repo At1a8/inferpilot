@@ -41,10 +41,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    exists in `framework_dir` (restored from its bundle when it does not, step 2) and is checked out
    there (check it out when the checkout is clean), and
    re-run one baseline smoke to confirm the environment still matches the ledger. With `resume_from:
-   verify`, first check, reading only, what the resume needs (PHASE=resume, steps 1 and 2): the branch
-   head is the last commit the ledger's Implement verified, the checkout is clean, and for `issue` and
-   `ci` the run directory records the gate command. When one fails, run no smoke and return the run
-   directory with `baseline_status: "fail"` and what differs in `baseline`.
+   verify`, first check, reading only, what the resume needs (PHASE=resume, steps 1 to 3): the branch
+   head is the commit the run's last Verify round ran on, the checkout is clean, the task you are given
+   measures what the one `run.json` recorded did, and for `issue` and `ci` the run directory records the
+   gate command. When one fails, run no smoke and return the run directory with `baseline_status:
+   "fail"` and what differs in `baseline`.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -219,34 +220,51 @@ Return:
 
 ## PHASE=resume (resume_from=verify, right after Setup)
 
-Inputs: `resume_run_dir`, the run directory Setup reused. The run's Verify ended without a result (its
-verify engineer returned nothing or timed out, its servers went with the call), and only Verify and what
-comes after it run again, on the commit the run's Implement verified. Change nothing.
+Inputs: `resume_run_dir`, the run directory Setup reused, and `task_def`, the task definition this run
+was given. The run's Verify ended without a result (its verify engineer returned nothing or timed out,
+its servers went with the call), and only Verify and what comes after it run again, on the commit the
+run's last Verify round ran on. Change nothing.
 
 1. From `RUN_DIR/experiment_ledger.md` and `run_report.md` (or `validation_report.md`): the work packages
-   Implement verified, each with its commit and evidence, and the last of those commits. `head_ok` is
-   true only when the task branch's head in the worktree is that commit and the worktree is clean:
-   a branch that moved after Implement (a commit, an edit, a reset) is not what the run verified.
+   Implement verified, each with its commit and evidence, and the commit the run's last Verify round ran
+   on (each round's first row in the ledger's Run log; without one, the last commit Implement
+   verified). `head_ok` is true only when the task branch's head in the worktree is
+   that commit, the worktree is clean, and every verified package's commit is in its history: that head
+   may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
+   that moved after the round started (a commit, an edit, a reset) is not what the run verified.
 2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
-   from `issue_triage.md` and the ledger's Reproduce section); `ci`, the failing test
-   (`failing_test_cmd`, from `ci_triage.md`). Leave it empty when the run directory does not record it.
-3. `perf_claim`: the claim the run's Performance phase was to measure (the spec's, the design's, the
-   plan's, or an issue's reproduction), empty when it had none.
-4. The paths later phases read, those that exist: `triage_path`, `reply_draft_path` (`issue`),
-   `spec_path`, `design_path` (`feature`), `analysis_path` (`perf`).
-5. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
-   `RUN_DIR/handoffs.json` (empty lists when it wrote none): Verify judges a failure the baseline shares
-   by the first, and an integrated kernel is reverted to its `commit` by the second.
-6. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
+   from `issue_triage.md` and the ledger's Reproduce section); `ci`, the failing test (`failing_test_cmd`,
+   word for word from the *failing test command* row of `ci_triage.md`). Leave it empty when the run
+   directory does not record it.
+3. `task_definition`: the task definition `RUN_DIR/run.json` recorded, as it is there (`null` when there
+   is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
+   workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`): a run that
+   would measure otherwise is a run of its own.
+4. `perf_required`: whether the run's Performance phase was to judge a claim (an `issue` that
+   `issue_triage.md` classifies `performance`, a `feature` whose spec or design states one, a `perf`
+   plan's gain); `perf_claim`: that claim, empty when there was none or the run directory does not
+   record it.
+5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`; `ci`:
+   `ci_triage.md`, which names the lanes the test failed on), `spec_path`, `design_path` (`feature`),
+   `analysis_path` (`perf`). The reply draft the run wrote stays in the run directory for the triager;
+   it is not this run's to post until Reply rewrites it.
+6. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
+   `RUN_DIR/handoffs.json`: `[]` for a file that holds an empty list, `null` for one that is missing or
+   does not parse, which stops the resume. Verify judges a failure the baseline shares by the first, and
+   an integrated kernel is reverted to its `commit` by the second.
+7. `design_auto_approved` (`feature`): `true` when the run's Design went on to Implement without a
+   human's approval (its report says so, its Design phase `auto_approved`); `false` otherwise and in
+   the other modes.
+8. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
    no result (the report and ledger say).
 
 Return:
 
 ```json
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
- "known_issues": [], "handoffs": [],
- "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_claim": "",
- "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md", "notes": ""}
+ "known_issues": [], "handoffs": [], "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
+ "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
+ "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
 ```
 
 ## PHASE=spec (feature)
@@ -362,7 +380,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   review, approve, post or hand over); stopped at PR, each of `leak_scan_findings` (where it is and what it
   shows) and of `pr_work_packages` (what the branch still lacks). For `fixed_on_main`, say on which code
   it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
-  `bisect_fixed` run that would.
+  `bisect_fixed` run that would. A run that reused a run directory (`resume_run_dir`) and stopped at
+  Setup measured nothing: it writes `RUN_DIR/run_report_<n>.md` instead, the first `<n>` from 2 not
+  taken, so that `run_report.md` stays the report of the run it resumed, which a later resume reads.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `rejected`, `not_integrated`) and package paths. Write `handoffs` and
   `known_issues` as given to `RUN_DIR/handoffs.json` and `RUN_DIR/known_issues.json`, which a run

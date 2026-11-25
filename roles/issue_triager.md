@@ -132,14 +132,15 @@ Return:
 ## PHASE=reply (before the report)
 
 Inputs: `status`, `stopped_at`, `phases`, the triage record, the reproduction (`repro_cmd` and its
-evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run produced
+evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, `resume_from`, and what the run produced
 (`pr_body_path`, the validation report). The draft written at Triage predates all of it.
 
-1. Keep the Triage draft as `RUN_DIR/reply_draft_triage.md`, unless it is there already (a run resumed
-   from Verify kept it the first time), then rewrite `RUN_DIR/reply_draft.md` from how the run ended:
-   what was checked (image, commit, platform, configuration), the result with its counts, and the next
-   step and who owns it. State only what the run showed; drop every step the Triage draft promised
-   that did not happen, and say what was not covered.
+1. Keep the Triage draft as `RUN_DIR/reply_draft_triage.md`, in place of one an earlier attempt left
+   there: this run's Triage wrote `reply_draft.md` anew. Only a run resumed from Verify (`resume_from:
+   verify`), which ran no Triage, keeps the one there. Then rewrite `RUN_DIR/reply_draft.md` from how
+   the run ended: what was checked (image, commit, platform, configuration), the result with its counts,
+   and the next step and who owns it. State only what the run showed; drop every step the Triage draft
+   promised that did not happen, and say what was not covered.
    - `ready_for_review`: what the fix changes and how it was verified; a `<PR link>` placeholder, since
      the human opens the PR.
    - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit when Bisect

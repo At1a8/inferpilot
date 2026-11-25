@@ -11,6 +11,7 @@
 | lanes | rocm720 / rocm724 / rocm10 / ... |
 | error signature | |
 | first red run / last green run | <run links and times> |
+| failing test command | `<failing_test_cmd, word for word: the command Verify runs on every lane>` |
 
 ## Classification
 

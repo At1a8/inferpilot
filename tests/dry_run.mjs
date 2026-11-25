@@ -430,6 +430,39 @@ const scenarios = [
     check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
     const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
     check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
+    const approved = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), design_auto_approved: true }),
+    });
+    const rep = approved.calls.find((c) => c.key === 'director:report');
+    check(rep && rep.ins.phases.some((p) => p.phase === 'Design' && p.verdict === 'auto_approved'),
+      'a design no human approved is still reported as such');
+  }],
+  ['feature: resume_from verify stops at Setup for a task that would measure otherwise, or state the run directory lost', async () => {
+    const resumed = (extra, args = {}) => run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, ...args }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra(ins) }) });
+    const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
+      && r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
+    const heldOut = await resumed((ins) => ({ task_definition: { ...ins.task_def, held_out: true } }));
+    check(stoppedFor(heldOut, 'would measure otherwise than the one it resumes (held_out not as its run.json has them)'),
+      `a held-out check the run had, dropped: ${JSON.stringify(heldOut.result.phases.at(-1))}`);
+    const workload = { input_len: 8192, output_len: 1024, concurrency: 64 };
+    const sameRun = await resumed((ins) => ({ task_definition: { ...ins.task_def, workload: { concurrency: 64, output_len: 1024, input_len: 8192 },
+      tune: 'false', apply_prs: '#46329' } }), { workload, client_script: '/s/client.sh', apply_prs: ['#46329'] });
+    check(sameRun.result.status === 'ready_for_review', `the same settings written another way are the same task: ${sameRun.result.status}`);
+    check(stoppedFor(await resumed(() => ({ task_definition: null })), 'records no task definition'), 'no run.json: nothing to hold the task against');
+    for (const k of ['known_issues', 'handoffs']) {
+      check(stoppedFor(await resumed(() => ({ [k]: null })), `no readable ${k}.json`), `${k}.json lost: the resume stops`);
+    }
+    check(stoppedFor(await resumed(() => ({ perf_claim: '' })), 'a claim its run directory does not record'), 'a claim the run had, lost');
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
+    check(doc.includes('the commit the run\'s last Verify round ran on') && doc.includes('may be a revert InferPilot made after Implement'),
+      'the head a resume holds the branch to is where the last Verify round began, a kernel revert included');
+    const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
+    check(verifyDoc.includes('Each round\'s first Run log row, written before anything starts, is the round and the commit it runs on (`git -C <worktree> rev-parse HEAD`, the worktree clean)')
+      && doc.includes('each round\'s first row in the ledger\'s Run log'), 'each Verify round records the commit it starts on, where a resume reads it');
+    const report = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'report').replace(/\s+/g, ' ');
+    check(report.includes('it writes `RUN_DIR/run_report_<n>.md` instead') && report.includes('`run_report.md` stays the report of the run it resumed'),
+      'a resume that stopped at Setup leaves the report it resumed from as it was');
   }],
   ['feature: resume_from verify restores the known issues and kernel hand-offs the run had', async () => {
     const ki = { id: 'KI-009', title: 'G4 collapse on the baseline too' };
@@ -453,20 +486,42 @@ const scenarios = [
     check(v && eqList(v.ins.extra_gates, [{ gate: 'issue_repro', cmd: 'bash repro.sh', expect: 'fixed' }]), `the run's reproduction is the gate: ${v && JSON.stringify(v.ins.extra_gates)}`);
     const reply = r.calls.find((c) => c.key === 'issue_triager:reply');
     check(reply && reply.ins.triage_path === `${RUN}/issue_triage.md`, 'the reply is rewritten from the run\'s triage record');
+    check(reply && reply.ins.resume_from === 'verify' && !reply.ins.reply_draft_path,
+      'the triager knows the run ran no Triage, and the earlier draft is not this run\'s');
     check(r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && p.summary.includes('c_WP2')), 'the record says where it resumed');
-    const noRewrite = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'issue_triager:reply': () => null });
-    check(noRewrite.result.reply_draft_path === `${RUN}/reply_draft.md`,
-      `a draft the resumed run never rewrote is the one it restored: ${noRewrite.result.reply_draft_path}`);
+    const noRewrite = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), reply_draft_path: `${RUN}/reply_draft.md` }),
+      'issue_triager:reply': () => null,
+    });
+    check(noRewrite.result.reply_draft_path === '' && !(noRewrite.result.next.user || []).some((u) => u.includes('post the reply draft')),
+      `a draft the resumed run never rewrote is not offered for posting: ${noRewrite.result.reply_draft_path}`);
+    const fresh = await run({ mode: 'issue', task: 'i' });
+    const freshReply = fresh.calls.find((c) => c.key === 'issue_triager:reply');
+    check(freshReply && !freshReply.ins.resume_from, 'a run that ran Triage is no resume');
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'issue_triager.md'), 'utf8'), 'reply').replace(/\s+/g, ' ');
+    check(doc.includes('in place of one an earlier attempt left there') && doc.includes('Only a run resumed from Verify (`resume_from: verify`), which ran no Triage, keeps the one there'),
+      'a retry that ran Triage again keeps its own Triage draft');
+    const perf = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: 'TTFT back under 200 ms' }),
+    });
+    const pe = perf.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(pe && pe.ins.claim === 'TTFT back under 200 ms' && eqList(perf.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']),
+      `a performance issue is measured again on its claim: ${perf.phases}`);
+    const lostClaim = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: '' }),
+    });
+    check(lostClaim.result.stopped_at === 'Setup' && !lostClaim.keys.includes('verify_engineer:verify'),
+      `a performance issue whose claim is lost is not passed unmeasured: ${lostClaim.result.status} at ${lostClaim.result.stopped_at}`);
   }],
   ['issue: resume_from verify measures nothing on a branch that moved, or without the gate the run recorded', async () => {
     const moved = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
-      'director:resume': () => ({ head_ok: false, head: 'f00d', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: 'bash repro.sh', perf_claim: '' }),
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), head_ok: false, head: 'f00d', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }] }),
     });
     check(moved.result.status === 'blocked' && moved.result.stopped_at === 'Setup' && !moved.keys.includes('verify_engineer:verify'),
       `a moved branch: ${moved.result.status} at ${moved.result.stopped_at}`);
     check(moved.result.phases.some((p) => p.phase === 'Setup' && p.summary.includes('f00d')), 'the stop names the head');
     const noGate = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
-      'director:resume': () => ({ head_ok: true, head: 'c_WP1', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: '', perf_claim: '' }),
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), head: 'c_WP1', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1' }], repro_cmd: '' }),
     });
     check(noGate.result.stopped_at === 'Setup' && !noGate.keys.includes('verify_engineer:verify'), 'no reproduction recorded: nothing to gate on');
     const nothing = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { 'director:resume': () => null });
@@ -491,6 +546,19 @@ const scenarios = [
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].gate === 'failing_test' && v.ins.extra_gates[0].cmd === 'pytest test_x.py', `gate ${v && JSON.stringify(v.ins.extra_gates)}`);
     check(!r.keys.includes('perf_engineer:perf_eval'), 'a CI fix is not measured for speed');
+    const rv = r.calls.find((c) => c.key === 'reviewer:review');
+    check(v && v.ins.triage_path === `${RUN}/ci_triage.md` && rv && rv.ins.triage_path === `${RUN}/ci_triage.md`,
+      `Verify and Review read the lanes it failed on: ${v && v.ins.triage_path}`);
+    const noLanes = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), triage_path: '' }),
+    });
+    check(noLanes.result.stopped_at === 'Setup' && !noLanes.keys.includes('verify_engineer:verify'), 'no CI triage record: no lanes to pass on');
+    const template = readFileSync(path.join(INFERPILOT, 'templates', 'ci_triage.md'), 'utf8');
+    const classify = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'ci_guardian.md'), 'utf8'), 'classify').replace(/\s+/g, ' ');
+    const resume = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
+    check(/^\| failing test command \|/m.test(template) && classify.includes('with `failing_test_cmd` word for word in its *failing test command* row')
+      && resume.includes('word for word from the *failing test command* row of `ci_triage.md`'),
+      'the failing test command is written where a resume reads it');
   }],
   ['agents: a timed-out call is not retried and goes on the attention list', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 3, agent_timeout_ms: 100 }, {
