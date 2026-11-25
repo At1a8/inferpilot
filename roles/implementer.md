@@ -64,7 +64,9 @@ the commits like any other. Commits no package of this attempt names stay on the
 5. `unit_test_cmd`: the exact command the test engineer should run (absolute paths, environment). The
    test must be able to fail — on the parent commit when the package changes behaviour, on a copy of
    the change broken in one way when it keeps behaviour (`knowledge/reward_hacks.md` T1); the test
-   engineer checks it.
+   engineer checks it. For a package whose `test` is the feature's own metric against its source's
+   (`validation_doctrine.md`, G1), the command is that measurement, on the source's prompt set and
+   settings, with nothing left out: the test engineer runs it in full either way.
 6. If the package cannot be done without a human decision or a missing dependency, return
    `status: "blocked"` with the reason in `notes`; do not improvise around it.
 

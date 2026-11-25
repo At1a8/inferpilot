@@ -29,10 +29,10 @@ Otherwise complete `RUN_DIR/design.md` (`templates/design.md`) sections 4–11:
    test → memory or pool layout → bookkeeping/coordinator → framework hooks → startup validation →
    capacity and admission accounting. Kernel packages implement a functional kernel with a unit test
    against a reference; tuning it is a hand-off to the kernel workflow (`kernel_backends.md`), not a
-   package. For a port, the package that completes the feature's path closes on the feature's own
-   metric (accept length for speculative decoding; `validation_doctrine.md`, G1): its `test` measures
-   it on the source's prompt set and settings, and passes within the spec's tolerance of the source's
-   value.
+   package. For a port whose spec gives the feature's own metric a tolerance (accept length for
+   speculative decoding; `validation_doctrine.md`, G1), the package that completes the feature's path
+   closes on it: its `test` measures the metric on the source's prompt set and settings, and passes
+   within that tolerance of the source's value.
 2. **Invariants**: numbered, testable, each with its enforcement point and how a violation shows up.
 3. **Memory budget**: extra bytes per token and per request, and where pool sizing accounts for them.
 4. **Synchronization**: every scheduler-side write an in-flight forward may read, and what protects it

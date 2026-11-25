@@ -15,10 +15,13 @@ Inputs: `work_package`, `commit`, `unit_test_cmd`.
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template
    instantiation the design lists. Repeat a GPU test that passed once only if it is timing-sensitive.
-   A test of the feature's own metric against its source's (accept length for a ported speculative
-   decoding method; `validation_doctrine.md`, G1) runs on the source's prompt set and settings as the
-   spec gives them, and passes within the spec's tolerance of the source's value, above or below: put
-   the value, the source's and the tolerance in the ledger.
+   A package whose `test` is the feature's own metric against its source's (accept length for a ported
+   speculative decoding method; `validation_doctrine.md`, G1) is closed by that measurement, whatever
+   `unit_test_cmd` holds: InferPilot sends you the implementer's command when there is one, so when it
+   leaves the measurement out or narrows it, run it yourself as well, on the source's prompt set and
+   settings as the spec gives them. `unit_pass` is true only when the value lies within the spec's
+   tolerance of the source's, above or below; put the value, the source's and the tolerance in the
+   ledger.
 3. **The test must be able to fail (T1).** Prove it in a throwaway worktree under `RUN_DIR`, with the
    worktree path in the command replaced:
    - a package that **changes behaviour** (a feature, a fix): check out the parent

@@ -226,7 +226,9 @@ Return:
    hardware does not change (accept length for speculative decoding), stays within a tolerance of the
    source's that the spec names. It is a G1 criterion (`validation_doctrine.md`): the spec gives the
    source's value and the source's prompt set and settings for it, and the test of the work package
-   that completes the feature's path judges it there, not G2 on its data sets.
+   that completes the feature's path judges it there, not G2 on its data sets. With no value to compare
+   with (the source reports none, and no reference implementation runs on its prompts), it is no
+   criterion: the spec says so and names no tolerance, and the metric is reported.
    - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
      scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what
@@ -274,7 +276,8 @@ Return:
  "fallback_client": "/abs/RUN_DIR/scripts/fallback_client.sh | ''"}
 ```
 
-`gates_measurable` is true only when every acceptance criterion names a suite and a threshold.
+`gates_measurable` is true only when every acceptance criterion names a suite and a threshold. The
+feature's own metric with no value to compare it with is reported, and is not a criterion.
 
 ## PHASE=report (every mode, every outcome)
 

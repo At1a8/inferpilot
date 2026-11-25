@@ -84,8 +84,8 @@ practice. Artifacts live in the run's working directory; the templates are in `.
 - Memory budget: extra bytes per token / per request and how the pool sizing accounts for them.
 - **Artifact:** `design.md`.
 - **Gate:** every WP has a test; every invariant has an enforcement point; unsupported configs have a
-  startup rejection; for a port, one WP's test judges the feature's own metric against the source's
-  (`validation_doctrine.md`, G1).
+  startup rejection; for a port whose spec gives the feature's own metric a tolerance, one WP's test
+  judges it against the source's (`validation_doctrine.md`, G1).
 
 ### 4. Implement — one work package at a time
 

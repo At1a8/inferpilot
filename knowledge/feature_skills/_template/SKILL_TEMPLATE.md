@@ -57,7 +57,8 @@ role: advisory_prior
 
 ## Validation recipe
 <!-- Per gate (G0-G5): command, size, number of runs, expected result, baseline comparison, engagement evidence.
-     For a port, G1 has the feature's own metric against the source's, on the source's prompts and settings. -->
+     For a port, G1 has the feature's own metric against the source's value, where there is one, on the
+     source's prompts and settings. -->
 
 ## Pitfalls
 <!-- symptom → root cause → fix. Include issues that turned out to be baseline bugs (link known_issues). -->
