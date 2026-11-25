@@ -122,6 +122,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      value, else the feature's, else the cookbook's (the server's), else the template's. A workload the
      client template's parameters cannot express fails the baseline, saying what is missing: the user's
      own client runs it, and a template measuring another workload would count for nothing.
+     With `stability` on, `client_script` reaches you as `template` whenever the task brought no client,
+     in any mode, issue and ci included: G4 needs a client to keep up. Render it all the same, on the
+     task's `workload` or, when it gives none, with the template's own values.
      - The cookbook recipe, for the template server: the page of the model in the framework checkout's
        `docs/cookbook/` (docs.sglang.io/cookbook when the checkout has none), for the run's GPU
        (its name: MI355X, MI300X) and the checkpoint's precision. Write its launch
@@ -269,9 +272,10 @@ Return:
 6. Long context and stability: G3 is a criterion only with `long_context` on, G4 only with `stability`
    on (`validation_doctrine.md`: G3's needle runs; G4, the run's `client_script` run back to back for
    more than 48 hours). With its field off, a gate's row says `not run: not asked` and is no criterion;
-   never add one from the kind of change, nor from `goal`. G4's row names the workload it keeps up, the
-   task's at its highest concurrency, and says so when the feature does not engage on it: G4 then shows
-   the server's stability, not the feature path's.
+   never add one from the kind of change, nor from `goal`. G4's row names the load it keeps up, at its
+   highest concurrency: the task's client, or InferPilot's client template when the task brings none
+   (on the task's `workload`, or on the template's own when it gives none), and says so when the
+   feature does not engage on it: G4 then shows the server's stability, not the feature path's.
 
 Return:
 
@@ -317,7 +321,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   template server followed, and each rendered parameter's value and source
   (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
 - G4 (`stability`): give its verdict with the commit it ran on (the verify engineer's `gates`, the
-  ledger). It runs once in a run: when the branch's head is a later commit, say near the top that the
+  ledger) and the load it kept up: the task's client, or InferPilot's client template when the task
+  brought none, on the task's workload or on the template's own (`assumptions` holds which). It runs
+  once in a run: when the branch's head is a later commit, say near the top that the
   code handed over has not been through G4, and since which commit. A G4 that failed where the baseline
   failed too is reported as failed, with the known issue.
 - A Design phase with the verdict `auto_approved` (`auto_approve_design`): no human approved the

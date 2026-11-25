@@ -1574,7 +1574,23 @@ const scenarios = [
     check(asks(await run({ mode: 'issue', task: 't', client_script: '/s/client.sh', stability: 'yes' }), 'stability'),
       'a gate field that is neither true nor false is asked about, not read as off');
     check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
-    check(asks(await run({ mode: 'issue', task: 't', stability: true }), 'client_script'), 'G4 without the client it runs asked');
+    const g4bare = await run({ mode: 'issue', task: 't', stability: true }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
+        gpu_ids: '0,1', client_script: `${RUN}/scripts/perf.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+    });
+    const g4setup = (g4bare.calls.find((c) => c.key === 'director:setup') || {}).ins || {};
+    const g4round = (g4bare.calls.find((c) => c.key === 'verify_engineer:verify') || {}).ins || {};
+    check(g4bare.result.status !== 'needs_input' && g4setup.client_script === 'template' && g4round.client_script === `${RUN}/scripts/perf.sh`
+      && g4round.stability === true,
+      `G4 without a client of the task's is no question: Setup renders InferPilot's client template, and G4 keeps it up (${g4bare.result.status})`);
+    check(g4bare.result.provenance.client_script === 'default' && g4bare.result.task_def.client_script === 'template'
+      && g4bare.result.assumptions.some((a) => /^client_script: stability is on .* the template's own workload/.test(a))
+      && (g4setup.assumptions || []).length === 1,
+      `the run records that it took it, on the template's own workload, for the roles and the report: ${JSON.stringify(g4bare.result.assumptions)}`);
+    const g4load = await run({ mode: 'issue', task: 't', stability: true, workload: '{"isl":30000,"osl":512,"conc":64}' });
+    check(g4load.result.status === 'blocked' && g4load.result.stopped_at === 'Setup'
+      && /on the task's workload$/.test(g4load.result.assumptions.join(' ')),
+      `on the task's workload when it gives one; and a template Setup did not render stops the run: ${g4load.result.status}`);
     const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
     check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
     const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });

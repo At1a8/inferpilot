@@ -67,10 +67,13 @@ clock can start before your session does.
      - G3 long context sized so the feature engages, at two or more concurrencies, at least 4 runs each
        (6 when an intermittent failure is being judged), fixed seeds, prefix cache flushed between runs.
      - G4 stability is one run, not repeated and not taken to other concurrencies: the run's
-       `client_script` (the task's, or InferPilot's `perf.sh`) run back to back for more than 48 hours
-       against one server that is not restarted, on a workload sized so the feature engages. Run
+       `client_script` run back to back for more than 48 hours against one server that is not
+       restarted. The client is the task's own, or InferPilot's `perf.sh` when the task brings none:
+       on the task's `workload` when it gives one, on the template's own otherwise (8192 tokens in,
+       1024 out, concurrency 32). Say in `gates` which load G4 kept up, and when the feature does not
+       engage on it: G4 then shows the server's stability, not the feature path's. Run
        `bash <inferpilot_dir>/scripts/stability.sh <client_script>` with `PORT`,
-       `OUT_DIR=RUN_DIR/logs/g4_<arm>`, `HOURS=48` and `CONCURRENCY`, the highest of the task's workload
+       `OUT_DIR=RUN_DIR/logs/g4_<arm>`, `HOURS=48` and `CONCURRENCY`, the highest of the run's workload
        (a client of the task's own that does not read it runs as it is), started detached like any long
        suite (step 1). It writes one line per pass to `OUT_DIR/stability.jsonl` (the client's result, the
        memory in use on every GPU and on the host; the throughput of a client that appends no result to

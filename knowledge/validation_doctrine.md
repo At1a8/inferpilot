@@ -71,14 +71,18 @@ Notes per gate:
   sets one when the user's request asks for that gate; no role infers it from the kind of change, and
   `goal` does not turn a gate on. A gate the task did not ask for is reported `not run: not asked`.
 - **G4 is the task's performance test, run back to back for more than 48 hours.** One server, not
-  restarted, under the run's performance client (the task's `client_script`, or InferPilot's `perf.sh` on
-  the task's workload), one pass after another, at the highest concurrency of the task's workload:
-  `scripts/stability.sh` runs it and writes one line per pass, with the client's result and the memory
-  in use. It is one run, not repeated and not taken to other concurrencies, after everything else in
-  its round. `perf.sh` keeps its concurrency full within a pass; the server is idle only while one pass
-  ends and the next starts, and the lines show how much of the run was under load. The workload is the
-  task's to bring: long prompts at high concurrency, on which the feature engages. Where it does not
-  engage, the report says that G4 showed the server's stability, not the feature path's.
+  restarted, under the run's performance client, one pass after another, at the highest concurrency of
+  its workload: `scripts/stability.sh` runs it and writes one line per pass, with the client's result
+  and the memory in use. The client is the task's `client_script`. A task that gives its scenario
+  (`workload`: input and output lengths, concurrency) but no client runs InferPilot's client template,
+  `perf.sh`, on that scenario; one that gives neither runs the template on its own workload (8192
+  tokens in, 1024 out, concurrency 32). Nothing is asked on G4's account, and the report says which
+  load it was. It is one run, not repeated and not taken to other concurrencies, after everything else
+  in its round. `perf.sh` keeps its concurrency full within a pass; the server is idle only while one
+  pass ends and the next starts, and the lines show how much of the run was under load. The load that
+  shows most is the task's to bring: long prompts at high concurrency, on which the feature engages;
+  the template's own is a general one, sized for no feature. Where the feature does not engage, the
+  report says that G4 showed the server's stability, not the feature path's.
 - **G4 passes on what its run shows.** The server neither crashes, hangs nor runs out of memory, no
   request fails, and nothing drifts: not the client's throughput, nor the memory in use on the run's
   GPUs or on the host. Each hour of the run has one value of throughput and one of memory: the median of

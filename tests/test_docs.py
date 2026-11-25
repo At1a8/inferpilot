@@ -399,7 +399,7 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("once in a run", EN)
         self.assertIn("一次运行里只跑一次", ZH)
 
-    def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
+    def test_g4s_load_is_the_runs_performance_client(self):
         doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)
         self.assertNotIn("throughput_test.py", doctrine, "a finite batch looped lets the concurrency drain")
@@ -408,9 +408,35 @@ class LongGatesTest(unittest.TestCase):
             self.assertIn("scripts/stability.sh", self.flat(path), "%s does not name G4's script" % path)
         self.assertTrue((ROOT / "scripts" / "stability.sh").is_file())
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertRegex(src, r"asked\(a\.stability\) === 'true' && !a\.client_script", "stability is on without a client to run")
         for field in self.FLAGS:
             self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
+
+    def test_g4_without_a_client_of_the_tasks_keeps_up_inferpilots_template_and_asks_for_none(self):
+        """The task's scenario when it gives one, the template's own otherwise; the run records which."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("if (STABILITY && MODE !== 'scan' && !String(A.client_script || '').trim()) {\n  A.client_script = TEMPLATE;", src,
+                      "stability is on with no client to keep up")
+        self.assertIn("START.provenance = { ...(START.provenance || {}), client_script: 'default' };", src)
+        missing = re.search(r"\nfunction missingFields\(a\) \{\n(.*?)\n\}\n", src, re.S).group(1)
+        self.assertNotIn("stability", missing.replace("['stability', 'G4, the stability run of more than 48 hours']", ""),
+                         "a task is still asked for a client on G4's account")
+        perf = (ROOT / "templates" / "harness" / "perf.sh").read_text(encoding="utf-8")
+        own = [re.search(r'^%s="\$\{%s:-(\d+)\}"' % (name, name), perf, re.M) for name in ("ISL", "OSL", "CONCURRENCY")]
+        self.assertTrue(all(own), "templates/harness/perf.sh gives ISL, OSL or CONCURRENCY no default")
+        said = "%s tokens in, %s out, concurrency %s" % tuple(m.group(1) for m in own)
+        for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md", "templates/task_definition.md"):
+            self.assertIn(said, self.flat(path), "%s does not give the template's own workload as perf.sh has it" % path)
+        for path, told in (("knowledge/validation_doctrine.md", "Nothing is asked on G4's account"),
+                           ("templates/task_definition.md", "Nothing is asked on G4's account"),
+                           ("roles/intake.md", "is asked for none on G4's account"),
+                           ("roles/verify_engineer.md", "or InferPilot's `perf.sh` when the task brings none"),
+                           ("roles/director.md", "InferPilot's client template when the task brings none"),
+                           ("README.md", "a task without a `client_script` is asked for none"),
+                           ("README.zh-CN.md", "任务没带 `client_script` 时不会提问")):
+            self.assertIn(told, self.flat(path), "%s does not say what G4 keeps up when the task brings no client" % path)
+        for path in ("templates/task_definition.md", "roles/intake.md", "README.md"):
+            self.assertNotRegex(self.flat(path), r"so the task needs one|is asked for one, as a perf task is|the task needs a `client_script`",
+                                "%s still makes the task bring G4's client" % path)
 
 
 class FlagsTest(unittest.TestCase):
