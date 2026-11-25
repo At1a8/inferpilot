@@ -740,8 +740,8 @@ const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
   ['report_path', 'daily_report_url', 'daily_report_action']);
-const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, notes: str },
-  ['updates']);
+const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, patch_path: str,
+  notes: str }, ['updates']);
 const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'] }, run_dir: str, candidates_path: str,
   counts: obj, recent: obj, notes: str }, ['lock', 'run_dir', 'candidates_path']);
 const DISPATCH = S({
@@ -815,6 +815,8 @@ async function finish(status, at) {
     if (learn) {
       R.knowledge_updates = learn.updates || [];
       R.knowledge_pr = learn.pr_url || '';
+      R.knowledge_notes = learn.notes || '';
+      R.knowledge_patch = R.knowledge_pr ? '' : String(learn.patch_path || '').trim();
     }
   }
   R.run_dir = C.run_dir;
@@ -880,6 +882,11 @@ function nextSteps(status, at) {
   if (R.reply_draft_path) user.push(`post the reply draft on the issue: ${R.reply_draft_path}`);
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
+  else if (R.knowledge_patch) {
+    user.push(`propose the curator's knowledge changes, which the run did not (${R.knowledge_notes || 'see the curator\'s notes'}),`
+      + ` from an InferPilot checkout: python3 scripts/propose_knowledge.py --run-dir ${C.run_dir}`
+      + ` --body ${C.run_dir}/knowledge_pr.md --patch ${R.knowledge_patch}`);
+  }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;
   return out;

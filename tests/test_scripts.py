@@ -1234,6 +1234,118 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.assertIn("/data/models/x", (self.inferpilot / "knowledge" / "known_issues.md").read_text(), "left as it was")
         self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
 
+    def test_a_change_that_names_this_machine_is_not_saved_for_later(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\nweights in /data/models/x\n")
+        self.assertEqual(self.propose(token="")[0], 3)
+        self.assertFalse((self.run / "knowledge.patch").exists(), "saved for a --patch elsewhere, whose check knows nothing of here")
+        known.write_text("# Known issues\nKI-001 GLM-5.3 dcp 8\n")
+        self.body.write_text("found with /data/models/x\n")
+        self.assertEqual(self.propose(token="")[0], 3)
+        self.assertIn("KI-001 GLM-5.3 dcp 8", (self.run / "knowledge.patch").read_text(), "a clean change is kept while its description is fixed")
+
+    def test_a_patch_that_makes_a_symbolic_link_is_refused_and_nothing_is_written_through_it(self):
+        import subprocess
+        victim = self.origin.parent / "victim.md"
+        victim.write_text("x\n## KI-001 elsewhere\n")
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.unlink()
+        # Relative, so that no leak check stops it first; from the worktree beside the victim it reaches the victim.
+        known.symlink_to(os.path.join("..", "..", "victim.md"))
+        git("add", "-A", "knowledge", cwd=self.inferpilot)
+        link = self.run / "link.patch"
+        link.write_text(subprocess.run(["git", "-C", str(self.inferpilot), "diff", "--cached", "--binary"],
+                                       capture_output=True, text=True, check=True).stdout)
+        git("reset", "-q", cwd=self.inferpilot)
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        with mock.patch.object(tempfile, "tempdir", str(self.origin.parent)):
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(link)], inferpilot=fresh)
+            self.assertEqual(rc, 1, err)
+            self.assertIn("symbolic link", err)
+            self.assertEqual(self.propose(api=self.github([]))[0], 1, "nor the checkout's own")
+        self.assertEqual(victim.read_text(), "x\n## KI-001 elsewhere\n", "a file outside the worktree was written")
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_a_name_with_a_space_or_one_git_quotes_is_read_as_git_reads_it(self):
+        names = ["knowledge/notes with spaces.md", 'knowledge/na\u00efve "quoted".md']
+        for name in names:
+            (self.inferpilot / name).write_text("a note\n")
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        rc, out, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=fresh)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(json.loads(out)["files"]), sorted(names))
+        for name in names:
+            self.assertEqual(self.show("inferpilot/knowledge/%s:%s" % (self.run.name, name)), "a note\n", name)
+        moved = self.run / "moved.patch"
+        moved.write_text("diff --git a/inferpilot.js b/knowledge/x.js\nsimilarity index 100%\n"
+                         "rename from inferpilot.js\nrename to knowledge/x.js\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(moved)], inferpilot=fresh)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is not a patch of knowledge/: it touches inferpilot.js", err, "a rename's source counts as a path it touches")
+        quoted = ('diff --git "a/knowledge/na\\303\\257ve.md" b/knowledge/plain.md\nsimilarity index 100%\n'
+                  'rename from "knowledge/na\\303\\257ve.md"\nrename to knowledge/plain.md\n')
+        self.assertEqual(propose_knowledge.patched(quoted), ["knowledge/na\u00efve.md", "knowledge/plain.md"])
+
+    def _entry_changed_on_main_and_here(self, base, mains, ours):
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(mains)
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(ours)
+        return self.propose(api=self.github([]))
+
+    def test_lines_both_added_inside_one_entry_stop_for_a_human(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n\n## KI-002 — other\nx\n"
+        rc, _, err = self._entry_changed_on_main_and_here(base, base.replace("open\n", "open\nWorkaround: disable A\n"),
+                                                          base.replace("open\n", "open\nWorkaround: enable A\n"))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("KI-001", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+        inside = ("## KI-001 — aiter segfault\nStatus: open\n<<<<<<< ours\nWorkaround: disable A\n||||||| base\n=======\n"
+                  "Workaround: enable A\n>>>>>>> theirs\n\n## KI-002 — other\nx\n")
+        self.assertIsNone(propose_knowledge.resolve_appends(inside), "lines added inside an entry are no new entries")
+        at_end = ("## KI-001 — a\nx\n<<<<<<< ours\n\n## KI-002 — main's\n||||||| base\n=======\n\n## KI-003 — ours\n"
+                  ">>>>>>> theirs\n")
+        self.assertEqual(propose_knowledge.resolve_appends(at_end), "## KI-001 — a\nx\n\n## KI-002 — main's\n\n## KI-003 — ours\n")
+
+    def test_different_lines_of_one_entry_changed_on_both_sides_stop_for_a_human(self):
+        base = ("# Known issues\n\n## KI-001 — aiter segfault\nSymptom: crash at import\nReproduction: import aiter\n"
+                "Status: open\n")
+        rc, _, err = self._entry_changed_on_main_and_here(base, base.replace("at import", "at import, MI308X only"),
+                                                          base.replace("open", "fixed by #123"))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("KI-001", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_a_shallow_checkout_of_a_later_main_applies_the_patch_three_way(self):
+        import subprocess
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nWorkaround: none\n\n## KI-002 — other\nx\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        made_against = subprocess.run(["git", "-C", str(self.inferpilot), "rev-parse", "HEAD:knowledge/known_issues.md"],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("\nx\n", "\nx, fixed by #9\n"))
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        shutil.rmtree(self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("none", "AITER_X=0"))
+        git("commit", "-qam", "main changes a line of the patch's context", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        shallow = self.origin.parent / "shallow"
+        git("clone", "-q", "--depth=1", "-b", "main", "file://" + str(self.origin), str(shallow))
+        self.assertNotEqual(subprocess.run(["git", "-C", str(shallow), "cat-file", "-e", made_against]).returncode, 0,
+                            "the test meant a checkout without the file the patch was made against")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=shallow)
+        self.assertEqual(rc, 0, err)
+        known = self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name)
+        self.assertIn("Workaround: AITER_X=0\n", known)
+        self.assertIn("\nx, fixed by #9\n", known)
+
 
 class RunLockTest(unittest.TestCase):
     def setUp(self):

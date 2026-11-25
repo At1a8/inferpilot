@@ -14,17 +14,21 @@ Contents and Pull requests: read and write on this repository (README step 1). T
 local path, this machine or an internal site stop it, as in scripts/daily_report.py. Without the token,
 or on any failure, the changes stay where they are. Standard library and git only.
 
-The patch is also written to RUN_DIR/knowledge.patch, which outlives the checkout: --patch proposes it later,
-from any checkout (the one that saved it, holding just those edits still, is restored as above). Runs
-started from the same main give their new known issues the same next KI- number: a number main has taken
-since is replaced, in the entry and in every line the patch adds, by the next free one on main, and the
-pull request says which ("renumbered"). Entries main added at the end of the file are kept beside this
-run's; an existing entry that main and the patch both changed stops it (exit 4) for a human to reconcile.
+Once the lines it adds name nothing local, the patch is also written to RUN_DIR/knowledge.patch, with the
+files it was made against ahead of it (git apply skips them): --patch proposes it later, from any checkout,
+a shallow one too (the one that saved it, holding just those edits still, is restored as above). It
+outlives the task's container only where RUN_DIR does, on a host mount (an exp_root outside the container).
+A patch that makes a symbolic link is refused. Runs started from the same main give their new known issues
+the same next KI- number: a number main has taken since is replaced, in the entry and in every line the
+patch adds, by the next free one on main, and the pull request says which ("renumbered"). New entries
+main added are kept beside this run's; an existing entry that main and the patch both changed, on the same
+lines or not, stops it (exit 4) for a human to reconcile.
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import codecs
 import json
 import os
 import re
@@ -34,6 +38,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from daily_report import default_repo, leaks, this_host  # noqa: E402
@@ -44,7 +49,8 @@ AUTHOR = ["-c", "user.name=InferPilot curator", "-c", "user.email=inferpilot-cur
 KNOWN = "knowledge/known_issues.md"
 KI_HEADING = re.compile(r"^## (KI-(\d+))\b", re.M)
 KI_REF = re.compile(r"\bKI-\d+\b")
-PATCHED = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.M)
+PREIMAGE = re.compile(r"^preimage ([0-9a-f]{40,64}) ([A-Za-z0-9+/=]+)$", re.M)
+SYMLINK = re.compile(r"^(?:(?:new file|new|old|deleted file) mode|index [0-9a-f]+\.\.[0-9a-f]+) 120000$", re.M)
 
 
 def api(method: str, path: str, token: str, data: dict | None = None):
@@ -78,19 +84,99 @@ def changed(inferpilot: str) -> tuple[list, list]:
 
 
 def patch(inferpilot: str, tracked: list, untracked: list) -> str:
-    out = git(inferpilot, "diff", "HEAD", "--binary", "--", *tracked) if tracked else ""
+    out = git(inferpilot, "diff", "HEAD", "--binary", "--full-index", "--", *tracked) if tracked else ""
     for f in untracked:
-        out += git(inferpilot, "diff", "--no-index", "--binary", "--", "/dev/null", f, check=False)
-    return out
+        out += git(inferpilot, "diff", "--no-index", "--binary", "--full-index", "--", "/dev/null", f, check=False)
+    return with_preimages(inferpilot, out)
+
+
+def with_preimages(inferpilot: str, diff: str) -> str:
+    """The patch with the files it was made against ahead of it, where git apply skips what it reads: a
+    three-way apply needs them, and a later checkout, a shallow one above all, may not have them."""
+    head = []
+    for sha in dict.fromkeys(re.findall(r"^index ([0-9a-f]+)\.\.", diff, re.M)):
+        p = subprocess.run(["git", "-C", inferpilot, "cat-file", "blob", sha], capture_output=True)
+        if set(sha) != {"0"} and p.returncode == 0:
+            head.append("preimage %s %s\n" % (sha, base64.b64encode(zlib.compress(p.stdout, 9)).decode()))
+    return "".join(head) + diff
+
+
+def store_preimages(repo: str, diff: str) -> None:
+    """Into the repository's objects, the files the patch was made against that it lacks."""
+    for sha, data in PREIMAGE.findall(diff):
+        if subprocess.run(["git", "-C", repo, "cat-file", "-e", sha + "^{blob}"], capture_output=True).returncode == 0:
+            continue
+        try:
+            content = zlib.decompress(base64.b64decode(data))
+        except (zlib.error, ValueError):
+            content = None
+        p = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"], input=content or b"", capture_output=True)
+        if content is None or p.returncode != 0 or p.stdout.decode().strip() != sha:
+            raise RuntimeError("the patch's copy of the file it was made against (%s) is damaged" % sha[:12])
 
 
 def added(diff: str) -> str:
     return "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
 
 
+def outside_git(args: list, diff: str, files: dict | None = None) -> tuple[subprocess.CompletedProcess, dict]:
+    """git apply on the patch in a directory no repository holds, with `files` in it: git's answer, and
+    those of the files that are still regular files after it."""
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in (files or {}).items():
+            os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
+            with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        p = subprocess.run(["git", "apply", *args, "-"], cwd=d, input=diff.encode("utf-8", "surrogateescape"),
+                           capture_output=True, env={**os.environ, "GIT_CEILING_DIRECTORIES": os.path.dirname(d)})
+        after = {}
+        for name in files or {}:
+            path = os.path.join(d, name)
+            if os.path.isfile(path) and not os.path.islink(path):
+                with open(path, encoding="utf-8") as f:
+                    after[name] = f.read()
+        return p, after
+
+
+def unquote(name: str) -> str:
+    """A path as a git header writes it: in C quotes when it has to be."""
+    if len(name) > 1 and name[0] == name[-1] == '"':
+        return codecs.escape_decode(name[1:-1].encode("utf-8", "surrogateescape"))[0].decode("utf-8", "surrogateescape")
+    return name
+
+
 def patched(diff: str) -> list:
-    """The paths a patch touches."""
-    return sorted({p for pair in PATCHED.findall(diff) for p in pair if p != "dev/null"})
+    """The paths a patch touches, as git reads them (a quoted name, one with a space), a rename's source too."""
+    p, _ = outside_git(["--numstat", "-z"], diff)
+    names = [r.split("\t", 2)[2] for r in p.stdout.decode("utf-8", "surrogateescape").split("\0")
+             if r.count("\t") >= 2] if p.returncode == 0 else []
+    names += [unquote(n) for n in re.findall(r"^(?:rename|copy) from (.+)$", diff, re.M)]
+    return sorted({n for n in names if n})
+
+
+def entries(text: str) -> dict:
+    """The known issues by number, each its lines without blank ones; the text before the first under ""."""
+    out, key = {"": []}, ""
+    for line in text.splitlines():
+        m = KI_HEADING.match(line)
+        if m:
+            key = m.group(1)
+            out[key] = []
+        if line.strip():
+            out[key].append(line.rstrip())
+    return {k: "\n".join(v) for k, v in out.items()}
+
+
+def changed_on_both(pre: str, main: str, post: str) -> list:
+    """The entries of the file the patch was made against that main and the patch each changed their own way."""
+    a, b, c = entries(pre), entries(main), entries(post)
+    return [k or "the text before the first entry" for k in a if a[k] != b.get(k) and a[k] != c.get(k) and b.get(k) != c.get(k)]
+
+
+def applied(diff: str, pre: str) -> str | None:
+    """known_issues.md as the patch leaves the file it was made against; None when it does not apply there."""
+    p, after = outside_git(["--include=" + KNOWN], diff, {KNOWN: pre})
+    return after.get(KNOWN) if p.returncode == 0 else None
 
 
 def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
@@ -129,12 +215,21 @@ def preimage(inferpilot: str, diff: str, path: str) -> str:
     return git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
 
 
+def new_entries(extra: list, rest: str) -> bool:
+    """Lines a side added after the base's that are whole new known issues: from a heading on, and up to
+    where an entry ends (`rest`, the next line with text after the conflict, is a heading or nothing)."""
+    filled = [l for l in extra if l.strip()]
+    return not filled or bool(KI_HEADING.match(filled[0])) and (not rest or rest.startswith("## "))
+
+
 def resolve_appends(text: str) -> str | None:
     """The known issues after a three-way apply with diff3 conflicts. A conflict where one side kept the base's
-    lines and only added after them (or both only added at the same place) keeps both, main's first where it
-    can; None when both changed lines the base had (an entry edited on main and in the patch)."""
+    lines and added only whole new entries after them, where an entry ends (or both added at the same such
+    place), keeps both, main's first where it can; None otherwise: lines added inside an entry, or the base's
+    lines changed on both sides."""
+    lines = text.splitlines(keepends=True)
     out, block, part = [], None, ""
-    for line in text.splitlines(keepends=True):
+    for i, line in enumerate(lines):
         if block is None:
             if line.startswith("<<<<<<< "):
                 block, part = {"ours": [], "base": [], "theirs": []}, "ours"
@@ -146,9 +241,10 @@ def resolve_appends(text: str) -> str | None:
             part = "theirs"
         elif part == "theirs" and line.startswith(">>>>>>> "):
             ours, base, theirs = block["ours"], block["base"], block["theirs"]
-            if theirs[:len(base)] == base:
+            rest = next((l for l in lines[i + 1:] if l.strip()), "")
+            if theirs[:len(base)] == base and new_entries(theirs[len(base):], rest):
                 out += ours + theirs[len(base):]
-            elif ours[:len(base)] == base:
+            elif ours[:len(base)] == base and new_entries(ours[len(base):], rest):
                 out += theirs + ours[len(base):]
             else:
                 return None
@@ -181,7 +277,15 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
     """Apply the patch onto origin/main in a throwaway worktree, commit, push the branch; the commit, and the
     known issues renumbered against main."""
     git(inferpilot, "fetch", "-q", push_url, "+refs/heads/main:refs/remotes/origin/main", env=auth_env(token))
-    diff, mapping = renumber(diff, preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False))
+    store_preimages(inferpilot, diff)
+    pre, main_known = preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False)
+    diff, mapping = renumber(diff, pre, main_known)
+    files = patched(diff)
+    # Git merges changes to different lines of one entry without a word: the entries say what each side changed.
+    post = applied(diff, pre) if pre and KNOWN in files else None
+    both = changed_on_both(pre, main_known, post) if post is not None else []
+    if both:
+        raise RuntimeError("git apply: %s: %s changed on main as well; reconcile them by hand" % (KNOWN, ", ".join(both)))
     wt = tempfile.mkdtemp(prefix="inferpilot-knowledge-")
     os.rmdir(wt)
     git(inferpilot, "worktree", "add", "-q", "--detach", wt, "origin/main")
@@ -194,6 +298,12 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
         known = os.path.join(wt, KNOWN)
         p = subprocess.run(["git", "-C", wt, "-c", "merge.conflictStyle=diff3", "apply", "--3way", "--index", patch_file],
                            capture_output=True, text=True)
+        # Before anything below opens a file: through a symbolic link it would write outside the worktree.
+        staged = git(wt, "ls-files", "-s", "-z", "--", *files).split("\0") if files else []
+        links = {e.split("\t", 1)[1] for e in staged if e.startswith("120000 ")}
+        links |= {f for f in files if os.path.islink(os.path.join(wt, f))}
+        if links:
+            raise RuntimeError("the patch makes a symbolic link: %s" % ", ".join(sorted(links)))
         if p.returncode != 0:
             # The known issues are a list: what main appended since this checkout and what this run appends
             # are both kept; an entry both changed stops here for a human.
@@ -208,7 +318,7 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
             with open(known, "w", encoding="utf-8") as f:
                 f.write(resolved)
             git(wt, "add", KNOWN)
-        if KNOWN in patched(diff) and os.path.isfile(known):
+        if KNOWN in files and os.path.isfile(known) and not os.path.islink(known):
             with open(known, encoding="utf-8") as f:
                 text = f.read()
             tidy = re.sub(r"([^\n])\n(## KI-)", r"\1\n\n\2", text)
@@ -290,12 +400,18 @@ def main(argv=None) -> int:
                 return 0
             diff = patch(a.inferpilot_dir, tracked, untracked)
             files = tracked + untracked
-            if os.path.isdir(a.run_dir):
-                saved = os.path.join(a.run_dir, "knowledge.patch")
-                with open(saved, "w", encoding="utf-8") as f:
-                    f.write(diff)
+        if SYMLINK.search(diff):
+            print("propose_knowledge: %s makes a symbolic link, which nothing under knowledge/ is" % (a.patch or "the change"),
+                  file=sys.stderr)
+            return 1
+        # Saved only when it names nothing of this machine: --patch, elsewhere, would not know this one.
+        bad = leaks(added(diff), this_host())
+        if not a.patch and not bad and os.path.isdir(a.run_dir):
+            saved = os.path.join(a.run_dir, "knowledge.patch")
+            with open(saved, "w", encoding="utf-8") as f:
+                f.write(diff)
         body = open(a.body, encoding="utf-8").read()
-        bad = leaks(added(diff), this_host()) + leaks(body, this_host())
+        bad += leaks(body, this_host())
         if bad:
             print("propose_knowledge: not proposed; it names something local or internal:\n  " + "\n  ".join(bad), file=sys.stderr)
             return 3

@@ -292,6 +292,23 @@ const scenarios = [
       counts: {}, leads: [lead] }) });
     check(!scan.keys.includes('issue_triager:spinoff'), 'a scan takes no leads');
   }],
+  ['next: knowledge changes the curator could not propose reach the user with the saved patch and why', async () => {
+    const updates = [{ file: 'knowledge/known_issues.md', change: 'KI-007 added' }];
+    const held = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/knowledge.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const say = (held.result.next.user || []).find((u) => u.includes('knowledge.patch'));
+    check(say && say.includes('GITHUB_TOKEN is not set') && say.includes(`--run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch ${RUN}/knowledge.patch`),
+      `the saved patch is the user's to propose, with why the run did not: ${say}`);
+    check(held.result.knowledge_notes === 'GITHUB_TOKEN is not set' && held.result.knowledge_patch === `${RUN}/knowledge.patch`,
+      'the curator\'s notes and its patch are in the result');
+    const opened = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates,
+      pr_url: 'https://github.com/o/inferpilot/pull/7', patch_path: `${RUN}/knowledge.patch`, notes: '' }) });
+    check(opened.result.next.user.some((u) => u.endsWith('pull/7')) && !opened.result.next.user.some((u) => u.includes('--patch'))
+      && opened.result.knowledge_patch === '', 'a pull request that is open needs no patch proposed');
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'curator.md'), 'utf8'), 'learn').replace(/\s+/g, ' ');
+    check(doc.includes('return it as `patch_path`') && doc.includes('only where `RUN_DIR` does, with `exp_root` on a host mount'),
+      'the curator returns the patch, which outlives the container only on a host mount');
+  }],
   ['feature: investigation budget is bounded', async () => {
     const r = await run({ mode: 'feature', task: 't', max_investigate_rounds: 2 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
