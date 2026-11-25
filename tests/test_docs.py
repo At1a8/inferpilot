@@ -1,8 +1,9 @@
 """What the code reads and what the docs say stay in step: every environment variable that setup, the
 container script and the runner read is in the READMEs, every other script names the ones it reads in
 its own header, every variable the READMEs' tables list is read by something, the command-line flags
-the READMEs and AGENTS.md give exist, and the branch bundle the roles write is the one a retry or a
-resume takes the task's commits from, with commands that do it. Offline.
+the READMEs and AGENTS.md give exist, the branch bundle the roles write is the one a retry or a
+resume takes the task's commits from, with commands that do it, and the detached launcher of
+knowledge/env_hygiene.md leaves the run's PID and exit status. Offline.
 
 The roles and the doctrine also agree on G0: it runs only where a change has a switch, and each role that
 reports it says what it reports without one.
@@ -10,9 +11,15 @@ reports it says what it reports without one.
     python3 -m unittest discover -s tests
 """
 import ast
+import os
 import re
+import shlex
+import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -240,6 +247,22 @@ def flags_in(text, command):
     return out
 
 
+class TokenComparisonTest(unittest.TestCase):
+    """G2 compares scores, not tokens: a token comparison is a diagnosis aid or the subject of a determinism
+    task (knowledge/validation_doctrine.md). No other document asks a gate for outputs equal to another
+    run's, which a bf16 baseline does not give twice."""
+
+    ASKS = re.compile(r"output\s+parity|match(?:es)?\s+greedy\s+output|greedy\s+outputs?\s+(?:equal|identical|match\w*)", re.I)
+
+    def test_no_gate_asks_for_output_parity(self):
+        doctrine = " ".join((ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").split())
+        self.assertIn("never the accuracy gate", doctrine)
+        found = ["%s: %s" % (path.relative_to(ROOT), " ".join(m.group(0).split()))
+                 for pattern in ("knowledge/*.md", "roles/*.md", "templates/*.md") for path in sorted(ROOT.glob(pattern))
+                 for m in self.ASKS.finditer(path.read_text(encoding="utf-8"))]
+        self.assertEqual(found, [], "these ask for outputs equal to another run's; G2 compares scores")
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_setup_container_and_runner_variables_are_in_both_readmes(self):
         missing = ["%s reads %s; %s does not say what it does" % (path.relative_to(ROOT), name, readme)
@@ -258,6 +281,136 @@ class EnvironmentTest(unittest.TestCase):
         read = set().union(*(inputs(p) for p in code_files()))
         self.assertEqual([], ["README.md lists %s, which nothing reads" % name
                               for name in sorted(table_names(EN)) if ENV_NAME.match(name) and name not in read])
+
+
+class LongGatesTest(unittest.TestCase):
+    """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
+    and hands to every role. G4 is the task's performance client run back to back for more than 48 hours
+    (scripts/stability.sh), once in a run, judged between its first hours and its last; its failure gets
+    its baseline control in the same round, is the baseline's only at a comparable time, and is never
+    reported as a pass (knowledge/validation_doctrine.md). The roles, the templates and both READMEs say
+    the same."""
+
+    FLAGS = ("long_context", "stability")
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_task_definition_takes_the_two_fields_off_by_default(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `long_context`, `stability` |")]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the two fields")
+        self.assertIn("each off by default", row[0])
+        for flag in self.FLAGS:
+            self.assertIn("'%s'" % flag, keys, "inferpilot.js does not take %s" % flag)
+            self.assertIn("\n  %s: { enum: [true, false, 'true', 'false', ''] }," % flag, intake,
+                          "the intake's %s is not true or false: another word would be read as off" % flag)
+            self.assertRegex(src, r"\nconst [A-Z_]+ = on\(A\.%s\);" % flag, "%s is not off unless the task sets it" % flag)
+            self.assertRegex(src, r"\n  %s: [A-Z_]+,\n" % flag, "%s does not reach the roles" % flag)
+            self.assertIn("args.%s" % flag, src, "inferpilot.js's whenToUse does not name %s" % flag)
+            for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+                self.assertIn(flag, table_names(text), "%s has no row for %s" % (name, flag))
+
+    def test_g3_and_g4_run_only_when_the_task_sets_their_field(self):
+        for path in ("knowledge/validation_doctrine.md", "knowledge/acceptance.md", "knowledge/dev_methodology.md",
+                     "roles/intake.md", "roles/director.md", "roles/verify_engineer.md",
+                     "templates/task_definition.md", "templates/feature_spec.md"):
+            text = self.flat(path)
+            for flag in self.FLAGS:
+                self.assertIn("`%s`" % flag, text, "%s does not name %s" % (path, flag))
+            self.assertNotRegex(text, r"G3 and G4[^.|]*`goal`[^.|]* asks", "%s still makes `goal` the switch" % path)
+        self.assertIn("G3 only with `long_context` on, G4 only with `stability` on", self.flat("roles/verify_engineer.md"))
+        self.assertIn("`goal` does not turn a gate on", self.flat("knowledge/validation_doctrine.md"))
+        self.assertIn("a `goal` the caller gave does not drop what the request asked", self.flat("roles/intake.md"))
+        spec = (ROOT / "templates" / "feature_spec.md").read_text(encoding="utf-8")
+        for gate, flag in zip(("G3", "G4"), self.FLAGS):
+            row = [line for line in spec.splitlines() if line.startswith("| %s " % gate)]
+            self.assertEqual(len(row), 1, gate)
+            self.assertIn("only with `%s` on; else `not run: not asked`" % flag, row[0], gate)
+        acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
+        profile = [line for line in acceptance.splitlines() if line.startswith("| Stability | ") and "G4)" in line]
+        self.assertEqual(len(profile), 1)
+        self.assertNotIn("required", profile[0], "no profile makes G4 required")
+
+    def test_g4_is_one_run_of_more_than_48_hours(self):
+        for path in ("knowledge/validation_doctrine.md", "knowledge/acceptance.md", "roles/verify_engineer.md",
+                     "roles/director.md", "roles/intake.md", "templates/task_definition.md", "templates/feature_spec.md"):
+            self.assertRegex(self.flat(path), r"more than 48 h(?:ours)?\b", "%s does not give G4 its 48 hours" % path)
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertNotIn("G3/G4 at two or more concurrencies", verify, "G4 is one run, at one concurrency")
+        self.assertIn("G4 stability is one run, not repeated and not taken to other concurrencies", verify)
+        doctrine = self.flat("knowledge/validation_doctrine.md")
+        self.assertNotIn("Run G3/G4 at more than one concurrency", doctrine)
+        self.assertIn("G4 is the exception: one run of more than 48 hours", doctrine)
+
+    def test_a_drift_is_judged_between_the_first_hours_and_the_last(self):
+        """Not by the spread of the whole run: a steady fall from 100 to 50 lies within its own range."""
+        hourly = ("Each hour of the run has one value of throughput and one of memory: the median of the passes "
+                  "that ended in it, the first pass left out as warm-up.")
+        window = ("The median of the last 6 hours' values is no lower in throughput, and no higher in memory, than "
+                  "the median of the first 6 hours' by more than the range of those first 6 values.")
+        for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md"):
+            text = self.flat(path)
+            self.assertIn(hourly, text, "%s does not say what an hour's value is" % path)
+            self.assertIn(window, text, "%s does not compare the first hours with the last" % path)
+            self.assertNotRegex(text, r"beyond the spread of (?:its hourly|the) samples", path)
+
+    def test_a_failed_g4_gets_its_control_in_the_round_and_stays_failed(self):
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("A failed G4 gets its control in this round", verify)
+        self.assertIn("its estimate counts G4 twice, its run and the control a failure would need", verify)
+        self.assertIn("A known issue never turns a failed G4 into a pass** (step 4 does not apply to it)", verify)
+        self.assertIn("until `known_issues` holds it as the baseline's: from then on report it as failed, with that "
+                      "issue, in `failures` with `blocking: false`", verify)
+        investigator = self.flat("roles/investigator.md")
+        self.assertIn("comes with its same-pattern baseline control already run", investigator)
+        doctrine = self.flat("knowledge/validation_doctrine.md")
+        self.assertIn("A failed G4 gets its baseline control in the same round, and stays failed", doctrine)
+        self.assertIn("G4 keeps its verdict even so", doctrine)
+
+    def test_a_g4_failure_is_the_baselines_only_at_a_comparable_time(self):
+        """The same signature is not enough: hour 1 against the baseline's hour 47 is a change in rate."""
+        for path in ("knowledge/validation_doctrine.md", "roles/investigator.md"):
+            text = self.flat(path)
+            self.assertIn("the same failure at a comparable time", text, path)
+            self.assertRegex(text, r"Hour 31 against the baseline's hour 27 is(?: comparable)?; hour 1 against hour 47 is a "
+                                   r"change in rate, which is the change's", path)
+            self.assertRegex(text, r"A control that ended another way first, or was interrupted, (?:says|shows) nothing "
+                                   r"about this failure", path)
+            self.assertIn("`inconclusive`", text, path)
+
+    def test_the_investigator_starts_no_control_it_cannot_finish(self):
+        investigator = self.flat("roles/investigator.md")
+        self.assertIn("never start a run that cannot finish in it", investigator)
+        self.assertIn("return `inconclusive` with the long controls still to run", investigator)
+
+    def test_g4_runs_once_in_a_run_and_its_result_names_its_commit(self):
+        self.assertIn("G4 runs once in a run, and its result names its commit", self.flat("knowledge/validation_doctrine.md"))
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("**G4 runs once in a run.** Write the commit it ran on", verify)
+        self.assertIn("say in `gates` that this commit has not been through G4", verify)
+        self.assertIn("Only a G4 whose failure was the change's is run again, on the fix", verify)
+        self.assertIn("the code handed over has not been through G4", self.flat("roles/director.md"))
+        self.assertIn("G4 runs once in a run", self.flat("templates/task_definition.md"))
+        self.assertIn("once in a run", EN)
+        self.assertIn("一次运行里只跑一次", ZH)
+
+    def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
+        doctrine = self.flat("knowledge/validation_doctrine.md")
+        self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)
+        self.assertNotIn("throughput_test.py", doctrine, "a finite batch looped lets the concurrency drain")
+        for path in ("knowledge/validation_doctrine.md", "roles/verify_engineer.md", "templates/task_definition.md",
+                     "templates/feature_spec.md", "README.md", "README.zh-CN.md"):
+            self.assertIn("scripts/stability.sh", self.flat(path), "%s does not name G4's script" % path)
+        self.assertTrue((ROOT / "scripts" / "stability.sh").is_file())
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertRegex(src, r"asked\(a\.stability\) === 'true' && !a\.client_script", "stability is on without a client to run")
+        for field in self.FLAGS:
+            self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
 
 
 class FlagsTest(unittest.TestCase):
@@ -465,6 +618,255 @@ class BranchBundleTest(unittest.TestCase):
             # rollback of ALL: nothing beyond the base, which implementer.md says git refuses to bundle
             git("reset", "-q", "--hard", base, cwd=old)
             self.assertNotEqual(run(create, **subs).returncode, 0, "an empty bundle was written")
+
+
+def alive(pid):
+    """Whether pid runs: a zombie nobody has reaped yet does not."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+class DetachedRunTest(unittest.TestCase):
+    """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
+    documented launcher leaves the run's PID and exit status where that shell reads them, whatever the
+    script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control; no
+    other launch shares its log and records, a wrapper that has exited is gone though nobody reaped it, and
+    the stop ends every process the launch gave its mark to, and no other."""
+
+    # (the script, its arguments, the status it ends with, what its log has)
+    SCRIPTS = (
+        ("EXTRA_ARGS='--foo 1' sh -c 'echo \"results written $EXTRA_ARGS\"'\nexec sh -c 'exit 3'\necho never\n", [],
+         "3", "results written --foo 1"),
+        ("set -e\necho results written\nfalse\necho never\n", [], "1", "results written"),
+        ("echo results written\nexit 4\necho never\n", [], "4", "results written"),
+        ('printf "%s|" "$#" "$@"; echo\n', ["gsm8k", "two words"], "0", "2|gsm8k|two words|"),
+    )
+
+    def setUp(self):
+        self.launch = doc_command("knowledge/env_hygiene.md", 'INFERPILOT_LAUNCH="$(realpath <log>)" setsid nohup')
+        self.assertIsNotNone(self.launch, "env_hygiene.md gives no detached launcher")
+        if not shutil.which("setsid"):
+            self.skipTest("no setsid here")
+        self.doc = re.sub(r"\s+", " ", (ROOT / "knowledge/env_hygiene.md").read_text())
+
+    def start(self, d, body, args=(), job_control=False):
+        """Launch body with the documented launcher, from a directory whose name has a space; its log."""
+        (Path(d) / "a run").mkdir()
+        script, log = Path(d) / "a run" / "run.sh", Path(d) / "a run" / "run.log"
+        script.write_text(body)
+        cmd = (self.launch.replace("<log>", shlex.quote(str(log))).replace("<script>", shlex.quote(str(script)))
+               .replace("[<arg>...]", " ".join(shlex.quote(a) for a in args)))
+        subprocess.run(["bash", "-c", ("set -m; " if job_control else "") + cmd], check=True, timeout=30)
+        return log
+
+    @staticmethod
+    def read(path):
+        """What path holds once it holds something; None when it is still empty after 10 s."""
+        for _ in range(200):
+            if path.exists() and path.read_text().strip():
+                return path.read_text().strip()
+            time.sleep(0.05)
+        return None
+
+    def test_a_run_that_writes_its_results_and_fails_is_seen_to_fail(self):
+        for body, args, code, output in self.SCRIPTS:
+            with self.subTest(script=body), tempfile.TemporaryDirectory() as d:
+                log = self.start(d, body, args)
+                self.assertEqual(self.read(Path("%s.exit" % log)), code)
+                self.assertIn(output, log.read_text())
+                self.assertNotIn("never", log.read_text())
+        self.assertIn("A run is done when `<log>.exit` has its status, and passed only when that is 0", self.doc)
+        self.assertIn("The script runs in a shell of its own, so an `exit`, an `exec` or `set -e` in it ends that "
+                      "shell and the status is still written", self.doc)
+
+    def test_the_pid_it_records_is_the_run_s_in_a_shell_with_job_control(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 2\n", job_control=True)
+            pid = self.read(Path("%s.pid" % log))
+            self.assertIsNotNone(pid, "the wrapper wrote no PID")
+            pid = int(pid)
+            self.assertTrue(alive(pid), "the recorded PID is gone while its run goes on")
+            self.assertEqual((os.getsid(pid), os.getpgid(pid)), (pid, pid), "the recorded PID leads no session and group of its own")
+            self.assertEqual(self.read(Path("%s.exit" % log)), "0")
+        self.assertIn("The run's PID is the one in `<log>.pid`, once the file has it, not `$!`", self.doc)
+
+    def test_a_run_stopped_with_its_wrapper_leaves_no_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 30\n")
+            pid = int(self.read(Path("%s.pid" % log)))
+            os.killpg(pid, signal.SIGTERM)
+            for _ in range(200):
+                if not alive(pid):
+                    break
+                time.sleep(0.05)
+            self.assertFalse(alive(pid), "the wrapper outlived its group")
+            self.assertFalse(Path("%s.exit" % log).exists(), "a wrapper stopped with its run wrote a status")
+        self.assertIn("A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with its run", self.doc)
+
+    def test_two_launches_in_one_second_get_records_of_their_own(self):
+        make = doc_command("knowledge/env_hygiene.md", "mktemp RUN_DIR/logs/")
+        self.assertIsNotNone(make, "env_hygiene.md gives no command that makes a launch's log")
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "logs").mkdir()
+            cmd = make.replace("RUN_DIR", shlex.quote(d)).replace("<tag>", "arm").replace("<time>", "20261125-010203Z")
+            logs = [subprocess.run(["bash", "-c", cmd], check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+                    for _ in range(2)]
+            self.assertNotEqual(logs[0], logs[1])
+            self.assertTrue(all(Path(p).is_file() and p.endswith(".log") and "/logs/arm_20261125-010203Z_" in p for p in logs), logs)
+        self.assertIn("a launch in the same second as another, a retry's among them, still gets a log of its own", self.doc)
+
+    def test_a_wrapper_that_has_exited_is_gone_though_nobody_reaped_it(self):
+        check = doc_command("knowledge/env_hygiene.md", "grep -qs '^State:")
+        self.assertIsNotNone(check, "env_hygiene.md gives no check that a wrapper still runs")
+
+        def runs(pid):
+            return subprocess.run(["bash", "-c", check.replace("<pid>", str(pid))], timeout=30).returncode == 0
+
+        live, done = subprocess.Popen(["sleep", "30"]), subprocess.Popen(["true"])
+        try:
+            for _ in range(200):
+                if Path("/proc/%d/stat" % done.pid).read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                    break
+                time.sleep(0.05)
+            self.assertTrue(runs(live.pid), "a process that runs is not seen to")
+            self.assertFalse(runs(done.pid), "a zombie is seen to run")
+            done.wait()
+            self.assertFalse(runs(done.pid), "a process that is gone is seen to run")
+        finally:
+            live.kill()
+            live.wait()
+            done.wait()
+        self.assertIn("Not `kill -0 <pid>`: it succeeds for a wrapper that has exited and that nobody has reaped", self.doc)
+
+    @staticmethod
+    def stop(*logs, stdin=False, env=None, grace="1"):
+        """scripts/stop_launch.py on logs, with a second of grace: its exit status and what it printed."""
+        script = ROOT / "scripts" / "stop_launch.py"
+        cmd = [sys.executable, "-" if stdin else str(script)] + [str(log) for log in logs] + ["--grace", grace]
+        with open(script, encoding="utf-8") as program:
+            out = subprocess.run(cmd, stdin=program if stdin else subprocess.DEVNULL, capture_output=True, text=True,
+                                 timeout=60, env=dict(os.environ, **(env or {})))
+        return out.returncode, out.stdout + out.stderr
+
+    def pids(self, *paths):
+        got = [self.read(Path(p)) for p in paths]
+        self.assertNotIn(None, got, "the run did not start what it was to")
+        return [int(p) for p in got]
+
+    @staticmethod
+    def kill(pids):
+        for p in pids:
+            if alive(p):
+                os.kill(p, signal.SIGKILL)
+
+    def test_a_stop_ends_every_process_of_the_launch(self):
+        # A worker that ignores SIGTERM; one whose parent has exited and that leads a session of its own,
+        # which only its environment still ties to the launch; and one with no environment, below the script.
+        body = ('bash -c \'trap "" TERM; exec sleep 60\' &\necho $! > "$1/stubborn"\n'
+                '(setsid sleep 60 & echo $! > "$1/away")\n'
+                'env -i sleep 60 &\necho $! > "$1/bare"\nsleep 60\n')
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, body, [str(Path(d) / "a run")])
+            pids = self.pids("%s.pid" % log, "%s/a run/stubborn" % d, "%s/a run/away" % d, "%s/a run/bare" % d)
+            try:
+                self.assertNotEqual(os.getsid(pids[2]), pids[0], "the worker that left the session is still in it")
+                code, out = self.stop(log)
+                self.assertEqual(code, 0, out)
+                self.assertEqual([p for p in pids if alive(p)], [], "a process of the launch outlived its stop")
+            finally:
+                self.kill(pids)
+        self.assertIn("every process whose environment holds `INFERPILOT_LAUNCH` with one of these logs, whatever became of "
+                      "its parent, its session or the wrapper, and what those started", self.doc)
+        self.assertIn("SIGKILLs those still there after `--grace` seconds (30 unless given), and exits 0 once none is left", self.doc)
+
+    def test_a_stop_ends_what_a_wrapper_that_exited_left_and_reads_no_pid_from_a_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, 'sleep 60 &\necho $! > "$1/left"\n', [str(Path(d) / "a run")])
+            wrapper, left = self.pids("%s.pid" % log, "%s/a run/left" % d)
+            # Another process has the recorded PID now, and the log among its arguments.
+            stranger = subprocess.Popen(["tail", "-f", str(log)], stdout=subprocess.DEVNULL)
+            try:
+                self.assertEqual(self.read(Path("%s.exit" % log)), "0")
+                for _ in range(200):
+                    if not alive(wrapper):
+                        break
+                    time.sleep(0.05)
+                Path("%s.pid" % log).write_text("%d\n" % stranger.pid)
+                code, out = self.stop(log, stdin=True)
+                self.assertEqual(code, 0, out)
+                self.assertFalse(alive(left), "what the wrapper left outlived the stop")
+                self.assertTrue(alive(stranger.pid), "a stop signalled the process that has the recorded PID now")
+                self.assertEqual(self.stop(Path(d) / "another.log")[0], 2, "a log that does not exist is taken for a stopped launch")
+                self.assertEqual(self.stop(log, grace="-1")[0], 2, "a grace below 0 is taken")
+            finally:
+                stranger.kill()
+                stranger.wait()
+                self.kill([left])
+        self.assertIn("not by a PID read later", self.doc)
+        self.assertIn("2 for a log that does not exist", self.doc)
+        self.assertIn("`docker exec -i <container> python3 - <log>... < <inferpilot_dir>/scripts/stop_launch.py`", self.doc)
+
+    def test_a_stop_takes_the_launches_it_is_given_together_and_no_other(self):
+        with tempfile.TemporaryDirectory() as d:
+            logs, pids = [], []
+            for name in ("a", "b", "c"):
+                (Path(d) / name).mkdir()
+                logs.append(self.start(str(Path(d) / name), 'bash -c \'trap "" TERM; exec sleep 60\'\n'))
+                pids += self.pids("%s.pid" % logs[-1])
+            try:
+                code, out = self.stop(logs[0], logs[1])
+                self.assertEqual(code, 0, out)
+                self.assertEqual([alive(p) for p in pids], [False, False, True], "the stop ended another launch, or left one of its own")
+            finally:
+                self.stop(*logs)  # the third launch, and what its wrapper started
+                self.kill(pids)
+        self.assertIn("All the launches of a call go in one command, which takes little more than twice the grace", self.doc)
+
+    def test_a_stop_started_from_a_shell_of_the_launch_ends_the_launch_not_itself(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 60\n")
+            pids = self.pids("%s.pid" % log)
+            try:
+                code, out = self.stop(log, env={"INFERPILOT_LAUNCH": os.path.realpath(log)})
+                self.assertEqual(code, 0, out)
+                self.assertFalse(alive(pids[0]), "the launch outlived its stop")
+            finally:
+                self.kill(pids)
+
+    def test_a_stop_that_exits_0_has_not_reached_a_process_with_no_mark_and_no_parent_and_the_gpus_are_checked(self):
+        # Started with an empty environment by a shell that then exited: nothing ties it to the launch.
+        body = '(env -i setsid sh -c \'echo $$ > "$1"; exec sleep 60\' _ "$1/gone" &)\nsleep 60\n'
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, body, [str(Path(d) / "a run")])
+            wrapper, gone = self.pids("%s.pid" % log, "%s/a run/gone" % d)
+            try:
+                for _ in range(200):
+                    parent = Path("/proc/%d/stat" % gone).read_text().rsplit(")", 1)[1].split()[1]
+                    try:
+                        if b"INFERPILOT_LAUNCH=" not in Path("/proc/%s/environ" % parent).read_bytes():
+                            break
+                    except OSError:
+                        pass
+                    time.sleep(0.05)
+                code, out = self.stop(log)
+                self.assertEqual(code, 0, out)
+                self.assertFalse(alive(wrapper), "the launch outlived its stop")
+                self.assertTrue(alive(gone), "the stop reaches such a process: what the documents say of it is out of date")
+            finally:
+                self.kill([wrapper, gone])
+        self.assertIn("Its exit 0 says the processes it could find are gone, not that the GPUs are free", self.doc)
+        self.assertIn("`python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`, where the servers run, before the "
+                      "call's first launch and again once the stop exits 0", self.doc)
+        self.assertIn("A GPU idle at the first and in use at the second is held by something the call started and the stop did "
+                      "not reach", self.doc)
+        script = re.sub(r"\s+", " ", (ROOT / "scripts" / "stop_launch.py").read_text())
+        self.assertIn("So 0 says the processes it could find are gone, not that the GPUs are free", script)
 
 
 if __name__ == "__main__":

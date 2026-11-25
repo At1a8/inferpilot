@@ -18,7 +18,7 @@ expects:
   stability: "not claimed as a dedicated stress test"
   perf: "at least vLLM #49406's speed-up over no speculation at concurrency 1 on its 4 x 80-prompt case"
 validation:
-  status: validated                  # for the gates claimed below: G2 and G5 (G1 parity on an earlier revision)
+  status: validated                  # for the gates claimed below: G2 and G5 (G1: accept length against vLLM's on this revision, draft parity on an earlier one)
   last_verified: "2026-11-19"
   framework_commit: "179247229d (sglang main a735253e84 + the PR's 3 commits)"
   model: "Qwen3-8B with amd/PARD2-Qwen3-8B, K = 15"
@@ -143,7 +143,11 @@ Startup logs `PARD2 draft worker: mode=..., target_proj loaded=...`.
 ## Validation recipe
 
 - G1 (reference): first-step draft logits against the PARD-2 HF reference (`pard/pard2_infer.py` of
-  AMD-AGI/PARD) on 16 prompts, TD and TI: top-1 identical.
+  AMD-AGI/PARD) on 16 prompts, TD and TI: top-1 identical. Accept length against the source's, on
+  vLLM's case at concurrency 1 (the G5 item below gives its prompts and settings): TD 7.52 / 8.42 /
+  8.56 / 3.97 on GSM8K / MATH-500 / HumanEval / MT-Bench where vLLM #49406 reports 7.72 / 8.09 / 8.72 /
+  4.02, at most 4.1% apart; on GSM8K at concurrency 8 and 32, 7.61 / 7.58 against 7.70 / 7.52. The
+  gsm8k test's 6.65 (5-shot) is another prompt set and is not compared with them.
 - G2 accuracy: gsm8k, all 1319 questions (`scripts/eval_accuracy.sh`, evalscope), within 1 point of the
   target alone. PARD-2 verifies exactly, so it is a lossless change: gpqa_diamond and simple_qa are not
   needed. Measured with the PR's CI test (5-shot, greedy; it also asserts accuracy > 0.88 and accept

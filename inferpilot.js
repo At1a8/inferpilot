@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
-  description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0-G4 against a same-pattern baseline, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -17,7 +17,7 @@ export const meta = {
     { title: 'Plan', detail: 'architect: performance work packages, kernel hand-offs, PRs to apply [perf]' },
     { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on failure' },
     { title: 'Kernel', detail: 'kernel_liaison: kernel hand-offs to args.kernel_backend (none records them; geak runs the kernel lane of a GEAK checkout as an outside program; command runs a kernel agent CLI); gains integrated as work packages' },
-    { title: 'Verify', detail: 'verify_engineer: G0-G4 against the same-pattern baseline plus mode gates; investigator loop on failure' },
+    { title: 'Verify', detail: 'verify_engineer: G0 and G2 against the same-pattern baseline, G3 and G4 when the task asks, plus mode gates; investigator loop on failure' },
     { title: 'Investigate', detail: 'investigator: controls first, hypothesis ledger, fix or baseline bug' },
     { title: 'Performance', detail: 'perf_engineer: G5 equal-budget A/B and guard workloads' },
     { title: 'Review', detail: 'reviewer: independent review of the diff and its evidence; requested changes come back as work packages' },
@@ -80,6 +80,13 @@ const timeoutFor = (role) => GRANTED_MS[role]
   || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
+// The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
+// rounded up can put the reserve's start before the call's.
+const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100) : 0);
+// The unit and Verify gates are not asked again by the engine, under what is left of the same limit: an
+// answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
+// told to check first what the one before left.
+const ONE_SESSION = { schemaRetries: 0 };
 // One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
 // its longest agent call has died, and its lock may be taken over.
 const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
@@ -114,7 +121,7 @@ const strs = arr(str);
 const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_path', 'platform', 'gpu_ids',
   'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs', 'sources', 'since',
   'stop_after', 'resume_from', 'run_dir',
-  'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune',
+  'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
   'image', 'image_ok', 'bisect_fixed', 'confirm_leads'];
 // '' is accepted for the enums so an undecided field costs no schema retry; pick() drops it.
@@ -142,6 +149,10 @@ const TASK_DEF = S({
   kernel_backend: { type: 'string', enum: [...KERNEL_BACKENDS, ''] },
   kernel_backend_dir: str,
   kernel_backend_command: str,
+  // set only when the request asks for the gate: true or false, as a word too; any other value ("yes", 1)
+  // is asked for again, since on() would read it as off and the run would leave the gate out
+  long_context: { enum: [true, false, 'true', 'false', ''] },
+  stability: { enum: [true, false, 'true', 'false', ''] },
 });
 const INTAKE = S({
   status: { type: 'string', enum: ['ready', 'needs_input', 'rejected'] },
@@ -216,6 +227,21 @@ function missingFields(a) {
     ask('client_script', 'Which script runs the workload against the server (absolute path)? It reads PORT and writes its logs to OUT_DIR. '
       + `Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${mode === 'feature' ? ', whose numbers are reported, never a claim' : ''}.`,
       'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  }
+  // A gate's field the caller set to anything but true or false would leave the gate out without a word.
+  const asked = (v) => String(v).trim().toLowerCase();
+  for (const [field, gate] of [['long_context', 'G3, the long-context gate'], ['stability', 'G4, the stability run of more than 48 hours']]) {
+    if (a[field] != null && a[field] !== '' && !['true', 'false'].includes(asked(a[field]))) {
+      ask(field, `Should the run include ${gate}?`,
+        `${field} takes true or false, and ${JSON.stringify(a[field])} is neither: the run would leave the gate out`, ['true', 'false']);
+    }
+  }
+  // G4 keeps the task's performance test up for more than 48 hours: it needs the client that runs it,
+  // also where the mode alone asks for none (asked above for perf, and for a feature with a workload).
+  if (mode !== 'scan' && mode !== 'perf' && !(mode === 'feature' && a.workload) && asked(a.stability) === 'true' && !a.client_script) {
+    ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
+      + `writes its logs to OUT_DIR. Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload.`,
+      'stability is on: G4 runs this client back to back against one server', [TEMPLATE]);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {
@@ -307,6 +333,10 @@ const GUARDS = on(A.guards);
 const SWEEP = on(A.sweep);
 const TUNE = on(A.tune);
 const BISECT_FIXED = on(A.bisect_fixed);
+// Correctness gates that take hours or days, each off unless the task asks for it: G3 (long context)
+// and G4 (stability: one throughput test of more than 48 hours, validation_doctrine.md).
+const LONG_CONTEXT = on(A.long_context);
+const STABILITY = on(A.stability);
 // leads cost GPU time only when asked: by default Spinoff lists them and runs nothing
 const CONFIRM_LEADS = on(A.confirm_leads);
 const RESUME = String(A.resume_from || '').trim().toLowerCase();
@@ -335,6 +365,8 @@ const C = {
   guards: GUARDS,
   sweep: SWEEP,
   tune: TUNE,
+  long_context: LONG_CONTEXT,
+  stability: STABILITY,
   confirm_leads: CONFIRM_LEADS,
   assumptions: START.assumptions || [],
   kernel_backend: KERNEL_BACKEND,
@@ -418,7 +450,7 @@ const stopHere = (title) => {
 // The same check where the verify, review and PR repair loops end a phase again: a stop named while the
 // run is in such a loop ends the run there, as the route's own checks do on its first pass.
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
-const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.stopped ? r.at : at);
+const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
@@ -499,8 +531,11 @@ async function call(role, sub, ins, schema, label, opts) {
   const ms = timeoutFor(role);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+    // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
+    const told = ins.time_limit_min > 0 && ms > 0
+      ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
-      const r = await withTimeout(agent(rolePrompt(role, sub, ins, attempt, leads),
+      const r = await withTimeout(agent(rolePrompt(role, sub, told, attempt, leads),
         { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
@@ -665,7 +700,8 @@ const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean'
 const VERIFY = S({
   all_pass: bool,
   gates: obj,
-  // blocking false: a report-only item of the acceptance matrix, which is reported and never investigated
+  // blocking false: a report-only item of the acceptance matrix, or a G4 failure the investigator found on the
+  // baseline too (a known issue): reported, and not investigated (again)
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
   needs_min: num, // the round stopped before a suite that would not fit: the limit it needs, from its start
   ledger_path: str,
@@ -779,6 +815,7 @@ async function finish(status, at) {
       // A base run that fails for another reason would pass for a confirmed lead: a timed-out agent may still
       // hold the GPUs, and a run that ended at Setup never showed the environment works.
       const skipped = !C.confirm_leads ? [] : [...TIMED_OUT_CALLS].map((c) => `${c} timed out`)
+        .concat(leftRunning)
         .concat(at === 'Setup' ? ['the run stopped at Setup'] : [])
         .concat(liveStopAfter() === 'now' ? ['the control file asked the run to stop now'] : []);
       const sp = await call('issue_triager', 'spinoff', inputs({ status, stopped_at: at || '', phases: R.phases,
@@ -986,9 +1023,21 @@ async function setup(requireBaseline) {
 // the package is rolled back to the last verified commit and the task stops.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
-function stalled(wp, label) {
+// Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
+function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
-  return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
+}
+// Gates and rounds that ended without a result and may have left detached runs on the GPUs.
+const leftRunning = [];
+// A unit gate whose every attempt ended without an answer may have left the runs it started going, as a
+// call that timed out may: no further round and no rollback either, and a human stops what it left.
+function noAnswer(wp, label, commit) {
+  ATTENTION.push({ wp: wp.id, worktree: C.worktree, issue: `${label} returned no answer: commit ${commit} stays in the `
+    + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
+  leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
+  note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} returned no answer` };
 }
 
 async function implementAll(wps) {
@@ -1028,19 +1077,19 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit',
-        inputs({ work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test }), UNIT, utLabel);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
+        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
+        ONE_SESSION);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
+      if (!ut) return noAnswer(wp, utLabel, im.commit);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
-      const bites = !!ut && (['parent', 'mutant'].includes(ut.fails_without_change)
-        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs'));
-      if (ut && ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
+      const bites = ['parent', 'mutant'].includes(ut.fails_without_change)
+        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs');
+      if (ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
         passed = true;
         R.done.push({ wp: wp.id, commit: im.commit, evidence: ut.evidence || '' });
-      } else if (!ut) {
-        feedback = 'the test engineer returned nothing';
       } else if (ut.unit_pass === true && ut.feature_off_unchanged === true) {
         feedback = `the unit test cannot fail (fails_without_change=${ut.fails_without_change}); make it fail on the parent `
           + `commit, or on a copy of the change broken in one way when the change keeps behaviour`
@@ -1081,7 +1130,7 @@ async function verifyLoop(extraGates) {
     for (let again = false; ; again = true) {
       const limit = minutes(timeoutFor('verify_engineer'));
       v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
-        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`);
+        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`, ONE_SESSION);
       const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
         ? Math.ceil(Number(v.needs_min) || 0) : 0;
       if (!needs) break;
@@ -1095,6 +1144,9 @@ async function verifyLoop(extraGates) {
     }
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
+      leftRunning.push(`Verify round ${round} may have left its servers running`);
+      ATTENTION.push({ call: `verify_engineer#${round}`, issue: `Verify round ${round} returned no answer and may have left its `
+        + 'servers running: stop them before reusing its GPUs' });
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
@@ -1102,7 +1154,7 @@ async function verifyLoop(extraGates) {
     const blocking = failures.filter((f) => f.blocking !== false);
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
-      note('Verify', 'pass', `${v.summary || 'all blocking gates pass'}${missed ? `; report-only items missed: ${missed}` : ''}`);
+      note('Verify', 'pass', `${v.summary || 'all blocking gates pass'}${missed ? `; missed without blocking: ${missed}` : ''}`);
       return { ok: true };
     }
     const failing = blocking.map((f) => `${f.gate}${f.failure_class ? `:${f.failure_class}` : ''}`).join(', ');
@@ -1126,7 +1178,7 @@ async function verifyLoop(extraGates) {
     }
     if (inv.verdict === 'kernel_regression') {
       const back = await rejectKernels(inv.kernel_handoffs || [], inv.counterexample || inv.summary || '');
-      if (!back.ok) return { ok: false, reason: back.reason };
+      if (!back.ok) return { ok: false, at: back.at, reason: back.reason };
       continue;
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
@@ -1134,7 +1186,8 @@ async function verifyLoop(extraGates) {
       if (!fix.ok) return { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
-      await kernelStage(); // hand-offs a fix raised
+      const ks = await kernelStage(); // hand-offs a fix raised
+      if (ks.held) return { ok: false, at: 'Kernel', reason: ks.held };
       const afterKernel = stopAt('Kernel');
       if (afterKernel) return afterKernel;
       continue;
@@ -1170,8 +1223,8 @@ async function rejectKernels(ids, counterexample) {
     note('Investigate', 'kernel_rejected', `${h.id}: back to the functional kernel${suffix}`
       + `${retry ? '; handed back once with the failing case' : '; rejected after its retry'}`);
   }
-  await kernelStage();
-  return { ok: true };
+  const ks = await kernelStage();
+  return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
 async function performance(claim) {
@@ -1234,11 +1287,12 @@ async function reviewLoop(extraGates, perfClaim, runPerf) {
 async function repaired(extraGates, perfClaim, runPerf) {
   const afterFix = stopAt('Implement');
   if (afterFix) return afterFix;
-  await kernelStage(); // hand-offs a requested change raised
+  const ks = await kernelStage(); // hand-offs a requested change raised
+  if (ks.held) return { ok: false, at: 'Kernel' };
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
   const ver = await verifyLoop(extraGates);
-  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: 'Verify' };
+  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify' };
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {
@@ -1308,6 +1362,18 @@ async function kernelStage() {
     if (res && res.status === 'improved' && res.integrate_wp) {
       h.status = 'not_integrated'; // what stays when a stop asked for now ends the run before Implement
       const r = await implementAll([res.integrate_wp]);
+      // Not rolled back (a gate without a result, a call that timed out): the commit stays, so the run stops.
+      if (r.held) {
+        h.status = 'integration_held';
+        h.commit = r.commit || '';
+        // The hand-offs it had not reached are recorded, as with no back end: a later run takes them. Read
+        // now, not from `pending`: the integration's own implementer can have raised one.
+        const rest = R.handoffs.filter((p) => p.owner === 'kernel_workflow' && !p.status);
+        for (const p of rest) p.status = 'recorded';
+        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`
+          + `${rest.length ? `; ${rest.map((p) => p.id).join(', ')} recorded, not run` : ''}`);
+        return { integrated, held: r.reason };
+      }
       h.status = r.ok ? 'integrated' : 'integration_failed';
       if (r.ok) {
         integrated += 1;
@@ -1329,6 +1395,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   }
   if (stopHere('Implement')) return finish('stopped', 'Implement');
   const ks = await kernelStage();
+  if (ks.held) return finish('blocked', 'Kernel');
   if (!wps.length && ks.integrated === 0) return finish('no_gain', 'Kernel');
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
 

@@ -55,7 +55,7 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `ci_guardian` | Classify、Bisect | 给变红的 job 分类（代码回归、依赖升级、测试缺陷、偶发、基础设施），后两类移交出去；找到并确认引入问题的 commit，规划修复；对已在 main 上修复的 issue，设置 `bisect_fixed` 时找出修复它的 commit |
 | `implementer` | Implement | 一次一个工作包，diff 尽量小，关闭特性时行为不变，只影响 HIP 或放在开关后面，提交时已通过 lint、测试已注册；编写带单元测试的功能性 kernel（调优走 hand-off）；应用现成的 PR 和验证过的 kernel 收益；回滚失败的工作包 |
 | `test_engineer` | Implement | 在每个工作包的 commit 上重新运行它的单元测试，检查这个测试确实可能失败（改变行为的改动在父 commit 上验证，不改变行为的改动在故意改坏的副本上验证），并检查关闭特性时行为不变（没有开关的工作包，改为检查它涉及的模块已有的测试仍然通过） |
-| `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2–G4、组合性、模式专属门禁），对每个失败分类计数 |
+| `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数 |
 | `investigator` | Investigate、Diagnose | 先跑对照实验，再一次只验证一个机制，并维护假设台账；返回修复工作包、基线同样存在的已知问题、无法定论的结论，或者（对 issue 而言）不在 AMD 这一侧的根因；探测代码只放在开关后面 |
 | `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack |
 | `reviewer` | Review | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；可以换用另一个模型（`review_model`） |
@@ -255,7 +255,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `run.json` | 任务定义、intake 的假设，以及所在的容器（任务的分支在那个容器里） |
 | `validation_report.md`、`run_report.md` | 报告：PR 准备好时是前者，其他结局是后者（运行结果中的 `report_path` 给出路径） |
 | `experiment_ledger.md` | 环境、基线和每一次测量 |
-| `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>.log` |
+| `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
@@ -343,6 +343,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
+| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任务需要有 `client_script`），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
 | `review_model` | reviewer 使用的模型，随它的 agent 调用一起传入（InferPilot 的 runner 把它作为命令行工具的 `--model` 传入；在 Claude Code 里取决于它的 Workflow 工具） |
 | `max_fix_rounds`、`max_investigate_rounds`、`max_review_rounds`、`max_work_packages` | 预算 |
 | `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer 和 investigator 为 6 小时；Verify 一轮需要更长时间时，会说明需要多久并获得一次延长，除非给了 `agent_timeout_ms` |
@@ -371,6 +372,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/scan_issues.py` | 开放的 AMD issue，附关联 PR（以及其中哪些会关闭这个 issue）、回复情况和预计的 60 天自动关闭日期 |
 | `scripts/scan_ci.py` | 从 main 上 AMD CI 自己的运行和日志读出现状（每个失败 job：从何时开始失败、上次通过的时间、失败的测试、第一条错误），以及 Failure Tracker 的失败簇 |
 | `scripts/eval_accuracy.sh` | 用 evalscope（bootstrap 会安装）测一个正在运行的 server 的精度，即 G2 门禁（每个测试集比基线低不超过 1 个点）：默认跑 gsm8k 全部 1319 题；任务说明改动可能有损时，再加跑 gpqa_diamond 和 simple_qa（LLM judge 打分）；其他测试集按名字指定；每次都重新采样，从不用 evalscope 的缓存；有题没拿到答案的测试集不出成绩；key 只从环境变量读取 |
+| `scripts/stability.sh` | G4 的负载，在 `stability` 打开时使用：对同一个 server 把这次运行的 `client_script` 一遍接一遍地运行，直到过了 `HOURS`（G4 用 48；正在跑的那一遍会跑完），每一遍在 `OUT_DIR/stability.jsonl` 里记一行：client 的退出状态和结果，以及每张 GPU 和主机已用的内存。第一遍失败时就结束 |
 | `scripts/harness.py` | InferPilot 的模板（`templates/harness/`）：`show` 列出 server、性能压测 client 和精度三个模板的参数和默认值；`render` 生成一次运行要用的脚本（没有自己脚本的用户选了模板的 server 或 client、任务没带精度脚本时的精度脚本、Spec 的备用 client），参数先取任务给的值，再取 feature 源头测试用的值，server 的参数再取模型的 sglang cookbook 配方（`--cookbook`），最后用默认值，并写出 `harness.json`，记录每个值的来源 |
 | `scripts/scan_upstream.py` | 已合入的上游提交：新增的 CUDA 门控、CUDA 优先的特性、新模型 |
 | `scripts/audit_platform_gates.py` | 换到新架构时需要重新检查的平台门控（在 gfx1250 上为真的能力判断、wave32 假设） |

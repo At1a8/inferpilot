@@ -11,7 +11,10 @@
 - Scenarios the source reports: <data sets, input / output lengths, concurrency, sampling, thinking,
   hardware, and its numbers>; the port is measured on these with the user's server and client. Claim: a
   gain beyond the noise band there, the source's numbers for reference; the feature's own metric (e.g.
-  accept length) within <tolerance> of the source's
+  accept length) within <tolerance> of the source's <value, with the prompt set and settings it was
+  measured on; the reference implementation's on the same prompts when the source reports none>, judged
+  in G1. With no value to compare with: <the metric is reported only, and G1 below has no criterion for
+  it>.
 
 ## Feasibility
 
@@ -43,10 +46,10 @@
 | Gate | Suite | Threshold (relative to baseline in the same pattern) |
 |---|---|---|
 | G0 feature off | | the baseline's tests pass; accuracy and throughput as the baseline's |
-| G1 unit / oracle | | all cases pass, including self-check mode |
+| G1 unit / oracle | <unit tests; for a port with a value to compare with, the source's prompt set and settings> | all cases pass, including self-check mode; for a port with a value to compare with, the feature's own metric within <tolerance> of the source's, above or below |
 | G2 accuracy | gsm8k (1319); gpqa_diamond and simple_qa as well when `goal` says the change may lose accuracy | each at most 1 point below the baseline |
-| G3 long context | | e.g. NIAH pass rate within baseline spread, feature engaged |
-| G4 stability | | no crash; failure taxonomy not worse than baseline |
+| G3 long context (only with `long_context` on; else `not run: not asked`) | | e.g. NIAH pass rate within baseline spread, feature engaged |
+| G4 stability (only with `stability` on; else `not run: not asked`) | the run's `client_script` at <its highest concurrency, on long prompts>, run back to back for more than 48 hours (`scripts/stability.sh`) | no crash, hang, out-of-memory or failed request; hour by hour, the last 6 hours' throughput no lower and memory no higher than the range of the first 6 hours' values allows |
 | G5 performance | | e.g. >= +X% output tok/s at equal HBM on <workload> |
 
 ## Non-goals and unsupported combinations
