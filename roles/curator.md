@@ -37,17 +37,21 @@ Inputs: `status`, `report_path`, `phases`, `known_issues`.
    this machine (no hostnames, local paths or internal sites: the repository is public). Then
    `python3 <inferpilot_dir>/scripts/propose_knowledge.py --run-dir RUN_DIR --body RUN_DIR/knowledge_pr.md`:
    it opens, or updates, a pull request from `inferpilot/knowledge/<run>` to main and restores `knowledge/`
-   in the checkout. Once the lines the change adds name nothing local, it writes the change to
-   `RUN_DIR/knowledge.patch`, with the files it was made against. That outlives the task's container only
-   where `RUN_DIR` does, with `exp_root` on a host mount: the default, `<inferpilot_dir>/exp`, goes with
-   the container and its checkout.
-   Exit 3: remove from your edits and the description what it lists, then run it again. Exit 4: the
+   in the checkout. Once the lines the change adds and the paths it touches name nothing local, it writes
+   the change to `RUN_DIR/knowledge.patch`, with the files it was made against (`--dry-run` writes
+   none). That outlives the task's container only where `RUN_DIR` does, with `exp_root` on a host
+   mount: the default, `<inferpilot_dir>/exp`, goes with the container and its checkout.
+   Exit 3: remove from your edits and the description what it lists (a line, or a file's path), then run
+   it again; a `knowledge.patch` from before those edits is `knowledge.patch.earlier` by then, and not
+   this change. Exit 4: the
    change does not apply to main as it is now, most often because an existing entry you edited changed
    on main too, on the same lines or not; say what it printed in `notes`, for a human to reconcile. Exit 2
    (no `GITHUB_TOKEN`, or one that cannot write to InferPilot's repository) or any other failure: the edits
    stay in the checkout and in `RUN_DIR/knowledge.patch`; give the command it prints in `notes`. When no
    pull request was opened and `RUN_DIR/knowledge.patch` exists, return it as `patch_path`: with
-   `--patch` it proposes the change later, from any checkout, and the user is given that command.
+   `--patch` it proposes the change later, from any checkout, and the user is given that command. When
+   neither exists (a refusal you could not clear), `notes` says what it refused: the user is told that,
+   and that the edits are in the checkout's `knowledge/` only.
 7. Last, make sure the run freed the machine: `python3 <inferpilot_dir>/scripts/run_lock.py release
    --run-dir RUN_DIR` (the director normally did; "held" by another run or "free" means nothing to do).
 

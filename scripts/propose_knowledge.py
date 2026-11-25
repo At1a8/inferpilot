@@ -14,11 +14,15 @@ Contents and Pull requests: read and write on this repository (README step 1). T
 local path, this machine or an internal site stop it, as in scripts/daily_report.py. Without the token,
 or on any failure, the changes stay where they are. Standard library and git only.
 
-Once the lines it adds name nothing local, the patch is also written to RUN_DIR/knowledge.patch, with the
-files it was made against ahead of it (git apply skips them): --patch proposes it later, from any checkout,
-a shallow one too (the one that saved it, holding just those edits still, is restored as above). It
-outlives the task's container only where RUN_DIR does, on a host mount (an exp_root outside the container).
-A patch that makes a symbolic link is refused. Runs started from the same main give their new known issues
+Once the lines it adds and the paths it touches name nothing local, the patch is also written to
+RUN_DIR/knowledge.patch, with the machine's name and the files it was made against ahead of it (git apply
+skips them): --patch proposes it later, from any checkout, a shallow one too (the one that saved it, holding
+just those edits still, is restored as above), and holds the patch and the description against the machine
+that made it as well as its own. --dry-run writes no patch; a change that is refused moves an earlier
+knowledge.patch, which lacks its edits, to knowledge.patch.earlier. It outlives the task's container only
+where RUN_DIR does, on a host mount (an exp_root outside the container). A patch that makes a symbolic link
+or holds a binary file is refused, and so is one that edits known_issues.md when neither it nor the checkout
+has the file it was made against (exit 4). Runs started from the same main give their new known issues
 the same next KI- number: a number main has taken since is replaced, in the entry and in every line the
 patch adds, by the next free one on main, and the pull request says which ("renumbered"). New entries
 main added are kept beside this run's; an existing entry that main and the patch both changed, on the same
@@ -32,6 +36,7 @@ import codecs
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,6 +54,11 @@ AUTHOR = ["-c", "user.name=InferPilot curator", "-c", "user.email=inferpilot-cur
 KNOWN = "knowledge/known_issues.md"
 KI_HEADING = re.compile(r"^## (KI-(\d+))\b", re.M)
 KI_REF = re.compile(r"\bKI-\d+\b")
+# In a description: not the name of a file of the run (spinoff/KI-007.md), which keeps its number.
+KI_IN_TEXT = re.compile(r"(?<![\w/-])KI-\d+\b(?!\.[A-Za-z0-9]+\b)(?!-\w)")
+ORIGIN = re.compile(r"\Aorigin (\S+)\n")
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+BINARY = re.compile(r"^(?:GIT binary patch|Binary files .* differ)$", re.M)
 PREIMAGE = re.compile(r"^preimage ([0-9a-f]{40,64}) ([A-Za-z0-9+/=]+)$", re.M)
 SYMLINK = re.compile(r"^(?:(?:new file|new|old|deleted file) mode|index [0-9a-f]+\.\.[0-9a-f]+) 120000$", re.M)
 
@@ -116,7 +126,22 @@ def store_preimages(repo: str, diff: str) -> None:
 
 
 def added(diff: str) -> str:
-    return "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
+    """The lines the patch adds, read inside its hunks: there a line that begins with ++ is an added line,
+    not a file header."""
+    out, old, new = [], 0, 0
+    for line in diff.split("\n"):
+        if old <= 0 and new <= 0:
+            m = HUNK.match(line)
+            if m:
+                old, new = int(m.group(1) or 1), int(m.group(2) or 1)
+        elif line.startswith("+"):
+            out.append(line[1:])
+            new -= 1
+        elif line.startswith("-"):
+            old -= 1
+        elif not line.startswith("\\"):  # not "\ No newline at end of file"
+            old, new = old - 1, new - 1
+    return "\n".join(out)
 
 
 def outside_git(args: list, diff: str, files: dict | None = None) -> tuple[subprocess.CompletedProcess, dict]:
@@ -207,12 +232,18 @@ def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
     return "".join(out), mapping
 
 
+def preimage_sha(diff: str, path: str) -> str:
+    """The blob the patch's index line names as the file it was made against; empty for a file it creates."""
+    m = re.search(r"^diff --git a/%s b/%s\n(?:(?!diff --git ).*\n)*?index ([0-9a-f]+)\.\." % (re.escape(path), re.escape(path)),
+                  diff, re.M)
+    return m.group(1) if m and set(m.group(1)) != {"0"} else ""
+
+
 def preimage(inferpilot: str, diff: str, path: str) -> str:
     """The file the patch was made against: its blob from the patch's index line (--binary writes it whole).
     Empty when this checkout lacks the blob: its HEAD may already hold main's entries under the same numbers."""
-    m = re.search(r"^diff --git a/%s b/%s\n(?:(?!diff --git ).*\n)*?index ([0-9a-f]+)\.\." % (re.escape(path), re.escape(path)),
-                  diff, re.M)
-    return git(inferpilot, "cat-file", "-p", m.group(1), check=False) if m and set(m.group(1)) != {"0"} else ""
+    sha = preimage_sha(diff, path)
+    return git(inferpilot, "cat-file", "-p", sha, check=False) if sha else ""
 
 
 def new_entries(extra: list, rest: str) -> bool:
@@ -260,7 +291,7 @@ def with_renumbering(body: str, mapping: dict) -> str:
     if not mapping:
         return body
     pairs = ", ".join("%s is %s here" % (k, v) for k, v in mapping.items())
-    text = KI_REF.sub(lambda m: mapping.get(m.group(0), m.group(0)), body)
+    text = KI_IN_TEXT.sub(lambda m: mapping.get(m.group(0), m.group(0)), body)
     return text.rstrip() + "\n\nNumbered against main when proposed: %s; the run's own files keep %s.\n" % (
         pairs, ", ".join(mapping))
 
@@ -281,6 +312,12 @@ def commit_branch(inferpilot: str, branch: str, diff: str, title: str, run: str,
     pre, main_known = preimage(inferpilot, diff, KNOWN), git(inferpilot, "show", "origin/main:" + KNOWN, check=False)
     diff, mapping = renumber(diff, pre, main_known)
     files = patched(diff)
+    # Without the file the patch was made against, an entry that main changed as well cannot be told from
+    # one only the patch changed, and git would apply both edits without a word.
+    if KNOWN in files and not pre and preimage_sha(diff, KNOWN) and main_known:
+        raise RuntimeError("git apply: %s: the file the patch was made against is neither in the patch nor in this "
+                           "checkout, so an entry main changed as well cannot be told; propose it from a full clone, "
+                           "or from the checkout that made it" % KNOWN)
     # Git merges changes to different lines of one entry without a word: the entries say what each side changed.
     post = applied(diff, pre) if pre and KNOWN in files else None
     both = changed_on_both(pre, main_known, post) if post is not None else []
@@ -379,10 +416,21 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     run = os.path.basename(os.path.normpath(a.run_dir))
     branch, title = "inferpilot/knowledge/%s" % run, a.title or "knowledge: what %s learned" % run
-    saved = a.patch
+    saved, hosts = a.patch, [this_host()]
+    snapshot = os.path.join(a.run_dir, "knowledge.patch")
+
+    def retire() -> None:
+        """A change that is refused leaves no earlier patch of the run to be taken for it."""
+        if not a.patch and not a.dry_run and os.path.lexists(snapshot):
+            os.replace(snapshot, snapshot + ".earlier")
+            print("propose_knowledge: %s held an earlier change, without these edits: it is %s.earlier now" % (
+                snapshot, snapshot), file=sys.stderr)
     try:
         if a.patch:
             diff = open(a.patch, encoding="utf-8").read()
+            # Where it was made: what named that machine there names it here too.
+            hosts += [h for h in ORIGIN.findall(diff) if h not in hosts]
+            diff = ORIGIN.sub("", diff)
             # The checkout that saved it, holding just these edits still, reads main again once they are
             # proposed; any other checkout, or one with more edits, is left as it is.
             mine = changed(a.inferpilot_dir)
@@ -403,15 +451,29 @@ def main(argv=None) -> int:
         if SYMLINK.search(diff):
             print("propose_knowledge: %s makes a symbolic link, which nothing under knowledge/ is" % (a.patch or "the change"),
                   file=sys.stderr)
+            retire()
             return 1
-        # Saved only when it names nothing of this machine: --patch, elsewhere, would not know this one.
-        bad = leaks(added(diff), this_host())
-        if not a.patch and not bad and os.path.isdir(a.run_dir):
-            saved = os.path.join(a.run_dir, "knowledge.patch")
+        if BINARY.search(diff):
+            print("propose_knowledge: %s holds a binary file, whose contents cannot be checked; knowledge/ is text" % (
+                a.patch or "the change"), file=sys.stderr)
+            retire()
+            return 1
+
+        def named(text: str) -> list:
+            return list(dict.fromkeys(line for h in hosts for line in leaks(text, h)))
+        # The names of the files it adds or renames are published as its lines are.
+        bad = named(added(diff)) + ["path %s" % line for line in named("\n".join(files))]
+        # Saved only when it names nothing of this machine, with the machine's name ahead of it (git apply
+        # skips the line): --patch, elsewhere, checks the description against this machine too. A dry run
+        # writes nothing.
+        if bad:
+            retire()
+        elif not a.patch and not a.dry_run and os.path.isdir(a.run_dir):
+            saved = snapshot
             with open(saved, "w", encoding="utf-8") as f:
-                f.write(diff)
+                f.write(("origin %s\n" % this_host() if this_host() else "") + diff)
         body = open(a.body, encoding="utf-8").read()
-        bad += leaks(body, this_host())
+        bad += named(body)
         if bad:
             print("propose_knowledge: not proposed; it names something local or internal:\n  " + "\n  ".join(bad), file=sys.stderr)
             return 3
@@ -422,11 +484,13 @@ def main(argv=None) -> int:
         repo = a.repo or default_repo()
         if not token or not repo:
             where = saved if a.patch else "%s/knowledge%s" % (a.inferpilot_dir, " and in %s" % saved if saved else "")
-            later = " --patch %s" % saved if saved else ""
-            print("propose_knowledge: %s; the changes stay in %s. Propose them later%s with:\n  python3 %s "
-                  "--run-dir %s --body %s%s" % ("GITHUB_TOKEN is not set" if not token else "no GitHub repository", where,
-                                                ", from any checkout," if saved else "", sys.argv[0], a.run_dir, a.body, later),
-                  file=sys.stderr)
+            later = " --patch %s" % shlex.quote(saved) if saved else ""
+            # As it is typed in an InferPilot checkout: the one this ran in may be gone with its container.
+            print("propose_knowledge: %s; the changes stay in %s. Propose them later%s with:\n  python3 "
+                  "scripts/propose_knowledge.py --run-dir %s --body %s%s" % (
+                      "GITHUB_TOKEN is not set" if not token else "no GitHub repository", where,
+                      ", from any InferPilot checkout," if saved else ", from this checkout,", shlex.quote(a.run_dir),
+                      shlex.quote(a.body), later), file=sys.stderr)
             return 2
         sha, mapping = commit_branch(a.inferpilot_dir, branch, diff, title, run, a.push_url or "https://github.com/%s.git" % repo, token)
         pr = open_pr(repo, branch, title, with_renumbering(body, mapping), token)

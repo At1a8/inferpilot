@@ -104,6 +104,8 @@ const num = { type: 'number' };
 const obj = { type: 'object' };
 const arr = (items) => (items ? { type: 'array', items } : { type: 'array' });
 const strs = arr(str);
+// A word for a POSIX shell, in a command the user is given to paste.
+const shq = (s) => (/^[\w@%+=:,./-]+$/.test(String(s)) ? String(s) : `'${String(s).replace(/'/g, "'\\''")}'`);
 
 // ---------------------------------------------------------------------------
 // The task definition (templates/task_definition.md): the fields that define a task, named as the
@@ -883,9 +885,15 @@ function nextSteps(status, at) {
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   else if (R.knowledge_patch) {
+    // The run directory is the task container's own unless exp_root is a host mount, which is not known here.
     user.push(`propose the curator's knowledge changes, which the run did not (${R.knowledge_notes || 'see the curator\'s notes'}),`
-      + ` from an InferPilot checkout: python3 scripts/propose_knowledge.py --run-dir ${C.run_dir}`
-      + ` --body ${C.run_dir}/knowledge_pr.md --patch ${R.knowledge_patch}`);
+      + ` from an InferPilot checkout: python3 scripts/propose_knowledge.py --run-dir ${shq(C.run_dir)}`
+      + ` --body ${shq(`${C.run_dir}/knowledge_pr.md`)} --patch ${shq(R.knowledge_patch)}`
+      + `. Unless exp_root is on a host mount, ${C.run_dir} goes with the task's container: copy it out first`);
+  } else if ((R.knowledge_updates || []).some((u) => u && /(^|\/)knowledge\//.test(String(u.file || '')))) {
+    user.push(`the curator's knowledge changes were not proposed and no patch of them was saved (${R.knowledge_notes || 'the curator gave no reason'}):`
+      + ` they are only in ${INFERPILOT}/knowledge (git -C ${shq(INFERPILOT)} status -- knowledge), which goes with the task's container:`
+      + ' copy the files out, or clear what the script refused and run it again');
   }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;

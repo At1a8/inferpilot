@@ -305,9 +305,26 @@ const scenarios = [
       pr_url: 'https://github.com/o/inferpilot/pull/7', patch_path: `${RUN}/knowledge.patch`, notes: '' }) });
     check(opened.result.next.user.some((u) => u.endsWith('pull/7')) && !opened.result.next.user.some((u) => u.includes('--patch'))
       && opened.result.knowledge_patch === '', 'a pull request that is open needs no patch proposed');
+    check(say.includes(`Unless exp_root is on a host mount, ${RUN} goes with the task's container: copy it out first`),
+      `the user is told the run directory may not outlive the container: ${say}`);
+    const odd = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/my runs/it's; echo x.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const quoted = (odd.result.next.user || []).find((u) => u.includes('--patch')) || '';
+    check(quoted.includes(`--run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch '${RUN}/my runs/it'\\''s; echo x.patch'.`),
+      `a path with a space or a quote is one word of the command the user pastes: ${quoted}`);
+    const refused = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '', patch_path: '',
+      notes: 'exit 3: knowledge/known_issues.md line 12 names a local path' }) });
+    const left = (refused.result.next.user || []).find((u) => u.includes('no patch of them was saved')) || '';
+    check(left.includes('exit 3: knowledge/known_issues.md line 12 names a local path') && left.includes(`${INFERPILOT}/knowledge`)
+      && left.includes('goes with the task\'s container') && !refused.result.next.user.some((u) => u.includes('--patch')),
+      `changes neither proposed nor saved reach the user with the curator's reason and where they are: ${left}`);
+    const none = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates: [], pr_url: '', patch_path: '', notes: '' }) });
+    check(!(none.result.next.user || []).some((u) => u.includes('knowledge')), 'a curator that changed nothing leaves the user nothing to propose');
     const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'curator.md'), 'utf8'), 'learn').replace(/\s+/g, ' ');
     check(doc.includes('return it as `patch_path`') && doc.includes('only where `RUN_DIR` does, with `exp_root` on a host mount'),
       'the curator returns the patch, which outlives the container only on a host mount');
+    check(doc.includes('When neither exists') && doc.includes('`notes` says what it refused') && doc.includes('`--dry-run` writes none')
+      && doc.includes('`knowledge.patch.earlier`'), 'the curator says why nothing was saved, and what a refusal does to an earlier patch');
   }],
   ['feature: investigation budget is bounded', async () => {
     const r = await run({ mode: 'feature', task: 't', max_investigate_rounds: 2 }, {

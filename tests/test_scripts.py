@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1243,6 +1244,124 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.body.write_text("found with /data/models/x\n")
         self.assertEqual(self.propose(token="")[0], 3)
         self.assertIn("KI-001 GLM-5.3 dcp 8", (self.run / "knowledge.patch").read_text(), "a clean change is kept while its description is fixed")
+
+    def test_a_file_whose_name_is_this_machines_is_refused_as_a_line_that_names_it_is(self):
+        with mock.patch.object(propose_knowledge, "this_host", return_value="gpu-node-17"):
+            (self.inferpilot / "knowledge" / "gpu-node-17.md").write_text("notes on dcp 8\n")
+            rc, _, err = self.propose(api=self.github([]))
+            self.assertEqual(rc, 3, err)
+            self.assertIn("path 1: knowledge/gpu-node-17.md", err)
+            self.assertFalse((self.run / "knowledge.patch").exists(), "its path is published as its lines are")
+            git("mv", "knowledge/known_issues.md", "knowledge/gpu-node-18.md", cwd=self.inferpilot)
+            (self.inferpilot / "knowledge" / "gpu-node-17.md").unlink()
+            rc, _, err = self.propose(api=self.github([]))
+            self.assertEqual(rc, 3, "a rename to a sibling's name: %s" % err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_an_added_line_that_begins_with_two_pluses_is_checked_and_a_binary_file_is_not_proposed(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n-- not a header either\n++ weights in /data/models/x\n")
+        self.assertEqual(propose_knowledge.added("--- a/k\n+++ b/k\n@@ -1,2 +1,2 @@\n ctx\n--- gone\n+++ here\n"
+                                                 "diff --git a/l b/l\n--- a/l\n+++ b/l\n@@ -0,0 +1 @@\n+new\n"),
+                         "++ here\nnew", "inside a hunk +++ is an added line, and outside it a header")
+        rc, _, err = self.propose()
+        self.assertEqual(rc, 3, err)
+        self.assertIn("/data/models/x", err)
+        known.write_text("# Known issues\n")
+        (self.inferpilot / "knowledge" / "trace.bin").write_bytes(b"\x00\x01/data/models/x\x00" * 40)
+        rc, _, err = self.propose()
+        self.assertEqual(rc, 1, err)
+        self.assertIn("a binary file, whose contents cannot be checked", err)
+        self.assertFalse((self.run / "knowledge.patch").exists())
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_a_description_that_names_the_machine_the_patch_was_made_on_is_refused_on_another(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        with mock.patch.object(propose_knowledge, "this_host", return_value="gpu-node-17"):
+            self.body.write_text("KI-001: seen on gpu-node-17 with dcp 8\n")
+            self.assertEqual(self.propose(token="")[0], 3, "the description names the machine")
+        self.assertTrue(saved.read_text().startswith("origin gpu-node-17\n"), "the clean change is kept, with where it was made")
+        with mock.patch.object(propose_knowledge, "this_host", return_value="laptop"):
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+            self.assertEqual(rc, 3, err)
+            self.assertIn("gpu-node-17", err)
+            self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+            self.body.write_text("KI-001: seen with dcp 8\n")
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+            self.assertEqual(rc, 0, err)
+        self.assertNotIn("gpu-node-17", self.show("inferpilot/knowledge/" + self.run.name), "the name stays in the run's file")
+
+    def test_a_file_of_the_run_named_after_a_known_issue_keeps_its_name_in_the_description(self):
+        body = ("KI-001: dcp 8 (KI-001). Proof: spinoff/KI-001.md, [KI-001](spinoff/KI-001.md), KI-001.json,\n"
+                "KI-001-draft.md and notes_KI-001.md. See KI-001.\n")
+        out = propose_knowledge.with_renumbering(body, {"KI-001": "KI-004"})
+        self.assertTrue(out.startswith(
+            "KI-004: dcp 8 (KI-004). Proof: spinoff/KI-001.md, [KI-004](spinoff/KI-001.md), KI-001.json,\n"
+            "KI-001-draft.md and notes_KI-001.md. See KI-004.\n"), out)
+        self.assertIn("KI-001 is KI-004 here; the run's own files keep KI-001", out)
+
+    def test_a_patch_without_the_file_it_was_made_against_is_not_applied_where_the_checkout_lacks_it_too(self):
+        import subprocess
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\nWorkaround: none\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #9"))
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        bare = self.run / "bare.patch"
+        bare.write_text("".join(l for l in saved.read_text().splitlines(keepends=True) if not l.startswith("preimage ")))
+        self.assertNotEqual(bare.read_text(), saved.read_text(), "the test meant a patch without its preimage")
+        shutil.rmtree(self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("none", "AITER_X=0"))
+        git("commit", "-qam", "main changes another line of the entry the patch changes", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        shallow = self.origin.parent / "shallow"
+        git("clone", "-q", "--depth=1", "-b", "main", "file://" + str(self.origin), str(shallow))
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(bare)], inferpilot=shallow)
+        self.assertEqual(rc, 4, err)
+        self.assertIn("neither in the patch nor in this checkout", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=shallow)
+        self.assertEqual(rc, 4, "with the preimage the entry both changed is seen: %s" % err)
+        self.assertIn("KI-001 changed on main as well", err)
+
+    def test_a_change_that_is_refused_leaves_no_earlier_patch_as_its_own_and_a_dry_run_writes_none(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        saved = self.run / "knowledge.patch"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        rc, out, err = self.propose(extra=["--dry-run"])
+        self.assertEqual((rc, json.loads(out)["patch"]), (0, ""), err)
+        self.assertFalse(saved.exists(), "a dry run writes nothing")
+        self.assertEqual(self.propose(token="")[0], 2)
+        first = saved.read_text()
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n\n## KI-002 — other\n")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 0)
+        self.assertEqual(saved.read_text(), first, "a dry run leaves the patch to propose later as it was")
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nweights in /data/models/x\n")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 3)
+        self.assertEqual(saved.read_text(), first, "refused in a dry run too, which still writes nothing")
+        rc, _, err = self.propose(token="")
+        self.assertEqual(rc, 3)
+        self.assertFalse(saved.exists(), "the patch of the earlier change is not this one's")
+        self.assertEqual((self.run / "knowledge.patch.earlier").read_text(), first)
+        self.assertIn("knowledge.patch.earlier", err)
+
+    def test_the_command_to_propose_later_is_quoted_and_names_the_script_in_a_checkout(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        spaced = self.run.parent / "my runs" / "issue_1; echo x"
+        spaced.mkdir(parents=True)
+        body = spaced / "knowledge_pr.md"
+        body.write_text("KI-001: dcp 8\n")
+        argv = ["--run-dir", str(spaced), "--body", str(body), "--inferpilot-dir", str(self.inferpilot)]
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
+        with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err, \
+                mock.patch.object(sys, "argv", ["gone/with/the/container/propose_knowledge.py"]):
+            self.assertEqual(propose_knowledge.main(argv), 2)
+        command = err.getvalue().strip().splitlines()[-1].strip()
+        self.assertEqual(shlex.split(command), ["python3", "scripts/propose_knowledge.py", "--run-dir", str(spaced), "--body",
+                                                str(body), "--patch", str(spaced / "knowledge.patch")], command)
+        self.assertIn("from any InferPilot checkout", err.getvalue())
 
     def test_a_patch_that_makes_a_symbolic_link_is_refused_and_nothing_is_written_through_it(self):
         import subprocess
