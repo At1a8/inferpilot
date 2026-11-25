@@ -7,7 +7,9 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -625,8 +627,15 @@ class EvalAccuracyTest(unittest.TestCase):
             mkdir -p "$wd/configs" "$wd/run/reports/fake-model"
             echo "judge_model_args: $jm" > "$wd/configs/task_config.yaml"
             echo "judge_model_args=$jm"
+            [ -n "${FAKE_READONLY:-}" ] && chmod 444 "$wd/configs/task_config.yaml"
             # the script stopped while evalscope runs (a timeout, the agent's call ending)
             [ -n "${FAKE_STOPPED:-}" ] && { kill -TERM "$PPID"; exit 143; }
+            # a run that takes a while, and writes its arguments again later on
+            if [ -n "${FAKE_SLOW:-}" ]; then
+              echo $$ > "$CALLS.pid"
+              sleep "$FAKE_SLOW"
+              echo "judge_model_args: $jm" > "$wd/configs/later.yaml"
+            fi
             # every question answered, unless FAKE_NUM says how many were
             case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
             echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
@@ -728,6 +737,89 @@ class EvalAccuracyTest(unittest.TestCase):
         r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200", FAKE_STOPPED="1")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(holding_key(), [], "a run stopped on its way keeps the key")
+
+    KEY = "judge-key-for-the-test-7f3a"
+
+    def holding_key(self):
+        return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                      if p.is_file() and self.KEY in p.read_text(errors="replace"))
+
+    def start_slow_run(self, seconds):
+        """simple_qa with a judge, its evalscope running for `seconds`; returns the script and evalscope's pid."""
+        p = subprocess.Popen(["bash", str(self.SCRIPT), "simple_qa"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env={**self.env, "LLM_GATEWAY_KEY": self.KEY, "FAKE_JUDGE": "200",
+                                             "FAKE_SLOW": str(seconds)})
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        pidfile = Path(str(self.calls) + ".pid")
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+
+        def gone():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(gone)
+        return p, pid
+
+    def test_the_log_shows_no_key_while_evalscope_runs(self):
+        p, _ = self.start_slow_run(3)
+        log = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            logs = list((self.tmp / "results").rglob("evalscope.log"))
+            if logs and "judge_model_args=" in logs[0].read_text(errors="replace"):
+                log = logs[0].read_text(errors="replace")
+                break
+            time.sleep(0.05)
+        self.assertIsNone(p.poll(), "evalscope ended before its log was read")
+        self.assertIsNotNone(log, "evalscope's line never reached its log")
+        self.assertNotIn(self.KEY, log, "an agent reading the log while the run goes sees the key")
+        self.assertIn("judge_model_args=", log)
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err + out)
+        self.assertEqual(self.holding_key(), [])
+
+    def test_a_stopped_run_stops_evalscope_before_it_redacts(self):
+        p, pid = self.start_slow_run(3)
+        p.send_signal(signal.SIGTERM)  # to the script alone, as a timeout of the agent's shell does
+        p.communicate(timeout=60)
+        self.assertNotEqual(p.returncode, 0)
+        with self.assertRaises(ProcessLookupError, msg="evalscope runs on after the script and writes the key again"):
+            os.kill(pid, 0)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipUnless(Path("/proc/self/status").exists(), "reads the ignored signals in /proc")
+    def test_the_redaction_ignores_the_signals_of_the_runners_shutdown(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-" ] && grep SigIgn /proc/self/status >> "$CALLS.sigign"
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200",
+                            PATH="%s:%s" % (wrap, self.env["PATH"]))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        masks = [int(line.split()[1], 16) for line in Path(str(self.calls) + ".sigign").read_text().splitlines()]
+        self.assertTrue(masks, "the redaction did not run")
+        for mask in masks:
+            for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+                self.assertTrue(mask >> (sig - 1) & 1, "%s stops the redaction halfway" % sig.name)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root writes a read-only file")
+    def test_a_file_the_redaction_cannot_rewrite_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_READONLY="1")
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("task_config.yaml", r.stderr, "no word of the file that keeps the key")
+        self.assertIn("could not be removed", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that still holds the key were read")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
         def sent():

@@ -30,9 +30,9 @@
 #                     in a venv of its own)
 #   Judge-graded sets: JUDGE_KEY (default LLM_GATEWAY_KEY), JUDGE_URL (default the AMD LLM gateway),
 #   JUDGE_MODEL (default Claude-Opus-5; never the model under test), JUDGE_NTID (the gateway's user
-#   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades, and
-#   where evalscope writes it (its configs, its log) it is replaced by <JUDGE_KEY> once the run ends or
-#   is stopped (not by SIGKILL).
+#   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades; its
+#   log gets <JUDGE_KEY> in its place as it is written, and its configs and other files once evalscope
+#   has stopped, at the end or when the run is stopped (not by SIGKILL).
 #
 # Before each set the server's prefix cache is flushed; after it, /server_info's speculative accept
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
@@ -156,25 +156,74 @@ sampling_settings() {
 }
 
 # evalscope keeps its arguments, the judge's among them, in the run's configs and log: the results of a
-# run hold no key (knowledge/guardrails.md, secrets).
+# run hold no key (knowledge/guardrails.md, secrets). The runner's shutdown sends SIGTERM to every process
+# of the run, so this one ignores it: it would stop with the key still in the files it had not reached.
 redact_key() {  # <dir>
     [ -n "${JUDGE_KEY}" ] && [ -d "$1" ] || return 0
-    KEY="${JUDGE_KEY}" python3 - "$1" <<'EOF'
+    (
+        trap '' TERM INT HUP
+        KEY="${JUDGE_KEY}" python3 - "$1" <<'EOF'
 import os, sys
 key = os.environ["KEY"].encode()
+failed = []
 for root, _, files in os.walk(sys.argv[1]):
     for name in files:
         path = os.path.join(root, name)
-        with open(path, "rb") as f:
-            data = f.read()
-        if key in data:
-            with open(path, "wb") as f:
-                f.write(data.replace(key, b"<JUDGE_KEY>"))
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            if key in data:
+                with open(path, "wb") as f:
+                    f.write(data.replace(key, b"<JUDGE_KEY>"))
+        except OSError as e:
+            failed.append("%s (%s)" % (path, e.strerror))
+if failed:
+    print("eval_accuracy.sh: the judge key may still be in " + ", ".join(failed), file=sys.stderr)
+    sys.exit(1)
 EOF
+    )
 }
-# A run stopped on its way (SIGTERM, SIGINT, a timeout) is redacted as it exits; only SIGKILL leaves the key.
+# What evalscope prints reaches its log with the key masked as it is written, so reading the log while the
+# run goes shows no key; evalscope's own files are redacted once it has stopped.
+mask_key() {
+    KEY="${JUDGE_KEY}" python3 -u -c '
+import os, sys
+key, out, held = os.environ["KEY"].encode(), sys.stdout.buffer, b""
+for chunk in iter(lambda: sys.stdin.buffer.read1(65536), b""):
+    data = held + chunk
+    if key:
+        data = data.replace(key, b"<JUDGE_KEY>")
+        keep = next((n for n in range(min(len(key) - 1, len(data)), 0, -1) if data.endswith(key[:n])), 0)
+        data, held = data[:len(data) - keep], data[len(data) - keep:]
+    out.write(data)
+    out.flush()
+out.write(held)
+'
+}
+# A run stopped on its way (SIGTERM, SIGINT, SIGHUP, a timeout) stops evalscope and waits for it, and only
+# then redacts, so no later write of evalscope's puts the key back; only SIGKILL leaves the key.
 REDACT_DIR=""
-trap 'redact_key "${REDACT_DIR}"' EXIT
+EVAL_PID=""
+MASK_PID=""
+FIFO_DIR=""
+SETSID=$(command -v setsid || true)
+stop_eval() {
+    if [ -n "${EVAL_PID}" ]; then
+        kill -TERM -- "-${EVAL_PID}" 2>/dev/null || kill -TERM "${EVAL_PID}" 2>/dev/null
+        for _ in $(seq 100); do kill -0 "${EVAL_PID}" 2>/dev/null || break; sleep 0.1; done
+        kill -KILL -- "-${EVAL_PID}" 2>/dev/null || kill -KILL "${EVAL_PID}" 2>/dev/null
+        wait "${EVAL_PID}" 2>/dev/null
+        EVAL_PID=""
+    fi
+    [ -n "${MASK_PID}" ] && wait "${MASK_PID}" 2>/dev/null
+    MASK_PID=""
+}
+trap 'stop_eval; exit 143' TERM
+trap 'stop_eval; exit 130' INT
+trap 'stop_eval; exit 129' HUP
+trap 'stop_eval; [ -n "${FIFO_DIR}" ] && rm -rf "${FIFO_DIR}"; redact_key "${REDACT_DIR}"' EXIT
 
 FAILED=0
 SUMMARY=""
@@ -230,7 +279,11 @@ run_one() {  # <set>
         judge_arg=(--judge-strategy auto --judge-model-args "${judge_args}")
     fi
     REDACT_DIR="${run_dir}"
-    "${EVALSCOPE}" eval \
+    # Outside the run directory: the redaction opens every file there, and a FIFO would block it.
+    FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" || exit 2
+    mask_key < "${FIFO_DIR}/out" > "${log}" &
+    MASK_PID=$!
+    ${SETSID} "${EVALSCOPE}" eval \
         --model "${MODEL}" \
         --api-url "${API_URL}" \
         --api-key EMPTY_KEY \
@@ -245,9 +298,20 @@ run_one() {  # <set>
         "${limit_arg[@]}" \
         --work-dir "${run_dir}" \
         --no-timestamp \
-        --repeats 1 > "${log}" 2>&1
+        --repeats 1 > "${FIFO_DIR}/out" 2>&1 &
+    EVAL_PID=$!
+    wait "${EVAL_PID}"
     rc=$?
-    redact_key "${run_dir}"
+    EVAL_PID=""
+    wait "${MASK_PID}"
+    MASK_PID=""
+    rm -rf "${FIFO_DIR}"
+    FIFO_DIR=""
+    # Left armed for the exit, which tries again: the results are not read while a file may hold the key.
+    if ! redact_key "${run_dir}"; then
+        echo "${ds}: stopped, since the judge key could not be removed from every file of ${run_dir}" >&2
+        exit 1
+    fi
     REDACT_DIR=""
 
     accept=$(curl -s --max-time 20 "${SERVER_URL}/server_info" | python3 -c \
