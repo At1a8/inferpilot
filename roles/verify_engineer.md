@@ -34,8 +34,9 @@ clock can start before your session does.
    wait for it in this call (`env_hygiene.md`, *Servers*): one that goes with a tool call leaves the
    round with nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus). Before
    you return, whatever the round's result, `needs_min` included, stop every server and suite this round
-   started, from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have
-   exited: a round asked for again after `needs_min` starts at once, with no GPU check before it.
+   started, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each (`env_hygiene.md`,
+   *Servers*, Killing), until it exits 0 for every one: a round asked for again after `needs_min` starts
+   at once, with no GPU check before it. `summary` names one you cannot stop.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.

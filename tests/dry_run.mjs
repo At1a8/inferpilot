@@ -381,6 +381,63 @@ const scenarios = [
       && (ver.result.next.user || []).some((u) => u.includes('Verify round 0 returned no answer and may have left its servers running')),
       `nor after a Verify round with no answer: ${ver.result.status} ${JSON.stringify(vsp && vsp.ins.confirm_skipped)}`);
   }],
+  ['kernel: an integration whose unit gate has no answer stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => (ins.work_package.id === 'K-K-WP1' ? {} : DEFAULTS['test_engineer:unit'](ins)) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
+  ['kernel: an integration whose unit gate has no answer stops the run also from a Verify fix, a review change or a kernel retry', async () => {
+    const heldFor = (id) => (ins) => (ins.work_package.id === id ? {} : DEFAULTS['test_engineer:unit'](ins));
+    const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+      kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
+    const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
+    const fix = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(fix.result.status === 'blocked' && verifies(fix) === 1 && !fix.keys.includes('implementer:rollback')
+      && fix.result.handoffs[0].status === 'integration_held', `a Verify fix's kernel: Verify ran ${verifies(fix)} time(s), ${JSON.stringify(fix.result.handoffs)}`);
+    check(fix.result.stopped_at === 'Kernel' && fix.result.next.say.includes(' at Kernel'),
+      `a Verify fix's kernel stops the run at Kernel: ${fix.result.stopped_at}; ${fix.result.next.say}`);
+    const review = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('RV1'),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }], work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+      'test_engineer:unit': heldFor('K-K-RV1'),
+    });
+    check(review.result.status === 'blocked' && review.result.stopped_at === 'Kernel' && verifies(review) === 1,
+      `a review change's kernel: ${review.result.status} at ${review.result.stopped_at}, Verify ran ${verifies(review)} time(s)`);
+    const afterReview = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'reviewer:review': () => ({ verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }],
+        work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: true, failures: [] } : { all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(afterReview.result.status === 'blocked' && afterReview.result.stopped_at === 'Kernel' && verifies(afterReview) === 2,
+      `the kernel of a Verify fix after a review change: ${afterReview.result.status} at ${afterReview.result.stopped_at}, Verify ran ${verifies(afterReview)} time(s)`);
+    let kernelGates = 0;
+    let kernelCommits = 0;
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const retry = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': (ins) => ({ ...implement(ins),
+        ...(ins.work_package.id === 'K-K-WP1' && ++kernelCommits > 1 ? { commit: 'c_K-K-WP1_retry' } : {}) }),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle' }),
+      'test_engineer:unit': (ins) => heldFor(ins.work_package.id === 'K-K-WP1' && ++kernelGates > 1 ? 'K-K-WP1' : '')(ins),
+    });
+    check(retry.result.status === 'blocked' && verifies(retry) === 1 && retry.result.handoffs[0].status === 'integration_held'
+      && retry.keys.filter((k) => k === 'implementer:rollback').length === 1,
+      `a kernel handed back: Verify ran ${verifies(retry)} time(s), ${JSON.stringify(retry.result.handoffs[0])}`);
+    check(retry.result.handoffs[0].commit === 'c_K-K-WP1_retry',
+      `the held hand-off names the commit left on the branch, not the reverted one: ${retry.result.handoffs[0].commit}`);
+    check(retry.result.stopped_at === 'Kernel', `a kernel handed back stops the run at Kernel: ${retry.result.stopped_at}`);
+  }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
@@ -406,13 +463,15 @@ const scenarios = [
       && unitDoc.includes('A server stopped once the checks that use it are done has failed nothing'),
       'neither a control that must fail nor a server stopped when its checks are done fails the gate');
     check(unitDoc.includes('Before you return, whatever the gate\'s result, stop every server and run this call started, '
-      + 'from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have exited'),
-      'the test engineer stops what it started before every return');
+      + '`python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each (`env_hygiene.md`, *Servers*, Killing), until it exits 0 for every one')
+      && unitDoc.includes('One you cannot stop fails the gate'),
+      'the test engineer stops what it started before every return, and a gate whose runs cannot be stopped fails');
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
       'both engineers count from the deadline');
     check(verifyDoc.includes('Before you return, whatever the round\'s result, `needs_min` included, stop every server and suite '
-      + 'this round started') && verifyDoc.includes('a round asked for again after `needs_min` starts at once, with no GPU check before it'),
+      + 'this round started, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each')
+      && verifyDoc.includes('a round asked for again after `needs_min` starts at once, with no GPU check before it'),
       'the verify engineer stops what it started before every return, a round that asks for more time too');
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);

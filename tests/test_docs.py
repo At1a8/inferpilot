@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -452,7 +453,8 @@ class DetachedRunTest(unittest.TestCase):
     """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
     documented launcher leaves the run's PID and exit status where that shell reads them, whatever the
     script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control; no
-    other launch shares its log and records, and a wrapper that has exited is gone though nobody reaped it."""
+    other launch shares its log and records, a wrapper that has exited is gone though nobody reaped it, and
+    the stop ends what outlives the wrapper and nothing it cannot tie to the record."""
 
     # (the script, its arguments, the status it ends with, what its log has)
     SCRIPTS = (
@@ -558,6 +560,73 @@ class DetachedRunTest(unittest.TestCase):
             live.wait()
             done.wait()
         self.assertIn("Not `kill -0 <pid>`: it succeeds for a wrapper that has exited and that nobody has reaped", self.doc)
+
+    @staticmethod
+    def stop(log):
+        """scripts/stop_launch.py on log, with a second of grace: its exit status and what it printed."""
+        out = subprocess.run([sys.executable, str(ROOT / "scripts" / "stop_launch.py"), str(log), "--grace", "1"],
+                             capture_output=True, text=True, timeout=60)
+        return out.returncode, out.stdout + out.stderr
+
+    def test_a_stop_waits_for_what_outlives_the_wrapper(self):
+        # One worker ignores SIGTERM, one has left the session, and the parent of one has exited: all three
+        # outlive a wrapper that is TERMed, and only the session still holds the last.
+        body = ('bash -c \'trap "" TERM; exec sleep 60\' &\necho $! > "$1/stubborn"\n'
+                'setsid bash -c \'echo $$ > "$1/away"; exec sleep 60\' _ "$1" &\n'
+                '(sleep 60 & echo $! > "$1/orphan")\nsleep 60\n')
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, body, [str(Path(d) / "a run")])
+            pids = [self.read(Path(p)) for p in ("%s.pid" % log, "%s/a run/stubborn" % d, "%s/a run/away" % d,
+                                                  "%s/a run/orphan" % d)]
+            self.assertNotIn(None, pids, "the run did not start its workers")
+            pids = [int(p) for p in pids]
+            try:
+                code, out = self.stop(log)
+                self.assertEqual(code, 0, out)
+                self.assertEqual([p for p in pids if alive(p)], [], "a process of the launch outlived its stop")
+            finally:
+                for p in pids:
+                    if alive(p):
+                        os.kill(p, signal.SIGKILL)
+        self.assertIn("it lists the wrapper, every process below it and every one of its session before the first signal", self.doc)
+        self.assertIn("SIGKILLs those still there after 30 seconds, and exits 0 once every one has exited", self.doc)
+
+    def test_a_stop_leaves_alone_a_process_that_took_the_recorded_pid(self):
+        with tempfile.TemporaryDirectory() as d:
+            stranger = subprocess.Popen(["sleep", "30"])
+            try:
+                log = Path(d) / "run.log"
+                Path("%s.pid" % log).write_text("%d\n" % stranger.pid)
+                code, out = self.stop(log)
+                self.assertEqual(code, 0, out)
+                self.assertTrue(alive(stranger.pid), "a stop killed a process its record does not name")
+                self.assertEqual(self.stop(Path(d) / "another.log")[0], 2, "a log with no record is taken for a stopped launch")
+            finally:
+                stranger.kill()
+                stranger.wait()
+        self.assertIn("leaving alone a PID that another process has taken since", self.doc)
+        self.assertIn("It exits 2 without `<log>.pid`", self.doc)
+
+    def test_a_stop_after_the_wrapper_exited_names_what_is_left_and_kills_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, 'sleep 30 &\necho $! > "$1/left"\n', [str(Path(d) / "a run")])
+            left = self.read(Path(d) / "a run" / "left")
+            self.assertIsNotNone(left, "the run started nothing")
+            left = int(left)
+            try:
+                self.assertEqual(self.read(Path("%s.exit" % log)), "0")
+                pid = int(self.read(Path("%s.pid" % log)))
+                for _ in range(200):
+                    if not alive(pid):
+                        break
+                    time.sleep(0.05)
+                code, out = self.stop(log)
+                self.assertEqual(code, 1, out)
+                self.assertIn('"pid": %d,' % left, out)
+                self.assertTrue(alive(left), "a stop killed a process it cannot tie to the record")
+            finally:
+                os.kill(left, signal.SIGKILL)
+        self.assertIn("when the wrapper had already exited, the processes still in its session, which it leaves alone", self.doc)
 
 
 if __name__ == "__main__":

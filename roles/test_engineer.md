@@ -24,9 +24,10 @@ clock can start before your session does.
    crashes or never starts. A check still running at the reserve is not waited for: the gate fails, and
    `failure_summary` names the check, how far it got and its log. A server stopped once the checks that
    use it are done has failed nothing. Before you return, whatever the gate's result, stop every server
-   and run this call started, from their launch records (`env_hygiene.md`, *Servers*, Killing), and
-   wait until they have exited, since a fix round, a rollback or the next work package works in this
-   worktree and on these GPUs next.
+   and run this call started, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each
+   (`env_hygiene.md`, *Servers*, Killing), until it exits 0 for every one: a fix round, a rollback or
+   the next work package works in this worktree and on these GPUs next. One you cannot stop fails the
+   gate, and `failure_summary` names it.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template

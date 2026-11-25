@@ -98,9 +98,9 @@ belongs to a host user, and the rules below are about those.
   can). A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with
   its run (its group killed, or every process of the container): the run did not pass. A server has no
   status until it is stopped: it is waited for until it is up, and stopping it once the checks that use
-  it are done fails nothing. Before the call that started it returns, stop it from its launch record
-  (Killing, below) and wait until that check says it is gone: the next call works on these GPUs and in
-  this worktree.
+  it are done fails nothing. Before the call that started it returns, stop it with
+  `scripts/stop_launch.py` (Killing, below), until that exits 0: the next call works on these GPUs and
+  in this worktree.
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`
@@ -110,7 +110,16 @@ belongs to a host user, and the rules below are about those.
   detached, and whether it leads its own process group) and kill from that record: the PID and its
   descendants (`setsid` workers keep VRAM otherwise), the whole group only when the launch proved the
   group is the server's. Never look the group up at kill time: a recycled PID belongs to a stranger,
-  and a teardown that did this once TERMed a container's PID 1.
+  and a teardown that did this once TERMed a container's PID 1. For a detached launch the record is
+  `<log>.pid`, and `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` kills from it, leaving alone
+  a PID that another process has taken since: it lists the wrapper, every process below it and every
+  one of its session before the first signal (a worker whose parent exits first is reparented away
+  from the wrapper, and the wrapper can exit while its workers still shut down), SIGTERMs them,
+  SIGKILLs those still there after 30 seconds, and exits 0 once every one has exited. It exits 1 naming
+  those it could not stop, or, when the wrapper had already exited, the processes still in its session,
+  which it leaves alone: stop by PID the ones that are this run's (their command, their working
+  directory) and run it again. It exits 2 without `<log>.pid`: a launch that never started, or another
+  log than the launch's.
 - Every server, test and benchmark runs with `HIP_VISIBLE_DEVICES=<gpu_ids>`, the set Setup pinned;
   without it, tensor-parallel ranks land on GPUs 0..N-1 whoever is using them.
 - Keep one server per GPU set; a previous server still holding the GPUs looks like an out-of-memory bug.

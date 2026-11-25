@@ -425,7 +425,7 @@ const stopHere = (title) => {
 // The same check where the verify, review and PR repair loops end a phase again: a stop named while the
 // run is in such a loop ends the run there, as the route's own checks do on its first pass.
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
-const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.stopped ? r.at : at);
+const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
@@ -997,9 +997,10 @@ async function setup(requireBaseline) {
 // the package is rolled back to the last verified commit and the task stops.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
-function stalled(wp, label) {
+// Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
+function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
-  return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
 }
 // Gates and rounds that ended without a result and may have left detached runs on the GPUs.
 const leftRunning = [];
@@ -1010,7 +1011,7 @@ function noAnswer(wp, label, commit) {
     + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
   leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
   note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
-  return { ok: false, failed_wp: wp.id, reason: `${label} returned no answer` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} returned no answer` };
 }
 
 async function implementAll(wps) {
@@ -1053,7 +1054,7 @@ async function implementAll(wps) {
       const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
         unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
         ONE_SESSION);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
       if (!ut) return noAnswer(wp, utLabel, im.commit);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
@@ -1151,7 +1152,7 @@ async function verifyLoop(extraGates) {
     }
     if (inv.verdict === 'kernel_regression') {
       const back = await rejectKernels(inv.kernel_handoffs || [], inv.counterexample || inv.summary || '');
-      if (!back.ok) return { ok: false, reason: back.reason };
+      if (!back.ok) return { ok: false, at: back.at, reason: back.reason };
       continue;
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
@@ -1159,7 +1160,8 @@ async function verifyLoop(extraGates) {
       if (!fix.ok) return { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
-      await kernelStage(); // hand-offs a fix raised
+      const ks = await kernelStage(); // hand-offs a fix raised
+      if (ks.held) return { ok: false, at: 'Kernel', reason: ks.held };
       const afterKernel = stopAt('Kernel');
       if (afterKernel) return afterKernel;
       continue;
@@ -1195,8 +1197,8 @@ async function rejectKernels(ids, counterexample) {
     note('Investigate', 'kernel_rejected', `${h.id}: back to the functional kernel${suffix}`
       + `${retry ? '; handed back once with the failing case' : '; rejected after its retry'}`);
   }
-  await kernelStage();
-  return { ok: true };
+  const ks = await kernelStage();
+  return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
 async function performance(claim) {
@@ -1259,11 +1261,12 @@ async function reviewLoop(extraGates, perfClaim, runPerf) {
 async function repaired(extraGates, perfClaim, runPerf) {
   const afterFix = stopAt('Implement');
   if (afterFix) return afterFix;
-  await kernelStage(); // hand-offs a requested change raised
+  const ks = await kernelStage(); // hand-offs a requested change raised
+  if (ks.held) return { ok: false, at: 'Kernel' };
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
   const ver = await verifyLoop(extraGates);
-  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: 'Verify' };
+  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify' };
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {
@@ -1333,6 +1336,13 @@ async function kernelStage() {
     if (res && res.status === 'improved' && res.integrate_wp) {
       h.status = 'not_integrated'; // what stays when a stop asked for now ends the run before Implement
       const r = await implementAll([res.integrate_wp]);
+      // Not rolled back (a gate without a result, a call that timed out): the commit stays, so the run stops.
+      if (r.held) {
+        h.status = 'integration_held';
+        h.commit = r.commit || '';
+        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`);
+        return { integrated, held: r.reason };
+      }
       h.status = r.ok ? 'integrated' : 'integration_failed';
       if (r.ok) {
         integrated += 1;
@@ -1354,6 +1364,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   }
   if (stopHere('Implement')) return finish('stopped', 'Implement');
   const ks = await kernelStage();
+  if (ks.held) return finish('blocked', 'Kernel');
   if (!wps.length && ks.integrated === 0) return finish('no_gain', 'Kernel');
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
 

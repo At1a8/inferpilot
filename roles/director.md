@@ -329,8 +329,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
   `bisect_fixed` run that would.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
-  `integration_failed`, `rejected`, `not_integrated`) and package paths. A `not_integrated` hand-off's
-  back end found a gain that the run, stopped by the control file, never integrated: give its speedup.
+  `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
+  `integration_held` hand-off's unit gate has no result: its integration commit (`commit`, empty when the
+  implementer made none) is still on the branch, unverified. A `not_integrated` hand-off's back end
+  found a gain that the run, stopped by the control file, never integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
