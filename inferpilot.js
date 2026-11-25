@@ -770,6 +770,12 @@ function checkedOnBase(s) {
       + `${imp || 'a path it did not record'}, not from a base worktree of this run.` };
 }
 
+// The triager rewrites reply_draft.md in place: a call that returned nothing may have left it half
+// rewritten, and one that timed out may be writing it still.
+const halfDone = (label, what) => ({ claim: 'the whole draft',
+  issue: `not checked: ${what} returned nothing, so the draft is an earlier one or one rewritten halfway`
+    + (TIMED_OUT_CALLS.has(label) ? `; ${label} timed out and may still be writing it: stop it before reading or posting the draft` : '') });
+
 // The reply draft goes to the issue's author and maintainers: the reviewer checks it against the run, and
 // what it finds goes back to the triager, once; what is still left, or a draft nobody checked, the user
 // hears of before posting it.
@@ -783,8 +789,15 @@ async function checkReply(replyIns) {
       note('Reply', 'unchecked', 'the reviewer returned nothing: the reply draft is not checked against the run');
       return;
     }
-    if (chk.check_path) C.reply_check_path = chk.check_path;
-    const findings = (chk.findings || []).filter((f) => f && f.claim);
+    // A finding that quotes no claim is a finding still; a check that wrote no record of itself is none.
+    C.reply_check_path = String(chk.check_path || '').trim();
+    const findings = (chk.findings || []).filter((f) => f && (String(f.claim || '').trim() || String(f.issue || '').trim()))
+      .map((f) => (String(f.claim || '').trim() ? f : { ...f, claim: 'a claim the reviewer did not quote' }));
+    if (!C.reply_check_path) {
+      C.reply_findings = [...findings, { claim: 'the whole draft', issue: 'not checked: the reviewer wrote no reply_check.md' }];
+      note('Reply', 'unchecked', 'the reviewer named no reply_check.md: the reply draft is not checked against the run');
+      return;
+    }
     if (!findings.length) {
       C.reply_findings = [];
       note('Reply', 'checked', `${round ? 'rewritten from the reviewer\'s findings; ' : ''}it says only what the run showed`);
@@ -798,6 +811,7 @@ async function checkReply(replyIns) {
     const again = await call('issue_triager', 'reply', inputs({ ...replyIns, reply_findings: findings }), REPLY,
       'issue_triager:reply#fix');
     if (!again || !String(again.reply_draft_path || '').trim()) {
+      C.reply_findings = [...findings, halfDone('issue_triager:reply#fix', 'the rewrite from these findings')];
       note('Reply', 'findings', `${findings.length} claim(s) the run does not bear out, and the rewrite returned nothing`);
       return;
     }
@@ -835,7 +849,7 @@ async function finish(status, at) {
       if (rp && String(rp.reply_draft_path || '').trim()) {
         C.reply_draft_path = rp.reply_draft_path;
         await checkReply(replyIns);
-      }
+      } else if (C.reply_draft_path) C.reply_findings = [halfDone('issue_triager:reply', 'the rewrite from how the run ended')];
     }
     if (MODE === 'issue') {
       R.reply_draft_path = C.reply_draft_path || '';
@@ -843,7 +857,7 @@ async function finish(status, at) {
       if (R.reply_draft_path && !C.reply_findings) {
         C.reply_findings = [{ claim: 'the whole draft', issue: at === 'Triage'
           ? 'not checked by the reviewer: the run ended at Triage, before the check'
-          : 'not checked: the triager returned no draft rewritten from how the run ended, so this is an earlier draft' }];
+          : 'not checked: no draft was rewritten from how the run ended, so this is an earlier draft' }];
       }
       if (C.reply_findings) R.reply_findings = C.reply_findings;
     }
@@ -1578,7 +1592,8 @@ async function runIssue() {
     return finish('blocked', 'Diagnose');
   }
   note('Diagnose', dg.verdict, dg.root_cause);
-  if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push(dg.known_issue);
+  // The baseline's bug is what the issue reported: the reply explains it as the cause, not as something else seen.
+  if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
   if (stopHere('Diagnose')) return finish('stopped', 'Diagnose');
 

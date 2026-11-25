@@ -74,9 +74,11 @@ claim by claim, and never edit it.
    `stopped_at` and `phases`: a work package that was rolled back is not being worked on, and a run that
    ended without a fix offers none.
 3. **What the run cannot know.** Nobody reviewed or approved anything unless a human did and the run
-   recorded it; no maintainer's intent, no date.
+   recorded it; no maintainer's intent, no promised date (a date the run recorded, such as an image
+   tag's, is a fact like any other).
 4. A failure the baseline shares (`known_issues`) is told as what was seen and where, not as part of
-   this issue.
+   this issue; the one with `cause_of_this_issue` is what Diagnose found the issue's own failure to be,
+   and the draft explains it as that.
 5. Write `RUN_DIR/reply_check.md`: each finding with the claim as the draft has it, what the run shows,
    and the ledger line or artifact; or that the draft says only what the run showed.
 
