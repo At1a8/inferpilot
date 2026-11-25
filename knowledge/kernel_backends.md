@@ -69,8 +69,8 @@ node <kernel_backend_dir>/interface/runtime/engine/run_workflow.mjs <kernel_back
 
 After integration a hand-off ends `integrated`, `integration_failed` (rolled back), or `integration_held`
 when its unit gate has no result: its commit stays on the branch, unverified, and the run stops for a
-human. A run the control file stops before the integration leaves it `not_integrated`, its gain in the
-report and not in the code.
+human, the hand-offs it had not reached `recorded`. A run the control file stops before the integration
+leaves it `not_integrated`, its gain in the report and not in the code.
 With `kernel_backend=none` every hand-off ends `recorded`, and the report says how to run it later.
 
 A back end's own numbers are never InferPilot's evidence: an integrated kernel passes InferPilot's gates like
