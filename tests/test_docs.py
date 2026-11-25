@@ -244,6 +244,22 @@ def flags_in(text, command):
     return out
 
 
+class TokenComparisonTest(unittest.TestCase):
+    """G2 compares scores, not tokens: a token comparison is a diagnosis aid or the subject of a determinism
+    task (knowledge/validation_doctrine.md). No other document asks a gate for outputs equal to another
+    run's, which a bf16 baseline does not give twice."""
+
+    ASKS = re.compile(r"output\s+parity|match(?:es)?\s+greedy\s+output|greedy\s+outputs?\s+(?:equal|identical|match\w*)", re.I)
+
+    def test_no_gate_asks_for_output_parity(self):
+        doctrine = " ".join((ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").split())
+        self.assertIn("never the accuracy gate", doctrine)
+        found = ["%s: %s" % (path.relative_to(ROOT), " ".join(m.group(0).split()))
+                 for pattern in ("knowledge/*.md", "roles/*.md", "templates/*.md") for path in sorted(ROOT.glob(pattern))
+                 for m in self.ASKS.finditer(path.read_text(encoding="utf-8"))]
+        self.assertEqual(found, [], "these ask for outputs equal to another run's; G2 compares scores")
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_setup_container_and_runner_variables_are_in_both_readmes(self):
         missing = ["%s reads %s; %s does not say what it does" % (path.relative_to(ROOT), name, readme)

@@ -134,6 +134,8 @@ with guards holding; report the numbers on the PR either way.
 
 ## 4. Correctness first
 
-A performance change passes the same gates as a feature: G0 (off means untouched), G2 accuracy, output
-parity on fixed prompts, and for speculative decoding the acceptance length must not drop
-(`composability.md`).
+A performance change passes the same gates as a feature: G0 (off means untouched), G2 accuracy, and
+for speculative decoding the acceptance length must not drop (`composability.md`). Its outputs are
+not compared with the baseline's token for token (`validation_doctrine.md`, G2): what shows that it
+keeps behaviour is its unit test, which fails on a copy of the change broken in one way
+(`reward_hacks.md` T1).
