@@ -60,9 +60,46 @@ clock can start before your session does.
      `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
      dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,
      PD transfer checks).
-   - G3 long context sized so the feature engages; G4 stability under capacity pressure. G3/G4 at two or
-     more concurrencies, at least 4 runs each (6 when an intermittent failure is being judged), fixed
-     seeds, prefix cache flushed between runs.
+   - **G3 only with `long_context` on, G4 only with `stability` on;** one the task did not ask for is
+     `not run: not asked` in `gates` (`validation_doctrine.md`). Never run either on your own reading of
+     the change or of `goal`.
+     - G3 long context sized so the feature engages, at two or more concurrencies, at least 4 runs each
+       (6 when an intermittent failure is being judged), fixed seeds, prefix cache flushed between runs.
+     - G4 stability is one run, not repeated and not taken to other concurrencies: the run's
+       `client_script` (the task's, or InferPilot's `perf.sh`) run back to back for more than 48 hours
+       against one server that is not restarted, on a workload sized so the feature engages. Run
+       `bash <inferpilot_dir>/scripts/stability.sh <client_script>` with `PORT`,
+       `OUT_DIR=RUN_DIR/logs/g4_<arm>`, `HOURS=48` and `CONCURRENCY`, the highest of the task's workload
+       (a client of the task's own that does not read it runs as it is), started detached like any long
+       suite (step 1). It writes one line per pass to `OUT_DIR/stability.jsonl` (the client's result, the
+       memory in use on every GPU and on the host; the throughput of a client that appends no result to
+       `OUT_DIR/bench.jsonl` is read from its own logs), touches `OUT_DIR` after each, which shows the
+       machine lock that the run is alive, and ends at the first pass that fails. G4 starts after
+       everything else in the round, the other data sets included. Its length is set, so it needs no
+       reference run and is never `slow`.
+     - G4 passes when the server neither crashes, hangs nor runs out of memory, no request fails, and
+       nothing drifts: not the client's throughput, nor the memory in use on the run's GPUs or on the
+       host. Each hour of the run has one value of throughput and one of memory: the median of the passes
+       that ended in it, the first pass left out as warm-up. The median of the last 6 hours' values is no
+       lower in throughput, and no higher in memory, than the median of the first 6 hours' by more than
+       the range of those first 6 values. Never judge a drift by the spread of the whole run, which holds
+       the drift. Report with it how much of the run the client was running.
+     - **A failed G4 gets its control in this round:** the same test on the baseline, for its full
+       length unless the baseline fails sooner, written with the failure to the Controls section of the
+       ledger, where the investigator finds it; the failure's `counts` says how each arm ended and after
+       how long. One control serves the run: a later round uses the one in the ledger.
+     - **A known issue never turns a failed G4 into a pass** (step 4 does not apply to it): a server
+       that did not hold the load is not reported as stable. A G4 failure is blocking, and goes to the
+       investigator with its control, until `known_issues` holds it as the baseline's: from then on
+       report it as failed, with that issue, in `failures` with `blocking: false`.
+     - **G4 runs once in a run.** Write the commit it ran on with its result in the ledger
+       (`git -C <worktree> rev-parse --short HEAD`). A later round does not run it again, whether it
+       passed or `known_issues` holds its failure as the baseline's: report that result with its commit,
+       and when this round's commit is another, say in `gates` that this commit has not been through
+       G4. Only a G4 whose failure was the change's is run again, on the fix.
+     - **A round with G4 says what it needs first** (`needs_min`, below): it does not fit the default
+       limit, and its estimate counts G4 twice, its run and the control a failure would need, since no
+       later call has that time.
    - **Other data sets last, one after another, and only when `goal` or the acceptance matrix asks:**
      gpqa_diamond and simple_qa (through evalscope) when `goal` says the change may lose accuracy, and the
      sets the goal adds; each once per arm, at most 1 point below the baseline.
@@ -100,10 +137,15 @@ Return:
 
 ```json
 {"all_pass": false,
- "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "pass", "G4": "fail"},
- "failures": [{"gate": "G4", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g4_*.json", "blocking": true}],
+ "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "fail", "G4": "not run: not asked"},
+ "failures": [{"gate": "G3", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g3_*.json", "blocking": true}],
  "ledger_path": "/abs/RUN_DIR/experiment_ledger.md", "summary": "<one line per gate>"}
 ```
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
 did not run are `not run`.
+
+A G4 that ran in an earlier round is in `gates` with its commit:
+`"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the
+baseline's is in `failures` with `"blocking": false`, and in `gates` as
+`"G4": "fail on 1a2b3c4: crash at hour 31, the baseline's control at hour 27 (KI-007)"`.

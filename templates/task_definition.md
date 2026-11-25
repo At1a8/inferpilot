@@ -15,7 +15,7 @@ of it.
 | `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
 | `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given | for a performance issue | — | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -30,6 +30,7 @@ of it.
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
 | `tune` | default `false`: the feature runs at the configuration of the target PR or design; `true`: a work package chooses its knobs by measurement | optional | | | | |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's workload and goal, each off by default: a held-out operating point the gain must also hold at, guard workloads of InferPilot's choosing, points beyond the workload's own | optional | optional | | optional | |
+| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack on long prompts), `stability` runs G4 (the `client_script` run back to back for more than 48 hours, so the task needs one) | optional | optional | | optional | |
 | `kernel_backend` with `kernel_backend_dir` or `kernel_backend_command` | where kernel hand-offs go | optional | optional | optional | optional | |
 
 `inferpilot.js` checks the required fields (and a back end's own field) for every definition; one that
@@ -60,6 +61,16 @@ the user.
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more
   runs are named there too. It runs through InferPilot's `accuracy.sh` (§1.2), which fixes the settings
   for every arm.
+- **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
+  on needle-in-a-haystack prompts, G4 as the `client_script` run back to back for more than 48 hours
+  against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;
+  `scripts/stability.sh` runs it). So a task with `stability` on brings a `client_script`, whatever its
+  mode, and its workload is the one to keep up: long prompts at high concurrency. `goal` does not turn
+  the gates on; from a request in plain words, the intake sets them. A task that sets neither is
+  reported with both as `not run: not asked`. G4 runs once in a run: after a later change to the code,
+  a review's for one, it is not run again, and the report says which commit it ran on. With `stability`
+  on, a Verify round asks for a limit of about 6 days, and uses it in full only when G4 fails and the
+  baseline runs the same test as its control.
 
 ```bash
 # server.sh
@@ -133,7 +144,7 @@ server's context leaves beside a question.
 
 ```json
 {"mode": "feature", "task": "https://github.com/sgl-project/sglang/pull/<n>",
- "goal": "the feature passes G0–G5 on DeepSeek-V4.1 at TP4",
+ "goal": "the feature passes its gates on DeepSeek-V4.1 at TP4",
  "model_path": "/mnt/models/DeepSeek-V4.1-Flash", "gpu_ids": "0,1,2,3",
  "server_script": "/workspace/scripts/server.sh"}
 ```
