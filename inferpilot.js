@@ -80,6 +80,13 @@ const timeoutFor = (role) => GRANTED_MS[role]
   || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
+// The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
+// rounded up can put the reserve's start before the call's.
+const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100) : 0);
+// The unit and Verify gates are not asked again by the engine, under what is left of the same limit: an
+// answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
+// told to check first what the one before left.
+const ONE_SESSION = { schemaRetries: 0 };
 // One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
 // its longest agent call has died, and its lock may be taken over.
 const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
@@ -418,7 +425,7 @@ const stopHere = (title) => {
 // The same check where the verify, review and PR repair loops end a phase again: a stop named while the
 // run is in such a loop ends the run there, as the route's own checks do on its first pass.
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
-const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.stopped ? r.at : at);
+const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
@@ -499,8 +506,11 @@ async function call(role, sub, ins, schema, label, opts) {
   const ms = timeoutFor(role);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+    // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
+    const told = ins.time_limit_min > 0 && ms > 0
+      ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
-      const r = await withTimeout(agent(rolePrompt(role, sub, ins, attempt, leads),
+      const r = await withTimeout(agent(rolePrompt(role, sub, told, attempt, leads),
         { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
@@ -779,6 +789,7 @@ async function finish(status, at) {
       // A base run that fails for another reason would pass for a confirmed lead: a timed-out agent may still
       // hold the GPUs, and a run that ended at Setup never showed the environment works.
       const skipped = !C.confirm_leads ? [] : [...TIMED_OUT_CALLS].map((c) => `${c} timed out`)
+        .concat(leftRunning)
         .concat(at === 'Setup' ? ['the run stopped at Setup'] : [])
         .concat(liveStopAfter() === 'now' ? ['the control file asked the run to stop now'] : []);
       const sp = await call('issue_triager', 'spinoff', inputs({ status, stopped_at: at || '', phases: R.phases,
@@ -986,9 +997,21 @@ async function setup(requireBaseline) {
 // the package is rolled back to the last verified commit and the task stops.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
-function stalled(wp, label) {
+// Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
+function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
-  return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
+}
+// Gates and rounds that ended without a result and may have left detached runs on the GPUs.
+const leftRunning = [];
+// A unit gate whose every attempt ended without an answer may have left the runs it started going, as a
+// call that timed out may: no further round and no rollback either, and a human stops what it left.
+function noAnswer(wp, label, commit) {
+  ATTENTION.push({ wp: wp.id, worktree: C.worktree, issue: `${label} returned no answer: commit ${commit} stays in the `
+    + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
+  leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
+  note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} returned no answer` };
 }
 
 async function implementAll(wps) {
@@ -1028,19 +1051,19 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit',
-        inputs({ work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test }), UNIT, utLabel);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
+        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
+        ONE_SESSION);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
+      if (!ut) return noAnswer(wp, utLabel, im.commit);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
-      const bites = !!ut && (['parent', 'mutant'].includes(ut.fails_without_change)
-        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs'));
-      if (ut && ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
+      const bites = ['parent', 'mutant'].includes(ut.fails_without_change)
+        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs');
+      if (ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
         passed = true;
         R.done.push({ wp: wp.id, commit: im.commit, evidence: ut.evidence || '' });
-      } else if (!ut) {
-        feedback = 'the test engineer returned nothing';
       } else if (ut.unit_pass === true && ut.feature_off_unchanged === true) {
         feedback = `the unit test cannot fail (fails_without_change=${ut.fails_without_change}); make it fail on the parent `
           + `commit, or on a copy of the change broken in one way when the change keeps behaviour`
@@ -1081,7 +1104,7 @@ async function verifyLoop(extraGates) {
     for (let again = false; ; again = true) {
       const limit = minutes(timeoutFor('verify_engineer'));
       v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
-        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`);
+        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`, ONE_SESSION);
       const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
         ? Math.ceil(Number(v.needs_min) || 0) : 0;
       if (!needs) break;
@@ -1095,6 +1118,9 @@ async function verifyLoop(extraGates) {
     }
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
+      leftRunning.push(`Verify round ${round} may have left its servers running`);
+      ATTENTION.push({ call: `verify_engineer#${round}`, issue: `Verify round ${round} returned no answer and may have left its `
+        + 'servers running: stop them before reusing its GPUs' });
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
@@ -1126,7 +1152,7 @@ async function verifyLoop(extraGates) {
     }
     if (inv.verdict === 'kernel_regression') {
       const back = await rejectKernels(inv.kernel_handoffs || [], inv.counterexample || inv.summary || '');
-      if (!back.ok) return { ok: false, reason: back.reason };
+      if (!back.ok) return { ok: false, at: back.at, reason: back.reason };
       continue;
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
@@ -1134,7 +1160,8 @@ async function verifyLoop(extraGates) {
       if (!fix.ok) return { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
-      await kernelStage(); // hand-offs a fix raised
+      const ks = await kernelStage(); // hand-offs a fix raised
+      if (ks.held) return { ok: false, at: 'Kernel', reason: ks.held };
       const afterKernel = stopAt('Kernel');
       if (afterKernel) return afterKernel;
       continue;
@@ -1170,8 +1197,8 @@ async function rejectKernels(ids, counterexample) {
     note('Investigate', 'kernel_rejected', `${h.id}: back to the functional kernel${suffix}`
       + `${retry ? '; handed back once with the failing case' : '; rejected after its retry'}`);
   }
-  await kernelStage();
-  return { ok: true };
+  const ks = await kernelStage();
+  return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
 async function performance(claim) {
@@ -1234,11 +1261,12 @@ async function reviewLoop(extraGates, perfClaim, runPerf) {
 async function repaired(extraGates, perfClaim, runPerf) {
   const afterFix = stopAt('Implement');
   if (afterFix) return afterFix;
-  await kernelStage(); // hand-offs a requested change raised
+  const ks = await kernelStage(); // hand-offs a requested change raised
+  if (ks.held) return { ok: false, at: 'Kernel' };
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
   const ver = await verifyLoop(extraGates);
-  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: 'Verify' };
+  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify' };
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {
@@ -1308,6 +1336,18 @@ async function kernelStage() {
     if (res && res.status === 'improved' && res.integrate_wp) {
       h.status = 'not_integrated'; // what stays when a stop asked for now ends the run before Implement
       const r = await implementAll([res.integrate_wp]);
+      // Not rolled back (a gate without a result, a call that timed out): the commit stays, so the run stops.
+      if (r.held) {
+        h.status = 'integration_held';
+        h.commit = r.commit || '';
+        // The hand-offs it had not reached are recorded, as with no back end: a later run takes them. Read
+        // now, not from `pending`: the integration's own implementer can have raised one.
+        const rest = R.handoffs.filter((p) => p.owner === 'kernel_workflow' && !p.status);
+        for (const p of rest) p.status = 'recorded';
+        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`
+          + `${rest.length ? `; ${rest.map((p) => p.id).join(', ')} recorded, not run` : ''}`);
+        return { integrated, held: r.reason };
+      }
       h.status = r.ok ? 'integrated' : 'integration_failed';
       if (r.ok) {
         integrated += 1;
@@ -1329,6 +1369,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   }
   if (stopHere('Implement')) return finish('stopped', 'Implement');
   const ks = await kernelStage();
+  if (ks.held) return finish('blocked', 'Kernel');
   if (!wps.length && ks.integrated === 0) return finish('no_gain', 'Kernel');
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
 

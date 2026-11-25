@@ -255,7 +255,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `run.json` | 任务定义、intake 的假设，以及所在的容器（任务的分支在那个容器里） |
 | `validation_report.md`、`run_report.md` | 报告：PR 准备好时是前者，其他结局是后者（运行结果中的 `report_path` 给出路径） |
 | `experiment_ledger.md` | 环境、基线和每一次测量 |
-| `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>.log` |
+| `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
