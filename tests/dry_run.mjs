@@ -808,6 +808,56 @@ const scenarios = [
     check(doc.includes('stop the runs this gate started and wait until they have exited'), 'a failed gate stops its runs before it returns');
     check(doc.includes('Steps 1 to 4 run only the checks that never started'), 'the finishing call runs only what is missing');
   }],
+  ['implement: a check given as null with nothing in incomplete is a gate without a result, not a failed one', async () => {
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' });
+    const open = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: null, fails_without_change: null, incomplete: '' });
+    const units = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit');
+    const implements_ = (r) => r.keys.filter((k) => k === 'implementer:implement').length;
+    const finished = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins, n) => (n === 1 ? open(ins) : good(ins)) });
+    check(finished.result.status === 'ready_for_review' && implements_(finished) === 2 && !finished.keys.includes('implementer:rollback'),
+      `finished by one more call, no fix round and no rollback: ${finished.result.status}`);
+    check(units(finished).length === 3 && units(finished)[1].ins.commit === 'c_WP1'
+      && /the feature-off check and the check that the test can fail did not run/.test(units(finished)[1].ins.incomplete),
+      `the finishing call is told which checks: ${units(finished)[1] && units(finished)[1].ins.incomplete}`);
+    const one = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { ...good(ins), fails_without_change: null } : good(ins)) });
+    check(units(one)[1] && /^the check that the test can fail did not run/.test(units(one)[1].ins.incomplete),
+      `only the check that is null is named: ${units(one)[1] && units(one)[1].ins.incomplete}`);
+    const never = await run({ mode: 'feature', task: 't' }, { 'test_engineer:unit': open });
+    check(never.result.status === 'blocked' && never.result.stopped_at === 'Implement' && units(never).length === 2
+      && implements_(never) === 1 && !never.keys.includes('implementer:rollback'),
+      `still null after the finishing call: the package stops, its commit kept: ${never.result.status} at ${never.result.stopped_at}`);
+    check(never.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('the feature-off check')),
+      `attention: ${JSON.stringify(never.result.attention)}`);
+    for (const [why, bad] of [['the unit test failed', { unit_pass: false }], ['the feature-off run changed', { feature_off_unchanged: false }],
+      ['the test cannot fail', { fails_without_change: 'no' }]]) {
+      const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins) => ({ ...open(ins), ...bad }) });
+      check(r.keys.includes('implementer:rollback') && units(r).length === 1,
+        `${why}, whatever else did not run: a failure as before, rolled back with no finishing call`);
+    }
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(doc.includes('Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed gate names '
+      + 'nothing there, and a check it did not run stays `null`')
+      && doc.includes('A gate with checks still without a result, none of those that ran having failed, returns `unit_pass` false'),
+      'what the answer holds says the same as step 0: a failed gate leaves incomplete empty');
+  }],
+  ['kernel: a held integration whose implementer timed out has a commit not reported, which the report does not take for none', async () => {
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100, ...CMD }, {
+      'implementer:implement': async (ins) => {
+        if (ins.work_package.id === 'K-K-WP1') await new Promise((resolve) => setTimeout(resolve, 400));
+        return implement(ins);
+      },
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === '',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+    const director = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
+    check(director.includes('An empty `commit` is one not reported, not one not made: the implementer\'s call timed out, and may have '
+      + 'committed or still be running, so say that the branch is to be inspected once that call has stopped')
+      && !director.includes('empty when the implementer made none'),
+      'the director is told what an empty commit means');
+  }],
   ['implement: a call finishing a unit gate that times out leaves the human its commit and what was still going', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
       'test_engineer:unit': async (ins, n) => {

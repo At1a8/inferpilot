@@ -999,8 +999,19 @@ function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
   return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
 }
+// What a unit answer leaves without a result: what it says in `incomplete`, or, when it says nothing
+// there and no check failed, the checks it gives as null. A check that ran and failed is a failure,
+// whatever else did not run.
+function leftOpen(ut) {
+  const said = String((ut && ut.incomplete) || '').trim();
+  if (!ut || said) return said;
+  if (ut.unit_pass === false || ut.feature_off_unchanged === false || ut.fails_without_change === 'no') return '';
+  const open = [ut.feature_off_unchanged === null && 'the feature-off check',
+    ut.fails_without_change === null && 'the check that the test can fail'].filter(Boolean);
+  return open.length ? `${open.join(' and ')} did not run (null in the answer, which named nothing in incomplete)` : '';
+}
 // A unit gate with checks that have no result, none of those that ran having failed.
-const unfinished = (ut) => !!ut && String(ut.incomplete || '').trim() !== '';
+const unfinished = (ut) => leftOpen(ut) !== '';
 // A unit call is never asked again blind: a retry without what the first one left going could start the
 // same tests on the same GPUs. An answer it cannot use, or none, goes to the call that finishes the gate.
 const UNIT_ONCE = { attempts: 1, schemaRetries: 0 };
@@ -1068,13 +1079,13 @@ async function implementAll(wps) {
       // A gate without its result, checks still to give one or no answer at all, is finished by one more
       // call, which spends no fix round and reads the runs the first one left going.
       if (!ut || unfinished(ut)) {
-        const left = ut ? ut.incomplete : 'every check: the test engineer returned no answer';
+        const left = ut ? leftOpen(ut) : 'every check: the test engineer returned no answer';
         const finLabel = `${utLabel}+finish`;
         const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
           earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel, UNIT_ONCE);
         if (!fin && TIMED_OUT_CALLS.has(finLabel)) return gateTimedOut(wp, finLabel, im.commit, left);
         if (!fin || unfinished(fin)) {
-          return noResult(wp, im.commit, fin ? fin.incomplete : `the call to finish it returned no answer; before it: ${left}`);
+          return noResult(wp, im.commit, fin ? leftOpen(fin) : `the call to finish it returned no answer; before it: ${left}`);
         }
         ut = fin;
       }

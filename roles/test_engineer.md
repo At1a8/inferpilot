@@ -56,6 +56,8 @@ Return:
  "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
 
-Every answer has `incomplete`, `""` when every check has a result. A gate with checks still without a
-result returns `unit_pass` false, `null` for a check not run, and says which in `incomplete`, e.g.
+Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
+gate names nothing there, and a check it did not run stays `null`. A gate with checks still without a
+result, none of those that ran having failed, returns `unit_pass` false, `null` for a check not run, and
+says which in `incomplete`, e.g.
 `"DCP8 runs 4-5 and DCP1 not finished: driver pid 4242 writes RUN_DIR/logs/unit_WP1_driver.log"`.
