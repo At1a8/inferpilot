@@ -29,7 +29,10 @@ Otherwise complete `RUN_DIR/design.md` (`templates/design.md`) sections 4–11:
    test → memory or pool layout → bookkeeping/coordinator → framework hooks → startup validation →
    capacity and admission accounting. Kernel packages implement a functional kernel with a unit test
    against a reference; tuning it is a hand-off to the kernel workflow (`kernel_backends.md`), not a
-   package.
+   package. For a port, the package that completes the feature's path closes on the feature's own
+   metric (accept length for speculative decoding; `validation_doctrine.md`, G1): its `test` measures
+   it on the source's prompt set and settings, and passes within the spec's tolerance of the source's
+   value.
 2. **Invariants**: numbered, testable, each with its enforcement point and how a violation shows up.
 3. **Memory budget**: extra bytes per token and per request, and where pool sizing accounts for them.
 4. **Synchronization**: every scheduler-side write an in-flight forward may read, and what protects it
@@ -42,8 +45,9 @@ Otherwise complete `RUN_DIR/design.md` (`templates/design.md`) sections 4–11:
 9. **Defaults:** the feature's knobs take the values of the target PR or design; a work package that
    chooses them by measurement only with `tune` on (`perf_evaluation.md` §3).
 
-`gate_ok` is true only when every work package has a test, every invariant has an enforcement point
-and every unsupported configuration has a startup rejection.
+`gate_ok` is true only when every work package has a test, every invariant has an enforcement point,
+every unsupported configuration has a startup rejection and, when the spec gives the feature's own
+metric a tolerance, one package's test judges it.
 
 Return:
 

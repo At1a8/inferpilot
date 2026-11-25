@@ -13,7 +13,7 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 | Gate | What it shows | Typical suite |
 |---|---|---|
 | G0 feature off | the change is inert when disabled | baseline suites on the feature branch with the switch off |
-| G1 unit / oracle | each new kernel or data structure does what it claims | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1) |
+| G1 unit / oracle | each new kernel or data structure does what it claims, and a port's own metric agrees with its source's | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1); for a port, the feature's own metric (accept length for speculative decoding) against the source's value, on the source's prompts and settings |
 | G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
 | G3 long context | the feature's own data path is exercised and correct | needle-in-a-haystack: single and multi-needle |
 | G4 stability | no crash / hang / collapse under capacity pressure | many long prompts at high concurrency |
@@ -21,6 +21,20 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 
 Notes per gate:
 
+- **G1 for a port: the feature's own metric against the source's.** A feature may have a metric of its
+  own that the hardware does not change (accept length for speculative decoding): for the same models,
+  prompts, sampling and draft length, a correct port gives the source's value, near-tie flips aside.
+  The test of the work package that completes the feature's path measures it on the source's own prompt
+  set and settings, and passes within the tolerance the spec names, above or below. Where the source
+  reports no value, the reference implementation run on the same prompts gives it; with neither, the
+  spec says so and the metric is reported, not judged. It belongs to G1 because nothing else shows that
+  this unit is right: with exact verification the target verifies every token, so a broken draft path
+  leaves the outputs correct, G2 passes, and only the accept length falls (PARD-2 with its draft input
+  shifted by one position: about 2 tokens a step instead of about 7.5). On vLLM's case of four sets the
+  port accepts 7.52 / 8.42 / 8.56 / 3.97 tokens a step where vLLM reports 7.72 / 8.09 / 8.72 / 4.02, on
+  other hardware and at another speed-up (`feature_skills/pard2`). G2's data sets are no place for the
+  comparison: other prompts give another number (6.65 on PARD-2's gsm8k test, 5-shot), which G2 records
+  as its engagement number and does not judge.
 - **gsm8k first.** gsm8k (1319) runs before every other gate, and a blocking failure ends the round: an
   hour of long-context runs on a build that already fails accuracy is wasted. Other data sets run last,
   one after another, only when the goal or the matrix asks. No gate has a fixed time cap: every limit

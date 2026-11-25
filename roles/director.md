@@ -224,7 +224,9 @@ Return:
    client.** Its claim is a gain beyond the noise band there, with the source's numbers beside it for
    reference: the hardware differs, and so may the size of the gain. The feature's own metric, which the
    hardware does not change (accept length for speculative decoding), stays within a tolerance of the
-   source's that the spec names.
+   source's that the spec names. It is a G1 criterion (`validation_doctrine.md`): the spec gives the
+   source's value and the source's prompt set and settings for it, and the test of the work package
+   that completes the feature's path judges it there, not G2 on its data sets.
    - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
      scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what

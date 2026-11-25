@@ -60,6 +60,36 @@ class AttributionTest(unittest.TestCase):
             self.assertEqual(text.count("Developed with the [InferPilot]"), text.count(ATTRIBUTION), name)
 
 
+def items(text):
+    """Paragraphs, list items and table rows, each on one line."""
+    return [" ".join(part.split()) for part in re.split(r"\n(?=[ \t]*(?:\d+\.|[-*]) |\|)|\n[ \t]*\n", text)]
+
+
+class FeatureMetricTest(unittest.TestCase):
+    """templates/feature_spec.md asks a port for its feature's own metric (accept length for speculative
+    decoding) in G1, against the source's value. The doctrine and the roles that write the spec, plan the
+    work package and run its test say the same: where it is judged, and on whose prompts."""
+
+    def test_the_spec_template_asks_for_it_in_g1(self):
+        spec = (ROOT / "templates" / "feature_spec.md").read_text(encoding="utf-8")
+        rows = [line for line in spec.splitlines() if line.startswith("| G1 ")]
+        self.assertEqual(len(rows), 1, "the acceptance criteria have one G1 row")
+        for said in ("the feature's own metric", "<tolerance>", "the source's"):
+            self.assertIn(said, rows[0])
+
+    def test_the_doctrine_and_the_roles_judge_it_in_g1_on_the_sources_prompts(self):
+        for name, phase in (("knowledge/validation_doctrine.md", None), ("roles/director.md", "## PHASE=spec"),
+                            ("roles/architect.md", "## PHASE=design"), ("roles/test_engineer.md", "## PHASE=unit")):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            if phase:
+                text = text.split(phase, 1)[1].split("\n## ", 1)[0]
+            said = [i for i in items(text) if "the feature's own metric" in i.lower() and not i.startswith("|")]
+            self.assertTrue(said, "%s does not name the feature's own metric" % name)
+            where = " ".join(said)
+            self.assertIn("G1", where, "%s does not say the feature's own metric is judged in G1" % name)
+            self.assertRegex(where, r"the source's(?: own)? prompt", "%s does not say on whose prompts it is measured" % name)
+
+
 class ScanTemplatesTest(unittest.TestCase):
     """templates/daily_report.md and templates/task_queue.md, which the dispatcher fills."""
 
