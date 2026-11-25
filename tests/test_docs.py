@@ -4,6 +4,9 @@ its own header, every variable the READMEs' tables list is read by something, th
 the READMEs and AGENTS.md give exist, and the branch bundle the roles write is the one a retry or a
 resume takes the task's commits from, with commands that do it. Offline.
 
+The roles and the doctrine also agree on G0: it runs only where a change has a switch, and each role that
+reports it says what it reports without one.
+
     python3 -m unittest discover -s tests
 """
 import ast
@@ -281,6 +284,40 @@ class FlagsTest(unittest.TestCase):
         for name in ("README.md", "README.zh-CN.md", "AGENTS.md"):
             given = flags_in((ROOT / name).read_text(encoding="utf-8"), "runtime/run.mjs")
             self.assertLessEqual(given, read, "%s gives runtime/run.mjs flags it does not take" % name)
+
+
+def items(path):
+    """A document's paragraphs, list items and table rows, each on one line."""
+    text = (ROOT / path).read_text(encoding="utf-8")
+    return [" ".join(part.split()) for part in re.split(r"\n(?=[ \t]*(?:\d+\.|[-*]) |\|)|\n[ \t]*\n", text)]
+
+
+class FeatureOffTest(unittest.TestCase):
+    """G0 turns a feature off, so it runs only where the change has a switch (knowledge/validation_doctrine.md).
+    Every mode that changes code still answers for it: the roles that report it say what they report for a
+    change without a switch, and the documents of the modes that fix things ask for it only where there is one."""
+
+    def test_the_doctrine_gives_g0_only_to_a_change_with_a_switch(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G0 needs a switch.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say where G0 runs")
+        for said in ("without a switch", "has no G0", "`roles/test_engineer.md`", "`roles/reviewer.md`"):
+            self.assertIn(said, note[0])
+
+    def test_every_role_that_reports_g0_says_what_it_reports_without_a_switch(self):
+        for path, result in (("roles/test_engineer.md", "`feature_off_unchanged`"),
+                             ("roles/pr_engineer.md", "`feature_off_final`"), ("roles/verify_engineer.md", "`gates`")):
+            named = [i for i in items(path) if re.search(r"\bG0\b", i) and "feature off" in i.lower()]
+            self.assertEqual(len(named), 1, "%s: the steps that run G0" % path)
+            self.assertRegex(named[0], r"without (?:a switch|one)", "%s runs G0 on a change with nothing to turn off" % path)
+            self.assertIn(result, named[0], "%s does not say what %s reports without a switch" % (path, result))
+
+    def test_a_fix_is_asked_for_g0_only_behind_a_features_switch(self):
+        for path in ("knowledge/ci_triage.md", "knowledge/issue_triage.md"):
+            named = [i for i in items(path) if re.search(r"\bG0\b", i)]
+            self.assertTrue(named, "%s does not say when a fix needs G0" % path)
+            for item in named:
+                self.assertIn("only when the fix is behind a feature's switch", item, path)
+                self.assertIn("existing tests of the module", item, "%s: what a fix without a switch shows instead" % path)
 
 
 BUNDLE = "RUN_DIR/branch.bundle"

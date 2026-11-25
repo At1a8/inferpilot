@@ -31,7 +31,9 @@ comes back as questions rather than guesses.
    on baseline (see `validation_doctrine.md` → *Same-pattern baseline control*).
 3. **Feature off means untouched.** With the feature disabled the framework must behave exactly as
    before: every hook is gated on the feature's own switch, and unsupported configurations are rejected
-   at startup, not discovered at runtime.
+   at startup, not discovered at runtime. A change without a switch (most fixes, a performance change
+   that is always on) takes effect only in the case it is for; its feature-off check is that the
+   existing tests of the modules it touches still pass (`validation_doctrine.md`, G0).
 4. **Evidence over belief.** A claim without an artifact (log, result file, commit) does not go into the
    report. Intermittent behaviour is described with counts over repeated runs, never with one run.
 5. **Smallest diff that satisfies the spec.** Keep the change inside the subsystems the design names;

@@ -50,15 +50,24 @@ Notes per gate:
 - **G3/G4 must be sized so the feature engages.** For a memory-tier feature that means total context
   well above the device pool (force eviction/demotion), and concurrency high enough that several engaged
   requests decode in the same batch. Log the engagement (e.g. demotion counters) and attach it.
-- **G0 for a config-construction change: compare the built config, not only a server smoke.** Diff
-  `get_config(...).to_dict()` from the fix and the parent tree for every config shape the changed code
-  branches on (with and without the field it touches), not only the task's checkpoint. For a YaRN config
-  fix on sglang #41299 the task's checkpoint built the same config with and without the fix, while a text
-  config without `rope_parameters`, built by the same code, had `{'rope_theta': 10000.0, ...}` filled in
-  on the parent and `{}` with the fix, so its effective rope_theta went from a wrongly filled-in 10000 to
-  the text config's own 5e6: a correction, but a behaviour change G0 should have reported, and only the
-  review found it. A short greedy smoke is a weak G0 here: one of three default-rope runs with identical
-  built configs gave a different 16-token text.
+- **G0 needs a switch.** It runs where the change can be turned off: a feature, and a fix or a
+  performance change behind a feature's switch. Such a fix has a baseline that runs, the base commit
+  with the switch off, since its failure needs the switch on. A change without a switch, which nothing
+  turns off (most issue and CI fixes, a performance change that is always on), has no G0. Where it
+  takes effect the base commit fails or is slower, which `issue_repro`, `failing_test` and G5 judge.
+  What it must leave alone is shown another way: the existing tests of the modules it touches that
+  pass on its parent still pass (`roles/test_engineer.md`), and the review finds that it takes effect
+  only in the case it is for (`roles/reviewer.md`).
+- **A change to config construction: compare the built config, not only a server smoke**, in G0 when
+  it has a switch and in the review when it has none. Diff `get_config(...).to_dict()` from the change
+  and the parent tree for every config shape the changed code branches on (with and without the field
+  it touches), not only the task's checkpoint. For a YaRN config fix on sglang #41299 the task's
+  checkpoint built the same config with and without the fix, while a text config without
+  `rope_parameters`, built by the same code, had `{'rope_theta': 10000.0, ...}` filled in on the parent
+  and `{}` with the fix, so its effective rope_theta went from a wrongly filled-in 10000 to the text
+  config's own 5e6: a correction, but a behaviour change outside the task's case, which this comparison
+  would have reported and only the review's reading found. A short greedy smoke is a weak check here:
+  one of three default-rope runs with identical built configs gave a different 16-token text.
 - **Run G3/G4 at more than one concurrency.** Concurrency 1 often passes when concurrency 8–32 fails;
   the batch-level interactions are where bugs live.
 

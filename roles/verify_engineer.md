@@ -37,10 +37,11 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit).
      the task's own, or InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's
      settings; the same for both arms): once per arm, at most 1 point below the baseline, with no
      token-level comparison. A set where a question got no answer has no score.
-   - G0 feature off; every gate in `extra_gates`: `issue_repro` (the reproduction no longer fails),
-     `failing_test` (the failing CI test passes on every lane it failed on); composability gates for every
-     dimension the task touches (acceptance length for speculative decoding, accuracy bounds per KV dtype,
-     PD transfer checks).
+   - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
+     no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
+     fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates
+     for every dimension the task touches (acceptance length for speculative decoding, accuracy bounds
+     per KV dtype, PD transfer checks).
    - G3 long context sized so the feature engages; G4 stability under capacity pressure. G3/G4 at two or
      more concurrencies, at least 4 runs each (6 when an intermittent failure is being judged), fixed
      seeds, prefix cache flushed between runs.

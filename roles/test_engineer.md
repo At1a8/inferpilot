@@ -30,7 +30,11 @@ Inputs: `work_package`, `commit`, `unit_test_cmd`.
    `n/a` only for a `docs` package.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
-   the baseline in the ledger. Behaviour must be unchanged.
+   the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a
+   performance change that is always on) has nothing to turn off, and no G0 (`validation_doctrine.md`):
+   run those tests on the commit as it is, and the smoke only when the ledger holds a baseline to
+   compare it with. `feature_off_unchanged` is then that no test which passes on the parent fails, and
+   that the smoke, when there is one, matches its baseline.
 5. Append the results to the Unit tests section of `RUN_DIR/experiment_ledger.md`, with how the test
    failed without the change.
 6. On failure, write `failure_summary` so the implementer can reproduce it: the failing case, the

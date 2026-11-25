@@ -134,6 +134,6 @@ with guards holding; report the numbers on the PR either way.
 
 ## 4. Correctness first
 
-A performance change passes the same gates as a feature: G0 (off means untouched), G2 accuracy, output
-parity on fixed prompts, and for speculative decoding the acceptance length must not drop
-(`composability.md`).
+A performance change passes the same gates as a feature: G0 when it is behind a switch (off means
+untouched; one that is always on has no G0, `validation_doctrine.md`), G2 accuracy, output parity on
+fixed prompts, and for speculative decoding the acceptance length must not drop (`composability.md`).

@@ -6,7 +6,8 @@ InferPilot's implementer meets these in every work package; the reviewer and the
 send what is missing back as work packages, so the branch that is pushed is the one that was verified.
 
 - [ ] Debug instrumentation removed, or gated behind an environment switch that is off by default.
-- [ ] Feature-off check (G0) passes on the final commit.
+- [ ] Feature-off check (G0) passes on the final commit; a change without a switch has none, and the
+      existing tests of the modules it touches pass there instead (`validation_doctrine.md`).
 - [ ] The target repo's formatters/linters pass locally (sglang: `pre-commit run --all-files`, which
       includes isort, ruff format and clang-format; CI's `lint` job runs the same).
 - [ ] New tests registered where the repo's CI discovers them (sglang: `test/registered/...` with the
