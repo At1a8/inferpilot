@@ -58,7 +58,7 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数 |
 | `investigator` | Investigate、Diagnose | 先跑对照实验，再一次只验证一个机制，并维护假设台账；返回修复工作包、基线同样存在的已知问题、无法定论的结论，或者（对 issue 而言）不在 AMD 这一侧的根因；探测代码只放在开关后面 |
 | `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack |
-| `reviewer` | Review | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；可以换用另一个模型（`review_model`） |
+| `reviewer` | Review、Reply | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；在报告前把 issue 的回复草稿逐条对照运行记录核对；可以换用另一个模型（`review_model`） |
 | `kernel_liaison` | Kernel | 把 kernel hand-off 转成后端的任务，运行 `command` 类后端，依据后端自身的验证评判结果，并把收益作为工作包返回 |
 | `pr_engineer` | PR | 不改任何代码：检查代码整洁、lint 和 CI 注册（缺什么就作为工作包退回），在不改变代码内容的前提下整理成每个工作包一个 commit，试合并 main 只用来报告冲突，在最终 commit 上检查关闭特性时的行为（没有开关的改动，改为检查它涉及的模块已有的测试），写 PR 描述和 push 命令 |
 | `curator` | Report | 把这次运行证实的内容写进 `knowledge/`（已知问题、特性 skill、CUDA → AMD 对照条目、新发现的 reward hack、方法经验），每个数字都能追溯到这次运行，并作为 PR 提到 InferPilot 仓库 |
@@ -257,6 +257,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `experiment_ledger.md` | 环境、基线和每一次测量 |
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
+| `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 
