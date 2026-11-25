@@ -60,7 +60,26 @@ clock can start before your session does.
    `n/a` only for a `docs` package.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
-   the baseline in the ledger. Behaviour must be unchanged.
+   the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a
+   performance change that is always on) has nothing to turn off, and no G0 (`validation_doctrine.md`):
+   `feature_off_unchanged` is then what the package leaves alone, judged against its parent and never
+   as an absolute pass.
+   - **The tests:** run them on the commit as it is, and each one that fails again on the parent
+     (`<commit>^` in a throwaway worktree, as in step 3; a run longer than one tool call goes through a
+     driver, as step 0 says of step 3's control), with the same command and environment. A failure is
+     unchanged only when the test fails there the same way, the same test with the same error. One
+     that passes on the parent is the package's, and so is one that fails there another way (an
+     assertion there, a crash here). One the parent cannot run at all because of the failure the
+     package fixes (a module that did not import) has no result there: run it on the last commit that
+     could run it, the culprit's parent for a CI fix (the triage record names it), and compare with
+     that; where the run knows no such commit, it is the package's.
+   - **The smoke,** for a package on the serving path, only against a baseline of a case the package
+     is meant to keep: any baseline in the ledger for a package that keeps behaviour (a performance
+     change), one on a configuration outside its case for a fix. The baseline of the case a fix is for
+     is no reference: there the server is meant to behave differently with the fix, and step 3 and the
+     mode's gate (`issue_repro`, `failing_test`) judge that difference, not this step.
+   `feature_off_unchanged` is false when a failure is the package's, or when the smoke differs from
+   such a baseline; `failure_summary` gives the test, its error on each tree and the command.
 5. Append the results to the Unit tests section of `RUN_DIR/experiment_ledger.md`, with how the test
    failed without the change.
 6. On failure, write `failure_summary` so the implementer can reproduce it: the failing case, the

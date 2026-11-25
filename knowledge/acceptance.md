@@ -12,7 +12,7 @@ until it does, the director and the reviewer apply this document by hand.
 
 | Dimension | What it shows | Typical checks |
 |---|---|---|
-| Correctness | the change does what it claims, and nothing when it is off | G0 feature off, G1 unit / oracle, startup rejection of unsupported combinations; parity with a reference implementation for a new model, kernel or refactor (§1.1) |
+| Correctness | the change does what it claims, and nothing when it is off | G0 feature off (a change with a switch), G1 unit / oracle, startup rejection of unsupported combinations; parity with a reference implementation for a new model, kernel or refactor (§1.1) |
 | Accuracy | model outputs keep their quality, or lose no more than a declared budget | §1.1 |
 | Performance | the claimed gain exists, and nothing else regresses | gain items and guard items, §1.2 |
 | Stability | no crash, hang or leak, under pressure and over time | G4, when the task asks (`stability`): the task's performance test at high concurrency on long prompts, run back to back for more than 48 hours, with no crash, hang or failed request and with throughput and memory flat (`validation_doctrine.md`); cancelled requests, oversized inputs, out-of-memory fallback; a restart; injected faults for a feature that spans instances, a network or storage (a timeout, a peer down, a backend unavailable): requests fail cleanly and nothing hangs |
@@ -122,8 +122,9 @@ extra items of its feature classes (§1.4).
 A scan changes no code; its daily report has its own checks (`scripts/daily_report.py check`).
 
 **Strictness.** Every item is either blocking or report-only, decided when the matrix is fixed. A P0
-hotfix may ship on the minimal set: the reproduction passes, G0 holds, accuracy and the guard workloads
-are not worse. The rest of its profile becomes follow-up items, listed in the report.
+hotfix may ship on the minimal set: the reproduction passes, the existing tests of the modules it
+touches still pass (and G0 holds, when it is behind a feature's switch), accuracy and the guard
+workloads are not worse. The rest of its profile becomes follow-up items, listed in the report.
 
 ## 3. An acceptance item
 

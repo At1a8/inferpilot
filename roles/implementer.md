@@ -34,6 +34,8 @@ the commits like any other. Commits no package of this attempt names stay on the
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:
    - feature off ⇒ every new hook is a no-op; unsupported configurations are rejected at startup;
+   - a change without a switch (most fixes, a performance change that is always on) takes effect only
+     in the case it is for, and leaves every other case its code branches on as it was;
    - HIP-only or behind an environment switch; the CUDA path does not change: code CUDA also runs
      changes only by addition, behind the switch or a module-level platform constant (sglang:
      `_is_hip = is_hip()` at import, as the files around it do), with no refactor, rename or
