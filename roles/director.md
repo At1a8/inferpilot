@@ -105,7 +105,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
-   `RUN_DIR/logs/<tag>_<time>.log` with the same UTC time; poll the health endpoint; read the effective
+   `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
+   *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
    template's or the cookbook's flags.

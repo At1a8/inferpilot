@@ -789,6 +789,7 @@ async function finish(status, at) {
       // A base run that fails for another reason would pass for a confirmed lead: a timed-out agent may still
       // hold the GPUs, and a run that ended at Setup never showed the environment works.
       const skipped = !C.confirm_leads ? [] : [...TIMED_OUT_CALLS].map((c) => `${c} timed out`)
+        .concat(leftRunning)
         .concat(at === 'Setup' ? ['the run stopped at Setup'] : [])
         .concat(liveStopAfter() === 'now' ? ['the control file asked the run to stop now'] : []);
       const sp = await call('issue_triager', 'spinoff', inputs({ status, stopped_at: at || '', phases: R.phases,
@@ -1000,6 +1001,17 @@ function stalled(wp, label) {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
   return { ok: false, failed_wp: wp.id, reason: `${label} timed out` };
 }
+// Gates and rounds that ended without a result and may have left detached runs on the GPUs.
+const leftRunning = [];
+// A unit gate whose every attempt ended without an answer may have left the runs it started going, as a
+// call that timed out may: no further round and no rollback either, and a human stops what it left.
+function noAnswer(wp, label, commit) {
+  ATTENTION.push({ wp: wp.id, worktree: C.worktree, issue: `${label} returned no answer: commit ${commit} stays in the `
+    + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
+  leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
+  note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
+  return { ok: false, failed_wp: wp.id, reason: `${label} returned no answer` };
+}
 
 async function implementAll(wps) {
   enter('Implement');
@@ -1042,16 +1054,15 @@ async function implementAll(wps) {
         unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
         ONE_SESSION);
       if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
+      if (!ut) return noAnswer(wp, utLabel, im.commit);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
-      const bites = !!ut && (['parent', 'mutant'].includes(ut.fails_without_change)
-        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs'));
-      if (ut && ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
+      const bites = ['parent', 'mutant'].includes(ut.fails_without_change)
+        || (ut.fails_without_change === 'n/a' && wp.kind === 'docs');
+      if (ut.unit_pass === true && ut.feature_off_unchanged === true && bites) {
         passed = true;
         R.done.push({ wp: wp.id, commit: im.commit, evidence: ut.evidence || '' });
-      } else if (!ut) {
-        feedback = 'the test engineer returned nothing';
       } else if (ut.unit_pass === true && ut.feature_off_unchanged === true) {
         feedback = `the unit test cannot fail (fails_without_change=${ut.fails_without_change}); make it fail on the parent `
           + `commit, or on a copy of the change broken in one way when the change keeps behaviour`
@@ -1106,6 +1117,9 @@ async function verifyLoop(extraGates) {
     }
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
+      leftRunning.push(`Verify round ${round} may have left its servers running`);
+      ATTENTION.push({ call: `verify_engineer#${round}`, issue: `Verify round ${round} returned no answer and may have left its `
+        + 'servers running: stop them before reusing its GPUs' });
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;

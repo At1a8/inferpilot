@@ -467,7 +467,7 @@ the container with its status. A run directory holds:
 | `run.json` | the task definition, the intake's assumptions and the container, which holds the task's branch |
 | `validation_report.md`, `run_report.md` | the report: the first when a PR is ready, the second for any other outcome (the result names it as `report_path`) |
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
-| `logs/` | one log per server or benchmark launch, `<tag>_<time>.log` |
+| `logs/` | one log per server or benchmark launch, `<tag>_<time>_XXXXXX.log` from `mktemp`, with its `.pid` and `.exit` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
 | `knowledge_pr.md` | the description of the curator's pull request to InferPilot's repository |
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |

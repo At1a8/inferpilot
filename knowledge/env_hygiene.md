@@ -73,9 +73,10 @@ belongs to a host user, and the rules below are about those.
 
 ## Servers
 
-- One launch script with a mode switch and a tag; one log per launch, `RUN_DIR/logs/<tag>_<time>.log`
-  with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container logs are often UTC, the host may be another
-  zone; the Z says which).
+- One launch script with a mode switch and a tag; one log per launch, made by
+  `mktemp RUN_DIR/logs/<tag>_<time>_XXXXXX.log` with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container
+  logs are often UTC, the host may be another zone; the Z says which): a launch in the same second as
+  another, a retry's among them, still gets a log of its own, and its own `<log>.pid` and `<log>.exit`.
 - A server, or any run longer than one tool call (a benchmark, a driver of several runs), starts detached
   from the agent's shell. It runs a bash script, the script's own arguments after it (`gsm8k` for
   `<accuracy_script> gsm8k`): the launch script, or one written for the run with a quoted heredoc
@@ -89,24 +90,27 @@ belongs to a host user, and the rules below are about those.
   shell and the status is still written. An agent CLI may stop the background jobs of its shell when a
   tool call or the agent's call ends, and a server stopped that way leaves a log that ends in the middle
   of startup with no error. Wait for it in the same call: poll its health endpoint, its log or result
-  file and `kill -0 <pid>`, each poll a short tool call, until it is up or done. A run is done when
-  `<log>.exit` has its status, and passed only when that is 0: a later tool shell cannot `wait` for it,
-  and a run can write its results and still fail (`templates/harness/perf.sh` can). A wrapper that is
-  gone with no status in `<log>.exit`, read once it is gone, was stopped with its run (its group killed,
-  or every process of the container): the run did not pass. A server has no status until it is stopped:
-  it is waited for until it is up, and stopping it once the checks that use it are done fails nothing.
-  Before the call that started it returns, stop it from its launch record (Killing, below) and wait
-  until it has exited: the next call works on these GPUs and in this worktree.
+  file and whether the wrapper still runs, `grep -qs '^State:[[:space:]]*[^ZX[:space:]]' /proc/<pid>/status`,
+  each poll a short tool call, until it is up or done. Not `kill -0 <pid>`: it succeeds for a wrapper
+  that has exited and that nobody has reaped, which a container without an init keeps as a zombie. A
+  run is done when `<log>.exit` has its status, and passed only when that is 0: a later tool shell
+  cannot `wait` for it, and a run can write its results and still fail (`templates/harness/perf.sh`
+  can). A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with
+  its run (its group killed, or every process of the container): the run did not pass. A server has no
+  status until it is stopped: it is waited for until it is up, and stopping it once the checks that use
+  it are done fails nothing. Before the call that started it returns, stop it from its launch record
+  (Killing, below) and wait until that check says it is gone: the next call works on these GPUs and in
+  this worktree.
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`
   differ. Probe the health endpoint rather than trusting a `pgrep` miss.
 - Killing: `pkill -f` patterns inside `bash -lc "..."` match the shell itself; use `'[s]glang serve'`
   style patterns. Better, record the server's identity at launch (its PID, `<log>.pid` for one started
-  detached, and whether it leads its own process group) and kill from that record: the PID and its descendants (`setsid` workers keep
-  VRAM otherwise), the whole group only when the launch proved the group is the server's. Never look
-  the group up at kill time: a recycled PID belongs to a stranger, and a teardown that did this once
-  TERMed a container's PID 1.
+  detached, and whether it leads its own process group) and kill from that record: the PID and its
+  descendants (`setsid` workers keep VRAM otherwise), the whole group only when the launch proved the
+  group is the server's. Never look the group up at kill time: a recycled PID belongs to a stranger,
+  and a teardown that did this once TERMed a container's PID 1.
 - Every server, test and benchmark runs with `HIP_VISIBLE_DEVICES=<gpu_ids>`, the set Setup pinned;
   without it, tensor-parallel ranks land on GPUs 0..N-1 whoever is using them.
 - Keep one server per GPU set; a previous server still holding the GPUs looks like an out-of-memory bug.

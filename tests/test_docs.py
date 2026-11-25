@@ -451,7 +451,8 @@ def alive(pid):
 class DetachedRunTest(unittest.TestCase):
     """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
     documented launcher leaves the run's PID and exit status where that shell reads them, whatever the
-    script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control."""
+    script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control; no
+    other launch shares its log and records, and a wrapper that has exited is gone though nobody reaped it."""
 
     # (the script, its arguments, the status it ends with, what its log has)
     SCRIPTS = (
@@ -522,6 +523,41 @@ class DetachedRunTest(unittest.TestCase):
             self.assertFalse(alive(pid), "the wrapper outlived its group")
             self.assertFalse(Path("%s.exit" % log).exists(), "a wrapper stopped with its run wrote a status")
         self.assertIn("A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with its run", self.doc)
+
+    def test_two_launches_in_one_second_get_records_of_their_own(self):
+        make = doc_command("knowledge/env_hygiene.md", "mktemp RUN_DIR/logs/")
+        self.assertIsNotNone(make, "env_hygiene.md gives no command that makes a launch's log")
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "logs").mkdir()
+            cmd = make.replace("RUN_DIR", shlex.quote(d)).replace("<tag>", "arm").replace("<time>", "20261125-010203Z")
+            logs = [subprocess.run(["bash", "-c", cmd], check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+                    for _ in range(2)]
+            self.assertNotEqual(logs[0], logs[1])
+            self.assertTrue(all(Path(p).is_file() and p.endswith(".log") and "/logs/arm_20261125-010203Z_" in p for p in logs), logs)
+        self.assertIn("a launch in the same second as another, a retry's among them, still gets a log of its own", self.doc)
+
+    def test_a_wrapper_that_has_exited_is_gone_though_nobody_reaped_it(self):
+        check = doc_command("knowledge/env_hygiene.md", "grep -qs '^State:")
+        self.assertIsNotNone(check, "env_hygiene.md gives no check that a wrapper still runs")
+
+        def runs(pid):
+            return subprocess.run(["bash", "-c", check.replace("<pid>", str(pid))], timeout=30).returncode == 0
+
+        live, done = subprocess.Popen(["sleep", "30"]), subprocess.Popen(["true"])
+        try:
+            for _ in range(200):
+                if Path("/proc/%d/stat" % done.pid).read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                    break
+                time.sleep(0.05)
+            self.assertTrue(runs(live.pid), "a process that runs is not seen to")
+            self.assertFalse(runs(done.pid), "a zombie is seen to run")
+            done.wait()
+            self.assertFalse(runs(done.pid), "a process that is gone is seen to run")
+        finally:
+            live.kill()
+            live.wait()
+            done.wait()
+        self.assertIn("Not `kill -0 <pid>`: it succeeds for a wrapper that has exited and that nobody has reaped", self.doc)
 
 
 if __name__ == "__main__":

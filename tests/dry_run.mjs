@@ -360,6 +360,27 @@ const scenarios = [
       'a role the engine asks again is told that the session before may have left work behind');
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
   }],
+  ['feature: a gate with no answer from any attempt leaves its package and its GPUs to a human, as one that timed out does', async () => {
+    const lead = { title: 'tokenizer test fails on main', observed: '3/3 KeyError', reproduce: 'pytest test_tokenizer.py' };
+    const leading = (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`,
+      unit_test_cmd: 'pytest -q t.py', leads: [lead] });
+    const unit = await run({ mode: 'feature', task: 't', confirm_leads: true },
+      { 'implementer:implement': leading, 'test_engineer:unit': () => ({}) });
+    const impl = unit.keys.filter((k) => k.startsWith('implementer:'));
+    check(unit.result.status === 'blocked' && impl.length === 1 && impl[0] === 'implementer:implement',
+      `a unit gate with no answer gets no further round and no rollback: ${impl}`);
+    const usp = unit.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(usp && usp.ins.confirm_leads === false && (usp.ins.confirm_skipped || []).includes('the unit gate of WP1 may have left runs going')
+      && (unit.result.next.user || []).some((u) => u.includes('returned no answer: commit c_WP1 stays in the worktree')),
+      `no lead is checked on its GPUs, and a human is told to stop what it left: ${JSON.stringify(usp && usp.ins.confirm_skipped)}`);
+    const ver = await run({ mode: 'feature', task: 't', confirm_leads: true },
+      { 'implementer:implement': leading, 'verify_engineer:verify': () => ({}) });
+    const vsp = ver.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(ver.result.status === 'blocked' && vsp && vsp.ins.confirm_leads === false
+      && (vsp.ins.confirm_skipped || []).includes('Verify round 0 may have left its servers running')
+      && (ver.result.next.user || []).some((u) => u.includes('Verify round 0 returned no answer and may have left its servers running')),
+      `nor after a Verify round with no answer: ${ver.result.status} ${JSON.stringify(vsp && vsp.ins.confirm_skipped)}`);
+  }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
