@@ -32,7 +32,10 @@ so count from the deadline, not from when you started.
    server, the `accuracy_server_env` of `RUN_DIR/scripts/harness.json` on top); confirm the effective
    flags from the `server_args=` line of each log. Start each server and each long suite detached and
    wait for it in this call (`env_hygiene.md`, *Servers*): one that goes with a tool call leaves the
-   round with nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus).
+   round with nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus). Before
+   you return, whatever the round's result, `needs_min` included, stop every server and suite this round
+   started, from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have
+   exited: a round asked for again after `needs_min` starts at once, with no GPU check before it.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.

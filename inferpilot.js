@@ -80,6 +80,9 @@ const timeoutFor = (role) => GRANTED_MS[role]
   || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
+// The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
+// rounded up can put the reserve's start before the call's.
+const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100) : 0);
 // One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
 // its longest agent call has died, and its lock may be taken over.
 const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
@@ -499,8 +502,9 @@ async function call(role, sub, ins, schema, label, opts) {
   const ms = timeoutFor(role);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
-    // The engine asks again for an unusable answer with the same prompt, under this attempt's one timeout:
-    // a role told its limit gets the moment it ends, which stays true for those retries.
+    // The engine asks again for an unusable answer, with the same prompt and a note that the session before
+    // may have left work behind, under this attempt's one timeout: a role told its limit gets the moment it
+    // ends, which stays true for those retries.
     const told = ins.time_limit_min > 0 && ms > 0
       ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
@@ -1033,7 +1037,7 @@ async function implementAll(wps) {
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
       const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
-        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: minutes(timeoutFor('test_engineer')) }), UNIT, utLabel);
+        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel);
       if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance

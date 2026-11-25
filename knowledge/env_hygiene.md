@@ -77,14 +77,20 @@ belongs to a host user, and the rules below are about those.
   with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container logs are often UTC, the host may be another
   zone; the Z says which).
 - A server, or any run longer than one tool call (a benchmark, a driver of several runs), starts detached
-  from the agent's shell, and writes its exit status when it ends:
-  `setsid nohup bash -c '<command>; echo $? > <log>.exit' > <log> 2>&1 < /dev/null &`, its PID recorded,
-  leading its own process group. An agent CLI may stop the background jobs of its shell when a tool call
-  or the agent's call ends, and a server stopped that way leaves a log that ends in the middle of startup
-  with no error. Wait for it in the same call: poll its health endpoint, its log or result file and
-  `kill -0 <pid>`, each poll a short tool call, until it is up or done. A run is done when `<log>.exit`
-  has its status, and passed only when that is 0: a later tool shell cannot `wait` for it, and a run can
-  write its results and still fail (`templates/harness/perf.sh` can).
+  from the agent's shell, from a script (the launch script, or one written for the run with a quoted
+  heredoc, `cat > <script> <<'EOF'`, which keeps the command's own quotes), and writes its exit status
+  when it ends:
+  `setsid nohup bash -c 'bash "$1" > "$2" 2>&1; echo $? > "$2.exit"' _ <script> <log> > /dev/null 2>&1 < /dev/null &`,
+  its PID recorded, leading its own process group. The script runs in a shell of its own, so an `exit`,
+  an `exec` or `set -e` in it ends that shell and the status is still written. An agent CLI may stop the
+  background jobs of its shell when a tool call or the agent's call ends, and a server stopped that way
+  leaves a log that ends in the middle of startup with no error. Wait for it in the same call: poll its
+  health endpoint, its log or result file and `kill -0 <pid>`, each poll a short tool call, until it is
+  up or done. A run is done when `<log>.exit` has its status, and passed only when that is 0: a later
+  tool shell cannot `wait` for it, and a run can write its results and still fail
+  (`templates/harness/perf.sh` can). Before the call that started it returns, stop it from its launch
+  record (Killing, below) and wait until it has exited: the next call works on these GPUs and in this
+  worktree.
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`

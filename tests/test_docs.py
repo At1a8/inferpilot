@@ -9,6 +9,7 @@ knowledge/env_hygiene.md leaves the run's exit status. Offline.
 """
 import ast
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -435,26 +436,41 @@ class BranchBundleTest(unittest.TestCase):
 
 class DetachedRunTest(unittest.TestCase):
     """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
-    documented launcher leaves its exit status where that shell reads it."""
+    documented launcher leaves its exit status where that shell reads it, whatever the script does with
+    quotes of its own, `exit`, `exec` or `set -e`."""
+
+    # (the script, the status it ends with, what its log has)
+    SCRIPTS = (
+        ("EXTRA_ARGS='--foo 1' sh -c 'echo \"results written $EXTRA_ARGS\"'\nexec sh -c 'exit 3'\necho never\n",
+         "3", "results written --foo 1"),
+        ("set -e\necho results written\nfalse\necho never\n", "1", "results written"),
+        ("echo results written\nexit 4\necho never\n", "4", "results written"),
+    )
 
     def test_a_run_that_writes_its_results_and_fails_is_seen_to_fail(self):
         launch = doc_command("knowledge/env_hygiene.md", "setsid nohup")
         self.assertIsNotNone(launch, "env_hygiene.md gives no detached launcher")
         if not shutil.which("setsid"):
             self.skipTest("no setsid here")
-        with tempfile.TemporaryDirectory() as d:
-            log = Path(d) / "perf.log"
-            cmd = launch.replace("<command>", 'sh -c "echo results written; exit 3"').replace("<log>", str(log))
-            subprocess.run(["bash", "-c", cmd], check=True, timeout=30)
-            status = Path("%s.exit" % log)
-            for _ in range(200):
-                if status.exists() and status.read_text().strip():
-                    break
-                time.sleep(0.05)
-            self.assertEqual(status.read_text().strip() if status.exists() else None, "3")
-            self.assertIn("results written", log.read_text())
+        for body, code, output in self.SCRIPTS:
+            with self.subTest(script=body), tempfile.TemporaryDirectory() as d:
+                (Path(d) / "a run").mkdir()
+                script, log = Path(d) / "a run" / "run.sh", Path(d) / "a run" / "run.log"
+                script.write_text(body)
+                cmd = launch.replace("<script>", shlex.quote(str(script))).replace("<log>", shlex.quote(str(log)))
+                subprocess.run(["bash", "-c", cmd], check=True, timeout=30)
+                status = Path("%s.exit" % log)
+                for _ in range(200):
+                    if status.exists() and status.read_text().strip():
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(status.read_text().strip() if status.exists() else None, code)
+                self.assertIn(output, log.read_text())
+                self.assertNotIn("never", log.read_text())
         text = re.sub(r"\s+", " ", (ROOT / "knowledge/env_hygiene.md").read_text())
         self.assertIn("A run is done when `<log>.exit` has its status, and passed only when that is 0", text)
+        self.assertIn("The script runs in a shell of its own, so an `exit`, an `exec` or `set -e` in it ends that "
+                      "shell and the status is still written", text)
 
 
 if __name__ == "__main__":

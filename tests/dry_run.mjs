@@ -348,6 +348,9 @@ const scenarios = [
       `the retry runs under the first one's deadline: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
     check(again && Date.parse(again.ins.deadline_utc) - again.at < 120 * 60000 - 200,
       'which leaves the retry less than the whole limit');
+    check(first && again && !first.prompt.includes('may have left work behind') && again.prompt.startsWith(first.prompt)
+      && again.prompt.includes('may have left work behind') && again.prompt.includes('never start a second server'),
+      'and tells it that the session before may have left work behind, which it must not start again');
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
   }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
@@ -365,19 +368,28 @@ const scenarios = [
       'no limit, no deadline');
     const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
     check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
-      && unitDoc.includes('The gate fails, and `failure_summary` names the check, how far it got and its log'),
+      && unitDoc.includes('the gate fails, and `failure_summary` names the check, how far it got and its log'),
       'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
-    check(unitDoc.includes('stop it from its launch record (`env_hygiene.md`, *Servers*, Killing) and wait until it has exited, '
-      + 'since a fix round or a rollback works in this worktree and on these GPUs next'),
-      'a check the gate stops waiting for is stopped before the gate fails');
+    check(unitDoc.includes('poll until every run has its exit status (`<log>.exit`) and every check its result')
+      && unitDoc.includes('A run whose status is not 0 fails its check, whatever results it wrote'),
+      'the gate waits for each run\'s exit status, and a run that exits otherwise than 0 fails its check');
+    check(unitDoc.includes('Before you return, whatever the gate\'s result, stop every server and run this call started, '
+      + 'from their launch records (`env_hygiene.md`, *Servers*, Killing), and wait until they have exited'),
+      'the test engineer stops what it started before every return');
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
       'both engineers count from the deadline');
+    check(verifyDoc.includes('Before you return, whatever the round\'s result, `needs_min` included, stop every server and suite '
+      + 'this round started') && verifyDoc.includes('a round asked for again after `needs_min` starts at once, with no GPU check before it'),
+      'the verify engineer stops what it started before every return, a round that asks for more time too');
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);
     const told = async (ms) => (await run({ mode: 'feature', task: 't', agent_timeout_ms: ms })).calls
       .find((c) => c.key === 'verify_engineer:verify').ins.time_limit_min;
     check(await told(0) === 0 && await told(20000) === 1, 'no limit reads 0, and a short one never does');
+    const quick = (await run({ mode: 'feature', task: 't', agent_timeout_ms: 10000 })).calls.find((c) => c.key === 'test_engineer:unit');
+    check(quick && quick.ins.time_limit_min === 0.17,
+      `a unit limit under a minute is told as it is, so that its reserve starts within it: ${quick && quick.ins.time_limit_min}`);
   }],
   ['feature: when the task\'s client does not run the source\'s scenarios, the run stops at Spec and asks; nothing is built', async () => {
     const gap = "vLLM's PR measured 256-token answers at concurrency 1; the task's client runs 8k in / 1k out.";
