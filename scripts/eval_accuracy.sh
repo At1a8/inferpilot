@@ -32,14 +32,24 @@
 #   JUDGE_MODEL (default Claude-Opus-5; never the model under test), JUDGE_NTID (the gateway's user
 #   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades; its
 #   log gets <JUDGE_KEY> in its place as it is written, and its configs and other files once evalscope
-#   has stopped, at the end or when the run is stopped (not by SIGKILL).
+#   has stopped, at the end or when the run is stopped (not by SIGKILL). evalscope runs in a process
+#   group of its own (setsid, which must be there), so that whatever it started stops with it; a set
+#   whose files could not all be redacted, or whose log is not whole, has no score.
 #
 # Before each set the server's prefix cache is flushed; after it, /server_info's speculative accept
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
 # afresh: evalscope's cache (--use-cache) is never used, so no answer of an earlier run, or of other
 # settings, reaches a score.
-# Exit status: 0 when every set produced a score over all its questions (with LIMIT, a report), 1 otherwise.
+# Exit status: 0 when every set produced a score over all its questions (with LIMIT, a report), 1 otherwise;
+# 2 when it cannot start (no setsid, no directory for a run).
 set -u
+
+# evalscope gets a process group of its own, by which every process it started is stopped: in this
+# script's group its children would outlive a stop, hold the log's pipe open and write the key again.
+if ! command -v setsid > /dev/null; then
+    echo "eval_accuracy.sh: setsid (util-linux) is needed, to stop evalscope with everything it starts" >&2
+    exit 2
+fi
 
 [ $# -eq 0 ] && set -- gsm8k
 
@@ -166,7 +176,8 @@ redact_key() {  # <dir>
 import os, sys
 key = os.environ["KEY"].encode()
 failed = []
-for root, _, files in os.walk(sys.argv[1]):
+# a directory that cannot be listed is not skipped: its files may hold the key
+for root, _, files in os.walk(sys.argv[1], onerror=lambda e: failed.append("%s (%s)" % (e.filename, e.strerror))):
     for name in files:
         path = os.path.join(root, name)
         if os.path.islink(path) or not os.path.isfile(path):
@@ -186,9 +197,10 @@ EOF
     )
 }
 # What evalscope prints reaches its log with the key masked as it is written, so reading the log while the
-# run goes shows no key; evalscope's own files are redacted once it has stopped.
+# run goes shows no key; evalscope's own files are redacted once it has stopped. Run in the background,
+# where it replaces its shell: the PID recorded for it is the masker's own.
 mask_key() {
-    KEY="${JUDGE_KEY}" python3 -u -c '
+    KEY="${JUDGE_KEY}" exec python3 -u -c '
 import os, sys
 key, out, held = os.environ["KEY"].encode(), sys.stdout.buffer, b""
 for chunk in iter(lambda: sys.stdin.buffer.read1(65536), b""):
@@ -203,33 +215,80 @@ out.write(held)
 '
 }
 # A run stopped on its way (SIGTERM, SIGINT, SIGHUP, a timeout) stops evalscope and waits for it, and only
-# then redacts, so no later write of evalscope's puts the key back; only SIGKILL leaves the key.
+# then redacts, so no later write of evalscope's puts the key back; only SIGKILL leaves the key. The stop
+# takes at most 7 seconds before the redaction starts (3 for SIGTERM, 1 for SIGKILL, 3 for the log): the
+# runner SIGKILLs what is left of a run 10 seconds after its SIGTERM (runtime/procs.mjs).
 REDACT_DIR=""
 EVAL_PID=""
 MASK_PID=""
 FIFO_DIR=""
-SETSID=$(command -v setsid || true)
+PENDING=""
+# What is left of the process group <pid> leads: SIGTERM, then SIGKILL to what is there <tenths> tenths
+# of a second later.
+end_group() {  # <pid> <tenths>
+    kill -TERM -- "-$1" 2>/dev/null || return 0
+    for _ in $(seq "$2"); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 0.1; done
+    kill -KILL -- "-$1" 2>/dev/null
+    for _ in $(seq 10); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 0.1; done
+    return 0
+}
+# The masker reads evalscope's output from a pipe, which this script opens first: for reading and writing,
+# which never blocks, and then for reading, the end the masker is given. Neither the masker nor evalscope
+# waits in an open for the other, so a stop that comes before evalscope has opened the pipe leaves no
+# masker waiting for a writer.
+start_log() {  # <log> -> MASK_PID
+    # shellcheck disable=SC2094  # the two ends of one pipe, not a file read while it is written
+    exec 3<> "${FIFO_DIR}/out" 4< "${FIFO_DIR}/out" || return 1
+    mask_key <&4 4<&- 3>&- > "$1" &
+    MASK_PID=$!
+    exec 4<&-
+}
+# The masker's input ends when this script has closed its end of the pipe and evalscope's processes
+# theirs. A masker that has not ended 3 seconds later (a writer left evalscope's group) is stopped. Its
+# status: not 0 when the log is not whole.
+end_log() {
+    local rc=0 n=0
+    [ -n "${MASK_PID}" ] || return 0
+    exec 3>&-
+    while kill -0 "${MASK_PID}" 2>/dev/null && [ "${n}" -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
+    [ "${n}" -lt 30 ] || kill -KILL "${MASK_PID}" 2>/dev/null
+    wait "${MASK_PID}" 2>/dev/null || rc=$?
+    MASK_PID=""
+    return "${rc}"
+}
 stop_eval() {
     if [ -n "${EVAL_PID}" ]; then
-        kill -TERM -- "-${EVAL_PID}" 2>/dev/null || kill -TERM "${EVAL_PID}" 2>/dev/null
-        for _ in $(seq 100); do kill -0 "${EVAL_PID}" 2>/dev/null || break; sleep 0.1; done
-        kill -KILL -- "-${EVAL_PID}" 2>/dev/null || kill -KILL "${EVAL_PID}" 2>/dev/null
+        end_group "${EVAL_PID}" 30
         wait "${EVAL_PID}" 2>/dev/null
         EVAL_PID=""
     fi
-    [ -n "${MASK_PID}" ] && wait "${MASK_PID}" 2>/dev/null
-    MASK_PID=""
+    end_log
+    return 0
 }
-trap 'stop_eval; exit 143' TERM
-trap 'stop_eval; exit 130' INT
-trap 'stop_eval; exit 129' HUP
+# A signal that comes between a launch and the line that records its PID would find nothing to stop: it
+# is kept while the masker and evalscope start, and acted on once both PIDs are known.
+hold_signals() {
+    trap 'PENDING=143' TERM
+    trap 'PENDING=130' INT
+    trap 'PENDING=129' HUP
+}
+act_on_signals() {
+    trap 'stop_eval; exit 143' TERM
+    trap 'stop_eval; exit 130' INT
+    trap 'stop_eval; exit 129' HUP
+    if [ -n "${PENDING}" ]; then
+        stop_eval
+        exit "${PENDING}"
+    fi
+}
+act_on_signals
 trap 'stop_eval; [ -n "${FIFO_DIR}" ] && rm -rf "${FIFO_DIR}"; redact_key "${REDACT_DIR}"' EXIT
 
 FAILED=0
 SUMMARY=""
 
 run_one() {  # <set>
-    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line complete
+    local ds=$1 batch work_dir run_dir log eb="" tail_cfg gen_cfg judge_args rc accept rep line complete log_whole=1
     local -a limit_arg=() args_arg=() judge_arg=()
     dataset_profile "${ds}"
     batch=${BATCH:-${DS_BATCH}}
@@ -281,9 +340,9 @@ run_one() {  # <set>
     REDACT_DIR="${run_dir}"
     # Outside the run directory: the redaction opens every file there, and a FIFO would block it.
     FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" || exit 2
-    mask_key < "${FIFO_DIR}/out" > "${log}" &
-    MASK_PID=$!
-    ${SETSID} "${EVALSCOPE}" eval \
+    hold_signals
+    start_log "${log}" || exit 2
+    setsid "${EVALSCOPE}" eval \
         --model "${MODEL}" \
         --api-url "${API_URL}" \
         --api-key EMPTY_KEY \
@@ -298,13 +357,15 @@ run_one() {  # <set>
         "${limit_arg[@]}" \
         --work-dir "${run_dir}" \
         --no-timestamp \
-        --repeats 1 > "${FIFO_DIR}/out" 2>&1 &
+        --repeats 1 > "${FIFO_DIR}/out" 2>&1 3>&- &
     EVAL_PID=$!
+    act_on_signals
     wait "${EVAL_PID}"
     rc=$?
+    # A child evalscope left behind would hold the log's pipe open, or write the key after the redaction.
+    end_group "${EVAL_PID}" 30
     EVAL_PID=""
-    wait "${MASK_PID}"
-    MASK_PID=""
+    end_log || log_whole=0
     rm -rf "${FIFO_DIR}"
     FIFO_DIR=""
     # Left armed for the exit, which tries again: the results are not read while a file may hold the key.
@@ -313,6 +374,13 @@ run_one() {  # <set>
         exit 1
     fi
     REDACT_DIR=""
+    # The count of dropped samples is read from the log: a set whose log is not whole has no score.
+    if [ "${log_whole}" = 0 ]; then
+        echo "${ds}: failed, since its log is not whole: the process that masks the key in ${log} did not end well" >&2
+        SUMMARY="${SUMMARY}\n  ${ds}: failed, its log is not whole"
+        FAILED=1
+        return
+    fi
 
     accept=$(curl -s --max-time 20 "${SERVER_URL}/server_info" | python3 -c \
         "import json,sys; print([s.get('avg_spec_accept_length') for s in json.load(sys.stdin)['internal_states']])" \
