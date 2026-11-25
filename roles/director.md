@@ -109,7 +109,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
-   template's or the cookbook's flags.
+   template's or the cookbook's flags. A report or a job that starts no server at all (a unit test, an
+   import that fails) leaves nothing to write it from: render InferPilot's server template for
+   `model_path` then (below), which G2 serves the fix and its baseline with.
    - **InferPilot's templates** (`task_definition.md` §1.2). The scripts the task brings
      (`server_script`, `client_script`, `accuracy_script`) run as given. From `templates/harness/` into
      `RUN_DIR/scripts/`, render only the server or the client the user answered `template` for, and
@@ -200,7 +202,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      (`perf_evaluation.md` §3: half the concurrency, when the client reads `CONCURRENCY`), before any
      number is seen.
    - `issue`, `ci`: prepare the environment the reproduction needs; run a baseline only if the task
-     needs one now. Report `baseline_status: "skip"` with the reason otherwise.
+     needs one now. Report `baseline_status: "skip"` with the reason otherwise. The fix's accuracy
+     (`validation_doctrine.md`, *G2 for a fix*) needs no baseline from you: nobody knows yet whether the
+     fix will change code the server runs, and the verify engineer measures the base arm when it does.
+     Return the `accuracy_script` all the same, whenever the task has a `model_path`.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 

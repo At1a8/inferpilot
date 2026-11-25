@@ -56,6 +56,21 @@ clock can start before your session does.
      the task's own, or InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's
      settings; the same for both arms): once per arm, at most 1 point below the baseline, with no
      token-level comparison. A set where a question got no answer has no score.
+   - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
+     when it changes code the server runs** (`validation_doctrine.md`, *G2 for a fix*). That gate of
+     `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then
+     `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
+     documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the server
+     runs changed"`, and gsm8k is not run. Otherwise run it on the fix and on the base, with the run's
+     launch script and `model_path`. Setup measured no baseline for a fix: measure the base arm
+     yourself, once, in the first round that needs it (a throwaway worktree at `<base>`: an issue or a
+     ci run has no `RUN_DIR/base`), and keep its score in the ledger for the later rounds. Where the
+     base cannot serve the configuration because that is the failure being fixed, measure instead the
+     last commit that served it, in a throwaway worktree: the culprit's parent for a CI fix (the
+     triage record names it), the commit or release the report says worked. Where the run knows no
+     such commit, the fix's score has no baseline: give it in `gates` with that said (`"G2": "0.893
+     (1319 q), no baseline: the base does not start on this configuration"`); it is reported, not
+     judged.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
      fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates

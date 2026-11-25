@@ -12,7 +12,7 @@ of it.
 | `mode` | the kind of task | required | required | required | required | required |
 | `task` | the source of truth: upstream PR or design URL, issue URL, CI job or tracker cluster, performance goal | required | required | required | required | — |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
-| `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
+| `model_path` | the model the baseline and the gates run | required | required unless `stop_after` ends the run before a fix: the reporter's model, which G2 measures the fix on | required unless `stop_after` ends the run before a fix: the model G2 measures the fix on, the one the failing test serves when it serves one | required | — |
 | `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
 | `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
@@ -60,7 +60,10 @@ the user.
   through evalscope, once, and the change passes at most 1 point below the baseline. A change the user
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more
   runs are named there too. It runs through InferPilot's `accuracy.sh` (§1.2), which fixes the settings
-  for every arm.
+  for every arm. The fix of an issue or a ci task is measured the same way when it changes code the
+  server runs, which is why those tasks name a `model_path`; one that stops before its fix
+  (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none
+  (`../knowledge/validation_doctrine.md`, *G2 for a fix*).
 - **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
   on needle-in-a-haystack prompts, G4 as the `client_script` run back to back for more than 48 hours
   against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;
@@ -155,7 +158,8 @@ server's context leaves beside a question.
 ```
 
 ```json
-{"mode": "ci", "task": "Failure Tracker #<n>, cluster <signature>"}
+{"mode": "ci", "task": "Failure Tracker #<n>, cluster <signature>",
+ "model_path": "/mnt/models/<the model the failing test serves>"}
 ```
 
 ```json

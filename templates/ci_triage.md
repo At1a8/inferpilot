@@ -30,7 +30,9 @@
 ## Fix or handover
 
 <!-- Fix PR: commits, the failing test now passing on every lane, the tests of the module the fix touches
-     (G0 when the fix is behind a feature's switch). Handover: who, what evidence. -->
+     (G0 when the fix is behind a feature's switch), and gsm8k on the fix against the base, or against
+     the culprit's parent where the base cannot serve, when the fix changes code the server runs (G2).
+     Handover: who, what evidence. -->
 
 ## Dates
 

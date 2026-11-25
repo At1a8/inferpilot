@@ -78,6 +78,8 @@ export function parseInputs(prompt) {
 
 // What a task of each mode needs besides its definition, so that the intake has nothing to ask.
 export const MODE_DEFAULTS = {
+  issue: { model_path: '/models/m' },
+  ci: { model_path: '/models/m' },
   feature: { model_path: '/models/m', server_script: '/s/server.sh' },
   perf: { model_path: '/models/m', workload: '{"isl":8192,"osl":1024,"conc":64}', server_script: '/s/server.sh', client_script: '/s/client.sh' },
 };

@@ -922,13 +922,37 @@ const scenarios = [
     check(r.keys.includes('director:report'), 'blocked runs still get a report');
   }],
   ['setup: a skipped baseline is enough only where none is required', async () => {
-    const skip = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0' }) };
+    const skip = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0',
+      accuracy_script: `${RUN}/scripts/accuracy.sh` }) };
     const feature = await run({ mode: 'feature', task: 't' }, skip);
     check(feature.result.status === 'blocked' && feature.result.stopped_at === 'Setup', `feature with skip: ${feature.result.status}`);
     const issue = await run({ mode: 'issue', task: 'i' }, skip);
     check(issue.result.status === 'ready_for_review', `issue with skip: ${issue.result.status}`);
     const prose = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ run_dir: RUN, baseline: 'PASS - 3/3' }) });
     check(prose.result.status === 'blocked' && prose.result.stopped_at === 'Setup', 'a baseline in prose without baseline_status is rejected');
+  }],
+  ['issue and ci: a task that can reach a fix names the model G2 measures it on; one that stops before the fix needs none', async () => {
+    check(asks(await run({ mode: 'issue', task: 'i', model_path: '' }), 'model_path'), 'an issue without a model asked');
+    check(asks(await run({ mode: 'ci', task: 'c', model_path: '' }), 'model_path'), 'a ci task without a model asked');
+    check(asks(await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Implement' }), 'model_path'),
+      'a run that stops after Implement has a fix: asked');
+    for (const [mode, stop] of [['issue', 'Triage'], ['issue', 'Reproduce'], ['issue', 'Diagnose'], ['ci', 'Classify'], ['ci', 'Bisect']]) {
+      const r = await run({ mode, task: 't', model_path: '', stop_after: stop });
+      check(r.result.status === 'stopped' && r.result.stopped_at === stop && !r.keys.includes('intake:define'),
+        `${mode} stopping after ${stop} has no fix to measure and starts without a model: ${r.result.status} at ${r.result.stopped_at}`);
+    }
+    const bare = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0' }) };
+    const noAccuracy = await run({ mode: 'ci', task: 'c' }, bare);
+    check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
+      && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)),
+      `a fix that G2 will measure needs the accuracy script from Setup on: ${noAccuracy.result.status} at ${noAccuracy.result.stopped_at}`);
+    const early = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Classify' }, bare);
+    check(early.result.status === 'stopped' && early.result.stopped_at === 'Classify', `a run with no fix needs none: ${early.result.status}`);
+    for (const mode of ['issue', 'ci']) {
+      const ve = (await run({ mode, task: 't' })).calls.find((c) => c.key === 'verify_engineer:verify');
+      check(ve && ve.ins.model_path === '/models/m' && ve.ins.accuracy_script === `${RUN}/scripts/accuracy.sh`,
+        `${mode}: the model and the accuracy script reach the verify engineer, who measures the fix`);
+    }
   }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {

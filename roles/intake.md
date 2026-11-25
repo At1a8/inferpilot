@@ -23,6 +23,9 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      shallow clone and the mode is `ci` or `scan`, which need history.
    - `model_path`: the model the request or the issue names, found under the usual model directories
      (`/mnt`, `/data`, `$HF_HOME`). A model that is not on the machine is a question, never a download.
+     An issue or a ci task needs it too, unless `stop_after` ends the run before a fix: G2 measures on
+     gsm8k a fix that changes code the server runs (`knowledge/validation_doctrine.md`). It is the
+     reporter's model, or the one the failing test serves; ask when neither is on the machine.
    - `gpu_ids`: GPUs that exist, by HIP number (`scripts/gpu_status.py`); leave it empty to let Setup
      pick free ones.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
