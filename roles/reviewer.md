@@ -89,5 +89,8 @@ Return:
  "check_path": "/abs/RUN_DIR/reply_check.md", "summary": "<one line>"}
 ```
 
+`check_path` is that file, `RUN_DIR/reply_check.md`, and nothing else: with any other value the draft
+counts as not checked. Every entry of `findings` is a finding, with its `claim` and `issue` filled in: one
+left empty still keeps the draft from being offered as checked.
 Empty `findings`: the draft says only what the run showed. Otherwise the issue triager rewrites the draft
 from them once, and you check it again (`round` 1); what is still left goes to the user with the draft.

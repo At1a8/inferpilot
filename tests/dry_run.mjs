@@ -832,6 +832,33 @@ const scenarios = [
     const cl = replyLine(claimless);
     check(claimless.keys.filter((k) => k === 'issue_triager:reply').length === 2 && cl && !cl.startsWith('post the reply draft')
       && cl.includes('a claim the reviewer did not quote: the ledger has 2/2'), `a finding that quotes no claim is a finding still: ${cl}`);
+    const blank = await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [{ claim: '', issue: '', evidence: 'experiment_ledger.md, Unit tests' }], check_path: `${RUN}/reply_check.md` }) });
+    const bl = replyLine(blank);
+    check(blank.keys.filter((k) => k === 'issue_triager:reply').length === 2 && bl && !bl.startsWith('post the reply draft')
+      && bl.includes('a claim the reviewer did not quote: the reviewer did not say what the run shows (its evidence: experiment_ledger.md, Unit tests)'),
+      `a finding with neither claim nor issue is a finding still, not a clean check: ${bl}`);
+    check(blank.result.reply_findings.length === 1 && blank.result.reply_findings[0].evidence === 'experiment_ledger.md, Unit tests',
+      'and what it did give is kept');
+    for (const [given, what] of [['not written', 'words that are no path'], [`${RUN}/reply_draft.md`, 'the draft\'s own path'],
+      [`${RUN}/../other_run/reply_check.md`, 'another run\'s record']]) {
+      const elsewhere = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: given }) }));
+      check(elsewhere && !elsewhere.startsWith('post the reply draft') && elsewhere.includes(`gave ${given} as its record, which is not this run's reply_check.md`)
+        && !elsewhere.includes(`(${given})`), `${what} as check_path is no record of this run's check: ${elsewhere}`);
+    }
+    const slashes = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: `${RUN}//reply_check.md ` }) }));
+    check(slashes && slashes.startsWith('post the reply draft'), `the record's path written with a doubled slash is the record still: ${slashes}`);
+    const recheck = (second) => run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, {
+      'reviewer:reply': (ins, n) => (n === 1 ? { findings: [finding], check_path: `${RUN}/reply_check.md` } : second()),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }) });
+    for (const [second, what] of [[() => null, 'returned nothing'],
+      [async () => { await new Promise((r) => setTimeout(r, 400)); return { findings: [], check_path: `${RUN}/reply_check.md` }; }, 'timed out']]) {
+      const gone = replyLine(await recheck(second));
+      check(gone && gone.includes('not checked since it was rewritten: the reviewer returned nothing') && gone.includes(`${RUN}/reply_draft_2.md`)
+        && !gone.includes('reply_check.md'), `a second check that ${what} does not leave the first draft's record beside the rewritten one: ${gone}`);
+    }
+    check(doc('reviewer').includes('with any other value the draft counts as not checked') && doc('reviewer').includes('Every entry of `findings` is a finding'),
+      'the reviewer is told what its record\'s path and an empty finding mean');
     const halfway = replyLine(await run({ mode: 'issue', task: 'i' }, {
       'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }),
       'issue_triager:reply': (ins, n) => (n === 1 ? { reply_draft_path: `${RUN}/reply_draft.md` } : null) }));

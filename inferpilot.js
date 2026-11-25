@@ -785,17 +785,26 @@ async function checkReply(replyIns) {
     const chk = await call('reviewer', 'reply', inputs({ ...replyIns, reply_draft_path: C.reply_draft_path, round }),
       REPLY_CHECK, `reviewer:reply#${round}`, opts);
     if (!chk) {
-      C.reply_findings = [{ claim: 'the whole draft', issue: 'not checked: the reviewer returned nothing' }];
-      note('Reply', 'unchecked', 'the reviewer returned nothing: the reply draft is not checked against the run');
+      // The record of the round before, when there was one, is of the draft before its rewrite.
+      C.reply_check_path = '';
+      C.reply_findings = [{ claim: 'the whole draft',
+        issue: `not checked${round ? ' since it was rewritten' : ''}: the reviewer returned nothing` }];
+      note('Reply', 'unchecked', `the reviewer returned nothing: the ${round ? 'rewritten ' : ''}reply draft is not checked against the run`);
       return;
     }
-    // A finding that quotes no claim is a finding still; a check that wrote no record of itself is none.
-    C.reply_check_path = String(chk.check_path || '').trim();
-    const findings = (chk.findings || []).filter((f) => f && (String(f.claim || '').trim() || String(f.issue || '').trim()))
-      .map((f) => (String(f.claim || '').trim() ? f : { ...f, claim: 'a claim the reviewer did not quote' }));
+    // A finding is one whatever it leaves out: an entry without a claim, or without anything, is not a clean
+    // check. A check that wrote no record of itself, or names another file as its record, is none.
+    const said = (v) => String(v || '').trim();
+    const findings = (chk.findings || []).map((f) => (f && typeof f === 'object' ? f : {})).map((f) => ({ ...f,
+      claim: said(f.claim) || 'a claim the reviewer did not quote',
+      issue: said(f.issue) || `the reviewer did not say what the run shows${said(f.evidence) ? ` (its evidence: ${said(f.evidence)})` : ''}` }));
+    const named = said(chk.check_path).replace(/\/{2,}/g, '/');
+    C.reply_check_path = named === `${C.run_dir}/reply_check.md` ? named : '';
     if (!C.reply_check_path) {
-      C.reply_findings = [...findings, { claim: 'the whole draft', issue: 'not checked: the reviewer wrote no reply_check.md' }];
-      note('Reply', 'unchecked', 'the reviewer named no reply_check.md: the reply draft is not checked against the run');
+      C.reply_findings = [...findings, { claim: 'the whole draft', issue: named
+        ? `not checked: the reviewer gave ${named} as its record, which is not this run's reply_check.md`
+        : 'not checked: the reviewer wrote no reply_check.md' }];
+      note('Reply', 'unchecked', `the reviewer named ${named ? 'another file as its' : 'no'} reply_check.md: the reply draft is not checked against the run`);
       return;
     }
     if (!findings.length) {
