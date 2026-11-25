@@ -1340,8 +1340,9 @@ async function kernelStage() {
       if (r.held) {
         h.status = 'integration_held';
         h.commit = r.commit || '';
-        // The hand-offs it had not reached are recorded, as with no back end: a later run takes them.
-        const rest = pending.filter((p) => !p.status);
+        // The hand-offs it had not reached are recorded, as with no back end: a later run takes them. Read
+        // now, not from `pending`: the integration's own implementer can have raised one.
+        const rest = R.handoffs.filter((p) => p.owner === 'kernel_workflow' && !p.status);
         for (const p of rest) p.status = 'recorded';
         note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`
           + `${rest.length ? `; ${rest.map((p) => p.id).join(', ')} recorded, not run` : ''}`);

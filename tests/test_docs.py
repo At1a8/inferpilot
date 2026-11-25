@@ -641,6 +641,7 @@ class DetachedRunTest(unittest.TestCase):
                 self.assertEqual(code, 0, out)
                 self.assertEqual([alive(p) for p in pids], [False, False, True], "the stop ended another launch, or left one of its own")
             finally:
+                self.stop(*logs)  # the third launch, and what its wrapper started
                 self.kill(pids)
         self.assertIn("All the launches of a call go in one command, which takes little more than twice the grace", self.doc)
 
@@ -654,6 +655,36 @@ class DetachedRunTest(unittest.TestCase):
                 self.assertFalse(alive(pids[0]), "the launch outlived its stop")
             finally:
                 self.kill(pids)
+
+    def test_a_stop_that_exits_0_has_not_reached_a_process_with_no_mark_and_no_parent_and_the_gpus_are_checked(self):
+        # Started with an empty environment by a shell that then exited: nothing ties it to the launch.
+        body = '(env -i setsid sh -c \'echo $$ > "$1"; exec sleep 60\' _ "$1/gone" &)\nsleep 60\n'
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, body, [str(Path(d) / "a run")])
+            wrapper, gone = self.pids("%s.pid" % log, "%s/a run/gone" % d)
+            try:
+                for _ in range(200):
+                    parent = Path("/proc/%d/stat" % gone).read_text().rsplit(")", 1)[1].split()[1]
+                    try:
+                        if b"INFERPILOT_LAUNCH=" not in Path("/proc/%s/environ" % parent).read_bytes():
+                            break
+                    except OSError:
+                        pass
+                    time.sleep(0.05)
+                code, out = self.stop(log)
+                self.assertEqual(code, 0, out)
+                self.assertFalse(alive(wrapper), "the launch outlived its stop")
+                self.assertTrue(alive(gone), "the stop reaches such a process: what the documents say of it is out of date")
+            finally:
+                self.kill([wrapper, gone])
+        self.assertIn("Its exit 0 says the processes it could find are gone, not that the GPUs are free", self.doc)
+        self.assertIn("`python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`, where the servers run, before the "
+                      "call's first launch and again once the stop exits 0", self.doc)
+        self.assertIn("A GPU idle at the first and in use at the second is held by something the call started and the stop did "
+                      "not reach", self.doc)
+        script = re.sub(r"\s+", " ", (ROOT / "scripts" / "stop_launch.py").read_text())
+        self.assertIn("So 0 says the processes it could find are gone, not that the GPUs are free", script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,8 +15,10 @@ is 0 once three looks in a row find none left (a zombie has exited; a process in
 shows no environment for a moment), 1 when one is still there --grace seconds after SIGKILL, named in
 the output, and 2 when a log does not exist: another path than the launch's. It never signals itself,
 whatever its own environment holds. Out of its reach: a process that emptied its environment and left
-its parent, and one of another user whose environment this user cannot read. Run it where the launches
-run: in a container their PIDs and environments are the container's. Standard library only.
+its parent, and one of another user whose environment this user cannot read. So 0 says the processes
+it could find are gone, not that the GPUs are free: its caller checks those before the first launch and
+after the stop (scripts/gpu_status.py --check, as Servers says). Run it where the launches run: in a
+container their PIDs and environments are the container's. Standard library only.
 """
 from __future__ import annotations
 

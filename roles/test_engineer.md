@@ -29,7 +29,10 @@ clock can start before your session does.
    `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...` (`env_hygiene.md`, *Servers*, Killing),
    until it exits 0: a fix round, a rollback or the next work package works in this worktree and on
    these GPUs next. The stop takes about twice its `--grace`, 30 seconds unless given: with a reserve
-   under 90 seconds, give it a third of the reserve. One you cannot stop fails the gate, and
+   under 90 seconds, give it a third of the reserve. Its exit 0 is confirmed on the GPUs,
+   `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the call's first launch
+   and again after the stop (*Killing*): a GPU idle before and in use after is one the call still
+   holds. One you cannot stop fails the gate, and so does a GPU the call still holds:
    `failure_summary` names it.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.

@@ -120,6 +120,14 @@ belongs to a host user, and the rules below are about those.
   after SIGKILL; 2 for a log that does not exist, another path than the launch's. All the launches of
   a call go in one command, which takes little more than twice the grace however many they are: where
   less time is left, give a smaller `--grace`.
+- Its exit 0 says the processes it could find are gone, not that the GPUs are free: a process that
+  emptied its environment and left its parent is out of its reach. The GPUs say the rest:
+  `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`, where the servers run, before the
+  call's first launch and again once the stop exits 0. A GPU idle at the first and in use at the second
+  is held by something the call started and the stop did not reach: the call has not stopped what it
+  started, and reports that GPU, its VRAM%, GPU% and pids as it reports a launch it cannot stop. A GPU
+  in use at both is somebody's work (below) and decides nothing; neither does a check that cannot run
+  (exit 2).
 - With `container` set (InferPilot on the host), servers and runs are in that container, and so are
   their launch, every poll and the stop: `docker exec -e INFERPILOT_RUN_TAG <container> bash -c '...'`
   for the launch (the tag lets the runner stop it when the run is stopped), `docker exec <container> ...`

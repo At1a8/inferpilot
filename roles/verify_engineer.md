@@ -38,8 +38,10 @@ clock can start before your session does.
    started, all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...`
    (`env_hygiene.md`, *Servers*, Killing), until it exits 0: a round asked for again after `needs_min`
    starts at once, with no GPU check before it. The stop takes about twice its `--grace`, 30 seconds
-   unless given: with less than 90 seconds to `deadline_utc`, give it a third of them. `summary` names
-   one you cannot stop.
+   unless given: with less than 90 seconds to `deadline_utc`, give it a third of them. Its exit 0 is
+   confirmed on the GPUs, `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the
+   round's first launch and again after the stop (*Killing*): a GPU idle before and in use after is one
+   the round still holds. `summary` names one you cannot stop, and a GPU the round still holds.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.
