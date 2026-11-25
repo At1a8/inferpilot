@@ -418,7 +418,7 @@ const stopHere = (title) => {
 // The same check where the verify, review and PR repair loops end a phase again: a stop named while the
 // run is in such a loop ends the run there, as the route's own checks do on its first pass.
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
-const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.stopped ? r.at : at);
+const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
@@ -479,9 +479,10 @@ function withTimeout(p, ms) {
 }
 
 // One agent call; resolves null (never throws) so every caller decides what a missing answer means
-// for its gate. A failed attempt is retried and the retry is told to check what it left behind. A
-// timeout is not retried: the timed-out agent cannot be cancelled and may still be running, so a
-// retry would run the role twice at once.
+// for its gate. A failed attempt is retried and the retry is told to check what it left behind, unless
+// the caller takes over (opts.attempts; opts.schemaRetries for the engine's asking again with the same
+// prompt). A timeout is not retried: the timed-out agent cannot be cancelled and may still be running,
+// so a retry would run the role twice at once.
 // Every role that works on the task may hand on what it meets that is not the task's; Spinoff checks it.
 const LEAD = S({ title: str, observed: str, where: str, evidence: str, reproduce: str }, ['title', 'observed']);
 // a function, not a const: the Intake calls in before MODE and the consts below exist. Spinoff and what
@@ -498,10 +499,11 @@ async function call(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
   const ms = timeoutFor(role);
   const leads = takesLeads(role, sub);
-  for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+  const { attempts = AGENT_RETRIES, ...agentOpts } = opts || {};
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const r = await withTimeout(agent(rolePrompt(role, sub, ins, attempt, leads),
-        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
+        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...agentOpts }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
         log(`  [inferpilot] ${lbl} timed out after ${min} min; not retried`);
@@ -515,9 +517,9 @@ async function call(role, sub, ins, schema, label, opts) {
         }
         return r;
       }
-      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${AGENT_RETRIES})`);
+      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${attempts})`);
     } catch (e) {
-      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${AGENT_RETRIES}): ` +
+      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${attempts}): ` +
         String(e && e.message ? e.message : e).slice(0, 200));
     }
   }
@@ -655,15 +657,16 @@ const IMPL = S({
 }, ['wp', 'status']);
 // incomplete: the checks that have no result yet, none of those that ran having failed, and where the
 // runs still going write; '' when every check has a result. A gate without a result is not a failed one.
+// null: a check not run yet, which only a gate without a result has.
 const UNIT = S({
   wp: str,
   unit_pass: bool,
-  feature_off_unchanged: bool,
-  fails_without_change: { type: 'string', enum: ['parent', 'mutant', 'no', 'n/a'] },
+  feature_off_unchanged: { type: ['boolean', 'null'] },
+  fails_without_change: { type: ['string', 'null'], enum: ['parent', 'mutant', 'no', 'n/a', null] },
   incomplete: str,
   failure_summary: str,
   evidence: str,
-}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change']);
+}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete']);
 const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean']);
 const VERIFY = S({
   all_pass: bool,
@@ -998,6 +1001,16 @@ function stalled(wp, label, commit = '') {
 }
 // A unit gate with checks that have no result, none of those that ran having failed.
 const unfinished = (ut) => !!ut && String(ut.incomplete || '').trim() !== '';
+// A unit call is never asked again blind: a retry without what the first one left going could start the
+// same tests on the same GPUs. An answer it cannot use, or none, goes to the call that finishes the gate.
+const UNIT_ONCE = { attempts: 1, schemaRetries: 0 };
+// A unit call that timed out may still be running: the human who cleans up gets the commit and what the
+// gate had left going.
+function gateTimedOut(wp, label, commit, left = '') {
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `${label} timed out: commit ${commit} stays in the worktree, `
+    + `unverified${left ? `; what the gate had left without a result before it: ${left}` : ''}` });
+  return stalled(wp, label, commit);
+}
 // Gates and rounds that ended without a result and may have left detached runs on the GPUs.
 const leftRunning = [];
 // Still without a result after the call that was to finish it: nothing measured went against the change,
@@ -1050,16 +1063,16 @@ async function implementAll(wps) {
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
       const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test };
-      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
+      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel, UNIT_ONCE);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return gateTimedOut(wp, utLabel, im.commit);
       // A gate without its result, checks still to give one or no answer at all, is finished by one more
       // call, which spends no fix round and reads the runs the first one left going.
       if (!ut || unfinished(ut)) {
         const left = ut ? ut.incomplete : 'every check: the test engineer returned no answer';
         const finLabel = `${utLabel}+finish`;
         const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
-          earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel);
-        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return stalled(wp, finLabel, im.commit);
+          earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel, UNIT_ONCE);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return gateTimedOut(wp, finLabel, im.commit, left);
         if (!fin || unfinished(fin)) {
           return noResult(wp, im.commit, fin ? fin.incomplete : `the call to finish it returned no answer; before it: ${left}`);
         }
@@ -1119,6 +1132,7 @@ async function verifyLoop(extraGates) {
       if (!needs) break;
       if (again || TIMEOUT_GIVEN) {
         note('Verify', 'fail', `the round needs ${needs} min; its limit is ${limit} min (${again ? 'the limit it asked for' : 'agent_timeout_ms'})`);
+        leftRunning.push(`Verify round ${round} stopped for time and may have left its servers running`);
         return { ok: false, reason: `out of time: the round needs ${needs} min` };
       }
       const grant = Math.max(needs, limit);
@@ -1159,7 +1173,7 @@ async function verifyLoop(extraGates) {
     }
     if (inv.verdict === 'kernel_regression') {
       const back = await rejectKernels(inv.kernel_handoffs || [], inv.counterexample || inv.summary || '');
-      if (!back.ok) return { ok: false, reason: back.reason };
+      if (!back.ok) return { ok: false, at: back.at, reason: back.reason };
       continue;
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
@@ -1168,7 +1182,7 @@ async function verifyLoop(extraGates) {
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
       const ks = await kernelStage(); // hand-offs a fix raised
-      if (ks.held) return { ok: false, reason: ks.held };
+      if (ks.held) return { ok: false, at: 'Kernel', reason: ks.held };
       const afterKernel = stopAt('Kernel');
       if (afterKernel) return afterKernel;
       continue;
@@ -1205,7 +1219,7 @@ async function rejectKernels(ids, counterexample) {
       + `${retry ? '; handed back once with the failing case' : '; rejected after its retry'}`);
   }
   const ks = await kernelStage();
-  return ks.held ? { ok: false, reason: ks.held } : { ok: true };
+  return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
 async function performance(claim) {
@@ -1273,7 +1287,7 @@ async function repaired(extraGates, perfClaim, runPerf) {
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
   const ver = await verifyLoop(extraGates);
-  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: 'Verify' };
+  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify' };
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {

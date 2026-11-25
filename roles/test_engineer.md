@@ -14,13 +14,16 @@ Inputs: `work_package`, `commit`, `unit_test_cmd`; on the call that finishes a g
 
 0. **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
    with `incomplete`: each check without a result, why, and for one still running its PID and where it
-   writes. A check that ran and failed makes the gate fail, whatever else has no result: then
-   `incomplete` is empty.
+   writes; `feature_off_unchanged` or `fails_without_change` is `null` while its check has not run. A
+   check that ran and failed makes the gate fail, whatever else has no result: stop the runs this gate
+   started and wait until they have exited, since a fix round or a rollback works in this worktree and
+   on these GPUs next, and return with `incomplete` empty.
    With `incomplete` given, finish that gate on the same `commit`: read what finished since, wait for
-   what still runs, run what never started, and judge the whole gate. When it says the call before
-   returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger first. No fix
-   round is spent on it; a gate still without a result after this call stops the package for a human,
-   its commit kept.
+   what still runs, and judge the whole gate. Steps 1 to 4 run only the checks that never started; the
+   others keep the results the call before recorded (`earlier_evidence`, the ledger). When it says the
+   call before returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger
+   first. No fix round is spent on it; a gate still without a result after this call stops the package
+   for a human, its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template
@@ -53,5 +56,6 @@ Return:
  "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
 
-A gate with checks still without a result returns `unit_pass` false and says which in `incomplete`, e.g.
+Every answer has `incomplete`, `""` when every check has a result. A gate with checks still without a
+result returns `unit_pass` false, `null` for a check not run, and says which in `incomplete`, e.g.
 `"DCP8 runs 4-5 and DCP1 not finished: driver pid 4242 writes RUN_DIR/logs/unit_WP1_driver.log"`.
