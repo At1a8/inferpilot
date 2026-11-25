@@ -31,12 +31,15 @@ clock can start before your session does.
    feature arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; for accuracy on the template
    server, the `accuracy_server_env` of `RUN_DIR/scripts/harness.json` on top); confirm the effective
    flags from the `server_args=` line of each log. Start each server and each long suite detached and
-   wait for it in this call (`env_hygiene.md`, *Servers*): one that goes with a tool call leaves the
-   round with nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus). Before
-   you return, whatever the round's result, `needs_min` included, stop every server and suite this round
-   started, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each (`env_hygiene.md`,
-   *Servers*, Killing), until it exits 0 for every one: a round asked for again after `needs_min` starts
-   at once, with no GPU check before it. `summary` names one you cannot stop.
+   wait for it in this call (`env_hygiene.md`, *Servers*; with `container` set, launched, polled and
+   stopped in that container, as it says there): one that goes with a tool call leaves the round with
+   nothing measured. InferPilot checked their GPUs just before the round (PHASE=gpus). Before you
+   return, whatever the round's result, `needs_min` included, stop every server and suite this round
+   started, all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...`
+   (`env_hygiene.md`, *Servers*, Killing), until it exits 0: a round asked for again after `needs_min`
+   starts at once, with no GPU check before it. The stop takes about twice its `--grace`, 30 seconds
+   unless given: with less than 90 seconds to `deadline_utc`, give it a third of them. `summary` names
+   one you cannot stop.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing.
@@ -70,7 +73,8 @@ clock can start before your session does.
      output add nothing) for three times the longest such pause in this run's healthy runs is hung, however
      much of the round is left: it is stopped, and its gate fails as a hang, with how far it got.
    - **The round fits in `time_limit_min`, or says what it needs.** With `time_limit_min` above 0, the
-     round ends 30 minutes before `deadline_utc`, which leaves time for the ledger and the answer. Estimate the round
+     round ends 30 minutes before `deadline_utc`, which leaves time for stopping what the round
+     started, the ledger and the answer. Estimate the round
      before its first suite, from the references, and again before each suite, from the times of this
      round. When the rest does not fit, start nothing more and return `all_pass` false with `needs_min`:
      the limit, in minutes from the round's start, that the whole round needs (the estimate and half as

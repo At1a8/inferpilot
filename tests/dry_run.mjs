@@ -389,6 +389,19 @@ const scenarios = [
     check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
       `handoff ${JSON.stringify(r.result.handoffs[0])}`);
   }],
+  ['kernel: the hand-offs after one whose integration is held are recorded, not left without a status', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'test_engineer:unit': (ins) => (ins.work_package.id === 'K-O2' ? {} : DEFAULTS['test_engineer:unit'](ins)) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integration_held' && byId.O4 === 'recorded', `statuses ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 1, 'the back end is not run on a hand-off after the held one');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase says so: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
   ['kernel: an integration whose unit gate has no answer stops the run also from a Verify fix, a review change or a kernel retry', async () => {
     const heldFor = (id) => (ins) => (ins.work_package.id === id ? {} : DEFAULTS['test_engineer:unit'](ins));
     const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
@@ -463,16 +476,23 @@ const scenarios = [
       && unitDoc.includes('A server stopped once the checks that use it are done has failed nothing'),
       'neither a control that must fail nor a server stopped when its checks are done fails the gate');
     check(unitDoc.includes('Before you return, whatever the gate\'s result, stop every server and run this call started, '
-      + '`python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each (`env_hygiene.md`, *Servers*, Killing), until it exits 0 for every one')
+      + 'all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...` (`env_hygiene.md`, *Servers*, Killing), until it exits 0')
       && unitDoc.includes('One you cannot stop fails the gate'),
       'the test engineer stops what it started before every return, and a gate whose runs cannot be stopped fails');
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
       'both engineers count from the deadline');
     check(verifyDoc.includes('Before you return, whatever the round\'s result, `needs_min` included, stop every server and suite '
-      + 'this round started, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>` for each')
+      + 'this round started, all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...`')
       && verifyDoc.includes('a round asked for again after `needs_min` starts at once, with no GPU check before it'),
       'the verify engineer stops what it started before every return, a round that asks for more time too');
+    check(unitDoc.includes('for stopping what the call started, the ledger and the answer')
+      && unitDoc.includes('with a reserve under 90 seconds, give it a third of the reserve')
+      && verifyDoc.includes('with less than 90 seconds to `deadline_utc`, give it a third of them'),
+      'the reserve covers the stop, and a short one gives the stop a grace that fits it');
+    check(unitDoc.includes('with `container` set, launched, polled and stopped in that container')
+      && verifyDoc.includes('with `container` set, launched, polled and stopped in that container'),
+      'with a container, both engineers launch, poll and stop there');
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);
     const told = async (ms) => (await run({ mode: 'feature', task: 't', agent_timeout_ms: ms })).calls

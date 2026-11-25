@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Stop what a detached launch started (knowledge/env_hygiene.md, Servers), from its launch record.
+"""Stop what detached launches started (knowledge/env_hygiene.md, Servers).
 
-    python3 scripts/stop_launch.py <log> [--grace 30]
+    python3 scripts/stop_launch.py <log> [<log>...] [--grace 30]
+    docker exec -i <container> python3 - <log> [<log>...] < scripts/stop_launch.py    # where the launches run
 
-The wrapper's PID is the one in <log>.pid. While the wrapper still runs (its command names <log>), it,
-every process below it and every process of its session are listed before the first signal, since one
-whose parent exits first is reparented away from the wrapper, and the wrapper can exit while its workers
-still shut down; each is known from then on by its PID and start time, and what they start meanwhile is
-added as it appears. SIGTERM to each, SIGKILL to those still there --grace seconds later, and the exit
-status is 0 once every one has exited (a zombie has), 1 when one is still there --grace seconds after
-SIGKILL: stuck, named in the output. A wrapper that had already exited leaves nothing that can be tied
-to the record: the processes still in its session are named and left alone, with status 1, and the PID
-taken by another process means nothing of the launch is left in its session (0). A process that left
-both the session and the tree before the stop (a daemon) is out of its reach. Status 2: no record.
-Standard library only.
+A launch gives its wrapper INFERPILOT_LAUNCH, the full path of its log, and every process the run starts
+inherits it, whatever becomes of its parent, its session or the wrapper. The processes of a launch are
+those whose environment holds that path, and what they started, whatever its environment: no PID is read
+from a file, so one that another process has taken since is never signalled, and each process found is
+known from then on by its PID and start time. SIGTERM to each, SIGKILL to those still there --grace
+seconds later, looking again all the while for ones started meanwhile; the logs of one command are
+stopped together, so it takes little more than twice the grace however many they are. The exit status
+is 0 once three looks in a row find none left (a zombie has exited; a process in the middle of an exec
+shows no environment for a moment), 1 when one is still there --grace seconds after SIGKILL, named in
+the output, and 2 when a log does not exist: another path than the launch's. It never signals itself,
+whatever its own environment holds. Out of its reach: a process that emptied its environment and left
+its parent, and one of another user whose environment this user cannot read. Run it where the launches
+run: in a container their PIDs and environments are the container's. Standard library only.
 """
 from __future__ import annotations
 
@@ -24,9 +27,11 @@ import signal
 import sys
 import time
 
+MARK = b"INFERPILOT_LAUNCH="
+
 
 def table() -> dict:
-    """Every process: PID -> (state, parent, session, start time in clock ticks)."""
+    """Every process: PID -> (state, parent, start time in clock ticks)."""
     out = {}
     for name in os.listdir("/proc"):
         if not name.isdigit():
@@ -36,32 +41,34 @@ def table() -> dict:
                 stat = f.read()
         except OSError:
             continue
-        fields = stat[stat.rindex(")") + 2:].split(" ")
-        out[int(name)] = (fields[0], int(fields[1]), int(fields[3]), fields[19])
+        try:
+            fields = stat[stat.rindex(")") + 2:].split(" ")
+            out[int(name)] = (fields[0], int(fields[1]), fields[19])
+        except (ValueError, IndexError):  # gone while it was read
+            continue
     return out
 
 
-def command(pid: int) -> list:
-    try:
-        with open("/proc/%d/cmdline" % pid, "rb") as f:
-            return [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
-    except OSError:
-        return []
+def marked(procs: dict, marks: set) -> set:
+    """The processes whose environment holds one of marks."""
+    out = set()
+    for pid in procs:
+        try:
+            with open("/proc/%d/environ" % pid, "rb") as f:
+                env = f.read()
+        except OSError:
+            continue
+        if MARK in env and not marks.isdisjoint(env.split(b"\0")):
+            out.add(pid)
+    return out
 
 
-def named(procs: dict, pids) -> list:
-    return [{"pid": p, "command": " ".join(command(p))} for p in sorted(pids) if p in procs]
-
-
-def spread(roots, procs: dict, session: int | None) -> set:
-    """roots and every process below them; with a session, its processes too and every one below them."""
+def below(roots, procs: dict) -> set:
+    """roots and every process below them."""
     kids = {}
     for pid, p in procs.items():
         kids.setdefault(p[1], []).append(pid)
-    out = {p for p in roots if p in procs}
-    if session is not None:
-        out |= {pid for pid, p in procs.items() if p[2] == session}
-    todo = list(out)
+    out, todo = set(roots), list(roots)
     while todo:
         for kid in kids.get(todo.pop(), []):
             if kid not in out:
@@ -70,33 +77,33 @@ def spread(roots, procs: dict, session: int | None) -> set:
     return out
 
 
-def stop(log: str, grace: float = 30, poll: float = 0.2) -> tuple:
+def command(pid: int) -> str:
     try:
-        with open(log + ".pid", encoding="utf-8") as f:
-            root = int(f.read().strip())
-    except (OSError, ValueError):
-        return 2, {"status": "no_record", "log": log}
-    procs = table()
-    running = root in procs and procs[root][0] not in ("Z", "X")
-    if not running or not any(os.path.basename(a) == os.path.basename(log) for a in command(root)):
-        if running:  # its PID is another process's: it was free, so the session had no process left
-            return 0, {"status": "exited", "left": []}
-        left = [p for p, v in procs.items() if v[2] == root and v[0] not in ("Z", "X")]
-        return (1 if left else 0), {"status": "exited", "left": named(procs, left)}
-    known = {(p, procs[p][3]) for p in spread([root], procs, root)}
-    sent, sig, deadline = set(), signal.SIGTERM, time.monotonic() + grace
+        with open("/proc/%d/cmdline" % pid, "rb") as f:
+            return f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+
+
+def stop(logs, grace: float = 30, poll: float = 0.2) -> tuple:
+    missing = [log for log in logs if not os.path.isfile(log)]
+    if missing:
+        return 2, {"status": "no_log", "logs": missing}
+    marks = {MARK + os.fsencode(os.path.realpath(log)) for log in logs}
+    known, sent, quiet = set(), set(), 0  # known: (pid, start time)
+    sig, deadline = signal.SIGTERM, time.monotonic() + grace
     while True:
         procs = table()
-        here = [p for p, start in known if p in procs and procs[p][3] == start]
-        # The session is still the launch's while one of its processes, a zombie too, keeps its ID taken.
-        held = any(procs[p][2] == root for p in here)
-        known |= {(p, procs[p][3]) for p in spread(here, procs, root if held else None)}
-        live = {p for p, start in known if p in procs and procs[p][3] == start and procs[p][0] not in ("Z", "X")}
-        if not live:
+        here = {p for p, start in known if p in procs and procs[p][2] == start}
+        found = below(marked(procs, marks) | here, procs) - {os.getpid()}
+        known |= {(p, procs[p][2]) for p in found if p in procs}
+        live = sorted(p for p, start in known if p in procs and procs[p][2] == start and procs[p][0] not in ("Z", "X"))
+        quiet = 0 if live else quiet + 1
+        if quiet == 3:
             return 0, {"status": "stopped", "pids": sorted(p for p, _ in known)}
-        if time.monotonic() >= deadline:
+        if live and time.monotonic() >= deadline:
             if sig == signal.SIGKILL:
-                return 1, {"status": "stuck", "left": named(procs, live)}
+                return 1, {"status": "stuck", "left": [{"pid": p, "command": command(p)} for p in live]}
             sig, deadline = signal.SIGKILL, time.monotonic() + grace
         for p in live:
             if sig == signal.SIGKILL or p not in sent:
@@ -105,15 +112,17 @@ def stop(log: str, grace: float = 30, poll: float = 0.2) -> tuple:
                 except OSError:
                     pass
                 sent.add(p)
-        time.sleep(poll)
+        time.sleep(min(poll, max(grace / 4, 0.01)))
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Stop what a detached launch started, from its launch record.")
-    ap.add_argument("log", help="the launch's log; the wrapper's PID is in <log>.pid")
+    ap = argparse.ArgumentParser(description="Stop what detached launches started.")
+    ap.add_argument("log", nargs="+", help="a launch's log, the path its wrapper got as INFERPILOT_LAUNCH")
     ap.add_argument("--grace", type=float, default=30,
                     help="seconds from SIGTERM to SIGKILL, and from SIGKILL to giving up (default %(default)s)")
     a = ap.parse_args(argv)
+    if not a.grace >= 0:
+        ap.error("--grace takes seconds, 0 or more")
     code, out = stop(a.log, a.grace)
     print(json.dumps(out, indent=1))
     return code

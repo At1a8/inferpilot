@@ -454,7 +454,7 @@ class DetachedRunTest(unittest.TestCase):
     documented launcher leaves the run's PID and exit status where that shell reads them, whatever the
     script does with quotes of its own, `exit`, `exec` or `set -e`, and in a shell with job control; no
     other launch shares its log and records, a wrapper that has exited is gone though nobody reaped it, and
-    the stop ends what outlives the wrapper and nothing it cannot tie to the record."""
+    the stop ends every process the launch gave its mark to, and no other."""
 
     # (the script, its arguments, the status it ends with, what its log has)
     SCRIPTS = (
@@ -466,7 +466,7 @@ class DetachedRunTest(unittest.TestCase):
     )
 
     def setUp(self):
-        self.launch = doc_command("knowledge/env_hygiene.md", "setsid nohup")
+        self.launch = doc_command("knowledge/env_hygiene.md", 'INFERPILOT_LAUNCH="$(realpath <log>)" setsid nohup')
         self.assertIsNotNone(self.launch, "env_hygiene.md gives no detached launcher")
         if not shutil.which("setsid"):
             self.skipTest("no setsid here")
@@ -562,72 +562,98 @@ class DetachedRunTest(unittest.TestCase):
         self.assertIn("Not `kill -0 <pid>`: it succeeds for a wrapper that has exited and that nobody has reaped", self.doc)
 
     @staticmethod
-    def stop(log):
-        """scripts/stop_launch.py on log, with a second of grace: its exit status and what it printed."""
-        out = subprocess.run([sys.executable, str(ROOT / "scripts" / "stop_launch.py"), str(log), "--grace", "1"],
-                             capture_output=True, text=True, timeout=60)
+    def stop(*logs, stdin=False, env=None, grace="1"):
+        """scripts/stop_launch.py on logs, with a second of grace: its exit status and what it printed."""
+        script = ROOT / "scripts" / "stop_launch.py"
+        cmd = [sys.executable, "-" if stdin else str(script)] + [str(log) for log in logs] + ["--grace", grace]
+        with open(script, encoding="utf-8") as program:
+            out = subprocess.run(cmd, stdin=program if stdin else subprocess.DEVNULL, capture_output=True, text=True,
+                                 timeout=60, env=dict(os.environ, **(env or {})))
         return out.returncode, out.stdout + out.stderr
 
-    def test_a_stop_waits_for_what_outlives_the_wrapper(self):
-        # One worker ignores SIGTERM, one has left the session, and the parent of one has exited: all three
-        # outlive a wrapper that is TERMed, and only the session still holds the last.
+    def pids(self, *paths):
+        got = [self.read(Path(p)) for p in paths]
+        self.assertNotIn(None, got, "the run did not start what it was to")
+        return [int(p) for p in got]
+
+    @staticmethod
+    def kill(pids):
+        for p in pids:
+            if alive(p):
+                os.kill(p, signal.SIGKILL)
+
+    def test_a_stop_ends_every_process_of_the_launch(self):
+        # A worker that ignores SIGTERM; one whose parent has exited and that leads a session of its own,
+        # which only its environment still ties to the launch; and one with no environment, below the script.
         body = ('bash -c \'trap "" TERM; exec sleep 60\' &\necho $! > "$1/stubborn"\n'
-                'setsid bash -c \'echo $$ > "$1/away"; exec sleep 60\' _ "$1" &\n'
-                '(sleep 60 & echo $! > "$1/orphan")\nsleep 60\n')
+                '(setsid sleep 60 & echo $! > "$1/away")\n'
+                'env -i sleep 60 &\necho $! > "$1/bare"\nsleep 60\n')
         with tempfile.TemporaryDirectory() as d:
             log = self.start(d, body, [str(Path(d) / "a run")])
-            pids = [self.read(Path(p)) for p in ("%s.pid" % log, "%s/a run/stubborn" % d, "%s/a run/away" % d,
-                                                  "%s/a run/orphan" % d)]
-            self.assertNotIn(None, pids, "the run did not start its workers")
-            pids = [int(p) for p in pids]
+            pids = self.pids("%s.pid" % log, "%s/a run/stubborn" % d, "%s/a run/away" % d, "%s/a run/bare" % d)
             try:
+                self.assertNotEqual(os.getsid(pids[2]), pids[0], "the worker that left the session is still in it")
                 code, out = self.stop(log)
                 self.assertEqual(code, 0, out)
                 self.assertEqual([p for p in pids if alive(p)], [], "a process of the launch outlived its stop")
             finally:
-                for p in pids:
-                    if alive(p):
-                        os.kill(p, signal.SIGKILL)
-        self.assertIn("it lists the wrapper, every process below it and every one of its session before the first signal", self.doc)
-        self.assertIn("SIGKILLs those still there after 30 seconds, and exits 0 once every one has exited", self.doc)
+                self.kill(pids)
+        self.assertIn("every process whose environment holds `INFERPILOT_LAUNCH` with one of these logs, whatever became of "
+                      "its parent, its session or the wrapper, and what those started", self.doc)
+        self.assertIn("SIGKILLs those still there after `--grace` seconds (30 unless given), and exits 0 once none is left", self.doc)
 
-    def test_a_stop_leaves_alone_a_process_that_took_the_recorded_pid(self):
+    def test_a_stop_ends_what_a_wrapper_that_exited_left_and_reads_no_pid_from_a_file(self):
         with tempfile.TemporaryDirectory() as d:
-            stranger = subprocess.Popen(["sleep", "30"])
+            log = self.start(d, 'sleep 60 &\necho $! > "$1/left"\n', [str(Path(d) / "a run")])
+            wrapper, left = self.pids("%s.pid" % log, "%s/a run/left" % d)
+            # Another process has the recorded PID now, and the log among its arguments.
+            stranger = subprocess.Popen(["tail", "-f", str(log)], stdout=subprocess.DEVNULL)
             try:
-                log = Path(d) / "run.log"
+                self.assertEqual(self.read(Path("%s.exit" % log)), "0")
+                for _ in range(200):
+                    if not alive(wrapper):
+                        break
+                    time.sleep(0.05)
                 Path("%s.pid" % log).write_text("%d\n" % stranger.pid)
-                code, out = self.stop(log)
+                code, out = self.stop(log, stdin=True)
                 self.assertEqual(code, 0, out)
-                self.assertTrue(alive(stranger.pid), "a stop killed a process its record does not name")
-                self.assertEqual(self.stop(Path(d) / "another.log")[0], 2, "a log with no record is taken for a stopped launch")
+                self.assertFalse(alive(left), "what the wrapper left outlived the stop")
+                self.assertTrue(alive(stranger.pid), "a stop signalled the process that has the recorded PID now")
+                self.assertEqual(self.stop(Path(d) / "another.log")[0], 2, "a log that does not exist is taken for a stopped launch")
+                self.assertEqual(self.stop(log, grace="-1")[0], 2, "a grace below 0 is taken")
             finally:
                 stranger.kill()
                 stranger.wait()
-        self.assertIn("leaving alone a PID that another process has taken since", self.doc)
-        self.assertIn("It exits 2 without `<log>.pid`", self.doc)
+                self.kill([left])
+        self.assertIn("not by a PID read later", self.doc)
+        self.assertIn("2 for a log that does not exist", self.doc)
+        self.assertIn("`docker exec -i <container> python3 - <log>... < <inferpilot_dir>/scripts/stop_launch.py`", self.doc)
 
-    def test_a_stop_after_the_wrapper_exited_names_what_is_left_and_kills_nothing(self):
+    def test_a_stop_takes_the_launches_it_is_given_together_and_no_other(self):
         with tempfile.TemporaryDirectory() as d:
-            log = self.start(d, 'sleep 30 &\necho $! > "$1/left"\n', [str(Path(d) / "a run")])
-            left = self.read(Path(d) / "a run" / "left")
-            self.assertIsNotNone(left, "the run started nothing")
-            left = int(left)
+            logs, pids = [], []
+            for name in ("a", "b", "c"):
+                (Path(d) / name).mkdir()
+                logs.append(self.start(str(Path(d) / name), 'bash -c \'trap "" TERM; exec sleep 60\'\n'))
+                pids += self.pids("%s.pid" % logs[-1])
             try:
-                self.assertEqual(self.read(Path("%s.exit" % log)), "0")
-                pid = int(self.read(Path("%s.pid" % log)))
-                for _ in range(200):
-                    if not alive(pid):
-                        break
-                    time.sleep(0.05)
-                code, out = self.stop(log)
-                self.assertEqual(code, 1, out)
-                self.assertIn('"pid": %d,' % left, out)
-                self.assertTrue(alive(left), "a stop killed a process it cannot tie to the record")
+                code, out = self.stop(logs[0], logs[1])
+                self.assertEqual(code, 0, out)
+                self.assertEqual([alive(p) for p in pids], [False, False, True], "the stop ended another launch, or left one of its own")
             finally:
-                os.kill(left, signal.SIGKILL)
-        self.assertIn("when the wrapper had already exited, the processes still in its session, which it leaves alone", self.doc)
+                self.kill(pids)
+        self.assertIn("All the launches of a call go in one command, which takes little more than twice the grace", self.doc)
 
+    def test_a_stop_started_from_a_shell_of_the_launch_ends_the_launch_not_itself(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = self.start(d, "sleep 60\n")
+            pids = self.pids("%s.pid" % log)
+            try:
+                code, out = self.stop(log, env={"INFERPILOT_LAUNCH": os.path.realpath(log)})
+                self.assertEqual(code, 0, out)
+                self.assertFalse(alive(pids[0]), "the launch outlived its stop")
+            finally:
+                self.kill(pids)
 
 if __name__ == "__main__":
     unittest.main()

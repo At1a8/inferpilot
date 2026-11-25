@@ -1340,7 +1340,11 @@ async function kernelStage() {
       if (r.held) {
         h.status = 'integration_held';
         h.commit = r.commit || '';
-        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`);
+        // The hand-offs it had not reached are recorded, as with no back end: a later run takes them.
+        const rest = pending.filter((p) => !p.status);
+        for (const p of rest) p.status = 'recorded';
+        note('Kernel', 'held', `${h.id}: ${r.reason}; its integration commit stays for a human, and the run stops`
+          + `${rest.length ? `; ${rest.map((p) => p.id).join(', ')} recorded, not run` : ''}`);
         return { integrated, held: r.reason };
       }
       h.status = r.ok ? 'integrated' : 'integration_failed';
