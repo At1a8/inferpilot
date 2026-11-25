@@ -17,7 +17,7 @@ seeing results. If it must change, stop and say why.
    a GPU another job uses means no profile is taken; return at once with `not_run`, each such GPU with
    its VRAM%, GPU% and pids (`path_ok` false, no opportunities). Then launch the baseline server with the
    run's `server_script` and warm it up with its `client_script` (the task's, or InferPilot's templates
-   the user took: `task_definition.md` §1.1–1.2).
+   where the task brings none: `task_definition.md` §1.1–1.2).
 2. **Path check first.** From the launch script and the server log (`server_args=` line, backend and
    graph-capture messages), compare intended and effective: attention backend, MoE and GEMM backends,
    graph capture and its batch sizes, torch.compile, the quantization path, and any fallback or
@@ -62,8 +62,8 @@ Before the servers of every round start, this run's earlier ones stopped, the ma
 return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and judge nothing.
 
 1. Follow `perf_evaluation.md`: the benchmark is the run's `client_script` (the task's, or InferPilot's
-   template the user took), run unchanged with `OUT_DIR` set, against servers started from the run's
-   `server_script` (the change's flags in `EXTRA_ARGS`); equal budget for the scarce resource; guard
+   template where the task brings none), run unchanged with `OUT_DIR` set, against servers started from
+   the run's `server_script` (the change's flags in `EXTRA_ARGS`); equal budget for the scarce resource; guard
    workloads only where the goal or the acceptance matrix lists them; fresh server per arm; prefix cache
    flushed; one warm-up, then one A/B round (one timed run per arm), and a round that shows no gain is
    reproduced at most twice and judged on the median (`perf_evaluation.md` §3); interleave arms on a

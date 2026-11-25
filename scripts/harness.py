@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """InferPilot's templates: the server, performance and accuracy scripts rendered from templates/harness/ for
-a run, the server and the client only where the user took them for a script of their own, and the accuracy
+a run, the server and the client only where the task brings no script of its own, and the accuracy
 script unless the task brings one. Each parameter takes the task's value first, then the one the feature the
 task ports sets in its source's own tests (vLLM PR #49406 serves PARD-2 with --max-model-len 4096:
 CONTEXT_LENGTH=4096), then, for the server, the model's recipe in the sglang cookbook for this GPU, then the

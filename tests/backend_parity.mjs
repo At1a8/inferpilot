@@ -192,7 +192,7 @@ return { got: args.agent_timeout_ms === undefined ? null : args.agent_timeout_ms
     }
   }],
   ['the log ends with what comes next, alike on both backends, and each run it names gets its arguments file', async () => {
-    const cases = [['scan', taskArgs({ mode: 'scan', framework_dir: '' }), 'start-1'], ['perf', taskArgs({ mode: 'perf', task: 'p', workload: '' }), 'again']];
+    const cases = [['scan', taskArgs({ mode: 'scan', framework_dir: '' }), 'start-1'], ['perf', taskArgs({ mode: 'perf', task: 'p', model_path: '' }), 'again']];
     for (const [name, args, tag] of cases) {
       const runs = await Promise.all(['claude', 'cursor'].map((b) => {
         const file = path.join(TMP, `${name}-${b}.json`);
@@ -204,7 +204,7 @@ return { got: args.agent_timeout_ms === undefined ? null : args.agent_timeout_ms
       for (const r of runs) {
         const written = r.file.replace(/\.json$/, `.${tag}.json`);
         const a = existsSync(written) ? JSON.parse(readFileSync(written, 'utf8')) : {};
-        const ok = tag === 'again' ? 'workload' in (a.answers || {}) && a.mode === 'perf' : a.mode === 'issue' && a.inferpilot_dir === INFERPILOT;
+        const ok = tag === 'again' ? 'model_path' in (a.answers || {}) && a.mode === 'perf' : a.mode === 'issue' && a.inferpilot_dir === INFERPILOT;
         check(ok, `${name} on ${r.b}: ${written}: ${JSON.stringify(a)}`);
         check(r.err.includes(`--backend ${r.b} `) && r.err.includes(`--args-file ${written} --result-file`), `${name} on ${r.b}: the command for it: ${next(r)}`);
         check(JSON.stringify(JSON.parse(readFileSync(r.file, 'utf8'))) === JSON.stringify(args), `${name} on ${r.b}: its own arguments file is untouched`);
