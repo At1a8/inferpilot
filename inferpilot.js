@@ -539,13 +539,15 @@ const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
 // A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that
 // component's to fix: the role that found it drafts the issue for its repository, and a human files it
-// (issue_triage.md §5, ci_triage.md §3). Records it; returns what the answer lacks, or ''.
-function componentCause(found) {
-  const component = String((found || {}).component || '').trim();
-  if (!component) return '';
+// (issue_triage.md §5, ci_triage.md §3). Records it, with what the role said besides the root cause (what the
+// reporter can do meanwhile, why no workaround serves), which the reply and the report relay; returns what the
+// answer lacks, or ''.
+function componentCause(found, said) {
+  const component = String((found || {}).component || '').trim().toLowerCase();
+  if (!COMPONENTS.includes(component)) return '';
   const draft = String(found.component_issue_path || '').trim();
   if (!draft) return `the root cause is in ${component}, and no issue was drafted for its repository`;
-  C.component_issue = R.component_issue = { component, draft_path: draft };
+  C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };
   return '';
 }
 
@@ -790,8 +792,10 @@ const CLASSIFY = S({
 const BISECT = S({ culprit: str, confirmed: bool, work_packages: WPS, evidence: str }, ['culprit', 'confirmed']);
 const BISECT_FIX = S({ fix_commit: str, confirmed: bool, evidence: str }, ['fix_commit', 'confirmed']);
 // A diagnosis and a bisect can both find the root cause in an AMD component outside the framework (aiter, MoRI,
-// ROCm, the ROCm build of PyTorch): which one, and the issue drafted for that component's repository.
-const COMPONENT_CAUSE = { component: str, component_issue_path: str };
+// ROCm, the ROCm build of PyTorch): which one, and the issue drafted for that component's repository. Only these
+// are components: any other word ("none", a third-party library) would stop a fix of the framework's own.
+const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];
+const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };
 Object.assign(DIAG.properties, COMPONENT_CAUSE);
 Object.assign(BISECT.properties, COMPONENT_CAUSE);
 const PROFILE = S({
@@ -2006,7 +2010,7 @@ async function runIssue() {
     return finish('blocked', 'Diagnose');
   }
   note('Diagnose', dg.verdict, dg.root_cause);
-  const noDraft = componentCause(dg);
+  const noDraft = componentCause(dg, dg.summary);
   if (noDraft) {
     note('Diagnose', 'fail', noDraft);
     return finish('blocked', 'Diagnose');
@@ -2015,7 +2019,8 @@ async function runIssue() {
   // Any other issue ends with the root cause, the reply and the issue drafted for the component.
   if (C.component_issue && C.priority !== 'P0') {
     note('Diagnose', 'component', `the root cause is in ${C.component_issue.component} and the issue is ${C.priority}: `
-      + 'no workaround in the framework, which only a P0 gets; the issue for the component is drafted');
+      + 'no workaround in the framework, which only a P0 gets; the issue for the component is drafted'
+      + `${C.component_issue.summary ? `. ${C.component_issue.summary}` : ''}`);
     return finish('diagnosed', 'Diagnose');
   }
   // The baseline's bug is what the issue reported: the reply explains it as the cause, not as something else seen.
@@ -2060,6 +2065,9 @@ async function runCi() {
 
   enter('Bisect');
   const bi = await call('ci_guardian', 'bisect', inputs(), BISECT);
+  // A component's defect is drafted for its repository whether or not the lane can be fixed here: the draft is
+  // recorded before anything below ends the run.
+  const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';
   if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {
     note('Bisect', 'fail', bi ? `culprit ${bi.culprit} not confirmed or no fix planned` : 'no bisect result');
     return finish('blocked', 'Bisect');
@@ -2067,7 +2075,6 @@ async function runCi() {
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
   // The lane is fixed as any other, by the pin or the fix forward; the component's defect gets its draft besides.
-  const noDraft = componentCause(bi);
   if (noDraft) {
     note('Bisect', 'fail', noDraft);
     return finish('blocked', 'Bisect');

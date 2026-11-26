@@ -1923,8 +1923,9 @@ const scenarios = [
   ['issue: a root cause in an AMD component gets an issue drafted for that repository, and a workaround in the framework only for a P0', async () => {
     const draft = `${RUN}/component_issue.md`;
     const wps = [{ id: 'FIX1', goal: 'the reference path for the shapes that fail, HIP-only', kind: 'framework', files: ['python/sglang/a.py'], test: 't', depends_on: [] }];
+    const advice = 'aiter 0.1.9 does not have it; --disable-aiter-moe avoids the path';
     const inAiter = (extra) => ({ verdict: 'fix_needed', root_cause: 'aiter: the fused MoE kernel reads past the last block',
-      component: 'aiter', component_issue_path: draft, ...extra });
+      component: 'aiter', component_issue_path: draft, summary: advice, ...extra });
     const triage = (priority) => () => ({ priority, category: 'crash', action: 'reproduce', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` });
     const filed = (r) => (r.result.next.user || []).find((x) => x.includes('component_issue.md'));
 
@@ -1937,6 +1938,11 @@ const scenarios = [
     check(/in aiter's repository/.test(filed(p1) || ''), `the user is told to file the draft there: ${filed(p1)}`);
     const reply = p1.calls.find((c) => c.key === 'issue_triager:reply');
     check(reply && reply.ins.component_issue && reply.ins.component_issue.component === 'aiter', 'the reply is written knowing where the root cause is');
+    // What the reporter can do meanwhile is said in the diagnosis' summary only: the reply and the report get it.
+    const report = p1.calls.find((c) => c.key === 'director:report');
+    check(reply.ins.component_issue.summary === advice && report.ins.component_issue.summary === advice && p1.result.component_issue.summary === advice
+      && p1.result.phases.some((p) => p.phase === 'Diagnose' && p.verdict === 'component' && p.summary.includes(advice)),
+      `the diagnosis' advice for the reporter reaches the reply, the report and the run record: ${JSON.stringify(p1.result.component_issue)}`);
     check(p1.result.phases.some((p) => p.phase === 'Diagnose' && p.verdict === 'component' && /only a P0/.test(p.summary)),
       `the run record says why no workaround was made: ${JSON.stringify(p1.result.phases.filter((p) => p.phase === 'Diagnose'))}`);
 
@@ -1949,7 +1955,20 @@ const scenarios = [
     check(impl.ins.component_issue && impl.ins.component_issue.draft_path === draft, 'the implementer knows which issue the workaround is for');
     // A P0 no workaround serves ends as any diagnosis without a fix.
     const none = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'), 'investigator:diagnose': () => inAiter({ work_packages: [] }) });
-    check(none.result.status === 'diagnosed' && !!filed(none), `a P0 with no workaround to make ends diagnosed, with the draft: ${none.result.status}`);
+    check(none.result.status === 'diagnosed' && !!filed(none) && none.result.component_issue.summary === advice,
+      `a P0 with no workaround to make ends diagnosed, with the draft and why: ${none.result.status}`);
+    // Only the four components are components: an empty one is a root cause in the framework, fixed at any priority.
+    const empty = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+      'investigator:diagnose': () => inAiter({ component: '', component_issue_path: '', work_packages: wps }) });
+    check(empty.result.status === 'ready_for_review' && !empty.result.component_issue, `no component named: the framework's own fix goes on: ${empty.result.status}`);
+    // A word that is no component ("none", a third-party library) is not an answer: it would stop the framework's own fix.
+    for (const word of ['none', 'mooncake']) {
+      const odd = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+        'investigator:diagnose': () => inAiter({ component: word, work_packages: wps }) });
+      check(odd.result.status === 'blocked' && odd.result.stopped_at === 'Diagnose' && !odd.result.component_issue
+        && odd.result.phases.some((p) => p.phase === 'Diagnose' && /no diagnosis/.test(p.summary)),
+        `"${word}" is refused as an answer, not taken for a component: ${odd.result.status} at ${odd.result.stopped_at}`);
+    }
 
     // A component named without a draft: the diagnosis is not done.
     const bare = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'),
@@ -2010,6 +2029,17 @@ const scenarios = [
     const ciBare = await run({ mode: 'ci', task: 'c' }, {
       'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: true, work_packages: ciWps, component: 'aiter' }) });
     check(ciBare.result.status === 'blocked' && ciBare.result.stopped_at === 'Bisect', `without the draft the bisect is not done: ${ciBare.result.status}`);
+    // A defect the lane cannot be fixed for here: the run stops, and the draft for the component is still the user's to file.
+    const noFix = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'the image of 11-25 (aiter 0.1.12)', confirmed: true, work_packages: [], component: 'aiter',
+        component_issue_path: draft, evidence: 'fails with aiter 0.1.12, passes with 0.1.11; no tag of 0.1.11 for rocm10' }) });
+    check(noFix.result.status === 'blocked' && noFix.result.stopped_at === 'Bisect' && !noFix.keys.includes('implementer:implement')
+      && noFix.result.component_issue && noFix.result.component_issue.draft_path === draft && /in aiter's repository/.test(filed(noFix) || '')
+      && noFix.result.component_issue.summary.includes('passes with 0.1.11'),
+      `with no fix planned, the draft and its evidence survive: ${noFix.result.status}, ${filed(noFix)}`);
+    const unsure = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: false, work_packages: ciWps, component: 'aiter', component_issue_path: draft }) });
+    check(unsure.result.status === 'blocked' && !unsure.result.component_issue, 'a culprit that is not confirmed names no component');
   }],
   ['ci: unconfirmed culprit blocks', async () => {
     const r = await run({ mode: 'ci', task: 'c' }, {

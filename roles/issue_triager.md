@@ -169,8 +169,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    the baseline already, and the reply explains it as the cause.
    With `component_issue` the root cause is in an AMD component outside the framework
    (`issue_triage.md` §5): name the component and the cause, with a `<component issue link>`
-   placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile.
-   `ready_for_review`: that the pull request is a workaround, and what it leaves to the component.
+   placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile,
+   as the diagnosis gave it (`component_issue.summary`). `ready_for_review`: that the pull request is
+   a workaround, and what it leaves to the component.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
 3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
    `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they

@@ -69,13 +69,16 @@ third-party library, the verdict is `not_amd_side` with the evidence.
 
 **A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of
 PyTorch; `issue_triage.md` §5): show it there, with the component's own call on the shapes and dtypes
-of the reproduction and no framework, or with that call replaced. Return `component`, and draft the
-issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): that reproduction,
-the versions, the GPU, counts and short log excerpts, never paths or names of this machine
-(`guardrails.md`). Then by `priority`: for a P0, `work_packages` are the workaround in the framework,
-HIP-only and the smallest that serves the reported configuration, each with a comment that names what
-to remove once the component is fixed; for any other issue return none, and say in `summary` what the
-reporter can do meanwhile. Never change the component: it comes from the image (`env_hygiene.md`).
+of the reproduction and no framework, or with that call replaced. Return `component` (`aiter`, `mori`,
+`rocm` or `pytorch_rocm`, and nothing for any other cause: a third-party library is `not_amd_side`),
+and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): that
+reproduction, the versions, the GPU, counts and short log excerpts, never paths or names of this
+machine (`guardrails.md`). Then by `priority`: for a P0, `work_packages` are the workaround in the
+framework, HIP-only and the smallest that serves the reported configuration, each with a comment that
+names what to remove once the component is fixed; for any other issue return none. Either way `summary`
+says what the reporter can do meanwhile (a version that works, a flag that avoids the path), or why no
+workaround serves: the reply and the report take it from there. Never change the component: it comes
+from the image (`env_hygiene.md`).
 
 Return:
 

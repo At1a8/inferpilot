@@ -547,14 +547,20 @@ class ComponentCauseTest(unittest.TestCase):
 
     def test_the_run_decides_by_the_priority(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        for said in ("function componentCause(found) {",
-                     "C.component_issue = R.component_issue = { component, draft_path: draft };",
+        for said in ("function componentCause(found, said) {",
+                     "C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };",
                      "if (C.component_issue && C.priority !== 'P0') {",
-                     "const noDraft = componentCause(dg);",
-                     "const noDraft = componentCause(bi);",
+                     "const noDraft = componentCause(dg, dg.summary);",
                      "file the issue draft in ${R.component_issue.component}'s repository"):
             self.assertIn(said, src)
-        self.assertIn("const COMPONENT_CAUSE = { component: str, component_issue_path: str };", src)
+        self.assertIn("const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];", src)
+        self.assertIn("const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };", src,
+                      'any word is taken for a component: "none" would stop a fix of the framework\'s own')
+        self.assertIn("if (!COMPONENTS.includes(component)) return '';", src)
+        # ci: the draft is recorded before the check that ends a run without a fix to make.
+        self.assertLess(src.index("const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';"),
+                        src.index("if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {"),
+                        "a defect the lane cannot be fixed for loses its draft")
         for schema in ("DIAG", "BISECT"):
             self.assertIn("Object.assign(%s.properties, COMPONENT_CAUSE);" % schema, src, "%s takes no component" % schema)
 
@@ -565,14 +571,18 @@ class ComponentCauseTest(unittest.TestCase):
                 ("knowledge/issue_triage.md", "so G2 and G5 measure it"),
                 ("knowledge/issue_triage.md", "**P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`)"),
                 ("knowledge/issue_triage.md", "A component that changed its interface on purpose has no defect"),
-                ("roles/investigator.md", "Return `component`, and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/investigator.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
                 ("roles/investigator.md", "for a P0, `work_packages` are the workaround in the framework"),
-                ("roles/investigator.md", "for any other issue return none"),
+                ("roles/investigator.md", "for any other issue return none."),
                 ("roles/investigator.md", "Never change the component: it comes from the image"),
+                ("roles/investigator.md", "Return `component` (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause"),
+                ("roles/investigator.md", "Either way `summary` says what the reporter can do meanwhile"),
+                ("roles/issue_triager.md", "as the diagnosis gave it (`component_issue.summary`)"),
+                ("roles/ci_guardian.md", "where you can plan none, return the component and its draft all the same"),
                 ("roles/issue_triager.md", "With `component_issue` the root cause is in an AMD component outside the framework"),
                 ("roles/issue_triager.md", "`<component issue link>` placeholder, since the human files that issue"),
-                ("roles/ci_guardian.md", "return `component` and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
-                ("roles/ci_guardian.md", "The lane is still fixed by the package."),
+                ("roles/ci_guardian.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/ci_guardian.md", "The lane is still fixed by the package; where you can plan none"),
                 ("knowledge/ci_triage.md", "**A defect of an AMD component** outside the framework"),
                 ("knowledge/ci_triage.md", "with a pin to the last version that passed where a bump brought it"),
                 ("roles/director.md", "With `component_issue`, name the component the root cause is in"),

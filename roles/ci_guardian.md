@@ -48,10 +48,12 @@ Return:
 4. Plan the fix forward as work packages; the package's `test` is the failing test. For a
    `dependency_bump`, the package pins or adapts and the triage record says what to report upstream.
 5. Where what fails is a defect of an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm
-   build of PyTorch; `ci_triage.md` §3), whichever commit or bump exposed it, return `component` and
-   draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): the
-   component's own call that fails without the framework, the versions, the GPU, counts and short log
-   excerpts, never paths or names of this machine. The lane is still fixed by the package.
+   build of PyTorch; `ci_triage.md` §3), whichever commit or bump exposed it, return `component`
+   (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause) and draft the issue
+   for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): the component's own
+   call that fails without the framework, the versions, the GPU, counts and short log excerpts, never
+   paths or names of this machine. The lane is still fixed by the package; where you can plan none,
+   return the component and its draft all the same: the run stops, and the draft is still filed.
 
 Return:
 
