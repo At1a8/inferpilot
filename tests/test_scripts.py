@@ -2516,6 +2516,90 @@ class ScanCiTest(unittest.TestCase):
         self.assertEqual(top["statuses"], {"recurring": 1, "never-passed": 1})
         self.assertEqual(clusters[1]["statuses"], {"flaky": 1})
 
+    # The state as the bot writes it since version 3: counts in place of a status, the runs that failed, the
+    # fix PR its analysis names, and the tests that stopped failing in an archive of bare rows.
+    V3 = {
+        "version": 3,
+        "active": {
+            "test/a.py::A.test_x": {"cluster": "enterContext on Python 3.10", "error": "AttributeError: enterContext",
+                                    "job_url": "https://ci/1", "first_seen": "2026-10-21", "last_seen": "2026-11-23",
+                                    "fix_pr": "[#49963](https://github.com/o/r/pull/49963)", "fail_runs": ["11", "12", "14"],
+                                    "variants": ["rocm720", "rocm724"], "failed": 3, "observed": 5, "streak": 2},
+            "test/b.py::B.test_y": {"cluster": "enterContext on Python 3.10", "first_seen": "2026-11-20", "last_seen": "2026-11-23",
+                                    "fix_pr": "", "fail_runs": ["12", "14"], "variants": ["rocm720"], "failed": 2, "observed": 2,
+                                    "streak": 2},
+            "test/c.py::C.test_z": {"cluster": "runner lost communication", "first_seen": "2026-11-01", "last_seen": "2026-11-02",
+                                    "fix_pr": "", "fail_runs": ["9"], "variants": ["rocm10"], "failed": 1, "observed": 7, "streak": 0},
+        },
+        "archive": [["test/d.py::D.test_w", "2026-10-23", "2026-10-24", 1, 14, "timed out"]],
+        "runs": {"9": ["2026-11-01T01:00:00Z", "rocm10"], "11": ["2026-11-10T01:00:00Z", "rocm720"],
+                 "12": ["2026-11-20T01:00:00Z", "rocm720"], "13": ["2026-11-21T01:00:00Z", "rocm720"],
+                 "14": ["2026-11-23T01:00:00Z", "rocm720"]},
+    }
+
+    def test_the_version_3_state_is_read_as_its_active_entries(self):
+        body = self.body(self.V3)
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state(body)), "counts")
+        entries = scan_ci.parse_state(body)
+        self.assertEqual(sorted(entries), sorted(self.V3["active"]),
+                         "the state's own keys (version, active, archive, runs) are not tests")
+        a, b, c = (entries[k] for k in sorted(entries))
+        self.assertEqual(a["status"], "failing now (2 in a row, since 2026-11-20; failed 3 of 5 runs)")
+        self.assertEqual(b["status"], "failing every run (2 of 2 runs, since 2026-11-20)")
+        self.assertEqual(c["status"], "not failing now (failed 1 of 7 runs)")
+        self.assertEqual([e["failing_since"] for e in (a, b, c)], ["2026-11-20", "2026-11-20", ""],
+                         "a streak begins at its first run of the failures in a row, by when the runs started")
+        self.assertEqual([e["fix_prs"] for e in (a, b, c)], [[49963], [], []])
+        self.assertEqual(self.V3["active"]["test/a.py::A.test_x"].get("status"), None, "the state it was given is left as it was")
+
+    def test_a_streak_whose_runs_the_state_no_longer_dates(self):
+        state = json.loads(json.dumps(self.V3))
+        state["runs"] = {"14": ["2026-11-23T01:00:00Z", "rocm720"]}
+        entries = scan_ci.parse_state(self.body(state))
+        self.assertEqual(entries["test/b.py::B.test_y"]["failing_since"], "2026-11-20",
+                         "it failed every run it had: the streak began when it was first seen")
+        self.assertEqual(entries["test/a.py::A.test_x"]["failing_since"], "", "it passed in between: no date is made up")
+        self.assertEqual(entries["test/a.py::A.test_x"]["status"], "failing now (2 in a row; failed 3 of 5 runs)")
+
+    def test_the_version_3_clusters_carry_the_variants_and_the_fix_prs(self):
+        clusters = scan_ci.aggregate(scan_ci.parse_state(self.body(self.V3)))
+        top = clusters[0]
+        self.assertEqual((top["cluster"], top["n_tests"]), ("enterContext on Python 3.10", 2))
+        self.assertEqual(top["statuses"], {"failing now": 1, "failing every run": 1})
+        self.assertEqual(top["since"], "2026-11-20")
+        self.assertEqual((top["variants"], top["fix_prs"]), (["rocm720", "rocm724"], [49963]))
+        self.assertEqual(clusters[1]["statuses"], {"not failing now": 1})
+        self.assertEqual((clusters[1]["variants"], clusters[1]["fix_prs"]), (["rocm10"], []))
+        old = scan_ci.aggregate(self.ENTRIES)[0]
+        self.assertEqual((old["variants"], old["fix_prs"]), ([], []), "the earlier form names neither")
+
+    def test_a_state_in_another_form_is_not_read_as_entries(self):
+        for state in ({"version": 4, "tests": [{"name": "t"}]}, {"version": 3, "active": ["not", "a", "map"]}, ["a", "list"]):
+            body = self.body(state)
+            self.assertEqual(scan_ci.state_form(scan_ci.read_state(body)), "unknown", state)
+            self.assertEqual(scan_ci.parse_state(body), {}, "its top-level keys were once taken for tests: %r" % (state,))
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state("no state here")), "none")
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state(self.body({}))), "status", "an empty state has no entry, and is read")
+
+    def test_main_says_which_form_it_read_and_what_it_could_not_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = {}
+            for name, state in (("v3", self.V3), ("old", self.ENTRIES), ("other", {"version": 4, "tests": []})):
+                body, res, md = (Path(tmp) / (name + ext) for ext in (".md", ".json", ".out.md"))
+                body.write_text(self.body(state))
+                with mock.patch.object(sys, "argv", ["scan_ci.py", "--file", str(body), "--out", str(res), "--md", str(md)]), \
+                        redirect_stderr(io.StringIO()):
+                    self.assertEqual(scan_ci.main(), 0)
+                out[name] = (json.loads(res.read_text())["trackers"][0], md.read_text())
+        v3, old, other = (out[k][0] for k in ("v3", "old", "other"))
+        self.assertEqual((v3["state_form"], v3["n_entries"], v3["n_archived"]), ("counts", 3, 1))
+        self.assertEqual((old["state_form"], old["n_entries"]), ("status", 3))
+        self.assertNotIn("n_archived", old)
+        self.assertEqual((other["state_form"], other["n_entries"], other["clusters"]), ("unknown", 0, []))
+        self.assertIn("does not read (version 4", other["unread"])
+        self.assertIn("**Not read:**", out["other"][1], "the report says so where the clusters would be")
+        self.assertIn("| #49963 |", out["v3"][1], "the report names the fix PR of a cluster")
+
     LOG = textwrap.dedent("""\
         2026-11-09T02:56:19.1234567Z \x1b[36;1m[server-test] FAILED during server startup: wan_lora\x1b[0m
         2026-11-09T03:40:01.0000000Z E   RuntimeError: Server exited early (code 1).

@@ -9,6 +9,10 @@ first errors. Runs of forks and pull requests are left out.
 Trackers: the bot keeps its state in an HTML comment `<!-- ci-failure-tracker-state: {...} -->`, keyed
 by `test_file::test_function`. Each cluster reports its tests, statuses, the earliest `since` date named
 in a status, first/last seen dates and one example error. A tracker can be days behind main.
+The bot has written two forms of that state, and both are read (knowledge/ci_triage.md §1): entries that
+carry a `status` in words, and, from version 3 on, `active` entries that carry counts instead (`failed`,
+`observed`, `streak`) with the runs that failed and the fix PR the bot names. A state in any other form
+is reported as not read, never taken for entries.
 
   scan_ci.py --out ci.json [--md ci.md]          # main and all open trackers
   scan_ci.py --no-main --out ci.json             # the trackers only
@@ -34,19 +38,78 @@ _SINCE = re.compile(r"since (\d{4}-\d\d-\d\d)")
 _STATUS_HEAD = re.compile(r"^\s*([a-z][a-z \-]*?)\s*(\(|$)", re.I)
 
 
-def parse_state(body: str) -> dict:
-    """The tracker's entries ({key: entry}); empty when the body has no state block."""
+def read_state(body: str):
+    """The state block as the bot wrote it; None when the body has none or it is not JSON."""
     i = (body or "").find(MARKER)
     if i < 0:
-        return {}
+        return None
     text = body[i + len(MARKER):].lstrip()
     try:
         state, _ = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError:
-        return {}
-    if isinstance(state, dict) and isinstance(state.get("entries"), dict):
-        return state["entries"]
-    return state if isinstance(state, dict) else {}
+        return None
+    return state
+
+
+def state_form(state) -> str:
+    """Which form a state is in: `status` (entries with a status in words, bare or under "entries"), `counts`
+    (version 3: "active" entries with failed / observed / streak), `none` (no state), or `unknown`: a state
+    this script does not read. An unknown one is said so, not read as entries: version 3's four top-level
+    keys were once taken for four tests."""
+    if state is None:
+        return "none"
+    if not isinstance(state, dict):
+        return "unknown"
+    if isinstance(state.get("active"), dict):
+        return "counts"
+    if isinstance(state.get("entries"), dict):
+        return "status"
+    if all(isinstance(v, dict) for v in state.values()):
+        return "status"  # the bare form: {key: entry}; an empty state is one with no entry
+    return "unknown"
+
+
+def _counts_entries(state: dict) -> dict:
+    """Version 3's active entries, each with what the earlier form gave in words: a `status` from its counts,
+    the day its present run of failures began (`failing_since`, from the runs that failed and when each
+    started) and the numbers of the fix PRs the bot names (`fix_prs`). The words are this script's, not the
+    bot's: `failing every run` (it never passed while tracked), `failing now` (it passed before; so many runs
+    in a row), `not failing now` (its latest run passed: it failed so many of the runs that had it)."""
+    runs = state.get("runs") if isinstance(state.get("runs"), dict) else {}
+    started = {str(r): v[0] for r, v in runs.items() if isinstance(v, list) and v and isinstance(v[0], str)}
+    out = {}
+    for key, entry in state["active"].items():
+        if not isinstance(entry, dict):
+            continue
+        e = dict(entry)
+        failed, observed, streak = (e.get(k) if isinstance(e.get(k), int) else 0 for k in ("failed", "observed", "streak"))
+        fails = sorted((str(r) for r in e.get("fail_runs") or [] if str(r) in started), key=lambda r: started[r])
+        since = started[fails[-streak]][:10] if 0 < streak <= len(fails) else ""
+        if not since and streak and streak == failed:
+            since = e.get("first_seen") or ""  # every failure is in the streak, and the first one is dated
+        of = f"{failed} of {observed} runs"
+        if not streak:
+            e["status"] = f"not failing now (failed {of})"
+        elif failed == observed:
+            e["status"] = f"failing every run ({of}{', since ' + since if since else ''})"
+        else:
+            e["status"] = f"failing now ({streak} in a row{', since ' + since if since else ''}; failed {of})"
+        e["failing_since"] = since
+        e["fix_prs"] = sorted({int(n) for n in re.findall(r"(?:/pull/|#)(\d+)", str(e.get("fix_pr") or ""))})
+        out[key] = e
+    return out
+
+
+def parse_state(body: str) -> dict:
+    """The tracker's entries ({key: entry}); empty when the body has no state block, or one in a form this
+    script does not read (state_form tells the two apart)."""
+    state = read_state(body)
+    form = state_form(state)
+    if form == "counts":
+        return _counts_entries(state)
+    if form == "status":
+        return state["entries"] if isinstance(state.get("entries"), dict) else state
+    return {}
 
 
 def status_head(status: str) -> str:
@@ -62,7 +125,7 @@ def aggregate(entries: dict) -> list[dict]:
         name = e.get("cluster") or "(no cluster)"
         c = clusters.setdefault(name, {"cluster": name, "tests": [], "statuses": collections.Counter(),
                                        "since": "", "first_seen": "", "last_seen": "", "example_error": "",
-                                       "job_urls": []})
+                                       "job_urls": [], "variants": set(), "fix_prs": set()})
         c["tests"].append(key)
         st = e.get("status", "")
         c["statuses"][status_head(st)] += 1
@@ -76,11 +139,16 @@ def aggregate(entries: dict) -> list[dict]:
             c["example_error"] = e["error"][:300]
         if e.get("job_url") and len(c["job_urls"]) < 3:
             c["job_urls"].append(e["job_url"])
+        # what only the form with counts carries: the image variants it failed on, the fix PRs the bot names
+        c["variants"].update(v for v in e.get("variants") or [] if isinstance(v, str))
+        c["fix_prs"].update(n for n in e.get("fix_prs") or [] if isinstance(n, int))
     out = []
     for c in clusters.values():
         c["n_tests"] = len(c["tests"])
         c["tests"] = sorted(c["tests"])[:10]
         c["statuses"] = dict(c["statuses"])
+        c["variants"] = sorted(c["variants"])
+        c["fix_prs"] = sorted(c["fix_prs"])
         out.append(c)
     return sorted(out, key=lambda c: (-c["n_tests"], c["cluster"]))
 
@@ -207,11 +275,15 @@ def to_markdown(result: dict) -> str:
     for t in result["trackers"]:
         lines.append(f"## #{t['number']} {t['title']} (updated {t['updated_at']}) — "
                      f"{t['n_entries']} tests in {len(t['clusters'])} clusters\n")
-        lines.append("| Tests | Statuses | Since | First / last seen | Cluster |")
-        lines.append("|---|---|---|---|---|")
+        if t.get("unread"):
+            lines.append(f"**Not read:** {t['unread']}\n")
+            continue
+        lines.append("| Tests | Statuses | Since | First / last seen | Fix PRs named | Cluster |")
+        lines.append("|---|---|---|---|---|---|")
         for c in t["clusters"]:
             st = ", ".join(f"{k} {v}" for k, v in c["statuses"].items())
-            lines.append(f"| {c['n_tests']} | {st} | {c['since'] or '-'} | {c['first_seen']} / {c['last_seen']} | "
+            fixes = ", ".join(f"#{n}" for n in c.get("fix_prs") or []) or "-"
+            lines.append(f"| {c['n_tests']} | {st} | {c['since'] or '-'} | {c['first_seen']} / {c['last_seen']} | {fixes} | "
                          f"{c['cluster'].replace('|', '/')} |")
         lines.append("")
     return "\n".join(lines)
@@ -243,12 +315,23 @@ def main() -> int:
         print("[scan_ci] main: %d workflows, %d failing jobs" % (len(result["main"]["workflows"]),
                                                                  len(result["main"]["failures"])), file=sys.stderr)
     for it in issues:
+        state = read_state(it.get("body") or "")
+        form = state_form(state)
         entries = parse_state(it.get("body") or "")
         clusters = aggregate(entries)
-        result["trackers"].append({"number": it.get("number"), "title": it.get("title", ""),
-                                   "state": it.get("state", ""), "updated_at": it.get("updated_at", ""),
-                                   "n_entries": len(entries), "clusters": clusters})
-        print(f"[scan_ci] #{it.get('number')}: {len(entries)} tests, {len(clusters)} clusters", file=sys.stderr)
+        tracker = {"number": it.get("number"), "title": it.get("title", ""),
+                   "state": it.get("state", ""), "updated_at": it.get("updated_at", ""),
+                   "state_form": form, "n_entries": len(entries), "clusters": clusters}
+        if form == "counts":
+            # the bot moves a test that stopped failing to "archive" and keeps only its key, dates and counts
+            tracker["n_archived"] = len(state["archive"]) if isinstance(state.get("archive"), list) else 0
+        if form == "unknown":
+            keys = sorted(map(str, state))[:8] if isinstance(state, dict) else type(state).__name__
+            tracker["unread"] = (f"the tracker's state is in a form scan_ci.py does not read (version "
+                                 f"{state.get('version', '?') if isinstance(state, dict) else '?'}, keys {keys}): read the issue itself")
+            print(f"[scan_ci] #{it.get('number')}: NOT READ: {tracker['unread']}", file=sys.stderr)
+        result["trackers"].append(tracker)
+        print(f"[scan_ci] #{it.get('number')}: {len(entries)} tests, {len(clusters)} clusters ({form})", file=sys.stderr)
     Path(a.out).write_text(json.dumps(result, indent=1, ensure_ascii=False))
     if a.md:
         Path(a.md).write_text(to_markdown(result))

@@ -15,8 +15,25 @@ fix PR or a handover within a week for anything else.
 - **AMD Failure Tracker** issues on sglang, titled `[Failure Tracker] PR Test (AMD)` (label
   `ci-failure-tracker`). A bot rewrites the body; the machine-readable state sits in an HTML comment
   `<!-- ci-failure-tracker-state: {...} -->`. Entries are keyed by `test_file::test_function` with
-  `cluster` (an error-signature title), `error`, `status`, `job_url`, `job_id`, `detail_url`,
-  `run_started_at`, `first_seen`, `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters.
+  `cluster` (an error-signature title), `error`, `job_url`, `job_id`, `detail_url`, `first_seen`,
+  `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters. The bot has written the state in
+  two forms, and the script reads both:
+  - each entry with a `status` in words (`new regression (since DATE)`, `never-passed`, `flaky`,
+    `infrastructure`): the trackers up to October 2026;
+  - version 3, the tracker open since 2026-10-22: `active` entries carry counts instead. `failed` and
+    `observed` are the runs a test failed, of the runs that had it; `streak` is its failures in a row
+    up to its latest run, 0 once it passed again; `fail_runs` are the runs that failed, `variants` the
+    images it failed on (rocm10, rocm720, rocm724); `fix_pr` is a pull request the bot's analysis names
+    as the fix, which may be wrong. The script says the counts in words of its own: `failing every
+    run` (it never passed while tracked), `failing now` (so many in a row, since the day that run of
+    failures began) and `not failing now`. A test that stopped failing moves to `archive`, which
+    keeps its key, dates and counts only.
+
+  What a status said in words, the counts say in numbers. `failing every run` on one variant is the
+  earlier `never-passed` on a lane. A streak that begins on one day, after runs that passed, is the
+  earlier `new regression (since DATE)`. `failed` well below `observed` and no streak is the earlier
+  `flaky`. A state in any other form is reported as not read (`unread` in the script's output): read
+  the issue itself then, and never take an empty result for a tracker without failures.
 - **Nightly** failures and **human-filed** CI issues (`[CI] [AMD] ...`).
 - A tracker only covers a few days (one snapshot covered 10-22 to 10-25). Record first-seen and fixed
   dates yourself; the tracker will not keep them.
