@@ -71,3 +71,36 @@ Return:
 ```
 
 An `approve` with a blocker finding is treated as not approved.
+
+## PHASE=reply (issue mode, after the reply draft)
+
+Inputs: `reply_draft_path`, `round`, `status`, `stopped_at`, `phases`, `spinoffs`, `known_issues`. The
+draft goes to the issue's author and maintainers once a human posts it; you check it against the run,
+claim by claim, and never edit it.
+
+1. **Numbers and outcomes.** Every count, pass or fail, version, commit and configuration in the draft
+   matches a line of `RUN_DIR/experiment_ledger.md`, `RUN_DIR/run.json` or an artifact the ledger names.
+2. **Where the run ended.** What the draft says is done, under way or to come agrees with `status`,
+   `stopped_at` and `phases`: a work package that was rolled back is not being worked on, and a run that
+   ended without a fix offers none.
+3. **What the run cannot know.** Nobody reviewed or approved anything unless a human did and the run
+   recorded it; no maintainer's intent, no promised date (a date the run recorded, such as an image
+   tag's, is a fact like any other).
+4. A failure the baseline shares (`known_issues`) is told as what was seen and where, not as part of
+   this issue; the one with `cause_of_this_issue` is what Diagnose found the issue's own failure to be,
+   and the draft explains it as that.
+5. Write `RUN_DIR/reply_check.md`: each finding with the claim as the draft has it, what the run shows,
+   and the ledger line or artifact; or that the draft says only what the run showed.
+
+Return:
+
+```json
+{"findings": [{"claim": "DCP2 passed 3/3", "issue": "the ledger has 2/2", "evidence": "experiment_ledger.md, Unit tests: DCP2"}],
+ "check_path": "/abs/RUN_DIR/reply_check.md", "summary": "<one line>"}
+```
+
+`check_path` is that file, `RUN_DIR/reply_check.md`, and nothing else: with any other value the draft
+counts as not checked. Every entry of `findings` is a finding, with its `claim` and `issue` filled in: one
+left empty still keeps the draft from being offered as checked.
+Empty `findings`: the draft says only what the run showed. Otherwise the issue triager rewrites the draft
+from them once, and you check it again (`round` 1); what is still left goes to the user with the draft.
