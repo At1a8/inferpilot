@@ -33,8 +33,9 @@
 #   header, which its SDK route requires). The key goes to evalscope only for a set a judge grades; its
 #   log gets <JUDGE_KEY> in its place as it is written, and its configs and other files once evalscope
 #   has stopped, at the end or when the run is stopped (not by SIGKILL). evalscope runs in a process
-#   group of its own (setsid, which must be there), so that whatever it started stops with it; a set
-#   whose files could not all be redacted, or whose log is not whole, has no score.
+#   group of its own (setsid, which must be there), so that whatever it started stops with it, and is
+#   stopped when the process that writes its log ends before it; a set whose files could not all be
+#   redacted, or whose log is not whole, has no score.
 #
 # Before each set the server's prefix cache is flushed; after it, /server_info's speculative accept
 # length is read, so it covers this set only. Run nothing else on the server meanwhile. Every run samples
@@ -173,21 +174,25 @@ redact_key() {  # <dir>
     (
         trap '' TERM INT HUP
         KEY="${JUDGE_KEY}" python3 - "$1" <<'EOF'
-import os, sys
+import os, stat, sys
 key = os.environ["KEY"].encode()
 failed = []
-# a directory that cannot be listed is not skipped: its files may hold the key
+# a directory that cannot be listed is not skipped: its files may hold the key. Nor is a name that
+# cannot be looked at (in a directory that can be listed and not searched): only what is known not to
+# be a regular file is passed over
 for root, _, files in os.walk(sys.argv[1], onerror=lambda e: failed.append("%s (%s)" % (e.filename, e.strerror))):
     for name in files:
         path = os.path.join(root, name)
-        if os.path.islink(path) or not os.path.isfile(path):
-            continue
         try:
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                continue
             with open(path, "rb") as f:
                 data = f.read()
             if key in data:
                 with open(path, "wb") as f:
                     f.write(data.replace(key, b"<JUDGE_KEY>"))
+        except FileNotFoundError:
+            continue  # gone since it was listed
         except OSError as e:
             failed.append("%s (%s)" % (path, e.strerror))
 if failed:
@@ -220,16 +225,26 @@ out.write(held)
 # runner SIGKILLs what is left of a run 10 seconds after its SIGTERM (runtime/procs.mjs).
 REDACT_DIR=""
 EVAL_PID=""
+# "launch" from evalscope's launch until this script has seen it end (to_group)
+EVAL_LAUNCH=""
 MASK_PID=""
 FIFO_DIR=""
 PENDING=""
+# A signal to the process group <pid> leads. With "launch", <pid> is a launch this script has not seen
+# end, which leads no group until it has reached its setsid: until then it has started nothing, and the
+# signal goes to <pid> itself. Without it <pid> may have ended, and its number may be another process's
+# by now. Fails when there is nothing to signal.
+to_group() {  # <signal> <pid> [launch]
+    kill "-$1" -- "-$2" 2>/dev/null && return 0
+    [ -n "${3:-}" ] && kill "-$1" "$2" 2>/dev/null
+}
 # What is left of the process group <pid> leads: SIGTERM, then SIGKILL to what is there <tenths> tenths
 # of a second later.
-end_group() {  # <pid> <tenths>
-    kill -TERM -- "-$1" 2>/dev/null || return 0
-    for _ in $(seq "$2"); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 0.1; done
-    kill -KILL -- "-$1" 2>/dev/null
-    for _ in $(seq 10); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 0.1; done
+end_group() {  # <pid> <tenths> [launch]
+    to_group TERM "$1" "${3:-}" || return 0
+    for _ in $(seq "$2"); do to_group 0 "$1" "${3:-}" || return 0; sleep 0.1; done
+    to_group KILL "$1" "${3:-}"
+    for _ in $(seq 10); do to_group 0 "$1" "${3:-}" || return 0; sleep 0.1; done
     return 0
 }
 # The masker reads evalscope's output from a pipe, which this script opens first: for reading and writing,
@@ -256,11 +271,17 @@ end_log() {
     MASK_PID=""
     return "${rc}"
 }
+# A fifth of a second in which a signal is acted on at once and for which no process is started: a read
+# that nothing answers, on a pipe of its own. Should the read fail, a sleep.
+tick() {
+    read -r -t 0.2 _ <> "${FIFO_DIR}/tick" 2>/dev/null || [ $? -gt 128 ] || sleep 0.2
+}
 stop_eval() {
     if [ -n "${EVAL_PID}" ]; then
-        end_group "${EVAL_PID}" 30
+        end_group "${EVAL_PID}" 30 "${EVAL_LAUNCH}"
         wait "${EVAL_PID}" 2>/dev/null
         EVAL_PID=""
+        EVAL_LAUNCH=""
     fi
     end_log
     return 0
@@ -339,7 +360,7 @@ run_one() {  # <set>
     fi
     REDACT_DIR="${run_dir}"
     # Outside the run directory: the redaction opens every file there, and a FIFO would block it.
-    FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" || exit 2
+    FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" "${FIFO_DIR}/tick" || exit 2
     hold_signals
     start_log "${log}" || exit 2
     setsid "${EVALSCOPE}" eval \
@@ -359,7 +380,21 @@ run_one() {  # <set>
         --no-timestamp \
         --repeats 1 > "${FIFO_DIR}/out" 2>&1 3>&- &
     EVAL_PID=$!
+    EVAL_LAUNCH=launch
     act_on_signals
+    # Without the masker nothing reads the pipe, and evalscope would wait on a full one for ever: it is
+    # stopped when the masker ends before it, and the set has no score.
+    while kill -0 "${EVAL_PID}" 2>/dev/null; do
+        if ! kill -0 "${MASK_PID}" 2>/dev/null; then
+            echo "${ds}: evalscope is stopped, since the process that masks the key in ${log} ended before it:" \
+                 "nothing reads what evalscope prints" >&2
+            log_whole=0
+            end_group "${EVAL_PID}" 30 launch
+            break
+        fi
+        tick
+    done
+    EVAL_LAUNCH=""
     wait "${EVAL_PID}"
     rc=$?
     # A child evalscope left behind would hold the log's pipe open, or write the key after the redaction.
