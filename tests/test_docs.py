@@ -301,12 +301,37 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("ROLLBACK, 'implementer:rollback:existing');", "the pull request stays on the branch the run's own fix is made on"),
                 ("R.done.length = 0;", "the pull request's package still counts as a verified one"),
                 ("async function verifyLoop(extraGates, existing) {", "the verify loop does not know that the fix is someone else's"),
-                ("if (existing && ['fix_needed', 'inconclusive'].includes(inv.verdict)) {", "what the pull request lacks is repaired on top of it"),
-                ("if (!impl.ok) return existing && !impl.held ? existingFailed(existing, 'Implement', impl.reason) : finish('blocked', 'Implement');",
-                 "a pull request that does not apply ends the run, or one whose gate may still be running is rolled back"),
+                # only what is shown to be the pull request's counts against it
+                ("if (existing && (inv.verdict === 'fix_needed' || (inv.verdict === 'inconclusive' && inv.attributed === true))) {",
+                 "what the pull request lacks is repaired on top of it, or a comparison that decided nothing counts against it"),
+                ("attributed: bool,", "the investigator cannot say that the controls attribute a failure it cannot explain"),
+                ("if (!impl.ok) return existing && impl.theirs && !impl.held ? existingFailed(existing, 'Implement', impl.reason) : finish('blocked', 'Implement');",
+                 "a pull request that does not apply ends the run, one whose gate may still be running is rolled back, or a missing answer "
+                 "counts against it"),
+                ("async function implementAll(wps, existing) {", "the implement loop does not know that the package is someone else's pull request"),
+                ("...(existing ? { verify_only: true } : {}) }), IMPL, imLabel);", "the implementer is not told to leave the pull request as it is"),
+                ("conflicts: strs,", "the implementer cannot say that the pull request no longer applies"),
+                ("if (existing && conflicts.length) {", "a package blocked for another reason counts as the pull request's failure"),
+                ("        if (existing) {\n          theirs = true;\n          break;\n        }", "a gate the pull request failed is repaired in a later round"),
+                # nothing is rolled back or fixed next to what may still be running
+                ("left_running: str,", "a unit gate cannot say what it could not stop"),
+                ("if (still) return gateLeftRunning(wp, im.commit, still);", "a fix round or a rollback starts next to what a gate could not stop"),
+                ("const live = [...TIMED_OUT_CALLS].map((c) => `${c} timed out and may still be running`).concat(leftRunning);\n  if (live.length) {",
+                 "a second rollback starts next to one that timed out"),
+                # a stop named for the phase the pull request failed in holds
+                ("if (stopHere(at)) {\n    note(at, 'stopped', `stop_after=${at}: ${prs} did not pass", "the run's own fix starts past the phase the operator named"),
+                # the run's own fix is prepared as any fix, at the priority the problem has without a usable fix PR
+                ("C.existing_prs = [];", "the PR phase writes a verification comment for the run's own fix"),
+                ("priority_without_pr: { type: 'string', enum: ['P0', 'P1', 'P2', ''] },", "Triage cannot say the priority without the pull request"),
+                ("const without = String(tri.priority_without_pr || '').trim();\n    if (without && without !== C.priority) {",
+                 "a failure that was P1 only for its open fix PR stays P1 once that PR has failed"),
+                ("${status === 'ready_for_review' ? \"; once the run's own pull request is open, add its link to that comment\" : ''}",
+                 "the user is told to link a pull request the run does not have"),
                 ("if (!ver.ok) return existing && ver.theirs ? existingFailed(existing, 'Verify', ver.reason) : ended(ver, 'Verify');",
                  "a failure that is not the pull request's is decided against it"),
-                ("if (existing && perf.trusted && perf.claimed && !perf.reproduced) {", "a measurement that was not trusted is decided against the pull request"),
+                ("if (existing && perf.trusted) {", "a measurement that was not trusted is decided against the pull request, or a slower guard "
+                                                    "workload is not"),
+                ("return { ok, trusted, claimed: !!claim, reproduced, guards: !!p && p.guards_ok === true };", "the run cannot tell a guard that failed"),
                 ("const tried = await deliver([wp], gates, issueClaim, runPerf, prs || 'the existing fix PR');", "an issue's existing fix is not verified as someone else's"),
                 ("if (tried !== EXISTING_FAILED) return tried;", "the run ends where its own fix should begin")):
             self.assertIn(said, src, why)
@@ -314,8 +339,13 @@ class ExistingFixFailsTest(unittest.TestCase):
         self.assertLess(issue.index("if (tried !== EXISTING_FAILED) return tried;"), issue.index("enter('Diagnose');"),
                         "the run's own fix does not start with a diagnosis")
         # The repair of a fix of the run's own is unchanged: the check for someone else's comes first.
-        self.assertLess(src.index("if (existing && ['fix_needed', 'inconclusive'].includes(inv.verdict)) {"),
+        self.assertLess(src.index("if (existing && (inv.verdict === 'fix_needed' || (inv.verdict === 'inconclusive' && inv.attributed === true))) {"),
                         src.index("const fix = await implementAll(inv.work_packages);"))
+        # The comment is drafted before anything stops the run, and the branch is rolled back before a stop holds.
+        fb = src[src.index("async function existingFailed(prs, at, why) {"):src.index("async function deliver(")]
+        self.assertLess(fb.index("const cm = await call('pr_engineer', 'comment'"), fb.index("if (live.length) {"))
+        self.assertLess(fb.index("if (live.length) {"), fb.index("ROLLBACK, 'implementer:rollback:existing');"))
+        self.assertLess(fb.index("ROLLBACK, 'implementer:rollback:existing');"), fb.index("if (stopHere(at)) {"))
 
     def test_the_documents_say_it(self):
         role = (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8")
@@ -326,8 +356,14 @@ class ExistingFixFailsTest(unittest.TestCase):
                      "`RUN_DIR/pr_comment.md`", "the commit of it the run applied",
                      "what passed, since a comment that lists only failures misleads",
                      "no verdict on the pull request, no request to close it, and no attribution line",
-                     "a fix for the same failure is being prepared and will be linked here",
+                     # the comment is written before the run knows what becomes of its own fix
+                     "Promise nothing about what follows", "it ends with what was measured, and names no pull request to come",
+                     "its result tells the human to add that pull request's link when posting",
                      "Run the leak scan on it as on a PR body",
+                     # the branch still carries the pull request: its findings are not the comment's
+                     "rewrite the comment until the scan finds nothing in it",
+                     "a finding there is not the comment's, and not yours to clear",
+                     "name what the scan found on the branch in `summary`",
                      '"comment_path": "/abs/RUN_DIR/pr_comment.md"'):
             self.assertIn(said, phase)
         for path, said in (
@@ -340,7 +376,35 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("roles/investigator.md", "**After an existing fix PR that did not pass** (`existing_pr_result`"),
                 ("roles/investigator.md", "plan from the root cause, not as a patch on that pull request"),
                 ("roles/issue_triager.md", "With `existing_pr_result` an open fix PR was verified first and did not pass"),
+                ("roles/issue_triager.md", "Say that the fix now offered is another one only for `ready_for_review`, where the run has one"),
+                ("roles/issue_triager.md", "for any other ending say what the run reached after it (a diagnosis, a stop), and promise no fix"),
+                ("roles/issue_triager.md", "return `priority_without_pr` as well, the priority it has when no usable fix PR exists"),
+                ("roles/issue_triager.md", '"priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>"'),
                 ("roles/director.md", "With `existing_pr_result`, say that the run first verified that pull request"),
+                ("roles/director.md", "only `ready_for_review` has a pull request to link from that comment, and the comment itself promises none"),
+                # the run's own fix after it is prepared as any fix
+                ("roles/pr_engineer.md", "With `existing_pr_result` the run first verified someone else's open fix, which did not pass"),
+                ("roles/pr_engineer.md", "Step 5 writes a PR body for it, with the attribution line, and not a verification comment, whatever the "
+                                         "triage record says of an existing PR"),
+                # verified as it is
+                ("roles/implementer.md", "`verify_only` (true when the package applies someone else's pull request that the run verifies as it is"),
+                ("roles/implementer.md", "A cherry-pick that conflicts is not resolved: `git cherry-pick --abort`"),
+                ("roles/implementer.md", "return `blocked` with the files that conflict in `conflicts`"),
+                ("roles/implementer.md", "name the files only when git reported the conflict, never for another reason you could not go on"),
+                ("roles/implementer.md", "the author's code and tests stay as they are, and where they fail, that is what the run reports"),
+                ("roles/test_engineer.md", "`left_running` says what is left and where"),
+                ("roles/test_engineer.md", "InferPilot then starts no fix round and no rollback next to it"),
+                ("roles/test_engineer.md", '"left_running": ""'),
+                ("roles/investigator.md", 'Add `"attributed": true` when the controls show that the failure is the change\'s although you cannot explain it'),
+                ("roles/investigator.md", "Leave it out where a control was interrupted, ended another way or was not run"),
+                ("knowledge/issue_triage.md", "Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that fails"),
+                ("knowledge/issue_triage.md", "And only what is shown to be the pull request's counts against it"),
+                ("knowledge/issue_triage.md", "A comparison that decided nothing, a package blocked for another reason and an answer that never came "
+                                              "prove nothing"),
+                ("knowledge/issue_triage.md", "Nothing is rolled back next to a call that may still be running"),
+                ("knowledge/issue_triage.md", "A stop named for the phase the pull request failed in holds as well"),
+                ("knowledge/issue_triage.md", "That fix has the priority the problem has without a usable fix PR"),
+                ("knowledge/issue_triage.md", "The comment promises no fix: it is written before the run knows what becomes of its own"),
                 ("knowledge/pr_playbook.md", "names that PR and says in one sentence what it did not pass"),
                 ("templates/issue_triage.md", "the comment drafted for it (`pr_comment.md`)"),
                 ("README.md", "| `pr_comment.md` |"), ("README.zh-CN.md", "| `pr_comment.md` |")):

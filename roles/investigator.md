@@ -47,7 +47,12 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      the tuned kernel (InferPilot does not tune kernels).
    - `fix_needed`: you can explain the mechanism. Return the fix as work packages, each with the
      regression test that would have caught it.
-   - `inconclusive`: say what is known and what experiment would decide it.
+   - `inconclusive`: say what is known and what experiment would decide it. Add `"attributed": true`
+     when the controls show that the failure is the change's although you cannot explain it: the
+     same-pattern baseline ran to its end and passed, as often as the change's arm failed. Leave it
+     out where a control was interrupted, ended another way or was not run: nothing is then decided
+     against the change. For someone else's pull request under verification that is the difference
+     between a result the run reports on it and a stop for a human.
 
 Return:
 
@@ -56,6 +61,7 @@ Return:
  "work_packages": [{"id": "FIX1", "goal": "...", "kind": "framework", "files": [], "test": "...", "depends_on": []}],
  "known_issue": {"id": "KI-006", "title": "...", "symptom": "...", "reproduction": "...", "excluded": "...", "workaround": "...", "status": "open"},
  "kernel_handoffs": ["K-WP1"], "counterexample": "<gate, shapes, dtype, configuration, command>",
+ "attributed": false,
  "summary": "<mechanism or the controls that prove it pre-existing>"}
 ```
 

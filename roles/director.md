@@ -403,7 +403,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   `component_issue`, name the component the root cause is in and the draft a human is to file in its
   repository.
 - With `existing_pr_result`, say that the run first verified that pull request, where it did not pass
-  and why, and give the comment drafted for it (`comment_path`), which a human posts there.
+  and why, and give the comment drafted for it (`comment_path`), which a human posts there. Say
+  what became of the run's own fix as the status has it: only `ready_for_review` has a pull request
+  to link from that comment, and the comment itself promises none.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when

@@ -84,6 +84,20 @@ one and says in one sentence what it did not pass. A failure the baseline shares
 request's (`validation_doctrine.md`, *Same-pattern baseline control*), and a measurement that could not
 be trusted decides nothing: the run stops for a human then, as for any fix.
 
+Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that
+fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's counts
+against it: a conflict, a gate it failed, a failure the investigator explains or one the controls
+attribute to it (the baseline ran to its end and passed), a trusted measurement that is slower on
+the task's client or on a guard workload. A comparison that decided nothing, a package blocked for
+another reason and an answer that never came prove nothing: the run stops for a human, with no
+comment. Nothing is rolled back next to a call that may still be running (one that timed out, a
+gate that could not stop what it started): the comment is drafted, and the run stops. A stop named
+for the phase the pull request failed in holds as well: the comment is there, the branch is back at
+the base, and the run's own fix is not started. That fix has the priority the problem has without a
+usable fix PR (§2 makes a default-configuration failure P1 only while one is open), since only a P0
+gets a workaround here for a component's defect. The comment promises no fix: it is written before
+the run knows what becomes of its own.
+
 **A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
 the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails
 the same way is the same failure with more evidence. One of them is the original: the one the

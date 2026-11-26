@@ -2108,25 +2108,86 @@ const scenarios = [
       check(c && c.ins.existing_pr_result && c.ins.existing_pr_result.prs === '#40872', `${key} knows that #40872 was verified first and did not pass`);
     }
 
-    // Every way it can fail to pass, and each is the pull request's: it does not apply, its accuracy, its speed.
+    // After the fall-back the branch holds the run's own fix: the PR phase is given no pull request to write a
+    // verification comment for, and the result gives the push, with the link to add to the earlier comment.
+    const ownPr = r.calls.filter((c) => c.key === 'pr_engineer:pr').pop();
+    check(ownPr && !ownPr.ins.existing_prs && !r.result.pr.comment_for
+      && r.result.next.user.some((u) => u.startsWith('post the comment on #40872') && u.endsWith("once the run's own pull request is open, add its link to that comment")),
+      `the run's own pull request is prepared as any fix's: ${JSON.stringify([ownPr && ownPr.ins.existing_prs, r.result.pr.comment_for, r.result.next.user])}`);
+
+    // The pull request is verified as it is. The implementer is told so for its package, and for none of the run's own.
+    const toldOnly = r.calls.filter((c) => c.key === 'implementer:implement').map((c) => !!c.ins.verify_only);
+    check(eqList(toldOnly, [true, false]), `only the pull request's package is applied verify-only: ${JSON.stringify(toldOnly)}`);
+
+    // Every way it can fail to pass, and each is the pull request's: it does not apply, its own tests, its accuracy, its speed.
     const blocked = await run({ mode: 'issue', task: 'i' }, { ...existing,
-      'implementer:implement': (ins) => (ins.work_package.kind === 'apply_pr' ? { wp: 'WP1', status: 'blocked', notes: 'conflicts in python/sglang/a.py' }
+      'implementer:implement': (ins) => (ins.work_package.kind === 'apply_pr'
+        ? { wp: 'WP1', status: 'blocked', conflicts: ['python/sglang/a.py'], notes: 'main rewrote the function it patches' }
         : DEFAULTS['implementer:implement'](ins)) });
-    check(blocked.result.status === 'ready_for_review' && fellBack(blocked, 'Implement') && /conflicts in python\/sglang\/a\.py/.test(comment(blocked).ins.failure),
+    check(blocked.result.status === 'ready_for_review' && fellBack(blocked, 'Implement')
+      && /it no longer applies to the base: conflicts in python\/sglang\/a\.py \(main rewrote the function it patches\)/.test(comment(blocked).ins.failure),
       `a pull request that no longer applies: ${ended(blocked)}`);
+    // Its own tests fail: that is its result. No round repairs it, as a round would a package of the run's own.
+    const red = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'test_engineer:unit': (ins) => (ins.work_package.kind === 'apply_pr'
+        ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, incomplete: '',
+          failure_summary: "test_dcp_tp8 fails with the PR applied: AssertionError at step 3", evidence: `${RUN}/logs/unit_WP1.log` }
+        : DEFAULTS['test_engineer:unit'](ins)) });
+    const applyRounds = red.calls.filter((c) => c.key === 'implementer:implement' && c.ins.work_package.kind === 'apply_pr').length;
+    check(red.result.status === 'ready_for_review' && fellBack(red, 'Implement') && applyRounds === 1
+      && /test_dcp_tp8 fails with the PR applied/.test(red.result.existing_pr_result.why),
+      `one whose own tests fail is not repaired in a second round (${applyRounds} round): ${ended(red)}`);
     const lossy = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'verify_engineer:verify': (ins, n) => (n === 1 ? failing('G2') : pass()),
-      'investigator:investigate': () => ({ verdict: 'inconclusive', summary: 'gsm8k 0.84 against 0.89 on the base; no mechanism found' }) });
+      'investigator:investigate': () => ({ verdict: 'inconclusive', attributed: true,
+        summary: 'gsm8k 0.84 against 0.89 on the base, three runs each; no mechanism found' }) });
     check(lossy.result.status === 'ready_for_review' && fellBack(lossy, 'Verify') && /G2: gsm8k 0\.84/.test(lossy.result.existing_pr_result.why),
-      `one that loses accuracy, which the investigator cannot explain: ${ended(lossy)}`);
+      `one that loses accuracy against a baseline that ran to its end, which the investigator cannot explain: ${ended(lossy)}`);
     const slow = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'perf_engineer:perf_eval': (ins, n) => ({ ...DEFAULTS['perf_engineer:perf_eval'](), claim_reproduced: n > 1 }) });
-    check(slow.result.status === 'ready_for_review' && fellBack(slow, 'Performance'), `one that is slower than the base: ${ended(slow)}`);
+    check(slow.result.status === 'ready_for_review' && fellBack(slow, 'Performance') && /slower than the base beyond the noise band, or the number/.test(comment(slow).ins.failure),
+      `one that is slower than the base: ${ended(slow)}`);
+    // A guard workload that is slower is measured too: the headline number holding does not hide it.
+    const guard = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'perf_engineer:perf_eval': (ins, n) => ({ ...DEFAULTS['perf_engineer:perf_eval'](), guards_ok: n > 1 }) });
+    check(guard.result.status === 'ready_for_review' && fellBack(guard, 'Performance') && /measured on the guard workloads/.test(comment(guard).ins.failure),
+      `one that is slower on a guard workload: ${ended(guard)}, ${comment(guard) && comment(guard).ins.failure}`);
     const stillThere = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()),
       'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base fails the same way' }, summary: 'as on the base' }) });
     check(stillThere.result.status === 'ready_for_review' && fellBack(stillThere, 'Verify') && !(stillThere.result.known_issues || []).length,
       `one with which the reproduction fails as on the base does not fix, and that is no known issue: ${ended(stillThere)}`);
+
+    // What does not show the failure to be the pull request's decides nothing against it: no comment, no fix of the
+    // run's own, and a human reads what the run has.
+    const undecided = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => failing('G4'),
+      'investigator:investigate': () => ({ verdict: 'inconclusive', summary: 'the baseline control was interrupted at hour 9; nothing to compare with' }) });
+    check(undecided.result.status === 'blocked' && undecided.result.stopped_at === 'Verify' && !comment(undecided)
+      && !undecided.keys.includes('investigator:diagnose') && !undecided.result.existing_pr_result,
+      `an inconclusive comparison with the baseline is not the pull request's failure: ${ended(undecided)}`);
+    for (const [what, answer] of [
+      ['blocked for a decision that is a human\'s', { wp: 'WP1', status: 'blocked', notes: 'the PR needs aiter 0.1.12, which the image does not have' }],
+      ['reported done without a commit', { wp: 'WP1', status: 'done', commit: '' }],
+      ['not answered', null]]) {
+      const unknown = await run({ mode: 'issue', task: 'i', max_fix_rounds: 0 }, { ...existing,
+        'implementer:implement': (ins) => (ins.work_package.kind === 'apply_pr' ? answer : DEFAULTS['implementer:implement'](ins)) });
+      check(unknown.result.status === 'blocked' && unknown.result.stopped_at === 'Implement' && !comment(unknown)
+        && !unknown.keys.includes('investigator:diagnose') && !unknown.result.existing_pr_result,
+        `a package ${what} proves nothing against the pull request: ${ended(unknown)}`);
+    }
+    // What a gate started and could not stop still holds the worktree and the GPUs: nothing is rolled back or
+    // fixed next to it, for someone else's pull request or for a package of the run's own.
+    const stuck = { wp: 'WP1', unit_pass: false, feature_off_unchanged: null, fails_without_change: null, incomplete: '',
+      failure_summary: 'the server of the smoke did not stop', left_running: 'the smoke server, pid 4242, on GPU 0-7', evidence: `${RUN}/logs/unit_WP1.log` };
+    for (const [whose, answers] of [['the pull request\'s', existing], ['the run\'s own', {}]]) {
+      const leftOn = await run({ mode: 'issue', task: 'i' }, { ...answers, 'test_engineer:unit': () => stuck });
+      check(leftOn.result.status === 'blocked' && leftOn.result.stopped_at === 'Implement' && !comment(leftOn)
+        && !leftOn.calls.some((c) => c.key === 'implementer:rollback')
+        && leftOn.calls.filter((c) => c.key === 'implementer:implement').length === 1
+        && leftOn.result.attention.some((a) => /could not stop what it started \(the smoke server, pid 4242/.test(a.issue)),
+        `a gate of ${whose} package that could not stop what it started stops the run, with no rollback and no further round: ${ended(leftOn)}`);
+    }
 
     // What is not the pull request's stops the run as for any fix: nothing is decided against it.
     const shared = await run({ mode: 'issue', task: 'i' }, { ...existing,
@@ -2145,6 +2206,67 @@ const scenarios = [
     const held = await run({ mode: 'issue', task: 'i' }, { ...existing, 'test_engineer:unit': () => null });
     check(held.result.status === 'blocked' && held.result.stopped_at === 'Implement' && !comment(held)
       && !held.calls.some((c) => c.key === 'implementer:rollback'), `a gate without a result may still be running: nothing is rolled back: ${ended(held)}`);
+
+    // A call that timed out is not cancelled. The rollback of the package that failed may still be resetting the
+    // branch: the comment is drafted, and then nothing more is started next to it, neither a second rollback,
+    // which the first could undo the run's own fix after, nor a diagnosis.
+    const redUnit = (ins) => (ins.work_package.kind === 'apply_pr'
+      ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, incomplete: '',
+        failure_summary: 'test_dcp_tp8 fails with the PR applied', evidence: `${RUN}/logs/unit_WP1.log` }
+      : DEFAULTS['test_engineer:unit'](ins));
+    const racing = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { ...existing, 'test_engineer:unit': redUnit,
+      'implementer:rollback': async (ins) => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return { wp: ins.work_package.id, reset_to: 'base', clean: true };
+      } });
+    check(racing.result.status === 'blocked' && racing.result.stopped_at === 'Implement' && !!comment(racing)
+      && racing.calls.filter((c) => c.key === 'implementer:rollback').length === 1 && !racing.keys.includes('investigator:diagnose')
+      && racing.result.phases.some((p) => p.phase === 'Implement' && p.verdict === 'fail'
+        && /no fix of the run's own is started next to what may still be running: implementer:rollback:WP1 timed out/.test(p.summary))
+      && racing.result.next.user.some((u) => u.startsWith('post the comment on #40872') && !/add its link/.test(u)),
+      `a rollback that timed out may still be at work on the branch: the comment is drafted, and nothing else starts (${ended(racing)}, ${
+        racing.calls.filter((c) => c.key === 'implementer:rollback').length} rollback)`);
+
+    // A stop named for the phase the pull request failed in holds: the comment is drafted, the branch is back at
+    // the base, and no fix of the run's own starts past the phase the operator named.
+    for (const [stop, answers] of [
+      ['Implement', { 'test_engineer:unit': redUnit }],
+      ['Verify', { 'verify_engineer:verify': () => failing('issue_repro') }],
+      ['Performance', { 'perf_engineer:perf_eval': () => ({ ...DEFAULTS['perf_engineer:perf_eval'](), claim_reproduced: false }) }]]) {
+      const halted = await run({ mode: 'issue', task: 'i', stop_after: stop }, { ...existing, ...answers });
+      check(halted.result.status === 'stopped' && halted.result.stopped_at === stop && !!comment(halted)
+        && halted.calls.some((c) => c.key === 'implementer:rollback' && c.ins.work_package.id === 'ALL')
+        && !halted.keys.includes('investigator:diagnose') && packages(halted).length === 1
+        && halted.result.next.user.some((u) => u.startsWith('post the comment on #40872')),
+        `stop_after=${stop} holds where the pull request failed there: no fix of the run's own starts (${ended(halted)}, ${packages(halted)})`);
+    }
+    const laterStop = await run({ mode: 'issue', task: 'i', stop_after: 'Review' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()) });
+    check(laterStop.result.status === 'stopped' && laterStop.result.stopped_at === 'Review' && fellBack(laterStop, 'Verify')
+      && eqList(packages(laterStop), ['WP1:apply_pr', 'WP1:framework']),
+      `a stop named for a later phase lets the run's own fix reach it: ${ended(laterStop)}`);
+
+    // The priority is the one the problem has without a usable fix PR: a default-configuration failure was P1 only
+    // because one was open, and only a P0 gets a workaround here for a defect that is a component's.
+    const inAiter = { verdict: 'fix_needed', root_cause: 'aiter: the fused MoE kernel reads past the last block', component: 'aiter',
+      component_issue_path: `${RUN}/component_issue.md`, summary: '--disable-aiter-moe avoids the path',
+      work_packages: [{ id: 'FIX1', goal: 'the reference path for the shapes that fail, HIP-only', kind: 'framework', files: ['python/sglang/a.py'], test: 't', depends_on: [] }] };
+    const downgraded = (without) => ({ 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr',
+      existing_prs: ['#40872'], triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md`, ...(without ? { priority_without_pr: without } : {}) }),
+    'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()), 'investigator:diagnose': () => inAiter });
+    const raised = await run({ mode: 'issue', task: 'i' }, downgraded('P0'));
+    check(raised.result.status === 'ready_for_review' && raised.result.priority === 'P0' && eqList(packages(raised), ['WP1:apply_pr', 'FIX1:framework'])
+      && raised.result.phases.some((p) => p.verdict === 'priority' && p.summary === 'P1 while #40872 was open, P0 without a usable one: the run goes on as P0')
+      && raised.calls.find((c) => c.key === 'investigator:diagnose').ins.priority === 'P0',
+      `a failure that was P1 only for its open fix PR is P0 once that PR has failed, and gets its workaround: ${ended(raised)}, ${raised.result.priority}`);
+    for (const without of ['P1', '', undefined]) {
+      const kept = await run({ mode: 'issue', task: 'i' }, downgraded(without));
+      check(kept.result.status === 'diagnosed' && kept.result.priority === 'P1' && !kept.result.phases.some((p) => p.verdict === 'priority'),
+        `one that is P1 without the pull request too (${JSON.stringify(without)}) stays P1: ${ended(kept)}`);
+    }
+    const passedPr = await run({ mode: 'issue', task: 'i' }, { ...existing, 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash',
+      action: 'push_existing_pr', existing_prs: ['#40872'], priority_without_pr: 'P0', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    check(passedPr.result.status === 'ready_for_review' && passedPr.result.priority === 'P1', `and a pull request that passes leaves the priority as triaged: ${passedPr.result.priority}`);
 
     // The branch has to be back at the base before a fix of the run's own starts on it.
     const dirty = await run({ mode: 'issue', task: 'i' }, { ...existing,

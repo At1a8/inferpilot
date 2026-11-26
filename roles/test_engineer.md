@@ -37,7 +37,10 @@ clock can start before your session does; on the call that finishes a gate, `inc
    `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the call's first launch
    and again after the stop (*Killing*): a GPU idle before and in use after is one the call still
    holds, unless a check left running for the call that finishes the gate uses it. One you cannot
-   stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it.
+   stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it, and
+   `left_running` says what is left and where (`"the smoke server, pid 4242, on GPU 0-7"`).
+   InferPilot then starts no fix round and no rollback next to it: the package stops with its
+   commit, and a human stops what is left. `left_running` is empty when everything stopped.
 
    **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
    with `incomplete`: each check without a result, why, and for one still running its PID and its
@@ -119,7 +122,7 @@ Return:
 
 ```json
 {"wp": "WP1", "unit_pass": true, "feature_off_unchanged": true, "fails_without_change": "parent | mutant | no | n/a",
- "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
+ "incomplete": "", "failure_summary": "", "left_running": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
 
 Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
