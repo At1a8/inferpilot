@@ -221,7 +221,10 @@ def main() -> int:
         if not a.no_prs:
             row["linked_prs"] = linked_prs(a.repo, row["number"])
         if a.with_comments and row["comments"]:
-            comments = gh.paginate(f"/repos/{a.repo}/issues/{row['number']}/comments")
+            # One issue is read whole: as many pages as its comment count needs, so that the newest (a maintainer
+            # naming the original report, say) is not cut off. A scan of many keeps the default page budget.
+            pages = {"max_pages": row["comments"] // 100 + 2} if a.issue else {}
+            comments = gh.paginate(f"/repos/{a.repo}/issues/{row['number']}/comments", **pages)
             row["replies"] = reply_status(comments, row["reporter"])
             row["last_comments"] = [{"author": c["user"]["login"], "association": c.get("author_association", ""),
                                      "created_at": c["created_at"], "body": (c.get("body") or "")[:600]}

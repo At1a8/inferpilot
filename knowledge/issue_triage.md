@@ -90,7 +90,8 @@ takes one, the one `task` names or else the most urgent, and says which in `reas
 priority, category, action and existing fix PRs are that problem's. The reply covers every one: what
 this run showed for the problem it took, and for each of the others its known state (a fix linked to
 it, open or merged, or nothing yet) and that this run did not cover it. Each of them starts as a run of
-its own, with the issue and the problem's name as its `task`.
+its own, with the issue and the problem's name as its `task`: the run's result offers those runs
+(`next.start`), each on this run's own definition.
 
 ## 5. Reproduction
 

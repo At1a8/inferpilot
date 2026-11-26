@@ -1865,6 +1865,7 @@ const scenarios = [
       `the result and the run record name the issue that has the failure: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Triage'))}`);
     // A duplicate ends before the Reply phase: without the original, or without the draft, it would end with no answer.
     for (const [lacks, drop] of [['the issue it duplicates', { duplicate_of: '' }], ['the issue it duplicates', { duplicate_of: undefined }],
+      ['the issue it duplicates', { duplicate_of: 'unknown' }], ['the issue it duplicates', { duplicate_of: '#n' }],
       ['a reply draft', { reply_draft_path: '' }]]) {
       const bare = await run({ mode: 'issue', task: 'i' }, {
         'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: '#38849', reason: 'the same failure',
@@ -1880,6 +1881,34 @@ const scenarios = [
         reply_draft_path: `${RUN}/reply.md` }),
     });
     check(other.result.status === 'triaged' && !other.result.duplicate_of, 'another action does not take it');
+    // The original is named as an issue is: #<n>, <owner>/<repo>#<n>, or its URL.
+    for (const [given, kept] of [['#38849', '#38849'], ['sgl-project/sglang#38849', 'sgl-project/sglang#38849'],
+      ['https://github.com/sgl-project/sglang/issues/38849', 'sgl-project/sglang#38849']]) {
+      const named = await run({ mode: 'issue', task: 'i' }, {
+        'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: given, reason: 'the same failure',
+          triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      });
+      check(named.result.status === 'triaged' && named.result.duplicate_of === kept, `${given} names the original: ${named.result.duplicate_of}`);
+    }
+  }],
+  ['issue: the other problems of a report with several are offered as runs of their own', async () => {
+    const others = [{ problem: 'GSM8K loses 4 points with the same flags', priority: 'P1', task: 'sgl-project/sglang#41299: the accuracy loss' },
+      { problem: 'the server hangs on shutdown', priority: 'P2' }];
+    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, {
+      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash, the most urgent of three',
+        other_problems: others, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+    });
+    const start = r.result.next.start || [];
+    check(start.length === 2 && start[0].task === others[0].problem && start[0].args.task === 'sgl-project/sglang#41299: the accuracy loss',
+      `each other problem is offered with its task: ${JSON.stringify(start)}`);
+    check(start[1].args.task === 'sgl-project/sglang#41299: the server hangs on shutdown',
+      `one without a task of its own takes the issue and the problem's name: ${start[1] && start[1].args.task}`);
+    check(start.every((x) => x.args.mode === 'issue' && x.args.inferpilot_dir === INFERPILOT && x.args.model_path === '/models/m'
+      && !('stop_after' in x.args) && !('run_dir' in x.args) && !('resume_from' in x.args)),
+      `each starts on this run's definition, and not where this run stops: ${JSON.stringify(start.map((x) => x.args))}`);
+    check(r.result.other_problems.length === 2, 'the result lists them');
+    const one = await run({ mode: 'issue', task: 'i' });
+    check(!one.result.next.start && !one.result.other_problems, 'a report with one problem offers no run');
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {

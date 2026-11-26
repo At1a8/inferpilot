@@ -21,10 +21,11 @@ Input: `task` (the issue URL or `<repo>#<n>`).
 2. Do the state checks of `issue_triage.md` §3: linked PRs and their state, replies, partial fixes
    (read a merged fix's diff against every point of the report), skipped tests. Then search the open
    issues for the same failure, by its error signature and the path that fails (the search API with
-   `GITHUB_TOKEN`, GET only), and read each match in full. An older open report of it, or the one the
-   maintainers call the original, makes this one a `duplicate` (§4). The others are duplicates of this
-   one: what they add (a configuration, a log, a second model) goes into this triage record and into
-   the reproduction.
+   `GITHUB_TOKEN`, GET only), and read each match in full. One of the reports is the original: the one
+   the maintainers call so (a label, a comment), and only where they name none, the one opened first.
+   Where that is another report, this one is a `duplicate` (§4). Where it is this one, the others are
+   its duplicates: what they add (a configuration, a log, a second model) goes into this triage record
+   and into the reproduction.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
@@ -33,9 +34,11 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    names or else the most urgent, and say which in `reason`. `priority`, `category`, `action` and
    `existing_prs` are then that problem's and no other's: a fix PR for another problem of the report is
    listed in the triage record only, since the run would apply it and check it against this problem's
-   reproduction. The reply covers every problem. `existing_prs` lists the open fix PRs (`#<n>`). Every
-   action that leads to a code change, `push_existing_pr` included, is reproduced on main first; that
-   reproduction is the gate the fix must pass.
+   reproduction. Return the others as `other_problems`, each with its `problem` in a few words, its
+   `priority`, and the `task` that starts a run on it (the issue and the problem's name): the run's
+   result offers them. The reply covers every problem. `existing_prs` lists the open fix PRs (`#<n>`).
+   Every action that leads to a code change, `push_existing_pr` included, is reproduced on main first;
+   that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -49,6 +52,7 @@ Return:
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "duplicate_of": "<with duplicate: #n, the original>",
+ "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>"}],
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```
 

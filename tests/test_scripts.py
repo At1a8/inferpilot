@@ -2597,6 +2597,22 @@ class ScanIssuesTest(unittest.TestCase):
         self.assertEqual(len(row["last_comments"]), 4, "the short list of the scan is as it was")
         self.assertTrue(all(len(c["body"]) <= 600 for c in row["last_comments"]))
 
+    def test_one_issue_is_read_to_its_newest_comment(self):
+        # The default page budget stops at 2000 comments: for one issue it follows the comment count, so that the
+        # newest comment (a maintainer naming the original report, say) is not cut off.
+        issue = {"number": 7, "title": "[Bug] long thread on MI300", "html_url": "https://x/7", "user": {"login": "rep"},
+                 "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-02T00:00:00Z", "comments": 2001, "labels": [], "body": "b"}
+        comment = {"user": {"login": "dev"}, "author_association": "MEMBER", "created_at": "2026-11-02T00:00:00Z", "body": "c"}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "issue.json"
+            with mock.patch.object(scan_issues.gh, "get", return_value=issue), \
+                    mock.patch.object(scan_issues.gh, "paginate", return_value=[comment]) as paginate, \
+                    mock.patch.object(scan_issues, "linked_prs", return_value=[]), \
+                    mock.patch.object(sys, "argv", ["scan_issues.py", "--issue", "7", "--with-comments", "--out", str(out)]), \
+                    redirect_stderr(io.StringIO()):
+                self.assertEqual(scan_issues.main(), 0)
+        self.assertGreaterEqual(paginate.call_args.kwargs["max_pages"] * 100, 2001, "the pages asked for do not reach the newest comment")
+
     def test_cites_issue(self):
         self.assertTrue(scan_issues.cites_issue("Fixes #38849", 38849))
         self.assertTrue(scan_issues.cites_issue("see https://github.com/sgl-project/sglang/issues/38849.", 38849))

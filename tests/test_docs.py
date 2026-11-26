@@ -1170,6 +1170,8 @@ class TriageCasesTest(unittest.TestCase):
         self.assertIn("duplicate_of: str,", src)
         self.assertIn("if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');", src,
                       "a duplicate goes on to a reproduction")
+        self.assertIn("const duplicateOf = tri.action === 'duplicate' ? issueRef(tri.duplicate_of) : '';", src,
+                      'any word names the original: "unknown" would end the run with no issue to follow')
         guard = "if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {"
         self.assertIn(guard, src, "a duplicate is accepted without the issue it duplicates, or without a reply")
         self.assertLess(src.index(guard), src.index("return finish('triaged', 'Triage');"), "the check comes before the run ends as triaged")
@@ -1184,8 +1186,9 @@ class TriageCasesTest(unittest.TestCase):
                            ("knowledge/issue_triage.md", "whose triage searches for its duplicates and takes what they add into its record"),
                            ("roles/issue_triager.md", "For a `duplicate`, return `duplicate_of` (`#<n>`, the original)"),
                            ("roles/issue_triager.md", "Then search the open issues for the same failure, by its error signature and the path that fails"),
-                           ("roles/issue_triager.md", "An older open report of it, or the one the maintainers call the original, makes this one a "
-                                                      "`duplicate`"),
+                           ("roles/issue_triager.md", "the one the maintainers call so (a label, a comment), and only where they name none, the one "
+                                                      "opened first"),
+                           ("roles/issue_triager.md", "Where that is another report, this one is a `duplicate`"),
                            ("roles/issue_triager.md", "read them, since the state of an issue is not what it reports"),
                            ("roles/issue_triager.md", "needs_info | not_amd | plan | duplicate"),
                            ("roles/issue_triager.md", '"duplicate_of": "<with duplicate: #n, the original>"'),
@@ -1204,6 +1207,8 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "A report with several problems is several tasks"),
                            ("roles/issue_triager.md", "`priority`, `category`, `action` and `existing_prs` are then that problem's and no other's"),
                            ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
+                           ("roles/issue_triager.md", "Return the others as `other_problems`"),
+                           ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
                            ("templates/issue_triage.md", "| problems in the report |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
         self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
