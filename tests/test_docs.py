@@ -1022,11 +1022,14 @@ class CiOnMainTest(unittest.TestCase):
         body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[(.*?)\]\);", src, re.S)
         self.assertIn("on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },", body.group(1))
         self.assertIn("fixed_by: str,", body.group(1))
+        self.assertIn("unchecked: str,", body.group(1))
         self.assertNotIn("'failure_class'", body.group(2), "a failure main no longer shows has no class to give")
+        self.assertNotIn("'failing_test_cmd'", body.group(2), "nor a command to verify a fix with: the answer would be rejected for lacking it")
         for said, why in (
                 ("const onMain = String(cl.on_main || 'fails').trim().toLowerCase();", "an answer without on_main is not a failure of main"),
                 ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
                 ("if (onMain === 'not_run') {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("const unchecked = String(cl.unchecked || '').trim();", "a task of which a part was not run is called resolved"),
                 ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
             self.assertIn(said, src, why)
         order = [src.index(x) for x in ("const onMain = ", "if (!handOver && !failingCmd) {", "const perfFailure = ")]
@@ -1039,6 +1042,18 @@ class CiOnMainTest(unittest.TestCase):
                 ("knowledge/ci_triage.md", "the run ends with no fix and no reply"),
                 ("knowledge/ci_triage.md", "the lane is supported, so the test or the code has to run on it"),
                 ("knowledge/ci_triage.md", "no conclusion is drawn, in either direction"),
+                ("knowledge/ci_triage.md", "The newest image is established, not assumed"),
+                ("knowledge/ci_triage.md", "for every test of the task on every lane it failed on"),
+                ("knowledge/ci_triage.md", "each test run as the job ran it, in the job's order, three times"),
+                ("knowledge/ci_triage.md", "is `flaky`, not passing"),
+                ("knowledge/ci_triage.md", "sets `stop_after=Classify`: it needs no model and no client"),
+                ("roles/ci_guardian.md", "**Which image is the newest is established, not assumed.**"),
+                ("roles/ci_guardian.md", "one that only matches the failed job's can be as old as it"),
+                ("roles/ci_guardian.md", "**Every test of the task, on every lane it failed on.**"),
+                ("roles/ci_guardian.md", "**A pass that holds.**"),
+                ("roles/ci_guardian.md", "a failure can depend on the test before it"),
+                ("roles/ci_guardian.md", "`unchecked` naming that part"),
+                ("roles/ci_guardian.md", "leave `failure_class` and `failing_test_cmd` out"),
                 ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
                 ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
                 ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),

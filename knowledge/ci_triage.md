@@ -27,20 +27,28 @@ fix PR or a handover within a week for anything else.
 ## 2. Classify before fixing
 
 **First: does main still fail, on the lane's own image?** A red job says what one image saw of one
-commit. Run the failing test on main in the environment of the lane that failed: that lane's newest
-image, its GPU model and its node count.
+commit. Run the failing tests on main in the environment of the lane that failed: that lane's newest
+image, its GPU model and its node count. The newest image is established, not assumed: the newest tag
+of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
+The answer is for every test of the task on every lane it failed on, and a pass has to hold: each
+test run as the job ran it, in the job's order, three times. One that fails some of those runs, or
+that the tracker shows failing only some of its runs, is `flaky`, not passing.
 
-- It passes: there is nothing to fix in the framework, and the run ends with no fix and no reply.
-  The job ran an image older than the lane's newest, or a fix has merged since. Most of two tracker
-  snapshots were this: 160 of 214 entries in June 2026 came from an image whose aiter lacked
+- All of it passes: there is nothing to fix in the framework, and the run ends with no fix and no
+  reply. The job ran an image older than the lane's newest, or a fix has merged since. Most of two
+  tracker snapshots were this: 160 of 214 entries in June 2026 came from an image whose aiter lacked
   `shuffle_scale`, and 168 of 208 in September from one with Triton 3.4.0 where aiter needed 3.6.0.
-- It fails: it is a failure of main, and is classified below. An image that is newer than main
-  expects (a library bump that breaks a test) is a `dependency bump`. A lane whose Python or PyTorch
-  is older than the code needs is one too, or a `test bug`: the lane is supported, so the test or
-  the code has to run on it (`enterContext` on the rocm720 lane's Python 3.10: 40 tracker entries
-  in November 2026).
-- This machine cannot be that lane (another GPU model, another ROCm, a second node): no conclusion
-  is drawn, in either direction, and the failure is handed over with what the lane needs.
+- Any of it fails: it is a failure of main, and is classified below. An image that is newer than
+  main expects (a library bump that breaks a test) is a `dependency bump`. A lane whose Python or
+  PyTorch is older than the code needs is one too, or a `test bug`: the lane is supported, so the
+  test or the code has to run on it (`enterContext` on the rocm720 lane's Python 3.10: 40 tracker
+  entries in November 2026).
+- This machine cannot be that lane (another GPU model, another ROCm, a second node), or is not in
+  its newest image: no conclusion is drawn, in either direction, and the failure is handed over with
+  what the lane needs. So is the part of a task that could not be run here, where the rest passes.
+
+A task that only asks whether main still fails sets `stop_after=Classify`: it needs no model and no
+client, which a task that can reach a fix is asked for before it starts.
 
 | Class | Signals | Action |
 |---|---|---|

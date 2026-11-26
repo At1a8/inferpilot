@@ -767,9 +767,11 @@ const DIAG = S({
 const CLASSIFY = S({
   // main, in the environment of the lane that failed (its newest image, its GPU model, its node count): fails
   // (left out means fails), passes: nothing to fix, with fixed_by when a merged change is why; not_run: this
-  // machine is not that lane
+  // machine is not that lane. passes is said of every test of the task on every lane it failed on: unchecked
+  // names what of the task was not run, and such a task is handed over, not called resolved
   on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },
   fixed_by: str,
+  unchecked: str,
   failure_class: { type: 'string', enum: ['code_regression', 'dependency_bump', 'test_bug', 'flaky', 'infrastructure'] },
   failing_test_cmd: str,
   window: str,
@@ -779,7 +781,7 @@ const CLASSIFY = S({
   perf_claim: str,
   evidence: str,
   triage_path: str,
-}, ['failing_test_cmd', 'evidence', 'triage_path']);
+}, ['evidence', 'triage_path']);
 const BISECT = S({ culprit: str, confirmed: bool, work_packages: WPS, evidence: str }, ['culprit', 'confirmed']);
 const BISECT_FIX = S({ fix_commit: str, confirmed: bool, evidence: str }, ['fix_commit', 'confirmed']);
 const PROFILE = S({
@@ -2021,6 +2023,12 @@ async function runCi() {
   // main shows there is classified and fixed.
   const onMain = String(cl.on_main || 'fails').trim().toLowerCase();
   if (onMain === 'passes') {
+    // A cluster is several tests, on one lane or more: what passed says nothing of what was not run.
+    const unchecked = String(cl.unchecked || '').trim();
+    if (unchecked) {
+      note('Classify', 'handed_off', `what was run passes on main, and part of the task was not run: ${unchecked}; ${cl.evidence}`);
+      return finish('handed_off', 'Classify');
+    }
     const fixedBy = String(cl.fixed_by || '').trim();
     if (fixedBy) C.fixed_by = R.fixed_by = fixedBy;
     note('Classify', 'passes_on_main', `${fixedBy ? `fixed by ${fixedBy}: ` : ''}${cl.evidence}`);

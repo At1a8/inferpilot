@@ -2003,9 +2003,24 @@ const scenarios = [
     const noClass = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails' }, ['failure_class']));
     check(noClass.result.status === 'blocked' && noClass.result.stopped_at === 'Classify' && /has no class/.test(JSON.stringify(noClass.result.phases)),
       `a failure of main without a class stops before the bisect: ${ended(noClass)}`);
-    // What only a fix needs is not asked of a failure that needs none.
-    const bare = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', performance: true, failing_test_cmd: '' }, ['failure_class']));
-    check(bare.result.status === 'not_reproduced', `neither a class, a command to verify a fix with, nor a number to restore: ${ended(bare)}`);
+    // What only a fix needs is not asked of a failure that needs none: the answer may leave it out altogether.
+    const bare = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', performance: true }, ['failure_class', 'failing_test_cmd']));
+    check(bare.result.status === 'not_reproduced' && !bare.calls.some((c) => c.key === 'ci_guardian:classify' && c.n > 1),
+      `neither a class, a command to verify a fix with, nor a number to restore, and the answer is taken as it is: ${ended(bare)}`);
+    const away = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run', evidence: 'the lane is rocm724' }, ['failure_class', 'failing_test_cmd']));
+    check(away.result.status === 'handed_off', `nor of a lane this machine cannot be: ${ended(away)}`);
+    // A cluster is several tests on one lane or more: what passed says nothing of what was not run.
+    const part = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', unchecked: 'the two tests on rocm724',
+      evidence: 'all five pass on rocm720 of 11-25' }, ['failure_class']));
+    check(part.result.status === 'handed_off' && part.result.stopped_at === 'Classify' && !part.keys.includes('ci_guardian:bisect')
+      && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
+        && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
+      `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // A task that only asks whether main still fails stops at Classify, and needs neither a model nor a client.
+    const ask = await run({ mode: 'ci', task: 'c', model_path: '', client_script: '', stop_after: 'Classify' },
+      classified({ on_main: 'passes', evidence: 'passes on rocm720 of 11-25' }, ['failure_class', 'failing_test_cmd']));
+    check(ask.result.status === 'not_reproduced' && !(ask.result.questions || []).length,
+      `stop_after=Classify gets the verdict without a model or a client: ${ended(ask)}`);
   }],
   ['perf: a hand-off owner outside the list is rejected', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
