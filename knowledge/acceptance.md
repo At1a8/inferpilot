@@ -53,7 +53,8 @@ Two rules hold across the dimensions:
   question got no answer (a request the server rejected, or one that failed) has no score: the arms
   may miss different questions.
 - **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3, when the
-  task asks with `long_context`), reasoning (GPQA, AIME), tool calls, multimodal input.
+  task asks with `long_context`, on the task's own test, its `long_context_script`), reasoning (GPQA,
+  AIME), tool calls, multimodal input.
 - **Parity with a reference**, for a new model, a new kernel or a refactor: logprobs or the KL
   divergence against the reference implementation (Hugging Face, or the model's official one) on a fixed
   prompt set, and the official benchmark scores matched. sglang's own skills do this

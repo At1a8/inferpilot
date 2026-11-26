@@ -54,6 +54,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      is asked for it, in any mode. Where only G4 needs the script (an issue's or a ci task's, the
      client of a feature without a workload), the question offers no `template`. A task that names
      InferPilot's client all the same (`client_script: template`) is asked for the `workload` it runs.
+   - `long_context_script` (`task_definition.md` §1.1): the user's own long-context test, which G3
+     runs. Set it when the request names one, and check that it exists and is readable. Never write
+     one for the user, and never answer `template`: InferPilot has no long-context test of its own.
+     With `long_context` on and no script, the run asks for it.
    - feature skills (feature mode): `python3 <inferpilot_dir>/scripts/find_skill.py "<request, task title>"`;
      list each candidate in `assumptions` as `feature skill candidate: <id> (<status>)`. The director
      makes the choice at Spec.

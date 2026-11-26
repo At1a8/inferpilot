@@ -283,6 +283,91 @@ class EnvironmentTest(unittest.TestCase):
                               for name in sorted(table_names(EN)) if ENV_NAME.match(name) and name not in read])
 
 
+class LongContextScriptTest(unittest.TestCase):
+    """G3 runs the task's own long-context test, `long_context_script`, as G4 keeps up the task's own client
+    (knowledge/validation_doctrine.md): the user who asks for the gate says what it runs. A task with
+    `long_context` on that names none is asked for it; InferPilot has no template for one, and no role writes
+    one in its place. inferpilot.js, the roles, the templates and both READMEs say the same."""
+
+    FIELD = "long_context_script"
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_task_definition_takes_the_script_and_every_role_reads_it(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the script")
+        self.assertIn("\n  %s: str," % self.FIELD, intake, "the intake cannot return the script")
+        self.assertIn("\n  %s: String(A.%s || '')," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
+        self.assertIn("args.%s" % self.FIELD, src, "inferpilot.js's whenToUse does not name the script")
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the script")
+        self.assertEqual(row[0].count("| with `long_context` on "), 4, "a feature, an issue, a ci and a perf task each name it with the gate on")
+        self.assertIn("InferPilot has no template for it", row[0])
+        gates = [line for line in fields.splitlines() if line.startswith("| `long_context`, `stability` |")]
+        self.assertEqual(len(gates), 1)
+        self.assertRegex(gates[0], r"\| optional \| optional \| optional \| optional \| \|$",
+                         "the two gates are any task's that changes code to ask for, a ci task's too")
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            self.assertIn(self.FIELD, table_names(text), "%s has no row for the script" % name)
+
+    def test_with_long_context_on_the_task_is_asked_for_its_test_and_nothing_stands_in(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("if (mode !== 'scan' && asked(a.long_context) === 'true' && (!a.long_context_script || "
+                      "isTemplate(a.long_context_script))) {\n    ask('long_context_script',", src,
+                      "long_context is on without a test for G3 to run")
+        question = re.search(r"\n    ask\('long_context_script',(.*?)\);\n", src, re.S)
+        self.assertIsNotNone(question)
+        self.assertNotIn("TEMPLATE", question.group(1), "the question offers a template InferPilot does not have")
+        self.assertIn("InferPilot has no template for it", question.group(1))
+        self.assertFalse((ROOT / "templates" / "harness" / "long_context.sh").exists(), "a template nobody asked for")
+
+    def test_g3_runs_the_tasks_own_test_unchanged_on_both_arms(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G3 is the task's own long-context test.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say what G3 runs")
+        for said in ("The user who asks for G3 says what it runs: the task's `long_context_script`",
+                     "It runs unchanged on the baseline and on the change",
+                     "A task with `long_context` on that names none is asked for it, in any mode",
+                     "InferPilot has no template for a long-context test, and no role writes one in its place or changes the task's",
+                     "G3 showed the server's long-context path, not the feature's"):
+            self.assertIn(said, note[0])
+        gate = [line for line in (ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").splitlines()
+                if line.startswith("| G3 long context |")]
+        self.assertEqual(len(gate), 1)
+        self.assertIn("the task's own long-context test (`long_context_script`)", gate[0])
+        for path, said in (("roles/verify_engineer.md", "G3 long context is the task's own test, its `long_context_script`"),
+                           ("roles/verify_engineer.md", "CONCURRENCY=<n> bash <long_context_script>"),
+                           ("roles/verify_engineer.md", "at two or more concurrencies, at least 4 runs each"),
+                           ("roles/verify_engineer.md", "Never write a long-context test of your own, and never change the task's"),
+                           ("roles/verify_engineer.md", "A script that does not read `CONCURRENCY` runs at its own"),
+                           ("roles/verify_engineer.md", "G3 then showed the server's long-context path, not the feature's"),
+                           ("roles/director.md", "and `long_context_script`, for which there is no template) run as given"),
+                           ("roles/director.md", "G3, the task's `long_context_script`"),
+                           ("roles/director.md", "G3's row names the task's script and the concurrencies it runs at"),
+                           ("roles/intake.md", "`long_context_script` (`task_definition.md` §1.1): the user's own long-context test"),
+                           ("roles/intake.md", "never answer `template`: InferPilot has no long-context test of its own"),
+                           ("roles/intake.md", "With `long_context` on and no script, the run asks for it"),
+                           ("knowledge/acceptance.md", "on the task's own test, its `long_context_script`"),
+                           ("templates/task_definition.md", "**`long_context_script`**, with `long_context` on, runs the task's long-context "
+                                                            "test against `PORT` and writes its results to `OUT_DIR`"),
+                           ("templates/task_definition.md", "at least 4 times at each of two or more concurrencies"),
+                           ("templates/task_definition.md", "It has no template for one, and writes none"),
+                           ("templates/task_definition.md", "a task with `long_context` on names its `long_context_script`"),
+                           ("templates/task_definition.md", "InferPilot has none for G3"),
+                           ("templates/feature_spec.md", "the task's `long_context_script` at <two or more concurrencies>, at least 4 runs "
+                                                         "each")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for name, text, said in (("README.md", EN, "G3 runs it unchanged on the baseline and on the change"),
+                                 ("README.zh-CN.md", ZH, "G3 在 baseline 和改动上原样运行它")):
+            row = [line for line in text.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+            self.assertEqual(len(row), 1, name)
+            self.assertIn(said, row[0], "%s: the long_context_script row" % name)
+
+
 class LongGatesTest(unittest.TestCase):
     """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
     and hands to every role. G4 is the task's performance client run back to back for more than 48 hours

@@ -91,8 +91,17 @@ clock can start before your session does.
    - **G3 only with `long_context` on, G4 only with `stability` on;** one the task did not ask for is
      `not run: not asked` in `gates` (`validation_doctrine.md`). Never run either on your own reading of
      the change or of `goal`.
-     - G3 long context sized so the feature engages, at two or more concurrencies, at least 4 runs each
-       (6 when an intermittent failure is being judged), fixed seeds, prefix cache flushed between runs.
+     - G3 long context is the task's own test, its `long_context_script` (`task_definition.md` §1.1),
+       run unchanged on both arms: `PORT=<port> OUT_DIR=RUN_DIR/logs/g3_<arm>_c<n>_<run>
+       CONCURRENCY=<n> bash <long_context_script>`, at two or more concurrencies, at least 4 runs each
+       (6 when an intermittent failure is being judged), the prefix cache flushed between runs. Never
+       write a long-context test of your own, and never change the task's: its prompts, their lengths,
+       the needles, the seed and the scoring are the user's. A script that does not read
+       `CONCURRENCY` runs at its own, and `gates` says that G3 ran at one concurrency. Count the passes
+       and classify the failures (step 3) from what it writes to `OUT_DIR`; a failure it gives no
+       output or logprobs for is counted unclassified. Where the feature did not engage on its prompts
+       (its counters, the server log), `gates` says so: G3 then showed the server's long-context path,
+       not the feature's.
      - G4 stability is one run, not repeated and not taken to other concurrencies: the run's
        `client_script` (the task's, or InferPilot's `perf.sh`) run back to back for more than 48 hours
        against one server that is not restarted, on a workload sized so the feature engages. Run
