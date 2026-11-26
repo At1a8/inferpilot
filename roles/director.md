@@ -373,7 +373,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   commit, that commit, as the ledger names it, and the fix alone where it had no baseline: the base is
   the server that does not start), runs every command of an arm (server, tests, reproduction, benchmark
   client) with that tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under
-  test*), measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
+  test*), gives an arm whose change takes effect outside its tree (a package's version, an
+  environment variable) that setup before its commands and the image's environment back after them,
+  measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
   arm, the same rounds in the same order) and gives the numbers to compare with, with the run's spread.
   Then it removes the worktrees, releases the lock, and gives the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
@@ -397,7 +399,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
 - List `spinoffs` with the known issues: for each, the upstream issue that tracks it or the issue draft
   a human is to file, and the definition that starts InferPilot on it; then the unconfirmed leads, each
   with what would confirm it. A spinoff with `withdrawn_draft` was written as a draft and not counted:
-  rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed.
+  rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed. With
+  `component_issue`, name the component the root cause is in and the draft a human is to file in its
+  repository.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when

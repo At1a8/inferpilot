@@ -77,6 +77,17 @@ clock can start before your session does; on the call that finishes a gate, `inc
    `fails_without_change`: `parent` or `mutant` by the check that failed, `no` when the test passed
    where it should have failed (the package fails; say in `failure_summary` what the test misses),
    `n/a` only for a `docs` package.
+   A package whose change takes effect outside the worktree (what a dependency declaration names, a
+   package or an environment variable a Dockerfile sets; `validation_doctrine.md`, *What a fix
+   changes decides its gates*) is tested with every tree in the environment its own files call for:
+   the commit with the change in effect, a mutant of the commit in the same, the parent with what the
+   parent declares (the image's, where no earlier package changed it). Step 4 compares the same way.
+   Make each environment the tree's own where you can (a directory on its `PYTHONPATH`, a variable
+   of its process): nothing is then left behind, and a check you leave running for the finishing
+   call keeps its environment. One installed in place is recorded first (`RUN_DIR/env_restore.sh`,
+   the ledger) and put back only once every process you started has stopped; with a check still
+   running, say in your answer which environment is in place. Two trees in one environment show
+   nothing.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
    the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a

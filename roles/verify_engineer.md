@@ -45,6 +45,31 @@ clock can start before your session does.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
+   Run that gate, and every arm after it, in the environment its tree calls for
+   (`validation_doctrine.md`, *What a fix changes decides its gates*). A fix to a dependency
+   declaration is not in the environment until what it names is installed, one to a Dockerfile until
+   its image is built or the steps it changes are run in the container (a package it installs, an
+   environment variable it sets), one to a benchmark or a tool until the tool runs: a run in the
+   unchanged environment shows nothing.
+   - Make the environment the arm's own wherever you can: a variable in the arm's process
+     environment only, a package in a directory of the arm's (`pip install --no-deps --target
+     RUN_DIR/env/<arm> ...`) put first on its `PYTHONPATH`, checked by the version the package
+     reports there. The image's environment is then untouched, the arms launch as any others, and a
+     call that times out leaves nothing behind.
+   - Only a package that must replace the image's is installed in place. First write the image's
+     state and the commands that restore it (`RUN_DIR/env_restore.sh`, and the ledger). Then no
+     server is started ahead and no two arms run side by side: for each run in turn, stop every
+     server, set the arm's environment, check it, launch, measure, stop. The reproduction that put
+     the change into effect is stopped, and the image's state back, before the base arm of G2
+     starts. Put the image's state back once every process of the round has stopped, not before.
+   - Whatever the way, check the environment against the ledger's record before the round's first
+     launch: an earlier call that was interrupted may have left a change in place
+     (`env_restore.sh` puts it back). Install what the change names and nothing else, never the
+     framework again (`env_hygiene.md`).
+   - Where the change cannot be put into effect on this machine, the gate is a blocking failure with
+     `"failure_class": "environment"`, which says what could not be done (`"<package> <version>
+     cannot be installed in this image"`): the run stops there for a human, and nothing is
+     investigated. Never run the fix's arm in the image's environment and call it the fix.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing. A port whose spec gives the
@@ -61,9 +86,9 @@ clock can start before your session does.
      most 1 point below the baseline, with no token-level comparison. A set where a question got no
      answer has no score.
    - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
-     when it changes code the server runs** (`validation_doctrine.md`, *G2 for a fix*). That gate of
-     `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then decide
-     whether G2 runs, before any server of its own is launched:
+     when it changes anything but tests, documentation and CI files** (`validation_doctrine.md`, *G2
+     for a fix*). That gate of `extra_gates` runs first: a fix that does not fix has no accuracy worth
+     measuring. Then decide whether G2 runs, before any server of its own is launched:
      - `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
        documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the
        server runs changed"`, and the answer `"server_code_changed": false`. With any other file
@@ -71,6 +96,19 @@ clock can start before your session does.
        *G5 for a fix*): on `false` the run measures the fix's speed no more than its accuracy, and
        without the field it measures it. Read the diff in every round: a repair, or a change the
        review asked for, can add a file the server runs, or take the last one away.
+       The line is drawn by the file's path, and by nothing else (*What a fix changes decides its
+       gates*). Never judge whether the server runs a file that is none of the three: a fix to a
+       Dockerfile, a benchmark or tool script or a dependency file is measured like one to a model
+       file. Where the change is in a file this run's platform does not use (a version in the CUDA
+       declaration, on a ROCm image, which is built from `python/pyproject_other.toml`), measure as
+       it is and say so next to the score: `"G2": "pass 0.893 vs 0.895 (1319 q); the version moved
+       in python/pyproject.toml, which the ROCm image does not install"`.
+     - A fix whose change takes effect outside the worktree (a new version of a package the server
+       runs: aiter, PyTorch, Triton, flashinfer; a package or an environment variable a Dockerfile
+       sets) is measured with the change in effect on the fix arm and without it on the base arm, as
+       step 1 sets the two environments. Both go in the ledger, where Performance and the report
+       find them. A change you cannot put into effect here is the blocking failure of step 1
+       (`"failure_class": "environment"`): G2 is not measured on the image's environment instead.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
        questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
@@ -87,6 +125,19 @@ clock can start before your session does.
      - Where the run knows no such commit, the fix's score has no baseline: give it in `gates` with
        that said (`"G2": "0.893 (1319 q), no baseline: the base does not start on this
        configuration"`); it is reported, not judged, and *Before pushing* measures the fix alone.
+   - **An accuracy problem is measured where it showed, whatever the fix changes.** With
+     `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2
+     for an accuracy problem in CI*), run the failing test's own measurement on the fix, with its
+     set, model and settings as `failing_test_cmd` runs them, and read the score it measures, not
+     whether its assertion passes. Report it in `gates` under its own name, apart from G2's gsm8k
+     against the base: `"accuracy_claim": "pass 0.936, the claim is 0.93 (the test's GSM8K, 200
+     q)"`, with `pass` only for a score at the claim or above. A score below it is a blocking failure
+     (`gate: "accuracy_claim"`) although `failing_test` passes: a threshold moved in the test
+     restores nothing. Never leave it out, and never report it `not run`: the run accepts no round
+     without its `pass`. Step 4 excuses nothing here: the base of an accuracy problem scores low as
+     well, and that is the failure being fixed, so no entry of `known_issues` makes a score below
+     the claim pass, or fail without blocking. gsm8k against the base (G2) runs besides, by the
+     fix's files, as for any fix.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
      fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates

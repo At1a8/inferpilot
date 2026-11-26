@@ -41,10 +41,11 @@ Two rules hold across the dimensions:
   the loss (`eval_accuracy.sh gsm8k gpqa_diamond simple_qa`); other sets (a long-context set for KV
   compression), more runs or another budget by name; a determinism task, token equality (§1.4). No role
   decides it on its own: the Intake keeps what the user said in `goal`, and every role reads it there.
-- **A fix** (issue, ci) is measured too when it changes code the server runs, on the task's
-  `model_path`: the fix against the base, or against the last commit that served the configuration
-  where the base cannot (`validation_doctrine.md`, *G2 for a fix*). One that changes tests,
-  documentation or CI files alone is not, nor one for a model that answers no text questions.
+- **A fix** (issue, ci) is measured too when it changes anything but tests, documentation and CI
+  files, on the task's `model_path`: the fix against the base, or against the last commit that served
+  the configuration where the base cannot (`validation_doctrine.md`, *G2 for a fix*). One that
+  changes tests, documentation or CI files alone is not, nor one for a model that answers no text
+  questions.
 - **Harness:** evalscope for every set, through `scripts/eval_accuracy.sh`, every run sampled afresh
   (never evalscope's cache). It runs through InferPilot's `accuracy.sh`, with the same settings for
   every arm: the task's, else those the feature's source tests with (thinking off for PARD-2), else
@@ -52,6 +53,10 @@ Two rules hold across the dimensions:
   `accuracy_script` is measured with it instead, as given, on the sets it measures. A set where a
   question got no answer (a request the server rejected, or one that failed) has no score: the arms
   may miss different questions.
+- **An accuracy problem in CI** (a test that fails on a score it measures, not on an error) is
+  measured whatever its fix changes, a fix to the test alone included: G2 reads the score the fix
+  must restore, with the failing test's own measurement, and a threshold moved in the test restores
+  nothing (`validation_doctrine.md`, *G2 for an accuracy problem in CI*).
 - **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3, when the
   task asks with `long_context`, on the task's own test, its `long_context_script`), reasoning (GPQA,
   AIME), tool calls, multimodal input.
@@ -72,11 +77,12 @@ Two rules hold across the dimensions:
   band, and, with `held_out` on, still wins at the held-out operating point (`perf_evaluation.md` §1, §3).
 - **Without a claimed gain** a feature is measured all the same, on its scenarios, and is no slower
   than the baseline beyond the noise band (`validation_doctrine.md`, *G5 for a feature*).
-- **A fix** (issue, ci) is measured too when it changes code the server runs, on the task's
-  `client_script`: no slower than the base beyond the noise band, or than the last commit that served
-  the configuration where the base cannot (`validation_doctrine.md`, *G5 for a fix*). One that changes
-  tests, documentation or CI files alone is not. A performance problem, reported in an issue or found
-  in a CI failure, is measured whatever its fix changes: the number that fell comes back.
+- **A fix** (issue, ci) is measured too when it changes anything but tests, documentation and CI
+  files, on the task's `client_script`: no slower than the base beyond the noise band, or than the
+  last commit that served the configuration where the base cannot (`validation_doctrine.md`, *G5 for a
+  fix*). One that changes tests, documentation or CI files alone is not. A performance problem,
+  reported in an issue or found in a CI failure, is measured whatever its fix changes: the number
+  that fell comes back.
 - **Guard items**, the ones the task's `goal` names, and more of InferPilot's own only with `guards` on:
   workloads where the change should be neutral, or where it costs. The change stays
   inside the noise band (a decode-side change at 100k in / 1k out, where prefill sets the total), or its
@@ -124,14 +130,18 @@ extra items of its feature classes (§1.4).
 | Dimension | Upstream feature | Issue fix | CI fix | Performance | Requirement |
 |---|---|---|---|---|---|
 | Correctness | required | required; the reproduction becomes a regression test | required; the failing test passes on every lane it failed on | required | required |
-| Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | required when the fix changes code the server runs: gsm8k at most 1 point below the base (§1.1); a loss the issue reports comes back as well | required when the fix changes code the server runs, as for an issue fix; none for a fix to tests, documentation or CI files alone | required, as for a feature (§1.1) | on the requester's data set |
-| Performance | required: the gain the feature claims, or, where it claims none, no slower than the baseline (§1.2) | required when the fix changes code the server runs: no slower than the base (§1.2); always when the issue is a performance problem: the reported number comes back | required when the fix changes code the server runs, as for an issue fix; always when the failure is a performance problem: the number its test measures comes back; none for any other fix to tests, documentation or CI files alone | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
+| Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | required when the fix changes anything but tests, documentation and CI files: gsm8k at most 1 point below the base (§1.1); a loss the issue reports comes back as well | required when the fix changes anything but tests, documentation and CI files, as for an issue fix; none for a fix to tests, documentation or CI files alone | required, as for a feature (§1.1) | on the requester's data set |
+| Performance | required: the gain the feature claims, or, where it claims none, no slower than the baseline (§1.2) | required when the fix changes anything but tests, documentation and CI files: no slower than the base (§1.2); always when the issue is a performance problem: the reported number comes back | required when the fix changes anything but tests, documentation and CI files, as for an issue fix; always when the failure is a performance problem: the number its test measures comes back; none for any other fix to tests, documentation or CI files alone | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
 | Stability | when the task asks (`stability`, G4) | when the task asks (`stability`, G4); a reported crash or hang is judged by its reproduction | a flaky test passes repeatedly (§4) | when the task asks (`stability`, G4) | when the requester asks (`stability`, G4) |
 | Compatibility | required | required | required | required | the requester's platforms |
 | Engineering | required | required | required | required | when the change goes upstream |
 | Requirement | — | when a requester reported it: the reporter confirms the fix | — | when a requester asked for it | required; the requirement owner signs off |
 
 A scan changes no code; its daily report has its own checks (`scripts/daily_report.py check`).
+
+A failure that is itself one of accuracy or of performance is measured whatever its fix changes,
+also where the table says "none" for a fix to tests alone: the score or the number that fell comes
+back (§1.1, §1.2).
 
 **Strictness.** Every item is either blocking or report-only, decided when the matrix is fixed. A P0
 hotfix may ship on the minimal set: the reproduction passes, the existing tests of the modules it
