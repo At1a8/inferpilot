@@ -273,10 +273,14 @@ on the commit the run's last Verify round ran on. Change nothing.
    is `0`, not an unset line). The `task` and the `goal` stay the ones `run.json` has, whatever this run
    was given: the goal names data sets and guard workloads the run's Verify and Performance ran, and
    the task the issue or PR its triage and reply are about.
-4. `perf_required`: whether the run's Performance phase was to judge a claim (an `issue` that
-   `issue_triage.md` classifies `performance`, a `feature` whose spec or design states one, a `perf`
-   plan's gain); `perf_claim`: that claim, empty when there was none or the run directory does not
-   record it.
+4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
+   that `issue_triage.md` classifies `performance`, a `feature` whose spec or design states one, a
+   `perf` plan's gain); `perf_claim`: that claim, empty when there was none or the run directory does
+   not record it; `perf_cost` (`feature`): `true` when that claim is a cost the user stated, as
+   `RUN_DIR/feature_spec.md` has it, which stays the claim on InferPilot's client, and `false`
+   otherwise. A `feature` that states no claim is judged all the same, as no slower than the baseline
+   (`validation_doctrine.md`, *G5 for a feature*): InferPilot gives that claim, and there is none to
+   restore.
 5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
    the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
    on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
@@ -299,7 +303,7 @@ Return:
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
  "known_issues": [], "handoffs": [], "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
- "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
+ "perf_cost": false, "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
 ```
 
 ## PHASE=spec (feature)

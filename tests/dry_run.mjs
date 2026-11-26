@@ -766,6 +766,21 @@ const scenarios = [
     check(r.result.done.map((d) => d.wp).join() === 'WP1,WP2', `the packages the run verified: ${JSON.stringify(r.result.done)}`);
     const rv = r.calls.find((c) => c.key === 'reviewer:review');
     check(rv && rv.ins.verified_work_packages.length === 2, 'the reviewer sees them');
+    // The claim is read as the run's Spec read it (G5 for a feature): no slowdown where the run claimed no gain or
+    // measures with InferPilot's client, and a cost the user stated on either client.
+    const claimOn = async (restored, args = {}) => ((await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, ...args }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...restored }),
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }),
+    })).calls.find((c) => c.key === 'perf_engineer:perf_eval') || { ins: {} }).ins.claim;
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    const BOUND = 'at most 5% below the baseline output tok/s (goal)';
+    const ours = { client_script: 'template', workload: '{"isl":8000,"osl":1000,"conc":32}' };
+    check(NO_SLOWER.test(await claimOn({ perf_required: false, perf_claim: '' })),
+      'a run that claimed no gain is judged again on the same thing: that the feature is no slower than the baseline');
+    check(NO_SLOWER.test(await claimOn({}, ours)), 'with InferPilot\'s client the source\'s gain is not the claim, as it was not in the run');
+    check(await claimOn({ perf_claim: BOUND, perf_cost: true }, ours) === BOUND && await claimOn({ perf_claim: BOUND, perf_cost: true }) === BOUND,
+      'a cost the user stated stays the claim, with InferPilot\'s client and with the task\'s own');
+    check(NO_SLOWER.test(await claimOn({ perf_claim: BOUND }, ours)), 'a claim not marked as a cost is a gain, never claimed with InferPilot\'s client');
     const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
     check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
     const approved = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {

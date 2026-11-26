@@ -897,7 +897,8 @@ const K_COLLECT = S({
 }, ['status']);
 // resume_from=verify: what the resumed run had, restored from its run directory. head_ok: the branch head
 // is the commit its last Verify round ran on; the mode's gate command and the claim are the ones its Verify
-// and Performance were given, perf_required whether its Performance was to judge a claim at all;
+// and Performance were given, perf_required whether its Performance was to judge a claim the run stated
+// (perf_cost: a feature's that is a cost the user stated; a feature that states none is judged as no slower);
 // known_issues and handoffs as its report wrote them (Verify judges a failure the baseline shares by the
 // first, and reverts an integrated kernel by the second), null when the run directory lost them;
 // task_definition as its run.json recorded it.
@@ -914,6 +915,7 @@ const RESUMED = S({
   failing_test_cmd: str, // ci: the failing_test gate
   perf_required: bool,
   perf_claim: str,       // '' for none
+  perf_cost: bool,       // feature: the claim is a cost the user stated, as its spec has it
   design_auto_approved: bool, // feature: its Design went on to Implement with no human's approval
   triage_path: str,
   spec_path: str,
@@ -1866,7 +1868,8 @@ async function resumeVerify(claimOf) {
   if (MODE === 'feature' && rs.design_auto_approved === true) {
     note('Design', 'auto_approved', 'restored from the run this one resumes: no human approved its design');
   }
-  const claim = claimOf(restored);
+  // A feature's claim is read as its Spec read it: a cost the user stated stays the claim on InferPilot's client.
+  const claim = claimOf(restored, rs.perf_cost);
   const rest = ROUTES[MODE].slice(ROUTES[MODE].indexOf('Verify'));
   logRoute(['Setup', ...(MODE === 'issue' && claim ? rest.flatMap((t) => (t === 'Verify' ? [t, 'Performance'] : [t])) : rest)]);
   if (MODE === 'issue') return fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, !!claim);

@@ -798,11 +798,15 @@ class FeaturePerformanceTest(unittest.TestCase):
         self.assertIn("const ours = fallback || isTemplate(A.client_script);\n"
                       "  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;",
                       src, "a feature without a claimed gain, or on InferPilot's client, is measured and nothing is judged")
-        self.assertEqual(src.count("claimOf("), 2, "the first run and the resumed one read the claim the same way")
-        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)"):
+        self.assertEqual(src.count("claimOf("), 3, "the first run and the resumed ones read the claim the same way")
+        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)",
+                     "claimOf(restored, rs.perf_cost)"):
             self.assertIn(call, src, "a cost the user stated is lost on the way to Performance")
-        self.assertEqual(src.count("perf_cost: bool,"), 2,
-                         "the spec and the approved design both say whether the claim is a cost the user stated")
+        self.assertEqual(src.count("perf_cost: bool,"), 3,
+                         "the spec, the approved design and a run resumed from Verify all say whether the claim is a cost the user stated")
+        self.assertIn("`perf_cost` (`feature`): `true` when that claim is a cost the user stated",
+                      " ".join((ROOT / "roles" / "director.md").read_text(encoding="utf-8").split()),
+                      "a run resumed from Verify is not told to restore whether its claim is a cost")
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a feature.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say that every feature is measured")
         for said in ("Every feature is measured against the baseline, whether it claims a gain or not",
