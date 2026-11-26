@@ -2586,6 +2586,27 @@ class ScanCiTest(unittest.TestCase):
                          [("enterContext on Python 3.10", 2, 3), ("comes and goes", 2, 2), ("new today", 1, 1),
                           ("runner lost communication", 0, 1)], "what fails now comes first, then the larger cluster")
 
+    def test_a_cluster_shows_what_fails_now_before_its_history(self):
+        # Twelve entries the tracker only keeps, whose keys sort first, and two that fail now: the ten tests listed,
+        # the example error and the job links are the present failure's, not history's.
+        state = {"version": 3, "active": {}, "archive": [], "runs": {"14": ["2026-11-23T01:00:00Z", "rocm720"]}}
+        for i in range(12):
+            state["active"]["test/a%02d.py::T.test" % i] = {"cluster": "one cause", "error": "old error %d" % i, "job_url": "https://ci/old/%d" % i,
+                                                             "first_seen": "2026-11-01", "last_seen": "2026-11-10", "fail_runs": ["9"],
+                                                             "failed": 1, "observed": 3, "streak": 0}
+        for name in ("y", "z"):
+            state["active"]["test/%s.py::T.test" % name] = {"cluster": "one cause", "error": "the error of today (%s)" % name,
+                                                             "job_url": "https://ci/now/%s" % name, "first_seen": "2026-11-23",
+                                                             "last_seen": "2026-11-23", "fail_runs": ["14"], "failed": 1, "observed": 1, "streak": 1}
+        c = scan_ci.aggregate(scan_ci.parse_state(self.body(state)))[0]
+        self.assertEqual((c["n_tests"], c["n_failing"]), (14, 2))
+        self.assertEqual(c["tests"][:2], ["test/y.py::T.test", "test/z.py::T.test"], "the tests that fail now are listed first")
+        self.assertEqual(len(c["tests"]), 10)
+        self.assertEqual(c["example_error"], "the error of today (y)")
+        self.assertEqual(c["job_urls"][:2], ["https://ci/now/y", "https://ci/now/z"])
+        self.assertEqual(scan_ci.aggregate(self.ENTRIES)[0]["tests"], ["test/a.py::A.setUpClass", "test/b.py::B.test_x"],
+                         "the earlier form keeps its order")
+
     def test_a_streak_whose_runs_the_state_no_longer_dates(self):
         state = json.loads(json.dumps(self.V3))
         state["runs"] = {"14": ["2026-11-23T01:00:00Z", "rocm720"]}
@@ -2640,12 +2661,18 @@ class ScanCiTest(unittest.TestCase):
         cut = "<!-- ci-failure-tracker-state: {\"version\": 3, \"active\": {\"test/a.py::A.te"
         self.assertIs(scan_ci.read_state(cut), scan_ci.MALFORMED)
         self.assertEqual((scan_ci.state_form(scan_ci.read_state(cut)), scan_ci.parse_state(cut)), ("unknown", {}))
+        # Nor is a state that decodes to null: the marker is there, so the body carries a payload.
+        null = self.body(None)
+        self.assertIs(scan_ci.read_state(null), scan_ci.NULL_STATE)
+        self.assertEqual((scan_ci.state_form(scan_ci.read_state(null)), scan_ci.parse_state(null)), ("unknown", {}))
+        self.assertIs(scan_ci.read_state("no state here"), scan_ci.NO_STATE)
 
     def test_main_says_which_form_it_read_and_what_it_could_not_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = {}
             bodies = {"v3": self.body(self.V3), "old": self.body(self.ENTRIES), "other": self.body({"version": 4, "tests": []}),
-                      "cut": "<!-- ci-failure-tracker-state: {\"version\": 3, \"acti", "none": "a tracker with no state block"}
+                      "cut": "<!-- ci-failure-tracker-state: {\"version\": 3, \"acti", "none": "a tracker with no state block",
+                      "null": self.body(None)}
             for name, text in bodies.items():
                 body, res, md = (Path(tmp) / (name + ext) for ext in (".md", ".json", ".out.md"))
                 body.write_text(text)
@@ -2654,6 +2681,8 @@ class ScanCiTest(unittest.TestCase):
                     self.assertEqual(scan_ci.main(), 0)
                 out[name] = (json.loads(res.read_text())["trackers"][0], md.read_text())
         v3, old, other, cut, none = (out[k][0] for k in ("v3", "old", "other", "cut", "none"))
+        self.assertEqual(out["null"][0]["state_form"], "unknown")
+        self.assertIn("is JSON null", out["null"][0]["unread"], "a null state is said so, not shown as a tracker without one")
         self.assertEqual((v3["state_form"], v3["n_entries"], v3["n_failing"], v3["snapshot"], v3["n_archived"]),
                          ("counts", 3, 2, "2026-11-23", 1))
         self.assertEqual((old["state_form"], old["n_entries"]), ("status", 3))

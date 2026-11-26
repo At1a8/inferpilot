@@ -36,7 +36,9 @@ import _github as gh  # noqa: E402
 
 DEFAULT_REPO = "sgl-project/sglang"
 MARKER = "ci-failure-tracker-state:"
+NO_STATE = None       # the body has no state marker
 MALFORMED = object()  # a state marker with no JSON behind it: cut short, or encoded another way
+NULL_STATE = object()  # a state marker followed by JSON null: a payload, though not one this script reads
 _SINCE = re.compile(r"since (\d{4}-\d\d-\d\d)")
 _STATUS_HEAD = re.compile(r"^\s*([a-z][a-z \-]*?)\s*(\(|$)", re.I)
 _SNAPSHOT = re.compile(r"\*\*Last auto-update:\*\*\s*(\d{4}-\d\d-\d\d)")
@@ -47,17 +49,18 @@ NO_LONGER = "no longer failing"
 
 
 def read_state(body: str):
-    """The state block as the bot wrote it; None when the body has none, MALFORMED when its marker is there
-    and what follows is not JSON."""
+    """The state block as the bot wrote it; NO_STATE (None) when the body has no marker, MALFORMED when its
+    marker is there and what follows is not JSON, NULL_STATE when what follows is JSON null: a body that
+    carries a state is never taken for one without."""
     i = (body or "").find(MARKER)
     if i < 0:
-        return None
+        return NO_STATE
     text = body[i + len(MARKER):].lstrip()
     try:
         state, _ = json.JSONDecoder().raw_decode(text)
     except json.JSONDecodeError:
         return MALFORMED
-    return state
+    return NULL_STATE if state is None else state
 
 
 def state_form(state) -> str:
@@ -70,7 +73,7 @@ def state_form(state) -> str:
     if state is None:
         return "none"
     if not isinstance(state, dict):
-        return "unknown"  # MALFORMED as well
+        return "unknown"  # MALFORMED and NULL_STATE as well
     if isinstance(state.get("active"), dict):
         return "counts" if state.get("version") == 3 else "unknown"
     if isinstance(state.get("entries"), dict):
@@ -168,9 +171,11 @@ def status_head(status: str) -> str:
 
 def aggregate(entries: dict) -> list[dict]:
     clusters: dict[str, dict] = {}
-    for key, e in entries.items():
-        if not isinstance(e, dict):
-            continue
+    # What fails now comes first within a cluster too: its listed tests, its example error and its job links are
+    # those of a present failure where it has one, not of an entry the tracker only keeps as history.
+    ordered = sorted(((k, e) for k, e in entries.items() if isinstance(e, dict)),
+                     key=lambda ke: (status_head(ke[1].get("status", "")) == NO_LONGER, ke[0]))
+    for key, e in ordered:
         name = e.get("cluster") or "(no cluster)"
         c = clusters.setdefault(name, {"cluster": name, "tests": [], "statuses": collections.Counter(),
                                        "since": "", "first_seen": "", "last_seen": "", "example_error": "",
@@ -195,7 +200,7 @@ def aggregate(entries: dict) -> list[dict]:
     out = []
     for c in clusters.values():
         c["n_tests"] = len(c["tests"])
-        c["tests"] = sorted(c["tests"])[:10]
+        c["tests"] = c["tests"][:10]
         c["statuses"] = dict(c["statuses"])
         c["variants"] = sorted(c["variants"])
         c["fix_prs"] = sorted(c["fix_prs"], key=lambda f: ("#" not in f[:1], f.split("#")[0].lower(), int(f.rsplit("#", 1)[1])))
@@ -383,6 +388,8 @@ def main() -> int:
         if form == "unknown":
             if state is MALFORMED:
                 what = "the tracker's state block is not JSON (cut short, or encoded another way)"
+            elif state is NULL_STATE:
+                what = "the tracker's state block is JSON null, not a state"
             else:
                 keys = sorted(map(str, state))[:8] if isinstance(state, dict) else type(state).__name__
                 what = (f"the tracker's state is in a form scan_ci.py does not read (version "
