@@ -91,7 +91,10 @@ priority, category, action and existing fix PRs are that problem's. The reply co
 this run showed for the problem it took, and for each of the others its known state (a fix linked to
 it, open or merged, or nothing yet) and that this run did not cover it. Each of them starts as a run of
 its own, with the issue and the problem's name as its `task`: the run's result offers those runs
-(`next.start`), each on this run's own definition.
+(`next.start`), each on this run's own definition and with the operator's settings this run was given.
+A problem the report puts on another model or launch configuration is never the one a run on this
+model takes, and its follow-up asks for its own model and scripts: G2 and G5 measure on what the run
+was set up with.
 
 ## 5. Reproduction
 

@@ -740,7 +740,8 @@ const TRIAGE = S({
   action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
   duplicate_of: str, // with duplicate: the open issue that has the failure, the original (#<n>)
   // a report with several problems: the ones this run does not take, each with the task that starts a run on it
-  other_problems: arr(S({ problem: str, task: str, priority: str }, ['problem'])),
+  // model: the model or launch configuration the report gives that problem, when it is not this run's
+  other_problems: arr(S({ problem: str, task: str, priority: str, model: str }, ['problem'])),
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1106,6 +1107,20 @@ async function finish(status, at) {
 const ENDED = { blocked: 'Blocked', handed_off: 'Handed over', triaged: 'Triaged', fixed_on_main: 'Fixed on main already',
   not_reproduced: 'Not reproduced', diagnosed: 'Diagnosed, with no fix to make here', no_gain: 'No measured gain to keep',
   dropped: 'Dropped, with no measured gain' };
+// The operator's settings, which the task definition holds none of: a run started from this one's result on the
+// same issue keeps the ones this run was given.
+const OPERATOR_KEYS = ['exp_root', 'max_fix_rounds', 'max_investigate_rounds', 'max_review_rounds', 'max_work_packages',
+  'agent_timeout_ms', 'agent_retries', 'review_model'];
+// What a run measures a fix with: a problem on another model brings its own.
+const MEASURED_WITH = ['model_path', 'server_script', 'client_script', 'accuracy_script', 'workload', 'harness', 'long_context_script'];
+// The issue a task names, without the problem an earlier follow-up added to it ("<issue>: <problem>"): a
+// follow-up of a follow-up names one problem, not two.
+function issueOf(task) {
+  const s = String(task || '').trim();
+  const m = /^(https?:\/\/\S+?\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)(?=[\s:,;]|$)/.exec(s);
+  return m ? m[1] : s;
+}
+
 function nextSteps(status, at) {
   const report = R.report_path ? ` The report: ${R.report_path}.` : '';
   // Where the run ended, not what a closing phase (the reply check) recorded after it.
@@ -1153,11 +1168,18 @@ function nextSteps(status, at) {
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
   }
-  // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
+  // The other problems of a report with several: each is offered as a run of its own, on this run's definition
+  // and with the operator's settings this run was given (where runs are kept, the budgets, the reviewer's model):
+  // it is the same work on the same issue. A problem the report puts on another model takes none of what this
+  // run measured with: its model, its scripts and its workload are asked for, as of any new task.
   if ((R.other_problems || []).length && !out.start) {
     const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
-    out.start = R.other_problems.map((p, i) => ({ rank: i + 1, task: p.problem,
-      args: { inferpilot_dir: INFERPILOT, ...def, mode: 'issue', task: p.task || `${def.task}: ${p.problem}` } }));
+    const issue = issueOf(def.task);
+    out.start = R.other_problems.map((p, i) => {
+      const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;
+      return { rank: i + 1, task: p.problem, ...(p.model ? { model: p.model } : {}),
+        args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task: p.task || `${issue}: ${p.problem}` } };
+    });
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1977,7 +1999,8 @@ async function runIssue() {
   // A report with several problems is several tasks: the ones this run does not take are offered as runs of
   // their own (next.start), each on this run's definition with the issue and the problem's name as its task.
   const others = (tri.other_problems || []).filter((p) => p && String(p.problem || '').trim())
-    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim() }));
+    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim(),
+      model: String(p.model || '').trim() }));
   if (others.length) R.other_problems = others;
   note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${duplicateOf ? `duplicate of ${duplicateOf}; ` : ''}${tri.reason || ''}`);
   // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside

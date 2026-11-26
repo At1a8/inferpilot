@@ -623,8 +623,8 @@ status; one that ends at the Intake (questions, a rejection) or before Setup cre
 Every result ends with `next`, what comes after the run, the same for Claude Code, a Cursor agent and the
 runner's log: `say`, a sentence for you; `ask`, questions only you answer; `rerun_with`, the arguments to
 set before running it again with the rest unchanged (answers merge with those already given); `start`, new
-runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
-post, a daily report the director could not share.
+runs it offers, with their arguments: a scan's top tasks, the other problems of an issue's report;
+`user`, what only you do: the push, a reply to post, a daily report the director could not share.
 
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and

@@ -31,14 +31,18 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
    names that issue and what this report adds to it. A report with several problems is several tasks:
    list each in the triage record with its own category, priority and fix PRs, take the one `task`
-   names or else the most urgent, and say which in `reason`. `priority`, `category`, `action` and
-   `existing_prs` are then that problem's and no other's: a fix PR for another problem of the report is
-   listed in the triage record only, since the run would apply it and check it against this problem's
-   reproduction. Return the others as `other_problems`, each with its `problem` in a few words, its
-   `priority`, and the `task` that starts a run on it (the issue and the problem's name): the run's
-   result offers them. The reply covers every problem. `existing_prs` lists the open fix PRs (`#<n>`).
-   Every action that leads to a code change, `push_existing_pr` included, is reproduced on main first;
-   that reproduction is the gate the fix must pass.
+   names or else the most urgent, and say which in `reason`. The one this run takes is on the task's
+   model and configuration: Setup has rendered the run's scripts for `model_path`, and G2 and G5
+   measure on them, so a problem the report puts on another model is one of the others, however urgent.
+   `priority`, `category`, `action` and `existing_prs` are then that problem's and no other's: a fix PR
+   for another problem of the report is listed in the triage record only, since the run would apply it
+   and check it against this problem's reproduction. Return the others as `other_problems`, each with
+   its `problem` in a few words, its `priority`, the `task` that starts a run on it (the issue and the
+   problem's name), and its `model` where the report gives it another model or launch configuration
+   than this run's: the run's result offers them, and one with a `model` asks for its own model and
+   scripts instead of taking this run's. The reply covers every problem. `existing_prs` lists the open
+   fix PRs (`#<n>`). Every action that leads to a code change, `push_existing_pr` included, is
+   reproduced on main first; that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -52,7 +56,8 @@ Return:
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "duplicate_of": "<with duplicate: #n, the original>",
- "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>"}],
+ "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>",
+                     "model": "<its model, when not this run's>"}],
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```
 

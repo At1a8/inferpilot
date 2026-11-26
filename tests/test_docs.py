@@ -1484,8 +1484,25 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
                            ("roles/issue_triager.md", "Return the others as `other_problems`"),
                            ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
+                           ("knowledge/issue_triage.md", "and with the operator's settings this run was given"),
+                           ("knowledge/issue_triage.md", "A problem the report puts on another model or launch configuration is never the one a run on "
+                                                         "this model takes"),
+                           ("roles/issue_triager.md", "The one this run takes is on the task's model and configuration"),
+                           ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
+                           ("roles/issue_triager.md", "one with a `model` asks for its own model and scripts instead of taking this run's"),
+                           ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
+                           ("README.md", "a scan's top tasks, the other problems of an issue's report"),
+                           ("README.zh-CN.md", "scan 排在前面的任务，issue 报告里的其他问题"),
                            ("templates/issue_triage.md", "| problems in the report |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const issue = issueOf(def.task);", "a follow-up of a follow-up names two problems"),
+                ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task: p.task || `${issue}: ${p.problem}` } };",
+                 "a follow-up loses the operator's settings, or takes the task as it stands"),
+                ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",
+                 "a problem on another model is measured with this run's model and scripts")):
+            self.assertIn(said, src, why)
         self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
                          "another problem may have a fix already: the reply gives its known state")
 

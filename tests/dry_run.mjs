@@ -1974,10 +1974,9 @@ const scenarios = [
   ['issue: the other problems of a report with several are offered as runs of their own', async () => {
     const others = [{ problem: 'GSM8K loses 4 points with the same flags', priority: 'P1', task: 'sgl-project/sglang#41299: the accuracy loss' },
       { problem: 'the server hangs on shutdown', priority: 'P2' }];
-    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, {
-      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash, the most urgent of three',
-        other_problems: others, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
-    });
+    const triaged = (list) => ({ 'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce',
+      reason: 'the crash, the most urgent of three', other_problems: list, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, triaged(others));
     const start = r.result.next.start || [];
     check(start.length === 2 && start[0].task === others[0].problem && start[0].args.task === 'sgl-project/sglang#41299: the accuracy loss',
       `each other problem is offered with its task: ${JSON.stringify(start)}`);
@@ -1989,6 +1988,30 @@ const scenarios = [
     check(r.result.other_problems.length === 2, 'the result lists them');
     const one = await run({ mode: 'issue', task: 'i' });
     check(!one.result.next.start && !one.result.other_problems, 'a report with one problem offers no run');
+    // A follow-up of a follow-up names one problem, not two: the task is cut back to its issue, however it names it.
+    for (const [task, issue] of [['sgl-project/sglang#41299: the accuracy loss', 'sgl-project/sglang#41299'], ['#41299: the crash', '#41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299: the crash at 32k', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['the crash a customer reported', 'the crash a customer reported']]) {
+      const again = await run({ mode: 'issue', task, stop_after: 'Reproduce' }, triaged([{ problem: 'the server hangs on shutdown' }]));
+      check(again.result.next.start[0].args.task === `${issue}: the server hangs on shutdown`,
+        `a task already scoped to a problem ("${task}") offers the next one on the issue alone: ${again.result.next.start[0].args.task}`);
+    }
+    // The follow-up is the same work on the same issue: it keeps the operator's settings this run was given.
+    const kept = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', exp_root: '/data/exp', max_fix_rounds: 0, review_model: 'big',
+      agent_timeout_ms: 7200000 }, triaged(others));
+    const args = kept.result.next.start[0].args;
+    check(args.exp_root === '/data/exp' && args.max_fix_rounds === 0 && args.review_model === 'big' && args.agent_timeout_ms === 7200000,
+      `the operator's settings go with the follow-up: ${JSON.stringify(args)}`);
+    check(!('max_work_packages' in r.result.next.start[0].args) && !('exp_root' in r.result.next.start[0].args), 'and none is made up where none was given');
+    // A problem on another model takes nothing of what this run measured with: its own is asked for, as of any new task.
+    const elsewhere = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}' },
+      triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
+    const [far, near] = elsewhere.result.next.start;
+    check(far.model === 'DeepSeek-V4.1, --tp-size 8' && ['model_path', 'client_script', 'server_script', 'workload'].every((k) => !(k in far.args))
+      && far.args.framework_dir && far.args.mode === 'issue', `a problem on another model brings its own model and scripts: ${JSON.stringify(far)}`);
+    check(near.args.model_path === '/models/m' && near.args.client_script === '/s/client.sh' && !('model' in near),
+      `one on this run's model keeps them: ${JSON.stringify(near.args)}`);
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
