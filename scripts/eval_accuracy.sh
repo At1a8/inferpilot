@@ -271,11 +271,6 @@ end_log() {
     MASK_PID=""
     return "${rc}"
 }
-# A fifth of a second in which a signal is acted on at once and for which no process is started: a read
-# that nothing answers, on a pipe of its own. Should the read fail, a sleep.
-tick() {
-    read -r -t 0.2 _ <> "${FIFO_DIR}/tick" 2>/dev/null || [ $? -gt 128 ] || sleep 0.2
-}
 stop_eval() {
     if [ -n "${EVAL_PID}" ]; then
         end_group "${EVAL_PID}" 30 "${EVAL_LAUNCH}"
@@ -360,7 +355,7 @@ run_one() {  # <set>
     fi
     REDACT_DIR="${run_dir}"
     # Outside the run directory: the redaction opens every file there, and a FIFO would block it.
-    FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" "${FIFO_DIR}/tick" || exit 2
+    FIFO_DIR=$(mktemp -d) && mkfifo "${FIFO_DIR}/out" || exit 2
     hold_signals
     start_log "${log}" || exit 2
     setsid "${EVALSCOPE}" eval \
@@ -383,7 +378,9 @@ run_one() {  # <set>
     EVAL_LAUNCH=launch
     act_on_signals
     # Without the masker nothing reads the pipe, and evalscope would wait on a full one for ever: it is
-    # stopped when the masker ends before it, and the set has no score.
+    # stopped when the masker ends before it, and the set has no score. Between two looks at them the
+    # script is in a wait, where a signal's trap runs at once and to its end; bash 5 cuts one that starts
+    # inside a read short when the read times out.
     while kill -0 "${EVAL_PID}" 2>/dev/null; do
         if ! kill -0 "${MASK_PID}" 2>/dev/null; then
             echo "${ds}: evalscope is stopped, since the process that masks the key in ${log} ended before it:" \
@@ -392,7 +389,8 @@ run_one() {  # <set>
             end_group "${EVAL_PID}" 30 launch
             break
         fi
-        tick
+        sleep 0.2 3>&- &
+        wait $!
     done
     EVAL_LAUNCH=""
     wait "${EVAL_PID}"
