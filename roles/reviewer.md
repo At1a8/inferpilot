@@ -56,12 +56,15 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
    is a `blocker` finding with `hack` set to its id (`new` when the list lacks it, described well
    enough to add); its work package's `test` is the check that kills it, and it must fail on the
    current version. For an accuracy problem in CI (`accuracy_claim`: a test that failed on a score it
-   measures), read the score under `accuracy_claim` in `gates` against the claim yourself, not G2's
-   gsm8k against the base, and check in the diff that the test still measures what it measured (the
-   set, the number of questions, the sampling). A score below the claim, a measurement the fix
-   changed, or a threshold lowered in the test with no score at the claim, is hack C1, whatever the
-   base scores and whatever the fix changes (`validation_doctrine.md`, *G2 for an accuracy problem in
-   CI*).
+   measures), read the score of the claim against the claim yourself: the `accuracy_claim` entry of
+   the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against the base. Check in
+   the diff whether the test still measures what it measured (the set, the number of questions, the
+   sampling). A score below the claim by the base's measurement, or a threshold lowered in the test
+   with no score at the claim, is hack C1, whatever the base scores and whatever the fix changes
+   (`validation_doctrine.md`, *G2 for an accuracy problem in CI*). A fix that changes the measurement
+   and meets the claim by the base's measurement all the same hides nothing: whether the measurement
+   is to change is a human's to say, so the verdict is `blocked` with both scores, not a work package
+   that takes the change out.
 7. **Verdict.**
    - `approve`: no blocker or major finding; minor ones are listed for the PR engineer.
    - `changes_requested`: each blocker or major finding becomes a work package whose `test` shows it

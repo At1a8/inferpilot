@@ -125,20 +125,25 @@ clock can start before your session does.
      - Where the run knows no such commit, the fix's score has no baseline: give it in `gates` with
        that said (`"G2": "0.893 (1319 q), no baseline: the base does not start on this
        configuration"`); it is reported, not judged, and *Before pushing* measures the fix alone.
-- **An accuracy problem is measured where it showed, whatever the fix changes.** With `accuracy_claim`
-     set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2 for an accuracy
-     problem in CI*), run the failing test's own measurement on the fix's code, and read the score it
-     measures, not whether its assertion passes. The measurement is the base's: the set, the number of
-     questions, the model and the sampling settings as the test has them at `<base>`, since a fix can
-     change what is measured as easily as the threshold. Where the fix changes the test, run the base's
-     copy of it against the fix's code (a throwaway copy under `RUN_DIR`). Report the score in `gates`
-     under its own name, apart from G2's gsm8k against the base: `"accuracy_claim": "pass 0.936, the
-     claim is 0.93 (the test's GSM8K, 200 q, as at the base)"`, with `pass` only for a score at the
-     claim or above by that measurement. A score below it is a blocking failure (`gate:
+   - **An accuracy problem is measured where it showed, whatever the fix changes.** With
+     `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2 for
+     an accuracy problem in CI*), run the failing test's own measurement on the fix's code, and read
+     the score it measures, not whether its assertion passes. The measurement is the base's: the set,
+     the number of questions, the model and the sampling settings as the test has them at `<base>`,
+     since a fix can change what is measured as easily as the threshold. What is kept from the base is
+     everything that decides the score, wherever it lives: the test's own values, and the helpers,
+     scripts or data files that supply them. What is kept from the fix is its framework code and how it
+     launches the server, which a fix may well be about. So where the fix changes the test or what it
+     measures with, run the base's measurement against the fix's server (a throwaway copy under
+     `RUN_DIR` with the base's measuring parts), not the base's test as a whole. Report the score in
+     `gates` under its own name, apart from G2's gsm8k against the base: `"accuracy_claim": "pass
+     0.936, the claim is 0.93 (the test's GSM8K, 200 q, as at the base)"`, with `pass` only for a score
+     at the claim or above by that measurement. A score below it is a blocking failure (`gate:
      "accuracy_claim"`) although `failing_test` passes: a threshold moved in the test restores nothing,
      nor do fewer questions or another sampling. A fix that says the measurement itself was wrong is a
      human's to accept: give both scores, by the base's measurement and by the fix's, and do not pass
-     the claim on the fix's alone. Never leave the gate out, and never report it `not run`: the run
+     the claim on the fix's alone; where the two measurements cannot be told apart in the test, say so,
+     and give what you could measure. Never leave the gate out, and never report it `not run`: the run
      accepts no round without its `pass`. Step 4 excuses nothing here: the base of an accuracy problem
      scores low as well, and that is the failure being fixed, so no entry of `known_issues` makes a
      score below the claim pass, or fail without blocking. gsm8k against the base (G2) runs besides, by
