@@ -1030,6 +1030,96 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual({n: cat[n]["default"] for n in own}, own)
 
 
+class StabilityTest(unittest.TestCase):
+    """scripts/stability.sh, G4's load, with a fake client and a fake DRM tree: the client run back to back,
+    one line a pass, until the hours have passed or a pass fails."""
+    SCRIPT = SCRIPTS / "stability.sh"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.out = self.tmp / "logs" / "g4_feature"
+        drm = self.tmp / "drm"
+        for card, used in (("card1", "1000"), ("card2", "2000")):
+            (drm / card / "device").mkdir(parents=True)
+            (drm / card / "device" / "mem_info_vram_used").write_text(used + "\n")
+        (drm / "card1-DP-1").mkdir()  # a connector, which holds no memory
+        # The client appends its result to OUT_DIR/bench.jsonl, as perf.sh does; it fails in the pass FAIL_AT
+        # names, and from its second pass on leaves OUT_DIR looking as old as a dead run's.
+        self.client = self.tmp / "client.sh"
+        self.client.write_text(textwrap.dedent("""\
+            #!/bin/bash
+            n=$(( $(cat "$OUT_DIR/passes" 2>/dev/null || echo 0) + 1 ))
+            echo "$n" > "$OUT_DIR/passes"
+            echo "pass $n on port $PORT at concurrency ${CONCURRENCY:-none}"
+            sleep "${FAKE_SLEEP:-0}"
+            [ "$n" -ge 2 ] && touch -d @0 "$OUT_DIR"
+            [ "$n" = "${FAIL_AT:-}" ] && { echo "a request failed" >&2; exit 1; }
+            echo "{\\"completed\\": 8, \\"output_throughput\\": $((100 + n))}" >> "$OUT_DIR/bench.jsonl"
+        """))
+        self.env = {"PATH": os.environ["PATH"], "PORT": "30001", "OUT_DIR": str(self.out), "DRM_ROOT": str(drm)}
+
+    def run_script(self, *args, **env):
+        env = {k: v for k, v in {**self.env, **env}.items() if v is not None}
+        return subprocess.run(["bash", str(self.SCRIPT), *args], env=env, capture_output=True, text=True, timeout=120)
+
+    def samples(self):
+        return [json.loads(line) for line in (self.out / "stability.jsonl").read_text().splitlines()]
+
+    def test_the_client_runs_back_to_back_until_the_hours_have_passed_one_line_a_pass(self):
+        began = time.time()
+        r = self.run_script(str(self.client), HOURS="0.001", CONCURRENCY="64", FAKE_SLEEP="0.3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertGreaterEqual(time.time() - began, 0.001 * 3600 - 1, "it stopped before the hours had passed")
+        got = self.samples()
+        self.assertGreaterEqual(len(got), 2, "one pass is not back to back")
+        self.assertEqual([s["pass"] for s in got], list(range(1, len(got) + 1)))
+        self.assertEqual((self.out / "passes").read_text().strip(), str(len(got)), "a pass the client ran has no line")
+        for s in got:
+            self.assertEqual(s["exit"], 0)
+            self.assertEqual(s["client"], [{"completed": 8, "output_throughput": 100 + s["pass"]}], "the client's result of this pass")
+            self.assertEqual(s["vram_used"], {"card1": 1000, "card2": 2000})
+            self.assertGreater(s["host_mem_used_kb"], 0)
+            self.assertRegex(s["started"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+            self.assertGreaterEqual(s["seconds"], 0)
+        log = (self.out / "stability.log").read_text()
+        self.assertIn("=== pass 1, ", log)
+        self.assertIn("pass 1 on port 30001 at concurrency 64", log, "the client runs with the port and the concurrency given")
+        self.assertLess(time.time() - self.out.stat().st_mtime, 60, "OUT_DIR shows no life after the last pass")
+
+    def test_the_first_pass_that_fails_ends_the_run(self):
+        r = self.run_script(str(self.client), HOURS="1", FAIL_AT="2")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("pass 2: the client exited 1", r.stderr)
+        got = self.samples()
+        self.assertEqual([(s["pass"], s["exit"]) for s in got], [(1, 0), (2, 1)])
+        self.assertEqual(got[1]["client"], [], "the failed pass appended no result")
+        self.assertEqual((self.out / "passes").read_text().strip(), "2", "no pass after the one that failed")
+        self.assertIn("a request failed", (self.out / "stability.log").read_text())
+
+    def test_one_pass_runs_even_when_no_time_is_asked(self):
+        r = self.run_script(str(self.client), HOURS="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([s["pass"] for s in self.samples()], [1])
+
+    def test_what_it_cannot_run_is_a_usage_error_and_starts_nothing(self):
+        for args, env in (((), {}), ((str(self.tmp / "missing.sh"),), {}), ((str(self.client), "more"), {}),
+                          ((str(self.client),), {"PORT": None}), ((str(self.client),), {"OUT_DIR": None}),
+                          ((str(self.client),), {"HOURS": "soon"}), ((str(self.client),), {"HOURS": "-1"}),
+                          ((str(self.client),), {"HOURS": "inf"})):
+            r = self.run_script(*args, **env)
+            self.assertEqual(r.returncode, 2, "%s %s: %s" % (args, env, r.stderr))
+            self.assertFalse(self.out.exists(), "%s %s started a pass" % (args, env))
+
+    def test_it_is_the_script_the_verify_engineer_is_given(self):
+        self.assertEqual(subprocess.run(["bash", "-n", str(self.SCRIPT)]).returncode, 0)
+        self.assertTrue(os.access(self.SCRIPT, os.X_OK))
+        role = " ".join((SCRIPTS.parent / "roles" / "verify_engineer.md").read_text(encoding="utf-8").split())
+        self.assertIn("bash <inferpilot_dir>/scripts/stability.sh <client_script>", role)
+        for name in ("PORT", "OUT_DIR", "HOURS", "CONCURRENCY"):
+            self.assertRegex(role, r"`%s[=`]" % name, "the role does not give stability.sh its %s" % name)
+
+
 def git(*args, cwd=None):
     import subprocess
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
