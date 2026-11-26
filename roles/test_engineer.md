@@ -9,12 +9,42 @@ Read: `knowledge/validation_doctrine.md` (G0, G1), `knowledge/reward_hacks.md` (
 
 ## PHASE=unit
 
-Inputs: `work_package`, `commit`, `unit_test_cmd`.
+Inputs: `work_package`, `commit`, `unit_test_cmd`, `time_limit_min` (minutes from this call's start
+after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
+`deadline_utc`, that moment: count from the deadline, not from when you started, since the call's
+clock can start before your session does.
 
+0. **A run longer than one tool call** (a server, a driver of several runs) starts detached and is
+   waited for in this call (`env_hygiene.md`, *Servers*; with `container` set, launched, polled and
+   stopped in that container, as it says there): poll each server until it is up, each run that
+   ends by itself (a suite, a driver) until it has its exit status (`<log>.exit`), and every check until
+   it has its result, or until only the reserve is left: a quarter of `time_limit_min`, at most 15
+   minutes, before `deadline_utc`, for stopping what the call started, the ledger and the answer. A run
+   whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it
+   wrote; a control of step 3, which must fail, runs from a driver that exits 0 only when the test fails
+   the way it should, not when it crashes or never starts. A check still running at the reserve is not
+   waited for: the gate fails, and `failure_summary` names the check, how far it got and its log. A
+   server stopped once the checks that use it are done has failed nothing. Before you return, whatever
+   the gate's result, stop every server and run this call started, all in one command,
+   `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...` (`env_hygiene.md`, *Servers*, Killing),
+   until it exits 0: a fix round, a rollback or the next work package works in this worktree and on
+   these GPUs next. The stop takes about twice its `--grace`, 30 seconds unless given: with a reserve
+   under 90 seconds, give it a third of the reserve. Its exit 0 is confirmed on the GPUs,
+   `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the call's first launch
+   and again after the stop (*Killing*): a GPU idle before and in use after is one the call still
+   holds. One you cannot stop fails the gate, and so does a GPU the call still holds:
+   `failure_summary` names it.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template
    instantiation the design lists. Repeat a GPU test that passed once only if it is timing-sensitive.
+   A package whose `test` is the feature's own metric against its source's (accept length for a ported
+   speculative decoding method; `validation_doctrine.md`, G1) is closed by that measurement, whatever
+   `unit_test_cmd` holds: InferPilot sends you the implementer's command when there is one, so when it
+   leaves the measurement out or narrows it, run it yourself as well, on the source's prompt set and
+   settings as the spec gives them. `unit_pass` is true only when the value lies within the spec's
+   tolerance of the source's, above or below; put the value, the source's and the tolerance in the
+   ledger, on this commit's row: Verify measures it again on the commit it verifies.
 3. **The test must be able to fail (T1).** Prove it in a throwaway worktree under `RUN_DIR`, with the
    worktree path in the command replaced:
    - a package that **changes behaviour** (a feature, a fix): check out the parent
@@ -30,7 +60,26 @@ Inputs: `work_package`, `commit`, `unit_test_cmd`.
    `n/a` only for a `docs` package.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
-   the baseline in the ledger. Behaviour must be unchanged.
+   the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a
+   performance change that is always on) has nothing to turn off, and no G0 (`validation_doctrine.md`):
+   `feature_off_unchanged` is then what the package leaves alone, judged against its parent and never
+   as an absolute pass.
+   - **The tests:** run them on the commit as it is, and each one that fails again on the parent
+     (`<commit>^` in a throwaway worktree, as in step 3; a run longer than one tool call goes through a
+     driver, as step 0 says of step 3's control), with the same command and environment. A failure is
+     unchanged only when the test fails there the same way, the same test with the same error. One
+     that passes on the parent is the package's, and so is one that fails there another way (an
+     assertion there, a crash here). One the parent cannot run at all because of the failure the
+     package fixes (a module that did not import) has no result there: run it on the last commit that
+     could run it, the culprit's parent for a CI fix (the triage record names it), and compare with
+     that; where the run knows no such commit, it is the package's.
+   - **The smoke,** for a package on the serving path, only against a baseline of a case the package
+     is meant to keep: any baseline in the ledger for a package that keeps behaviour (a performance
+     change), one on a configuration outside its case for a fix. The baseline of the case a fix is for
+     is no reference: there the server is meant to behave differently with the fix, and step 3 and the
+     mode's gate (`issue_repro`, `failing_test`) judge that difference, not this step.
+   `feature_off_unchanged` is false when a failure is the package's, or when the smoke differs from
+   such a baseline; `failure_summary` gives the test, its error on each tree and the command.
 5. Append the results to the Unit tests section of `RUN_DIR/experiment_ledger.md`, with how the test
    failed without the change.
 6. On failure, write `failure_summary` so the implementer can reproduce it: the failing case, the

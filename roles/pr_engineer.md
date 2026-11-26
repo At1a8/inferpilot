@@ -66,7 +66,14 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    the conflicts. Do not update the branch: a merged tree is not the tree that was verified.
    `merges_cleanly` false puts the conflicts in the PR body for the human, who merges and re-runs the
    gates (`pr_playbook.md`).
-4. **Feature off on the final commit** (G0 smoke).
+4. **Feature off on the final commit** (G0 smoke). A change without a switch has no G0
+   (`validation_doctrine.md`): run the existing tests of the modules it touches on the final commit
+   instead, and each one that fails again on the base (`<base>` in a throwaway worktree), with the same
+   command and environment. `feature_off_final` is then true when every one of them passes, or fails
+   the same way on the base, the same test with the same error: the body names those, as it does the
+   CPU tests of step 1. One that passes on the base, or fails there another way, makes it false. One
+   the base cannot run at all because of the failure being fixed (a module that did not import) is
+   compared instead with the last commit that could run it, the culprit's parent for a CI fix.
 5. **Description:** write `RUN_DIR/pr_body.md` from `templates/pr_body.md` and the validation report,
    following `pr_playbook.md` §Description (the template kept as it is, Motivation in at most 100 words,
    one sentence per changed file, HIP-only checked and said, GSM8K 1319 at the defaults, one speed

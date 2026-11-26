@@ -163,7 +163,7 @@ directory is not visible: `run_lock.py release --force` frees a lock whose run i
   (`awaiting_design_review`) and continue with `resume_from: "implement"` (by default they go on, and
   the report says no human approved the design); a run whose Verify ended without a result continues
   with `resume_from: "verify"` on the commit its Implement verified; the PR is prepared, never
-  pushed; issue replies are drafts; a scan's daily report is checked to name nothing about the machine
+  pushed; issue replies are drafts, checked against the run by the reviewer before the report; a scan's daily report is checked to name nothing about the machine
   (`scripts/daily_report.py`), and a shared copy is where the next scan, in any container, continues
   from. The two posts both go to InferPilot's own repository, with the user's `GITHUB_TOKEN`: the daily
   report, as an issue (`scripts/share_daily_report.py`; when the token cannot write there, a human shares

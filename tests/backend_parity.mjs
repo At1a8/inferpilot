@@ -93,6 +93,8 @@ function check(cond, msg) {
   else { failed++; console.error(`  FAIL: ${msg}`); }
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// A role told its limit gets the moment it ends, which no two runs share.
+const timeless = (prompt) => prompt.replace(/^- deadline_utc: .*$/gm, '- deadline_utc: <its call\'s start plus the limit>');
 const INFERPILOT_JS = path.join(INFERPILOT, 'inferpilot.js');
 const taskArgs = (args) => ({ inferpilot_dir: INFERPILOT, framework_dir: '/tmp/sglang', agent_retries: 1, ...MODE_DEFAULTS[args.mode], ...args });
 
@@ -102,7 +104,7 @@ function alike(name, c, k) {
   check(same(c.result, k.result), `${name}: the results differ: ${JSON.stringify(c.result).slice(0, 200)} | ${JSON.stringify(k.result).slice(0, 200)}`);
   check(same(c.phases, k.phases), `${name}: phases claude ${c.phases} | cursor ${k.phases}`);
   check(same(c.calls.map((x) => x.key), k.calls.map((x) => x.key)), `${name}: role calls claude ${c.calls.map((x) => x.key)} | cursor ${k.calls.map((x) => x.key)}`);
-  const differ = c.calls.findIndex((x, i) => !k.calls[i] || x.prompt !== k.calls[i].prompt);
+  const differ = c.calls.findIndex((x, i) => !k.calls[i] || timeless(x.prompt) !== timeless(k.calls[i].prompt));
   check(differ < 0, `${name}: the prompt of call ${differ} (${(c.calls[differ] || {}).key}) differs between the backends`);
 }
 
@@ -123,6 +125,8 @@ const scenarios = [
       console.log(`     ${t.mode}: ${c.calls.length} role calls, ${c.phases.length} phases, status ${c.result && c.result.status}`);
     });
     const [c, k] = [runs[0], runs[1]];
+    const unit = (r) => (r.calls.find((x) => x.key === 'test_engineer:unit') || { prompt: '' }).prompt;
+    check([c, k].every((r) => /^- deadline_utc: \d{4}-\d\d-\d\dT[\d:.]+Z$/m.test(unit(r))), 'both tell the unit gate when its limit ends');
     check(c.calls.every((x) => x.via === 'stdin') && k.calls.every((x) => x.via === 'argument'), 'claude reads stdin, the Cursor CLI an argument');
     const flags = (x) => x.args.join(' ');
     check(c.calls.every((x) => flags(x) === '-p --dangerously-skip-permissions --output-format stream-json --verbose'),

@@ -12,10 +12,10 @@ until it does, the director and the reviewer apply this document by hand.
 
 | Dimension | What it shows | Typical checks |
 |---|---|---|
-| Correctness | the change does what it claims, and nothing when it is off | G0 feature off, G1 unit / oracle, startup rejection of unsupported combinations; parity with a reference implementation for a new model, kernel or refactor (§1.1) |
+| Correctness | the change does what it claims, and nothing when it is off | G0 feature off (a change with a switch), G1 unit / oracle, startup rejection of unsupported combinations; parity with a reference implementation for a new model, kernel or refactor (§1.1) |
 | Accuracy | model outputs keep their quality, or lose no more than a declared budget | §1.1 |
 | Performance | the claimed gain exists, and nothing else regresses | gain items and guard items, §1.2 |
-| Stability | no crash, hang or leak, under pressure and over time | G4 stress; a soak (at least 1 h at the target concurrency, memory flat); cancelled requests, oversized inputs, out-of-memory fallback; a restart; injected faults for a feature that spans instances, a network or storage (a timeout, a peer down, a backend unavailable): requests fail cleanly and nothing hangs |
+| Stability | no crash, hang or leak, under pressure and over time | G4, when the task asks (`stability`): the task's performance test at high concurrency on long prompts, run back to back for more than 48 hours, with no crash, hang or failed request and with throughput and memory flat (`validation_doctrine.md`); cancelled requests, oversized inputs, out-of-memory fallback; a restart; injected faults for a feature that spans instances, a network or storage (a timeout, a peer down, a backend unavailable): requests fail cleanly and nothing hangs |
 | Compatibility | other platforms, features and configurations behave as before | the CUDA path untouched by a HIP change (`pr_playbook.md`); the combinations in `composability.md`; the platform matrix the task asks for |
 | Engineering | upstream can take it | lint, tests registered in CI, docs, the PR description (`pr_playbook.md`), upstream CI green, a maintainer's approval |
 | Requirement | the requester's own definition of done | §1.3 |
@@ -48,8 +48,8 @@ Two rules hold across the dimensions:
   `accuracy_script` is measured with it instead, as given, on the sets it measures. A set where a
   question got no answer (a request the server rejected, or one that failed) has no score: the arms
   may miss different questions.
-- **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3),
-  reasoning (GPQA, AIME), tool calls, multimodal input.
+- **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3, when the
+  task asks with `long_context`), reasoning (GPQA, AIME), tool calls, multimodal input.
 - **Parity with a reference**, for a new model, a new kernel or a refactor: logprobs or the KL
   divergence against the reference implementation (Hugging Face, or the model's official one) on a fixed
   prompt set, and the official benchmark scores matched. sglang's own skills do this
@@ -94,7 +94,7 @@ items of every class it belongs to.
 | KV movement and memory tiers | HiCache, KV offload, prefix cache, lossless KV compression | KV read back through the reload path byte-identical with what was written (or with a recompute); hit counters per tier; a reuse workload whose working set exceeds HBM; equal HBM; a full pool evicting under load; an unavailable storage backend falling back to recompute |
 | Distributed and multi-instance serving | PD disaggregation, multi-node TP / PP / EP, DP attention, routers, elastic scaling | accuracy (G2) within 1 point of serving on one instance, also with different TP sizes on the two sides; equal GPU count; an arrival-rate sweep with the SLA throughput; the transfer's share of TTFT; scaling efficiency over node counts; injected faults (a timeout, a peer down, a cancellation mid-transfer); the topology and transfer-backend matrix |
 | Model support | a new architecture, a multimodal model | parity with the reference implementation; the official benchmark scores; the tokenizer, chat template, tool-call and reasoning parsers; every parallelism and checkpoint precision the model card lists |
-| Sampling and speculative decoding | samplers, draft verification, draft models | the accept length reported; a distribution test at a temperature above 0 when the goal claims the target distribution is kept exactly (§4); a concurrency sweep, since the gain can turn into a loss at high concurrency; the greedy and the sampled paths both |
+| Sampling and speculative decoding | samplers, draft verification, draft models | the accept length reported, and for a port whose spec gives it a tolerance, within it of the source's on the source's prompts (G1, `validation_doctrine.md`); a distribution test at a temperature above 0 when the goal claims the target distribution is kept exactly (§4); a concurrency sweep, since the gain can turn into a loss at high concurrency; the greedy and the sampled paths both |
 | Determinism | deterministic inference, batch-invariant kernels | bitwise-identical outputs over repeated runs, batch compositions, concurrency and, where claimed, TP sizes; the cost in throughput |
 | API and protocol | OpenAI-compatible API, structured output, function calling, streaming, logprobs, multi-LoRA | contract tests of the API; structured outputs valid against their schema; streaming equal to non-streaming; the official client SDK working; the overhead of constrained decoding; adapters switched under load |
 | Scheduling | priority, preemption, chunked-prefill policy, overlap scheduling | P99 under mixed and bursty traffic; fairness between long and short requests; no request starving; accuracy (G2) within 1 point with preemption or retraction forced |
@@ -114,7 +114,7 @@ extra items of its feature classes (§1.4).
 | Correctness | required | required; the reproduction becomes a regression test | required; the failing test passes on every lane it failed on | required | required |
 | Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | when the issue is an accuracy loss | no regression | required, as for a feature (§1.1) | on the requester's data set |
 | Performance | when the feature claims a gain | when the issue is a performance problem: the reported number comes back | — | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
-| Stability | required (G4) | when the issue is a crash or hang | a flaky test passes repeatedly (§4) | when the change touches memory or scheduling | required, with a soak |
+| Stability | when the task asks (`stability`, G4) | when the task asks (`stability`, G4); a reported crash or hang is judged by its reproduction | a flaky test passes repeatedly (§4) | when the task asks (`stability`, G4) | when the requester asks (`stability`, G4) |
 | Compatibility | required | required | required | required | the requester's platforms |
 | Engineering | required | required | required | required | when the change goes upstream |
 | Requirement | — | when a requester reported it: the reporter confirms the fix | — | when a requester asked for it | required; the requirement owner signs off |
@@ -122,8 +122,9 @@ extra items of its feature classes (§1.4).
 A scan changes no code; its daily report has its own checks (`scripts/daily_report.py check`).
 
 **Strictness.** Every item is either blocking or report-only, decided when the matrix is fixed. A P0
-hotfix may ship on the minimal set: the reproduction passes, G0 holds, accuracy and the guard workloads
-are not worse. The rest of its profile becomes follow-up items, listed in the report.
+hotfix may ship on the minimal set: the reproduction passes, the existing tests of the modules it
+touches still pass (and G0 holds, when it is behind a feature's switch), accuracy and the guard
+workloads are not worse. The rest of its profile becomes follow-up items, listed in the report.
 
 ## 3. An acceptance item
 
@@ -157,8 +158,8 @@ this form after the fact:
 - **Runs:** each accuracy set once per arm; performance one A/B round, one timed run per arm after a
   warm-up (`perf_evaluation.md` §3). A result that misses its expectation (accuracy below its budget,
   no performance gain) is reproduced at most twice, so three results at most, and the verdict is their
-  median. Failure rates at least 4 per configuration (`validation_doctrine.md`); a flaky test passes
-  in every one of at least 10 runs.
+  median. Failure rates at least 4 per configuration (`validation_doctrine.md`); G4 one run of more
+  than 48 hours; a flaky test passes in every one of at least 10 runs.
 - **Distribution tests** (a goal that claims a sampler or a verification change keeps the target
   distribution exactly): per tested prompt, compare the sampled tokens with the target distribution
   using a stated test, sample size and significance level, e.g. a chi-square test on at least 10,000

@@ -40,7 +40,7 @@ function makeBackend(overrides) {
     const key = `${m[1]}:${m[2]}`;
     const n = (counts[key] = (counts[key] || 0) + 1);
     const ins = parseInputs(prompt);
-    calls.push({ key, n, ins, model, prompt });
+    calls.push({ key, n, ins, model, prompt, at: Date.now() });
     const contract = /## Output contract[\s\S]*?```json\n([\s\S]*?)\n```/.exec(prompt);
     if (contract) CONTRACTS.set(key, JSON.parse(contract[1]).required || []);
     const f = (overrides && overrides[key]) || DEFAULTS[key];
@@ -57,7 +57,7 @@ const asWorkflowTool = (rt, args) => new AsyncFunction('agent', 'parallel', 'pip
   scriptBody(readFileSync(SCRIPT, 'utf8')))(rt.agent, rt.parallel, rt.pipeline, rt.phase, rt.log,
   async () => { throw new Error('workflow(): not used'); }, args, { total: null, spent: () => 0, remaining: () => Infinity });
 
-async function run(args, overrides, { control, workflowTool } = {}) {
+async function run(args, overrides, { control, workflowTool, schemaRetries = 0 } = {}) {
   const phases = [];
   const heads = [];
   const lines = [];
@@ -66,7 +66,7 @@ async function run(args, overrides, { control, workflowTool } = {}) {
   const rt = createRuntime({
     backend,
     concurrency: 2,
-    schemaRetries: 0,
+    schemaRetries,
     ...(control ? { control } : {}),
     log: (msg) => {
       lines.push(msg);
@@ -305,7 +305,7 @@ const scenarios = [
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'ACC-3 simple_qa', blocking: false }] }),
     });
     check(!r.keys.includes('investigator:investigate'), 'no investigation for a report-only miss');
-    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'pass' && /report-only items missed: ACC-3 simple_qa/.test(p.summary)),
+    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'pass' && /missed without blocking: ACC-3 simple_qa/.test(p.summary)),
       'the miss is in the Verify note');
     const mixed = await run({ mode: 'feature', task: 't', max_investigate_rounds: 1 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }, { gate: 'ACC-3', blocking: false }] }),
@@ -314,6 +314,30 @@ const scenarios = [
     check(mixed.result.status === 'blocked' && mixed.result.stopped_at === 'Verify', `a blocking miss still fails: ${mixed.result.status}`);
     const inv = mixed.calls.find((c) => c.key === 'investigator:investigate');
     check(inv && eqList(inv.ins.failures.map((f) => f.gate), ['G2']), 'the investigator gets the blocking failures only');
+  }],
+  ['feature: a G4 failure the baseline shares is recorded once, then reported as failed without blocking', async () => {
+    const r = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' }, {
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { all_pass: false, gates: { G4: 'fail' },
+          failures: [{ gate: 'G4', failure_class: 'crash', counts: 'feature: hour 31; baseline control: hour 27' }] }
+        // not blocking only once the known issue has reached the verify engineer: without it, a second investigation
+        : { all_pass: false, gates: { G4: 'fail on 1a2b3c4: the baseline too (KI-009)' },
+          failures: [{ gate: 'G4', failure_class: 'crash', blocking: !(ins.known_issues || []).some((k) => k.id === 'KI-009') }] }),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-009', title: 'the server does not hold the load' },
+        summary: 'the control in the ledger failed the same way' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    check(r.keys.filter((k) => k === 'verify_engineer:verify').length === 2
+      && r.keys.filter((k) => k === 'investigator:investigate').length === 1, 'one investigation, then one round that does not block');
+    const inv = r.calls.find((c) => c.key === 'investigator:investigate');
+    check(inv && inv.ins.failures.length === 1 && inv.ins.failures[0].gate === 'G4' && inv.ins.failures[0].counts.includes('baseline control'),
+      'the investigator gets the failure with what its control showed');
+    const second = r.calls.filter((c) => c.key === 'verify_engineer:verify')[1];
+    check(second && (second.ins.known_issues || []).some((k) => k.id === 'KI-009'), 'the next round is given the known issue');
+    check(r.result.known_issues.length === 1 && r.result.known_issues[0].id === 'KI-009' && r.keys.includes('issue_triager:spinoff'),
+      'the known issue is recorded, and someone hears of it');
+    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'pass' && /missed without blocking: G4/.test(p.summary)),
+      'the Verify note says G4 failed');
   }],
   ['feature: a verify round that would not fit says what it needs and runs again with it, once; nobody chooses a time', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
@@ -335,17 +359,196 @@ const scenarios = [
     });
     check(failing.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'a blocking failure is no reason to ask for time');
   }],
+  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
+    // The first answer of each, 300 ms late, is one InferPilot cannot use.
+    const once = (key) => async (ins, n) => {
+      if (n > 1) return DEFAULTS[key](ins, n);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return {};
+    };
+    const keys = ['test_engineer:unit', 'verify_engineer:verify', 'director:spec'];
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000, agent_retries: 2 },
+      Object.fromEntries(keys.map((k) => [k, once(k)])), { schemaRetries: 1 });
+    for (const key of keys.slice(0, 2)) {
+      const [first, again] = r.calls.filter((c) => c.key === key);
+      check(first && again && !first.prompt.includes('This is attempt') && again.prompt.includes('This is attempt 2: an earlier attempt '
+        + 'of this call failed and may have left work behind') && !again.prompt.includes('An earlier session of this same request'),
+        `${key}: not asked again by the engine but by the call's next attempt, which checks first what the one before left`);
+      check(first && again && again.ins.time_limit_min === 120
+        && Date.parse(again.ins.deadline_utc) - Date.parse(first.ins.deadline_utc) >= 250,
+        `${key}: with a limit of its own: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
+    }
+    const [spec, specAgain] = r.calls.filter((c) => c.key === 'director:spec');
+    check(spec && specAgain && specAgain.prompt.startsWith(spec.prompt) && specAgain.prompt.includes('An earlier session of this same request')
+      && specAgain.prompt.includes('never start a second server'),
+      'a role the engine asks again is told that the session before may have left work behind');
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+  }],
+  ['feature: a gate with no answer from any attempt leaves its package and its GPUs to a human, as one that timed out does', async () => {
+    const lead = { title: 'tokenizer test fails on main', observed: '3/3 KeyError', reproduce: 'pytest test_tokenizer.py' };
+    const leading = (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`,
+      unit_test_cmd: 'pytest -q t.py', leads: [lead] });
+    const unit = await run({ mode: 'feature', task: 't', confirm_leads: true },
+      { 'implementer:implement': leading, 'test_engineer:unit': () => ({}) });
+    const impl = unit.keys.filter((k) => k.startsWith('implementer:'));
+    check(unit.result.status === 'blocked' && impl.length === 1 && impl[0] === 'implementer:implement',
+      `a unit gate with no answer gets no further round and no rollback: ${impl}`);
+    const usp = unit.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(usp && usp.ins.confirm_leads === false && (usp.ins.confirm_skipped || []).includes('the unit gate of WP1 may have left runs going')
+      && (unit.result.next.user || []).some((u) => u.includes('returned no answer: commit c_WP1 stays in the worktree')),
+      `no lead is checked on its GPUs, and a human is told to stop what it left: ${JSON.stringify(usp && usp.ins.confirm_skipped)}`);
+    const ver = await run({ mode: 'feature', task: 't', confirm_leads: true },
+      { 'implementer:implement': leading, 'verify_engineer:verify': () => ({}) });
+    const vsp = ver.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(ver.result.status === 'blocked' && vsp && vsp.ins.confirm_leads === false
+      && (vsp.ins.confirm_skipped || []).includes('Verify round 0 may have left its servers running')
+      && (ver.result.next.user || []).some((u) => u.includes('Verify round 0 returned no answer and may have left its servers running')),
+      `nor after a Verify round with no answer: ${ver.result.status} ${JSON.stringify(vsp && vsp.ins.confirm_skipped)}`);
+  }],
+  ['kernel: an integration whose unit gate has no answer stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => (ins.work_package.id === 'K-K-WP1' ? {} : DEFAULTS['test_engineer:unit'](ins)) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
+  ['kernel: the hand-offs after one whose integration is held are recorded, not left without a status', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'test_engineer:unit': (ins) => (ins.work_package.id === 'K-O2' ? {} : DEFAULTS['test_engineer:unit'](ins)) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integration_held' && byId.O4 === 'recorded', `statuses ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 1, 'the back end is not run on a hand-off after the held one');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase says so: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: a hand-off an integration raised is recorded too when one is held, not only those the stage began with', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+        kernel_handoff: { op_spec_path: `${RUN}/handoffs/K-${ins.work_package.id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } }),
+      'test_engineer:unit': (ins) => (ins.work_package.id === 'K-O4' ? {} : DEFAULTS['test_engineer:unit'](ins)) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integrated' && byId.O4 === 'integration_held', `statuses ${JSON.stringify(byId)}`);
+    check(byId['K-K-O2'] === 'recorded' && byId['K-K-O4'] === 'recorded',
+      `the one an earlier integration raised and the held one's own: ${JSON.stringify(byId)}`);
+    check(r.result.handoffs.every((h) => h.status), `none is left without a status: ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 2, 'the back end is not run on them');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /K-K-O2, K-K-O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase names them: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: an integration whose unit gate has no answer stops the run also from a Verify fix, a review change or a kernel retry', async () => {
+    const heldFor = (id) => (ins) => (ins.work_package.id === id ? {} : DEFAULTS['test_engineer:unit'](ins));
+    const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+      kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
+    const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
+    const fix = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(fix.result.status === 'blocked' && verifies(fix) === 1 && !fix.keys.includes('implementer:rollback')
+      && fix.result.handoffs[0].status === 'integration_held', `a Verify fix's kernel: Verify ran ${verifies(fix)} time(s), ${JSON.stringify(fix.result.handoffs)}`);
+    check(fix.result.stopped_at === 'Kernel' && fix.result.next.say.includes(' at Kernel'),
+      `a Verify fix's kernel stops the run at Kernel: ${fix.result.stopped_at}; ${fix.result.next.say}`);
+    const review = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('RV1'),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }], work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+      'test_engineer:unit': heldFor('K-K-RV1'),
+    });
+    check(review.result.status === 'blocked' && review.result.stopped_at === 'Kernel' && verifies(review) === 1,
+      `a review change's kernel: ${review.result.status} at ${review.result.stopped_at}, Verify ran ${verifies(review)} time(s)`);
+    const afterReview = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'reviewer:review': () => ({ verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }],
+        work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: true, failures: [] } : { all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(afterReview.result.status === 'blocked' && afterReview.result.stopped_at === 'Kernel' && verifies(afterReview) === 2,
+      `the kernel of a Verify fix after a review change: ${afterReview.result.status} at ${afterReview.result.stopped_at}, Verify ran ${verifies(afterReview)} time(s)`);
+    let kernelGates = 0;
+    let kernelCommits = 0;
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const retry = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': (ins) => ({ ...implement(ins),
+        ...(ins.work_package.id === 'K-K-WP1' && ++kernelCommits > 1 ? { commit: 'c_K-K-WP1_retry' } : {}) }),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle' }),
+      'test_engineer:unit': (ins) => heldFor(ins.work_package.id === 'K-K-WP1' && ++kernelGates > 1 ? 'K-K-WP1' : '')(ins),
+    });
+    check(retry.result.status === 'blocked' && verifies(retry) === 1 && retry.result.handoffs[0].status === 'integration_held'
+      && retry.keys.filter((k) => k === 'implementer:rollback').length === 1,
+      `a kernel handed back: Verify ran ${verifies(retry)} time(s), ${JSON.stringify(retry.result.handoffs[0])}`);
+    check(retry.result.handoffs[0].commit === 'c_K-K-WP1_retry',
+      `the held hand-off names the commit left on the branch, not the reverted one: ${retry.result.handoffs[0].commit}`);
+    check(retry.result.stopped_at === 'Kernel', `a kernel handed back stops the run at Kernel: ${retry.result.stopped_at}`);
+  }],
   ['feature: a timeout the user gave stays the verify limit; a round that needs more stops the run with how long it needs', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 7200000 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
     });
     const ver = r.calls.filter((c) => c.key === 'verify_engineer:verify');
     check(ver.length === 1 && ver[0].ins.time_limit_min === 120, `one call, told 120 min: ${ver.map((c) => c.ins.time_limit_min)}`);
+    const unit = r.calls.find((c) => c.key === 'test_engineer:unit');
+    check(unit && unit.ins.time_limit_min === 120, `the test engineer is told its limit too: ${unit && unit.ins.time_limit_min}`);
+    const ends = unit && Date.parse(unit.ins.deadline_utc);
+    check(Math.abs(ends - (unit.at + 120 * 60000)) < 5000, `and the moment it ends: ${unit && unit.ins.deadline_utc}`);
+    const unlimited = await run({ mode: 'feature', task: 't', agent_timeout_ms: 0 });
+    check(unlimited.calls.filter((c) => /^(test|verify)_engineer:(unit|verify)$/.test(c.key)).every((c) => !('deadline_utc' in c.ins)),
+      'no limit, no deadline');
+    const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
+      && unitDoc.includes('the gate fails, and `failure_summary` names the check, how far it got and its log'),
+      'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
+    check(unitDoc.includes('poll each server until it is up, each run that ends by itself (a suite, a driver) until it has its exit '
+      + 'status (`<log>.exit`), and every check until it has its result')
+      && unitDoc.includes('A run whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it wrote'),
+      'the gate waits for a server to be up and for each run\'s exit status; a run that exits otherwise than 0, or with none, fails its check');
+    check(unitDoc.includes('a control of step 3, which must fail, runs from a driver that exits 0 only when the test fails the way it should')
+      && unitDoc.includes('A server stopped once the checks that use it are done has failed nothing'),
+      'neither a control that must fail nor a server stopped when its checks are done fails the gate');
+    check(unitDoc.includes('Before you return, whatever the gate\'s result, stop every server and run this call started, '
+      + 'all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...` (`env_hygiene.md`, *Servers*, Killing), until it exits 0')
+      && unitDoc.includes('One you cannot stop fails the gate'),
+      'the test engineer stops what it started before every return, and a gate whose runs cannot be stopped fails');
+    const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
+    check(verifyDoc.includes('30 minutes before `deadline_utc`') && unitDoc.includes('count from the deadline'),
+      'both engineers count from the deadline');
+    check(verifyDoc.includes('Before you return, whatever the round\'s result, `needs_min` included, stop every server and suite '
+      + 'this round started, all in one command, `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...`')
+      && verifyDoc.includes('a round asked for again after `needs_min` starts at once, with no GPU check before it'),
+      'the verify engineer stops what it started before every return, a round that asks for more time too');
+    check(unitDoc.includes('for stopping what the call started, the ledger and the answer')
+      && unitDoc.includes('with a reserve under 90 seconds, give it a third of the reserve')
+      && verifyDoc.includes('with less than 90 seconds to `deadline_utc`, give it a third of them'),
+      'the reserve covers the stop, and a short one gives the stop a grace that fits it');
+    const freed = (doc, call) => doc.includes('Its exit 0 is confirmed on the GPUs, `python3 <inferpilot_dir>/scripts/gpu_status.py '
+      + `--check <gpu_ids>\` before the ${call}'s first launch and again after the stop (*Killing*): a GPU idle before and in use `
+      + `after is one the ${call} still holds`);
+    check(freed(unitDoc, 'call') && unitDoc.includes('and so does a GPU the call still holds: `failure_summary` names it')
+      && freed(verifyDoc, 'round') && verifyDoc.includes('`summary` names one you cannot stop, and a GPU the round still holds'),
+      'a stop that exits 0 is confirmed on the GPUs: one idle before the first launch and in use after the stop fails the gate, or is named');
+    check(unitDoc.includes('with `container` set, launched, polled and stopped in that container')
+      && verifyDoc.includes('with `container` set, launched, polled and stopped in that container'),
+      'with a container, both engineers launch, poll and stop there');
     check(r.result.status === 'blocked' && r.result.phases.some((p) => p.phase === 'Verify'
       && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), `status ${r.result.status}`);
     const told = async (ms) => (await run({ mode: 'feature', task: 't', agent_timeout_ms: ms })).calls
       .find((c) => c.key === 'verify_engineer:verify').ins.time_limit_min;
     check(await told(0) === 0 && await told(20000) === 1, 'no limit reads 0, and a short one never does');
+    const quick = (await run({ mode: 'feature', task: 't', agent_timeout_ms: 10000 })).calls.find((c) => c.key === 'test_engineer:unit');
+    check(quick && quick.ins.time_limit_min === 0.17,
+      `a unit limit under a minute is told as it is, so that its reserve starts within it: ${quick && quick.ins.time_limit_min}`);
   }],
   ['feature: when the task\'s client does not run the source\'s scenarios, the run stops at Spec and asks; nothing is built', async () => {
     const gap = "vLLM's PR measured 256-token answers at concurrency 1; the task's client runs 8k in / 1k out.";
@@ -995,12 +1198,130 @@ const scenarios = [
     const early = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': () => null });
     check(!early.keys.includes('issue_triager:reply'), 'no triage, no reply to rewrite');
   }],
+  ['issue: the reviewer checks the reply draft against the run; what it finds is rewritten once, and what is left the user hears of', async () => {
+    const clean = await run({ mode: 'issue', task: 'i' });
+    const chk = clean.calls.find((c) => c.key === 'reviewer:reply');
+    check(chk && chk.ins.reply_draft_path === `${RUN}/reply_draft.md` && chk.ins.status === 'ready_for_review',
+      'the reviewer reads the rewritten draft and how the run ended');
+    check(clean.keys.indexOf('reviewer:reply') > clean.keys.indexOf('issue_triager:reply')
+      && clean.keys.indexOf('reviewer:reply') < clean.keys.indexOf('director:report'), 'after the draft, before the report');
+    check(!chk.prompt.includes('Return it in\n`leads`'), 'a closing phase hands on no leads');
+    check(clean.result.next.user.some((u) => u.startsWith('post the reply draft on the issue:')), 'a clean draft is the user\'s to post');
+    const finding = { claim: 'a human reviewed the fix', issue: 'nobody did: the PR is a draft for review', evidence: 'run.json' };
+    const fixed = await run({ mode: 'issue', task: 'i', review_model: 'other-model' }, {
+      'reviewer:reply': (ins, n) => ({ findings: n === 1 ? [finding] : [], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }),
+    });
+    const rewrite = fixed.calls.filter((c) => c.key === 'issue_triager:reply')[1];
+    check(rewrite && JSON.stringify(rewrite.ins.reply_findings).includes('a human reviewed the fix'), 'the findings go back to the triager');
+    check(fixed.calls.filter((c) => c.key === 'reviewer:reply').map((c) => c.model).join() === 'other-model,other-model',
+      'review_model reaches the reply check too');
+    check(fixed.result.reply_draft_path === `${RUN}/reply_draft_2.md` && fixed.result.next.user.some((u) => u.startsWith('post the reply draft')),
+      `the rewritten draft, checked clean: ${fixed.result.reply_draft_path}`);
+    check(fixed.result.phases.some((p) => p.phase === 'Reply' && p.verdict === 'checked'), 'the check is in the record');
+    const left = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }) });
+    check(left.keys.filter((k) => k === 'reviewer:reply').length === 2 && left.keys.filter((k) => k === 'issue_triager:reply').length === 2,
+      'one rewrite, checked once more, no further round');
+    const say = (left.result.next.user || []).find((u) => u.includes('reply draft'));
+    check(say && say.startsWith('read the reply draft against what the run showed before posting it') && say.includes('nobody did'),
+      `what is left reaches the user: ${say}`);
+    const unchecked = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => null });
+    const u = (unchecked.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(unchecked.result.status === 'ready_for_review' && u && u.includes('not checked'), `a draft nobody checked is not offered for posting as is: ${u}`);
+    const blocked = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
+    });
+    check(blocked.result.stopped_at === 'Verify' && blocked.keys.includes('reviewer:reply')
+      && !blocked.result.next.say.includes('only what the run showed'),
+      `next.say names where the run ended, not the reply check after it: ${blocked.result.next.say}`);
+    const replyLine = (r) => (r.result.next.user || []).find((x) => x.includes('reply draft'));
+    const doc = (role) => phaseSection(readFileSync(path.join(INFERPILOT, 'roles', `${role}.md`), 'utf8'), 'reply').replace(/\s+/g, ' ');
+    check(doc('reviewer').includes('no promised date (a date the run recorded, such as an image tag\'s, is a fact'),
+      'a date the run recorded is told; only a promised one is out');
+    const noRecord = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: ' ' }) }));
+    check(noRecord && !noRecord.startsWith('post the reply draft') && noRecord.includes('wrote no reply_check.md'),
+      `a check that wrote no record of itself is none: ${noRecord}`);
+    const stale = replyLine(await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': (ins, n) => (n === 1 ? { findings: [finding], check_path: `${RUN}/reply_check.md` } : { findings: [], check_path: '' }),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }) }));
+    check(stale && stale.includes('wrote no reply_check.md') && !stale.includes(`(${RUN}/reply_check.md)`),
+      `the first round's record is not given for the second check: ${stale}`);
+    const claimless = await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [{ claim: '', issue: 'the ledger has 2/2, the draft 3/3' }], check_path: `${RUN}/reply_check.md` }) });
+    const cl = replyLine(claimless);
+    check(claimless.keys.filter((k) => k === 'issue_triager:reply').length === 2 && cl && !cl.startsWith('post the reply draft')
+      && cl.includes('a claim the reviewer did not quote: the ledger has 2/2'), `a finding that quotes no claim is a finding still: ${cl}`);
+    const blank = await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [{ claim: '', issue: '', evidence: 'experiment_ledger.md, Unit tests' }], check_path: `${RUN}/reply_check.md` }) });
+    const bl = replyLine(blank);
+    check(blank.keys.filter((k) => k === 'issue_triager:reply').length === 2 && bl && !bl.startsWith('post the reply draft')
+      && bl.includes('a claim the reviewer did not quote: the reviewer did not say what the run shows (its evidence: experiment_ledger.md, Unit tests)'),
+      `a finding with neither claim nor issue is a finding still, not a clean check: ${bl}`);
+    check(blank.result.reply_findings.length === 1 && blank.result.reply_findings[0].evidence === 'experiment_ledger.md, Unit tests',
+      'and what it did give is kept');
+    for (const [given, what] of [['not written', 'words that are no path'], [`${RUN}/reply_draft.md`, 'the draft\'s own path'],
+      [`${RUN}/../other_run/reply_check.md`, 'another run\'s record']]) {
+      const elsewhere = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: given }) }));
+      check(elsewhere && !elsewhere.startsWith('post the reply draft') && elsewhere.includes(`gave ${given} as its record, which is not this run's reply_check.md`)
+        && !elsewhere.includes(`(${given})`), `${what} as check_path is no record of this run's check: ${elsewhere}`);
+    }
+    const slashes = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: `${RUN}//reply_check.md ` }) }));
+    check(slashes && slashes.startsWith('post the reply draft'), `the record's path written with a doubled slash is the record still: ${slashes}`);
+    const recheck = (second) => run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, {
+      'reviewer:reply': (ins, n) => (n === 1 ? { findings: [finding], check_path: `${RUN}/reply_check.md` } : second()),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }) });
+    for (const [second, what] of [[() => null, 'returned nothing'],
+      [async () => { await new Promise((r) => setTimeout(r, 400)); return { findings: [], check_path: `${RUN}/reply_check.md` }; }, 'timed out']]) {
+      const gone = replyLine(await recheck(second));
+      check(gone && gone.includes('not checked since it was rewritten: the reviewer returned nothing') && gone.includes(`${RUN}/reply_draft_2.md`)
+        && !gone.includes('reply_check.md'), `a second check that ${what} does not leave the first draft's record beside the rewritten one: ${gone}`);
+    }
+    check(doc('reviewer').includes('with any other value the draft counts as not checked') && doc('reviewer').includes('Every entry of `findings` is a finding'),
+      'the reviewer is told what its record\'s path and an empty finding mean');
+    const halfway = replyLine(await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': (ins, n) => (n === 1 ? { reply_draft_path: `${RUN}/reply_draft.md` } : null) }));
+    check(halfway && halfway.includes('nobody did') && halfway.includes('rewritten halfway') && !halfway.includes('still be writing'),
+      `a rewrite that returned nothing may have left the draft half done: ${halfway}`);
+    const writing = replyLine(await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, {
+      'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': async (ins, n) => {
+        if (n > 1) await new Promise((r) => setTimeout(r, 400));
+        return { reply_draft_path: `${RUN}/reply_draft.md` };
+      } }));
+    check(writing && writing.includes('issue_triager:reply#fix timed out and may still be writing it: stop it before reading or posting'),
+      `a rewrite that timed out may be writing the draft still: ${writing}`);
+    const cause = await run({ mode: 'issue', task: 'i' }, {
+      'investigator:diagnose': () => ({ verdict: 'baseline_bug', root_cause: 'pre-existing on main', known_issue: { id: 'KI-008' } }) });
+    const cr = cause.calls.find((c) => c.key === 'reviewer:reply');
+    const ct = cause.calls.find((c) => c.key === 'issue_triager:reply');
+    check(cause.result.known_issues.length === 1 && cause.result.known_issues[0].cause_of_this_issue === true
+      && cr && cr.ins.known_issues[0].cause_of_this_issue === true,
+      'the baseline bug Diagnose found is marked as the issue\'s own cause');
+    check(ct && doc('reviewer').includes('the one with `cause_of_this_issue` is what Diagnose found the issue\'s own failure to be')
+      && doc('issue_triager').includes('The one with `cause_of_this_issue` is the exception'),
+      'the reply explains the issue\'s own cause as that, and the check does not flag it');
+  }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
     });
     check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `status ${r.result.status}`);
     check(!r.keys.includes('issue_triager:reply') && r.result.reply_draft_path === `${RUN}/reply.md`, 'the Triage draft is the reply');
+    const u = (r.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(u && !u.startsWith('post the reply draft') && u.includes('ended at Triage'), `a draft no reviewer checked is not offered as is: ${u}`);
+    const noRewrite = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:reply': () => null });
+    const v = (noRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(!noRewrite.keys.includes('reviewer:reply') && v && !v.startsWith('post the reply draft')
+      && v.includes('an earlier one or one rewritten halfway') && !v.includes('still be writing'),
+      `a draft the rewrite returned nothing for is not offered as is: ${v}`);
+    const slowRewrite = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'issue_triager:reply': async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { reply_draft_path: `${RUN}/reply_draft.md` };
+    } });
+    const w = (slowRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(!slowRewrite.keys.includes('reviewer:reply') && w && w.includes('issue_triager:reply timed out and may still be writing it'),
+      `nothing checks or posts a draft a timed-out rewrite may still be writing: ${w}`);
   }],
   ['issue: close_fixed that no longer reproduces', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
@@ -1189,6 +1510,22 @@ const scenarios = [
     check(sp && sp.ins.held_out === true && sp.ins.guards === true && sp.ins.sweep === true, 'on for the spec when the task sets them');
     const ar = asked.calls.find((c) => c.key === 'architect:design');
     check(ar && ar.ins.tune === true, 'tune reaches the architect, which adds a tuning package only then');
+  }],
+  ['feature: long_context and stability are off by default, and every role sees them', async () => {
+    const plain = await run({ mode: 'feature', task: 't' });
+    const off = ['director:spec', 'verify_engineer:verify', 'investigator:investigate', 'reviewer:review']
+      .map((k) => plain.calls.find((c) => c.key === k)).filter(Boolean);
+    check(off.length >= 3 && off.every((c) => c.ins.long_context === false && c.ins.stability === false),
+      `off for every role: ${JSON.stringify(off.map((c) => [c.key, c.ins.long_context, c.ins.stability]))}`);
+    check(!('long_context' in plain.result.task_def) && !('stability' in plain.result.task_def), 'and not in the definition the run records');
+    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh' });
+    const sp = asked.calls.find((c) => c.key === 'director:spec');
+    const ve = asked.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sp && sp.ins.long_context === true && sp.ins.stability === true, 'on for the spec when the task sets them');
+    check(ve && ve.ins.long_context === true && ve.ins.stability === true, 'on for the verify engineer, which runs G3 and G4 only then');
+    const one = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' });
+    const ov = one.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ov && ov.ins.stability === true && ov.ins.long_context === false, 'each on its own');
   }],
   ['perf: measured win to a PR', async () => {
     const r = await run({ mode: 'perf', task: 'p', apply_prs: ['#46329'] });
@@ -1568,6 +1905,16 @@ const scenarios = [
     check(asks(await run({ mode: 'magic', task: 't' }), 'mode'), 'unknown mode asked');
     check(asks(await run({ mode: 'issue' }), 'task'), 'missing task asked');
     check(asks(await run({ mode: 'issue', task: 't', framework: 'vllm', framework_dir: '' }), 'framework_dir'), 'missing checkout asked');
+    check(asks(await run({ mode: 'issue', task: 't', client_script: '/s/client.sh', stability: 'yes' }), 'stability'),
+      'a gate field that is neither true nor false is asked about, not read as off');
+    check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
+    check(asks(await run({ mode: 'issue', task: 't', stability: true }), 'client_script'), 'G4 without the client it runs asked');
+    const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
+    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
+    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });
+    const g4verify = g4.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(g4.result.status !== 'needs_input' && g4verify && g4verify.ins.stability === true && g4verify.ins.long_context === false,
+      `true and false as words or values start the run: ${g4.result.status}`);
     const image = await run({ mode: 'issue', task: 't', framework_dir: '' });
     const setupIns = image.calls.find((c) => c.key === 'director:setup').ins;
     check(setupIns.framework_dir === '/sgl-workspace/sglang', `sglang defaults to the image's checkout: ${setupIns.framework_dir}`);
@@ -1628,6 +1975,35 @@ const scenarios = [
       'intake:define': () => ({ status: 'ready', task_def: { mode: 'feature', task: 'something else', framework_dir: '/tmp/sglang', model_path: '/m' }, questions: [] }),
     });
     check(r.result.mode === 'issue' && r.result.task_def.task.endsWith('/38849'), `mode ${r.result.mode}, task ${r.result.task_def.task}`);
+  }],
+  ['intake: a gate the request asks for is kept beside a goal the caller gave', async () => {
+    const r = await run({ request: 'port this PR and run the 48-hour stability test', mode: 'feature', task: 't', goal: '20% faster',
+      client_script: '/s/client.sh' }, {
+      'intake:define': () => ({ status: 'ready', questions: [],
+        task_def: { mode: 'feature', task: 't', goal: 'the port passes its gates', stability: true } }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ve && ve.ins.goal === '20% faster' && ve.ins.stability === true && ve.ins.long_context === false,
+      `the caller's goal, and the gate the request asked for: ${JSON.stringify(ve && [ve.ins.goal, ve.ins.stability, ve.ins.long_context])}`);
+    check(r.result.task_def.goal === '20% faster' && r.result.task_def.stability === true, 'both are in the definition the run records');
+    const off = await run({ request: 'port this PR and run the 48-hour stability test', mode: 'feature', task: 't', stability: false }, {
+      'intake:define': () => ({ status: 'ready', questions: [], task_def: { mode: 'feature', task: 't', stability: true } }),
+    });
+    const ov = off.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ov && ov.ins.stability === false, 'a field the caller set still wins over the intake');
+  }],
+  ['intake: a gate field the intake fills with another word than true or false is asked for again, never read as off', async () => {
+    const answers = [];
+    const r = await run({ request: 'port this PR and run the stability test', mode: 'feature', task: 't', client_script: '/s/client.sh' }, {
+      'intake:define': (ins, n) => {
+        answers.push(n === 1 ? 'yes' : true);
+        return { status: 'ready', questions: [], task_def: { mode: 'feature', task: 't', stability: answers[answers.length - 1] } };
+      },
+    }, { schemaRetries: 1 });
+    check(answers.length === 2 && answers[0] === 'yes', `"yes" does not match the schema, and the intake answers again: ${JSON.stringify(answers)}`);
+    const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ve && ve.ins.stability === true, 'the gate the request asked for is on');
   }],
   ['intake: a request outside InferPilot is rejected with what to do instead', async () => {
     const r = await run({ request: 'push my branch and comment on the PR' }, {

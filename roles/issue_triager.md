@@ -149,8 +149,13 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, `resume_from`, and 
      exact information or test that would move it on.
    - `blocked`, `stopped`: what was done so far, without a conclusion.
    A failure the run found on the baseline as well (`known_issues`) is reported as what was seen and
-   where, not as part of this issue; whether it gets an issue of its own is the human's call.
+   where, not as part of this issue; whether it gets an issue of its own is the human's call. The one
+   with `cause_of_this_issue` is the exception: Diagnose found it to be the reported failure itself, on
+   the baseline already, and the reply explains it as the cause.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
+3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
+   `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they
+   name to what the run shows, or drop it, change nothing else, and update the triage record to match.
 
 Return:
 

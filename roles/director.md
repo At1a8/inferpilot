@@ -121,7 +121,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
-   `RUN_DIR/logs/<tag>_<time>.log` with the same UTC time; poll the health endpoint; read the effective
+   `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
+   *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
    template's or the cookbook's flags.
@@ -297,7 +298,11 @@ Return:
    client.** Its claim is a gain beyond the noise band there, with the source's numbers beside it for
    reference: the hardware differs, and so may the size of the gain. The feature's own metric, which the
    hardware does not change (accept length for speculative decoding), stays within a tolerance of the
-   source's that the spec names.
+   source's that the spec names. It is a G1 criterion (`validation_doctrine.md`): the spec gives the
+   source's value and the source's prompt set and settings for it, and the test of the work package
+   that completes the feature's path judges it there, not G2 on its data sets. With no value to compare
+   with (the source reports none, and no reference implementation runs on its prompts), it is no
+   criterion: the spec says so and names no tolerance, and the metric is reported.
    - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
      scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what
@@ -334,6 +339,12 @@ Return:
    A/B round on the task's workload (`perf_evaluation.md` §3). A result that misses is reproduced at
    most twice and judged on the median. The feature's knobs take the values of the target PR or design;
    only with `tune` on are they chosen by measurement (`perf_evaluation.md` §3).
+6. Long context and stability: G3 is a criterion only with `long_context` on, G4 only with `stability`
+   on (`validation_doctrine.md`: G3's needle runs; G4, the run's `client_script` run back to back for
+   more than 48 hours). With its field off, a gate's row says `not run: not asked` and is no criterion;
+   never add one from the kind of change, nor from `goal`. G4's row names the workload it keeps up, the
+   task's at its highest concurrency, and says so when the feature does not engage on it: G4 then shows
+   the server's stability, not the feature path's.
 
 Return:
 
@@ -345,7 +356,8 @@ Return:
  "fallback_client": "/abs/RUN_DIR/scripts/fallback_client.sh | ''"}
 ```
 
-`gates_measurable` is true only when every acceptance criterion names a suite and a threshold.
+`gates_measurable` is true only when every acceptance criterion names a suite and a threshold. The
+feature's own metric with no value to compare it with is reported, and is not a criterion.
 
 ## PHASE=report (every mode, every outcome)
 
@@ -377,6 +389,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
   template server followed, and each rendered parameter's value and source
   (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
+- G4 (`stability`): give its verdict with the commit it ran on (the verify engineer's `gates`, the
+  ledger). It runs once in a run: when the branch's head is a later commit, say near the top that the
+  code handed over has not been through G4, and since which commit. A G4 that failed where the baseline
+  failed too is reported as failed, with the known issue.
 - A Design phase with the verdict `auto_approved` (`auto_approve_design`): no human approved the
   design. Say so near the top, with what the architect wanted a human to review, so the PR's reviewer
   checks it there.
@@ -403,11 +419,15 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   Setup measured nothing: it writes `RUN_DIR/run_report_<n>.md` instead, the first `<n>` from 2 not
   taken, so that `run_report.md` stays the report of the run it resumed, which a later resume reads.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
-  `integration_failed`, `rejected`, `not_integrated`) and package paths. Write `handoffs` and
-  `known_issues` as given to `RUN_DIR/handoffs.json` and `RUN_DIR/known_issues.json`, which a run
-  resumed from Verify restores; a run that stopped at Setup writes neither: it has none of its own, and
-  a resumed one would empty those it was to restore. A `not_integrated` hand-off's back end found a
-  gain that the run, stopped by the control file, never integrated: give its speedup.
+  `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
+  `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
+  the branch, unverified. An empty `commit` is one not reported, not one not made: the implementer's call
+  timed out, and may have committed or still be running, so say that the branch is to be inspected once
+  that call has stopped. Write `handoffs` and `known_issues` as given to `RUN_DIR/handoffs.json` and
+  `RUN_DIR/known_issues.json`, which a run resumed from Verify restores; a run that stopped at Setup
+  writes neither: it has none of its own, and a resumed one would empty those it was to restore. A
+  `not_integrated` hand-off's back end found a gain that the run, stopped by the control file, never
+  integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
