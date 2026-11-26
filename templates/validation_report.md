@@ -81,7 +81,10 @@
        the base, and the fix alone when it had none); every command of an arm, its server, tests,
        reproduction and benchmark client alike, with
        that tree first on PYTHONPATH, and `python -c "import sglang; print(sglang.__file__)"` under the
-       same PYTHONPATH printing a path inside it (`env_hygiene.md`, *The code under test*); the
+       same PYTHONPATH printing a path inside it (`env_hygiene.md`, *The code under test*); for an
+       arm whose change takes effect outside its tree (a package's version, an environment variable a
+       Dockerfile sets), the setup that puts it into effect before the arm's commands, its check, and
+       the image's environment back after them; the
        measurement as the run made it (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
        arm, the same rounds in the same order), its logs under RUN_DIR/rerun/logs; the numbers the PR body
        gives, with the run's spread.

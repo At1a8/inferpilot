@@ -537,6 +537,20 @@ const stopHere = (title) => {
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
 const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
+// A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that
+// component's to fix: the role that found it drafts the issue for its repository, and a human files it
+// (issue_triage.md §5, ci_triage.md §3). Records it, with what the role said besides the root cause (what the
+// reporter can do meanwhile, why no workaround serves), which the reply and the report relay; returns what the
+// answer lacks, or ''.
+function componentCause(found, said) {
+  const component = String((found || {}).component || '').trim().toLowerCase();
+  if (!COMPONENTS.includes(component)) return '';
+  const draft = String(found.component_issue_path || '').trim();
+  if (!draft) return `the root cause is in ${component}, and no issue was drafted for its repository`;
+  C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };
+  return '';
+}
+
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
   ...C,
@@ -723,7 +737,10 @@ const TRIAGE = S({
     type: 'string',
     enum: ['wrong result', 'crash', 'startup or build failure', 'performance', 'feature request', 'CI', 'tool'],
   },
-  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan'] },
+  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
+  duplicate_of: str, // with duplicate: the open issue that has the failure, the original (#<n>)
+  // a report with several problems: the ones this run does not take, each with the task that starts a run on it
+  other_problems: arr(S({ problem: str, task: str, priority: str }, ['problem'])),
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -772,11 +789,22 @@ const CLASSIFY = S({
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
   performance: bool,
   perf_claim: str,
+  // the same for a score the test measures (an accuracy threshold): accuracy_claim is the score the fix must
+  // restore, the set, the model and the value
+  accuracy: bool,
+  accuracy_claim: str,
   evidence: str,
   triage_path: str,
 }, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
 const BISECT = S({ culprit: str, confirmed: bool, work_packages: WPS, evidence: str }, ['culprit', 'confirmed']);
 const BISECT_FIX = S({ fix_commit: str, confirmed: bool, evidence: str }, ['fix_commit', 'confirmed']);
+// A diagnosis and a bisect can both find the root cause in an AMD component outside the framework (aiter, MoRI,
+// ROCm, the ROCm build of PyTorch): which one, and the issue drafted for that component's repository. Only these
+// are components: any other word ("none", a third-party library) would stop a fix of the framework's own.
+const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];
+const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };
+Object.assign(DIAG.properties, COMPONENT_CAUSE);
+Object.assign(BISECT.properties, COMPONENT_CAUSE);
 const PROFILE = S({
   analysis_path: str,
   path_ok: bool,
@@ -1131,6 +1159,12 @@ function nextSteps(status, at) {
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
   }
+  // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
+  if ((R.other_problems || []).length && !out.start) {
+    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
+    out.start = R.other_problems.map((p, i) => ({ rank: i + 1, task: p.problem,
+      args: { inferpilot_dir: INFERPILOT, ...def, mode: 'issue', task: p.task || `${def.task}: ${p.problem}` } }));
+  }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
   if (status === 'queued' && !R.daily_report_url) {
@@ -1147,6 +1181,9 @@ function nextSteps(status, at) {
       : `post the reply draft on the issue: ${R.reply_draft_path}`);
   }
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
+  if (R.component_issue) {
+    user.push(`file the issue draft in ${R.component_issue.component}'s repository, where the root cause is: ${R.component_issue.draft_path}`);
+  }
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   else if (R.knowledge_patch) {
     // The run directory is the task container's own unless exp_root is a host mount, which is not known here.
@@ -1479,6 +1516,19 @@ async function verifyLoop(extraGates) {
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
+    // An accuracy problem is fixed when its score comes back. The verify engineer measures that apart from G2's
+    // gsm8k against the base, as gates.accuracy_claim, and a round is accepted only with its pass, whichever way
+    // the round is accepted (all gates passing, or failures that do not block): not one that left it out or did
+    // not run it (the fix changed a test alone, say its threshold), not one where it failed without blocking.
+    const claimGate = String((v.gates || {}).accuracy_claim || '').trim();
+    // The fix's own gates: what the task is there to fix (the reproduction, the failing test, the score to restore).
+    const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];
+    const own = (fs) => fs.filter((f) => ownGates.includes(String(f.gate || '').trim()));
+    if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
+      note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
+        + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);
+      return { ok: false, reason: 'the accuracy claim is not met' };
+    }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
       note('Verify', 'pass', `${v.summary || 'all blocking gates pass'}${missed ? `; missed without blocking: ${missed}` : ''}`);
@@ -1486,6 +1536,15 @@ async function verifyLoop(extraGates) {
     }
     const failing = blocking.map((f) => `${f.gate}${f.failure_class ? `:${f.failure_class}` : ''}`).join(', ');
     note('Verify', 'fail', failing || v.summary || 'gates failed');
+    // A fix whose change could not be put into effect on this machine (a version that does not install here) was
+    // not measured, and no change to the code repairs that: nothing is investigated, and a human decides.
+    const unset = blocking.filter((f) => String(f.failure_class || '').trim().toLowerCase() === 'environment');
+    if (unset.length) {
+      const why = `the fix's change could not be put into effect on this machine (${unset.map((f) => f.gate).join(', ')}): `
+        + `${unset[0].evidence || unset[0].counts || 'see the round'}; nothing was measured, and a human decides`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     if (round >= MAX_INVESTIGATE) return { ok: false, reason: `investigation budget exhausted (${failing})` };
 
     enter('Investigate');
@@ -1500,6 +1559,14 @@ async function verifyLoop(extraGates) {
     }
     note('Investigate', inv.verdict, inv.summary || '');
     if (inv.verdict === 'baseline_bug') {
+      // What the task is there to fix fails on the base by definition. A gate of the fix's own that still fails
+      // is the fix not fixing, never a known issue: recorded as one, it would be excused in the next round.
+      const mine = own(blocking).map((f) => f.gate);
+      if (mine.length) {
+        note('Investigate', 'fail', `${mine.join(', ')} still fails with the fix as it does on the base: that is the failure the task is `
+          + 'to fix, not a known issue. A human decides: for a score, whether the threshold itself was wrong');
+        return { ok: false, reason: 'the fix does not fix' };
+      }
       if (inv.known_issue) R.known_issues.push(inv.known_issue);
       continue;
     }
@@ -1561,7 +1628,8 @@ const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the no
 // G5 for a fix (validation_doctrine.md). `when` says when a mode measures: true always (a feature, a perf task,
 // a performance problem, whose number must come back whatever its fix changes), 'fix' when the fix changes code
 // the server runs. The verify engineer reads that from the fix's diff, as it does for G2: a fix to tests,
-// documentation or CI files alone is not measured. A fix whose last Verify round did not say so is measured.
+// documentation or CI files alone is not measured. Any other file counts as code the server runs, by its path:
+// whether the server in fact runs it is not judged. A fix whose last Verify round did not say so is measured.
 const NOT_MEASURED = 'not run: no code the server runs changed';
 const unmeasured = (when) => when === 'fix' && C.server_code_changed === false;
 // The claim the reviewer reads: none where G5 did not run.
@@ -1950,6 +2018,15 @@ async function runFeature() {
   return deliver(design.work_packages, [], claimOf(spec.perf_claim, spec.perf_cost), true);
 }
 
+// An issue as a duplicate names it: `#<n>`, `<owner>/<repo>#<n>`, or its URL, which becomes the second form.
+// Anything else ("unknown", "#n") names no issue to follow, and is ''.
+function issueRef(v) {
+  const s = String(v || '').trim();
+  const url = /^https?:\/\/[^\s/]+\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/?$/.exec(s);
+  if (url) return `${url[1]}#${url[2]}`;
+  return /^(?:[\w.-]+\/[\w.-]+)?#\d+$/.test(s) ? s : '';
+}
+
 async function runIssue() {
   const early = await start(false);
   if (early) return early;
@@ -1962,8 +2039,24 @@ async function runIssue() {
   }
   Object.assign(C, { triage_path: tri.triage_path, reply_draft_path: tri.reply_draft_path || '', priority: tri.priority });
   R.priority = tri.priority;
-  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${tri.reason || ''}`);
-  if (['needs_info', 'not_amd', 'plan'].includes(tri.action)) return finish('triaged', 'Triage');
+  // A duplicate ends here, before the Reply phase: without the issue it duplicates, or without the draft written
+  // at Triage, the run would end with no answer and no issue to follow.
+  const duplicateOf = tri.action === 'duplicate' ? issueRef(tri.duplicate_of) : '';
+  if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {
+    note('Triage', 'fail', `a duplicate without ${duplicateOf ? 'a reply draft' : `the issue it duplicates (duplicate_of: #<n>, not `
+      + `${JSON.stringify(tri.duplicate_of || '')})`}: ${tri.reason || ''}`);
+    return finish('blocked', 'Triage');
+  }
+  if (duplicateOf) R.duplicate_of = duplicateOf;
+  // A report with several problems is several tasks: the ones this run does not take are offered as runs of
+  // their own (next.start), each on this run's definition with the issue and the problem's name as its task.
+  const others = (tri.other_problems || []).filter((p) => p && String(p.problem || '').trim())
+    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim() }));
+  if (others.length) R.other_problems = others;
+  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${duplicateOf ? `duplicate of ${duplicateOf}; ` : ''}${tri.reason || ''}`);
+  // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside
+  // AMD code, a feature request, and a report of a failure that another open issue already has.
+  if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
@@ -2060,6 +2153,21 @@ async function runIssue() {
     return finish('blocked', 'Diagnose');
   }
   note('Diagnose', dg.verdict, dg.root_cause);
+  // A component is recorded only with a diagnosis that establishes the root cause: one that is inconclusive, or
+  // that puts the cause outside AMD code, names no component for a human to file an issue with.
+  const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';
+  if (noDraft) {
+    note('Diagnose', 'fail', noDraft);
+    return finish('blocked', 'Diagnose');
+  }
+  // What the framework does about a component's defect goes by the priority: only a P0 gets a workaround here.
+  // Any other issue ends with the root cause, the reply and the issue drafted for the component.
+  if (C.component_issue && C.priority !== 'P0') {
+    note('Diagnose', 'component', `the root cause is in ${C.component_issue.component} and the issue is ${C.priority}: `
+      + 'no workaround in the framework, which only a P0 gets; the issue for the component is drafted'
+      + `${C.component_issue.summary ? `. ${C.component_issue.summary}` : ''}`);
+    return finish('diagnosed', 'Diagnose');
+  }
   // The baseline's bug is what the issue reported: the reply explains it as the cause, not as something else seen.
   if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
@@ -2096,18 +2204,36 @@ async function runCi() {
     note('Classify', 'fail', 'a performance failure classified without a perf_claim: the number the fix must restore');
     return finish('blocked', 'Classify');
   }
-  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${cl.evidence}`);
+  // A failure on a score the test measures is an accuracy problem, fixed when that score comes back: G2
+  // measures it whatever the fix changes, so that a threshold moved in the test passes for nothing
+  // (validation_doctrine.md, G2 for an accuracy problem in CI). The verify engineer reads the claim.
+  const accFailure = cl.accuracy === true;
+  const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';
+  if (!handOver && accFailure && !accClaim) {
+    note('Classify', 'fail', 'an accuracy failure classified without an accuracy_claim: the score the fix must restore');
+    return finish('blocked', 'Classify');
+  }
+  if (!handOver && accClaim) C.accuracy_claim = accClaim;
+  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${accFailure ? 'accuracy: ' : ''}${cl.evidence}`);
   if (handOver) return finish('handed_off', 'Classify');
   if (stopHere('Classify')) return finish('stopped', 'Classify');
 
   enter('Bisect');
   const bi = await call('ci_guardian', 'bisect', inputs(), BISECT);
+  // A component's defect is drafted for its repository whether or not the lane can be fixed here: the draft is
+  // recorded before anything below ends the run.
+  const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';
   if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {
     note('Bisect', 'fail', bi ? `culprit ${bi.culprit} not confirmed or no fix planned` : 'no bisect result');
     return finish('blocked', 'Bisect');
   }
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
+  // The lane is fixed as any other, by the pin or the fix forward; the component's defect gets its draft besides.
+  if (noDraft) {
+    note('Bisect', 'fail', noDraft);
+    return finish('blocked', 'Bisect');
+  }
   if (stopHere('Bisect')) return finish('stopped', 'Bisect');
   const lacking = askForFix('Bisect');
   if (lacking) return lacking;

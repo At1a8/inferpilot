@@ -53,12 +53,14 @@ Notes per gate:
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
   below) or the subject of a determinism task, never the accuracy gate.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
-  report was about, when it changes code the server runs: gsm8k (1319) on the fix and on the base, each
-  once, with the run's launch script and model, the fix at most 1 point below the base. Every task that
-  ends in a pull request brings its accuracy with it: the framework's PR template asks it of a change
-  to outputs, and a fix on the serving path can be one without meaning to. A fix to tests,
-  documentation or CI files alone changes nothing the server runs and has no G2: `not run: no code the
-  server runs changed`. Nor has the fix for a model that answers no text questions (a diffusion,
+  report was about, when it changes anything but tests, documentation and CI files: gsm8k (1319) on
+  the fix and on the base, each once, with the run's launch script and model, the fix at most 1 point
+  below the base. Every task that ends in a pull request brings its accuracy with it: the framework's
+  PR template asks it of a change to outputs, and a fix on the serving path can be one without
+  meaning to. A fix to tests, documentation or CI files alone changes nothing the server runs and has
+  no G2: `not run: no code the server runs changed`. Of any other file nobody judges whether the
+  server runs it: that judgement can be wrong, and measuring is the safe side (*What a fix changes
+  decides its gates*). Nor has the fix for a model that answers no text questions (a diffusion,
   speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
   questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
   reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
@@ -72,6 +74,18 @@ Notes per gate:
   pull request, and both say that it has no baseline. An issue that reports an accuracy loss is
   judged by its reproduction (`issue_repro`: the reported score comes back); G2 runs all the same, and
   its base arm shows the loss.
+- **G2 for an accuracy problem in CI.** A CI failure on a score its test measures (a GSM8K threshold,
+  an MMMU score), not on an error, is an accuracy problem, as a failure on a speed number is a
+  performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the
+  claim. Classify records it (`accuracy_claim`: the set, the model and the value, from the last green
+  run or from the threshold the test had when it last passed), and G2 measures it where it showed, with
+  the failing test's own measurement, whatever the fix changes. G2 reads the score, not the assertion:
+  a score below the claim is a blocking failure although the test passes, so a threshold moved in a
+  test restores nothing. It is reported under its own name (`accuracy_claim`), apart from gsm8k against
+  the base, which runs by the fix's files as for any fix and cannot stand in for it. No known issue
+  excuses it: the base scores low as well, and that is the failure being fixed. Where the threshold
+  itself was wrong (a baseline no commit ever met), that is a human's to say: the run stops with the
+  scores of the fix, of the base and of the last green run.
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose
@@ -188,11 +202,12 @@ Notes per gate:
   a feature task names its client as it names its server, and one that names none is asked for it
   (`templates/task_definition.md` §1.1).
 - **G5 for a fix.** The fix of an issue or of a CI failure is measured for speed as it is for
-  accuracy (*G2 for a fix*), and on the same condition: when it changes code the server runs. Whoever
-  merges a fix on the serving path asks what it costs, so its pull request shows the fix next to the
-  base on the task's client, with the run's launch script and model: no slower than the base beyond
-  the noise band, by the median of its rounds. One diff decides both gates: a fix to tests,
-  documentation or CI files alone has no G5 either, `not run: no code the server runs changed`. Where
+  accuracy (*G2 for a fix*), and on the same condition: when it changes anything but tests,
+  documentation and CI files. Whoever merges a fix on the serving path asks what it costs, so its
+  pull request shows the fix next to the base on the task's client, with the run's launch script and
+  model: no slower than the base beyond the noise band, by the median of its rounds. One diff decides
+  both gates, by one line (*What a fix changes decides its gates*): a fix to tests, documentation or
+  CI files alone has no G5 either, `not run: no code the server runs changed`. Where
   the base cannot serve the configuration because that is the failure being fixed, the fix is compared
   with the last commit that served it: the one G2 measured against, or, where G2 did not run (a model
   that answers no text questions), the one the triage record names. Only where the run knows no such
@@ -207,6 +222,47 @@ Notes per gate:
   or the failing test. A threshold moved in a test restores nothing, and G5 says so.
   A fix that is slower, or a number that does not come back, stops the task at Performance for a
   human, and nothing is rolled back: what a correct fix may cost is not a role's to decide.
+- **What a fix changes decides its gates.** The fix's diff is read once, for G2 and for G5, by one
+  line drawn by file: both gates run for every fix that changes a file other than tests,
+  documentation and CI files (sglang: `test/`; `docs/`, `*.md`; `.github/`, `scripts/ci/`). That is
+  what *code the server runs* means wherever a rule on a fix names it. Whether the server in fact
+  runs such a file is nobody's to judge: a module under `python/` can be taken for a tool, a script
+  can be one the launch path imports, and an accuracy or a speed loss let through on such a reading
+  is the costly mistake. So a fix to a Dockerfile, a benchmark or tool script or a dependency file is
+  measured like a fix to a model file, on gsm8k and on the task's client. On the three kinds left out
+  the framework's own fixes agree: of the 23 fix pull requests merged from 2026-05-26 to 2026-11-26
+  that changed only tests, documentation or CI files, none measured the server's accuracy or speed.
+  A change outside the framework's code takes effect only once it is put into effect: a dependency
+  declaration when what it names is installed, a Dockerfile when its image is built or the steps it
+  changes are run in the container (a package it installs, an environment variable it sets, such as
+  `SGLANG_USE_AITER`), a tool when it runs. So every tree runs in the environment its own files call
+  for: the fix with the change in effect, the base with the image's, a parent or a mutant of a commit
+  with what that tree declares. That holds for every run of the task: the unit test and its control
+  at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2 and of G5,
+  and the command the pull request gives. The same run in the unchanged environment shows nothing.
+  The commonest such change is a new version of a package the server runs (aiter, PyTorch, Triton,
+  flashinfer), bumped or pinned: no line of the framework changes, and every kernel may.
+  The environment is the arm's own wherever it can be: a variable set for the arm's processes alone,
+  a package installed into a directory of the arm's (`pip install --no-deps --target
+  RUN_DIR/env/<arm>`) and put first on its `PYTHONPATH`. The image's environment is then never
+  changed, and a call that times out leaves nothing behind. Only a package that must replace the
+  image's is installed in place, and then four things hold. The image's state and the commands that
+  restore it are written first (`RUN_DIR/env_restore.sh`, the ledger). Every later launch, in this
+  call or any other, checks the environment against that record before it starts: an interrupted
+  call may have left the change in. The arms run one after the other, never side by side: stop every
+  server, set the arm's environment, check it (the version the package reports), launch, measure,
+  stop. And the image's state is put back once every process of the round has stopped, not before.
+  Install what the change names and nothing else: never the framework again (`env_hygiene.md`, *The
+  code under test*), never a package the change does not name. The report's commands carry the
+  setup, so that whoever measures again measures the same thing.
+  Only what this run's platform uses counts. A ROCm image is built from its own files (sglang:
+  `python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`): a version
+  moved only in the CUDA declaration changes nothing in this run, which measures as it is and says so
+  next to its numbers.
+  Where the change cannot be put into effect on this machine, nothing was measured, and nothing is
+  to be repaired in the code: the gate is a blocking failure of the class `environment`, `<package>
+  <version> cannot be installed in this image`, and the run stops there for a human. It is not
+  investigated, and no fix is planned for it.
 
 ## Failure taxonomy — classify before counting
 

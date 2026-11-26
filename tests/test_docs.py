@@ -602,6 +602,70 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("so the task names both", both[0])
 
 
+class ComponentCauseTest(unittest.TestCase):
+    """A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is
+    that component's to fix: the issue for its repository is drafted, and the framework gets a workaround only
+    for a P0 issue (knowledge/issue_triage.md §5). A CI failure is fixed as any other, with the draft besides."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_decides_by_the_priority(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said in ("function componentCause(found, said) {",
+                     "C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };",
+                     "if (C.component_issue && C.priority !== 'P0') {",
+                     "const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';",
+                     "file the issue draft in ${R.component_issue.component}'s repository"):
+            self.assertIn(said, src)
+        self.assertIn("const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];", src)
+        self.assertIn("const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };", src,
+                      'any word is taken for a component: "none" would stop a fix of the framework\'s own')
+        self.assertIn("if (!COMPONENTS.includes(component)) return '';", src)
+        # ci: the draft is recorded before the check that ends a run without a fix to make.
+        self.assertLess(src.index("const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';"),
+                        src.index("if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {"),
+                        "a defect the lane cannot be fixed for loses its draft")
+        for schema in ("DIAG", "BISECT"):
+            self.assertIn("Object.assign(%s.properties, COMPONENT_CAUSE);" % schema, src, "%s takes no component" % schema)
+
+    def test_the_rule_is_written_where_each_role_reads_it(self):
+        for path, said in (
+                ("knowledge/issue_triage.md", "**A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that component's to fix."),
+                ("knowledge/issue_triage.md", "**P0:** a workaround in the framework, HIP-only"),
+                ("knowledge/issue_triage.md", "so G2 and G5 measure it"),
+                ("knowledge/issue_triage.md", "**P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`)"),
+                ("knowledge/issue_triage.md", "A component that changed its interface on purpose has no defect"),
+                ("roles/investigator.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/investigator.md", "for a P0, `work_packages` are the workaround in the framework"),
+                ("roles/investigator.md", "for any other issue return none."),
+                ("roles/investigator.md", "Never change the component: it comes from the image"),
+                ("roles/investigator.md", "Return `component` (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause"),
+                ("roles/investigator.md", "Either way `summary` says what the reporter can do meanwhile"),
+                ("roles/issue_triager.md", "as the diagnosis gave it (`component_issue.summary`)"),
+                ("roles/ci_guardian.md", "where you can plan none, return the component and its draft all the same"),
+                ("roles/issue_triager.md", "With `component_issue` the root cause is in an AMD component outside the framework"),
+                ("roles/issue_triager.md", "`<component issue link>` placeholder, since the human files that issue"),
+                ("roles/ci_guardian.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/ci_guardian.md", "The lane is still fixed by the package; where you can plan none"),
+                ("knowledge/ci_triage.md", "**A defect of an AMD component** outside the framework"),
+                ("knowledge/ci_triage.md", "with a pin to the last version that passed where a bump brought it"),
+                ("roles/director.md", "With `component_issue`, name the component the root cause is in"),
+                ("templates/issue_triage.md", "the issue drafted for its repository (`component_issue.md`)"),
+                ("templates/ci_triage.md", "| defect of an AMD component |"),
+                ("README.md", "| `component_issue.md` |"),
+                ("README.zh-CN.md", "| `component_issue.md` |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_the_components_are_the_ones_the_priority_rubric_calls_the_amd_side(self):
+        # issue_triage.md §2 names the AMD-maintained stacks; the rule is about the same four, wherever it is written.
+        rubric = self.flat("knowledge/issue_triage.md")
+        self.assertIn("AMD-maintained stacks (aiter, MoRI, ROCm, the ROCm build of PyTorch)", rubric)
+        for path in ("knowledge/issue_triage.md", "knowledge/ci_triage.md", "roles/investigator.md", "roles/ci_guardian.md"):
+            self.assertIn("(aiter, MoRI, ROCm, the ROCm build of PyTorch", self.flat(path), path)
+
+
 class FlagsTest(unittest.TestCase):
     def test_bootstrap_flags_the_docs_give_exist_and_every_one_is_documented(self):
         defined = argparse_flags(ROOT / "inferpilot" / "bootstrap.py")
@@ -725,6 +789,150 @@ class FeatureOffTest(unittest.TestCase):
             self.assertIn("without a switch", item, "the playbook runs G0 again after a fix, switch or no switch")
 
 
+class FixGatesByFileTest(unittest.TestCase):
+    """The diff of a fix is read once, for G2 and for G5, by one line drawn by file
+    (knowledge/validation_doctrine.md, What a fix changes decides its gates): both gates run for every fix that
+    changes a file other than tests, documentation and CI files. Of any other file nobody judges whether the
+    server runs it, since that judgement can be wrong: a fix to a Dockerfile, a tool or a dependency file is
+    measured like one to a model file, and a new version of a runtime dependency with that version installed."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_doctrine_draws_one_line_for_both_gates(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **What a fix changes decides its gates.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say what a fix's files decide")
+        for said in ("read once, for G2 and for G5, by one line drawn by file",
+                     "both gates run for every fix that changes a file other than tests, documentation and CI files "
+                     "(sglang: `test/`; `docs/`, `*.md`; `.github/`, `scripts/ci/`)",
+                     "That is what *code the server runs* means wherever a rule on a fix names it",
+                     "Whether the server in fact runs such a file is nobody's to judge",
+                     "an accuracy or a speed loss let through on such a reading is the costly mistake",
+                     "a fix to a Dockerfile, a benchmark or tool script or a dependency file is measured like a fix to a model file, "
+                     "on gsm8k and on the task's client",
+                     "A change outside the framework's code takes effect only once it is put into effect",
+                     "an environment variable it sets, such as `SGLANG_USE_AITER`",
+                     "So every tree runs in the environment its own files call for: the fix with the change in effect, the base with the "
+                     "image's, a parent or a mutant of a commit with what that tree declares",
+                     "the unit test and its control at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2 "
+                     "and of G5, and the command the pull request gives",
+                     "The same run in the unchanged environment shows nothing",
+                     "a new version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
+                     # the arm's own environment first: nothing to restore, nothing left behind by a call that times out
+                     "The environment is the arm's own wherever it can be",
+                     "`pip install --no-deps --target RUN_DIR/env/<arm>`",
+                     "a call that times out leaves nothing behind",
+                     "Only a package that must replace the image's is installed in place",
+                     "The image's state and the commands that restore it are written first (`RUN_DIR/env_restore.sh`, the ledger)",
+                     "Every later launch, in this call or any other, checks the environment against that record before it starts",
+                     "The arms run one after the other, never side by side",
+                     "put back once every process of the round has stopped, not before",
+                     "The report's commands carry the setup",
+                     "Install what the change names and nothing else: never the framework again",
+                     "the gate is a blocking failure of the class `environment`",
+                     "It is not investigated, and no fix is planned for it",
+                     "Only what this run's platform uses counts",
+                     "`python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`",
+                     "a version moved only in the CUDA declaration changes nothing in this run",
+                     "cannot be installed in this image"):
+            self.assertIn(said, note[0])
+        # A change that is not in effect is not measured as if it were: the note no longer lets a gate run both arms
+        # in one environment and say so.
+        self.assertNotIn("the change was not in effect", note[0])
+        # No second, narrower line for G5: what the server is judged not to run is measured all the same.
+        for gone in ("G5 runs when the fix changes code the server runs", "has no G5: `not run", "each by a line of its own"):
+            self.assertNotIn(gone, note[0], "G5 still has a line of its own")
+        for gate in ("G2", "G5"):
+            text = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **%s for a fix.**" % gate)][0]
+            self.assertIn("anything but tests, documentation and CI files", text, "%s for a fix does not draw the line by file" % gate)
+            self.assertNotIn("when it changes code the server runs", text, "%s still rests on a reading of what the server runs" % gate)
+        g2 = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")][0]
+        for said in ("A fix to tests, documentation or CI files alone changes nothing the server runs and has no G2",
+                     "Of any other file nobody judges whether the server runs it: that judgement can be wrong"):
+            self.assertIn(said, g2)
+        g5 = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")][0]
+        for said in ("and on the same condition: when it changes anything but tests, documentation and CI files",
+                     "One diff decides both gates, by one line (*What a fix changes decides its gates*)",
+                     "a fix to tests, documentation or CI files alone has no G5 either"):
+            self.assertIn(said, g5)
+
+    def test_the_roles_read_the_diff_by_that_line(self):
+        role = self.flat("roles/verify_engineer.md")
+        for said in ("when every file it names is a test, a documentation file or a CI file of the repository",
+                     '`"G2": "not run: no code the server runs changed"`',
+                     "That one diff decides G5 as well",
+                     "The line is drawn by the file's path, and by nothing else",
+                     "Never judge whether the server runs a file that is none of the three",
+                     "a fix to a Dockerfile, a benchmark or tool script or a dependency file is measured like one to a model file",
+                     "which the ROCm image does not install",
+                     "A fix whose change takes effect outside the worktree",
+                     "a package or an environment variable a Dockerfile sets",
+                     "Run that gate, and every arm after it, in the environment its tree calls for",
+                     "Make the environment the arm's own wherever you can",
+                     "Only a package that must replace the image's is installed in place",
+                     "First write the image's state and the commands that restore it (`RUN_DIR/env_restore.sh`, and the ledger)",
+                     "no server is started ahead and no two arms run side by side",
+                     "The reproduction that put the change into effect is stopped, and the image's state back, before the base arm of G2 starts",
+                     "check the environment against the ledger's record before the round's first launch",
+                     "Install what the change names and nothing else, never the framework again",
+                     '`"failure_class": "environment"`',
+                     "Never run the fix's arm in the image's environment and call it the fix",
+                     "`false` only when every file the fix changes is a test, a documentation file or a CI file"):
+            self.assertIn(said, role, "roles/verify_engineer.md does not say it")
+        self.assertNotIn("G5 has the narrower line", role, "the verify engineer still judges what the server runs for G5")
+        perf = self.flat("roles/perf_engineer.md")
+        for said in ("**A fix is measured whatever file it changes,** tests, documentation and CI files apart",
+                     "never judge whether the server runs it",
+                     "is measured with each arm in the environment its tree calls for, as Verify set them",
+                     "the warm-up, each round, the held-out point and the guards alike",
+                     "One installed in place is checked against the ledger's record before every launch",
+                     "return `not_run` saying so",
+                     "never the fix's arm on the image's environment",
+                     "is measured as it is, and `summary` says so"):
+            self.assertIn(said, perf, "roles/perf_engineer.md does not say it")
+        # Every role that runs a fix runs it where its change takes effect, not Verify alone.
+        for path, said in (("roles/test_engineer.md", "is tested with every tree in the environment its own files call for"),
+                           ("roles/test_engineer.md", "a mutant of the commit in the same, the parent with what the parent declares"),
+                           ("roles/test_engineer.md", "Step 4 compares the same way"),
+                           ("roles/test_engineer.md", "a check you leave running for the finishing call keeps its environment"),
+                           ("roles/test_engineer.md", "Two trees in one environment show nothing"),
+                           ("roles/pr_engineer.md", "each tree in the environment its own files call for"),
+                           ("roles/pr_engineer.md", "the body gives the setup with the command"),
+                           ("roles/director.md", "gives an arm whose change takes effect outside its tree"),
+                           ("templates/validation_report.md", "the setup that puts it into effect before the arm's commands")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        # A change that cannot be put into effect was not measured, and no change to the code repairs that: the run
+        # stops for a human before anything is investigated.
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        stop = "const unset = blocking.filter((f) => String(f.failure_class || '').trim().toLowerCase() === 'environment');"
+        self.assertIn(stop, src)
+        self.assertLess(src.index(stop), src.index("enter('Investigate');"), "an environment failure goes to the investigator")
+        review = self.flat("roles/reviewer.md")
+        for said in ("`server_code_changed` false means the run measured neither its accuracy nor its speed",
+                     "A changed file that is not a test, a documentation file or a CI file is a `blocker` finding",
+                     "whether or not the server runs it"):
+            self.assertIn(said, review, "roles/reviewer.md does not say it")
+
+    def test_every_place_that_states_the_condition_states_it_by_file(self):
+        for path, said in (
+                ("knowledge/acceptance.md", "is measured too when it changes anything but tests, documentation and CI files, on the task's `model_path`"),
+                ("knowledge/acceptance.md", "is measured too when it changes anything but tests, documentation and CI files, on the task's `client_script`"),
+                ("knowledge/issue_triage.md", "A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well"),
+                ("knowledge/issue_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
+                ("knowledge/ci_triage.md", "A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well"),
+                ("knowledge/ci_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
+                ("knowledge/pr_playbook.md", "A fix that changes anything but tests, documentation and CI files gives the same two scores"),
+                ("knowledge/pr_playbook.md", "So does a fix that changes anything but tests, documentation and CI files, the fix next to the base")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
+        for name in ("Accuracy", "Performance"):
+            row = [line for line in acceptance.splitlines() if line.startswith("| %s | required" % name)]
+            self.assertEqual(len(row), 1, name)
+            self.assertIn("required when the fix changes anything but tests, documentation and CI files", row[0], name)
+            self.assertNotIn("required when the fix changes code the server runs", row[0], name)
+
+
 class FixAccuracyTest(unittest.TestCase):
     """The fix of an issue or of a CI failure is measured on gsm8k as a feature is, when it changes code the
     server runs (knowledge/validation_doctrine.md, G2 for a fix). Such a task names its model unless it stops
@@ -776,7 +984,7 @@ class FixAccuracyTest(unittest.TestCase):
     def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_says_what_it_is_compared_with(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")
-        for said in ("when it changes code the server runs", "the fix at most 1 point below the base", "has no G2",
+        for said in ("when it changes anything but tests, documentation and CI files", "the fix at most 1 point below the base", "has no G2",
                      "a model that answers no text questions", "The reproduction or the failing test runs first",
                      "it is never launched for G2", "the last commit that served the configuration",
                      "the culprit's parent for a CI fix", "The gate and the pull request name that commit", "it is reported"):
@@ -799,10 +1007,10 @@ class FixAccuracyTest(unittest.TestCase):
                            ("roles/director.md", "for the G2 and the G5 of a fix whose baseline was measured on another commit"),
                            ("templates/validation_report.md", "the commit its baseline was measured on when that was not the base"),
                            ("roles/intake.md", "An issue or a ci task needs it too"),
-                           ("knowledge/acceptance.md", "required when the fix changes code the server runs"),
-                           ("knowledge/issue_triage.md", "A fix that changes code the server runs is measured on gsm8k as well"),
-                           ("knowledge/ci_triage.md", "A fix that changes code the server runs is measured on gsm8k as well"),
-                           ("knowledge/pr_playbook.md", "A fix that changes code the server runs gives the same two scores")):
+                           ("knowledge/acceptance.md", "required when the fix changes anything but tests, documentation and CI files"),
+                           ("knowledge/issue_triage.md", "A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well"),
+                           ("knowledge/ci_triage.md", "A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well"),
+                           ("knowledge/pr_playbook.md", "A fix that changes anything but tests, documentation and CI files gives the same two scores")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
         acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
         row = [line for line in acceptance.splitlines() if line.startswith("| Accuracy | required: gsm8k")]
@@ -883,8 +1091,8 @@ class FixPerformanceTest(unittest.TestCase):
             self.assertIn(field, body, "%s does not take %s" % (schema, field))
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
-        for said in ("when it changes code the server runs", "no slower than the base beyond the noise band", "One diff decides both gates",
-                     "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
+        for said in ("when it changes anything but tests, documentation and CI files", "no slower than the base beyond the noise band",
+                     "One diff decides both gates", "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
                      "the one the triage record names", "reported and not judged", "names its client as it names its model",
                      "no template is offered for it", "A performance problem is measured whatever its fix changes",
                      "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
@@ -920,8 +1128,8 @@ class FixPerformanceTest(unittest.TestCase):
                            ("templates/issue_triage.md", "its speed on the task's client against the same commit (G5)"),
                            ("templates/validation_report.md", "for the G2 and the G5 of a fix"),
                            ("templates/validation_report.md", "`not run: no code the server runs changed`, and no table"),
-                           ("knowledge/acceptance.md", "**A fix** (issue, ci) is measured too when it changes code the server runs, on the "
-                                                       "task's `client_script`"),
+                           ("knowledge/acceptance.md", "**A fix** (issue, ci) is measured too when it changes anything but tests, documentation "
+                                                       "and CI files, on the task's `client_script`"),
                            ("knowledge/acceptance.md", "always when the failure is a performance problem: the number its test measures comes "
                                                        "back"),
                            ("knowledge/perf_evaluation.md", "The fix of an issue or of a CI failure is measured the same way when it changes "
@@ -929,7 +1137,8 @@ class FixPerformanceTest(unittest.TestCase):
                            ("knowledge/issue_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
                            ("knowledge/ci_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
                            ("knowledge/ci_triage.md", "**A failure on a number is a performance problem,** whatever its class"),
-                           ("knowledge/pr_playbook.md", "So does a fix that changes code the server runs, the fix next to the base"),
+                           ("knowledge/pr_playbook.md", "So does a fix that changes anything but tests, documentation and CI files, the fix next "
+                                                         "to the base"),
                            ("knowledge/dev_methodology.md", "nor is a fix that changes code the server runs slower than the base")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
         for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
@@ -938,6 +1147,72 @@ class FixPerformanceTest(unittest.TestCase):
             for line in modes:
                 self.assertRegex(line, r"Verify → Performance[ （(]", "%s: a fix's Performance phase, and when it is skipped" % name)
             self.assertRegex(text, r"its number must come back, whatever the fix changes|掉下去的数值都必须回来", name)
+
+
+class CiAccuracyProblemTest(unittest.TestCase):
+    """A CI failure on a score its test measures is an accuracy problem, as one on a speed number is a
+    performance problem (knowledge/validation_doctrine.md, G2 for an accuracy problem in CI). It is fixed when
+    the score comes back: G2 measures it whatever the fix changes, and a threshold moved in the test restores
+    nothing."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_takes_the_score_from_classify_and_accepts_no_round_without_g2(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        for field in ("accuracy: bool,", "accuracy_claim: str,"):
+            self.assertIn(field, body, "CLASSIFY does not take %s" % field)
+        for said, why in (
+                ("const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';", "the score to restore is not read"),
+                ("if (!handOver && accFailure && !accClaim) {", "an accuracy failure goes on without the score its fix must restore"),
+                ("if (!handOver && accClaim) C.accuracy_claim = accClaim;", "the claim does not reach the verify engineer"),
+                ("const claimGate = String((v.gates || {}).accuracy_claim || '').trim();",
+                 "the score to restore is read from G2, which also holds gsm8k against the base"),
+                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {",
+                 "a round is accepted without the score's pass: both ways a round is accepted are held to it, and only \"pass\" is one"),
+                ("const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];",
+                 "the fix's own gates are not told from the others"),
+                ("const mine = own(blocking).map((f) => f.gate);", "a gate of the fix's own that fails on the base becomes a known issue")):
+            self.assertIn(said, src, why)
+        # The check sits before the line that accepts a round, whichever way it is accepted; and what the task is
+        # there to fix is never recorded as a known issue, which the next round would excuse.
+        self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
+        self.assertLess(src.index("const mine = own(blocking).map((f) => f.gate);"), src.index("if (inv.known_issue) R.known_issues.push(inv.known_issue);"))
+
+    def test_the_documents_say_what_is_measured(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a CI accuracy problem is judged")
+        for said in ("A CI failure on a score its test measures", "It is fixed when the score comes back, so the score is the claim",
+                     "`accuracy_claim`: the set, the model and the value", "with the failing test's own measurement, whatever the fix changes",
+                     "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
+                     "No known issue excuses it: the base scores low as well",
+                     "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "cannot stand in for it",
+                     "that is a human's to say"):
+            self.assertIn(said, note[0])
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure on a score is an accuracy problem,** whatever its class"),
+                ("knowledge/ci_triage.md", "a lower threshold in the test is not a fix"),
+                ("roles/ci_guardian.md", "`accuracy`: true when the test fails on a score it measures"),
+                ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
+                ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
+                ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
+                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
+                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
+                ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
+                ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
+                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
+                ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
+                ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),
+                ("knowledge/acceptance.md", "A failure that is itself one of accuracy or of performance is measured whatever its fix changes"),
+                ("templates/ci_triage.md", "for an accuracy problem the score the fix restores"),
+                ("templates/ci_triage.md", "| accuracy problem: yes / no |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
 
 
 class FeaturePerformanceTest(unittest.TestCase):
@@ -1219,6 +1494,66 @@ def alive(pid):
         return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
     except OSError:
         return True
+
+
+class TriageCasesTest(unittest.TestCase):
+    """Two cases the triage of an issue left open (knowledge/issue_triage.md §4): a report of a failure that
+    another open issue already has is answered and not worked on twice, and a report with several problems is
+    several tasks, each with its own reproduction, fix and gates."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_a_duplicate_ends_at_triage_with_its_original_and_its_reply(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },", src)
+        self.assertIn("duplicate_of: str,", src)
+        self.assertIn("if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');", src,
+                      "a duplicate goes on to a reproduction")
+        self.assertIn("const duplicateOf = tri.action === 'duplicate' ? issueRef(tri.duplicate_of) : '';", src,
+                      'any word names the original: "unknown" would end the run with no issue to follow')
+        guard = "if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {"
+        self.assertIn(guard, src, "a duplicate is accepted without the issue it duplicates, or without a reply")
+        self.assertLess(src.index(guard), src.index("return finish('triaged', 'Triage');"), "the check comes before the run ends as triaged")
+        table = [line for line in (ROOT / "knowledge" / "issue_triage.md").read_text(encoding="utf-8").splitlines()
+                 if line.startswith("| `duplicate` |")]
+        self.assertEqual(len(table), 1, "knowledge/issue_triage.md §4 has no row for a duplicate")
+        for path, said in (("knowledge/issue_triage.md", "**A duplicate is answered, not worked on twice.**"),
+                           ("knowledge/issue_triage.md", "when the signature and the path that fails are the same, not when the titles are alike"),
+                           ("knowledge/issue_triage.md", "One of them is the original: the one the maintainers already call so (a label, a comment), "
+                                                         "else the one opened first"),
+                           ("knowledge/issue_triage.md", "so that two reports are never each the other's"),
+                           ("knowledge/issue_triage.md", "whose triage searches for its duplicates and takes what they add into its record"),
+                           ("roles/issue_triager.md", "For a `duplicate`, return `duplicate_of` (`#<n>`, the original)"),
+                           ("roles/issue_triager.md", "Then search the open issues for the same failure, by its error signature and the path that fails"),
+                           ("roles/issue_triager.md", "the one the maintainers call so (a label, a comment), and only where they name none, the one "
+                                                      "opened first"),
+                           ("roles/issue_triager.md", "Where that is another report, this one is a `duplicate`"),
+                           ("roles/issue_triager.md", "read them, since the state of an issue is not what it reports"),
+                           ("roles/issue_triager.md", "needs_info | not_amd | plan | duplicate"),
+                           ("roles/issue_triager.md", '"duplicate_of": "<with duplicate: #n, the original>"'),
+                           ("templates/issue_triage.md", "/ plan / duplicate (of #<n>) |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_a_report_with_several_problems_is_several_tasks(self):
+        for path, said in (("knowledge/issue_triage.md", "**A report with several problems is several tasks.**"),
+                           ("knowledge/issue_triage.md", "what its pull request changes decides its gates one by one"),
+                           ("knowledge/issue_triage.md", "each with its priority and the fix PRs that are its own"),
+                           ("knowledge/issue_triage.md", "A run takes one, the one `task` names or else the most urgent, and says which in `reason`"),
+                           ("knowledge/issue_triage.md", "the run's priority, category, action and existing fix PRs are that problem's"),
+                           ("knowledge/issue_triage.md", "for each of the others its known state (a fix linked to it, open or merged, or nothing yet) "
+                                                         "and that this run did not cover it"),
+                           ("knowledge/issue_triage.md", "Each of them starts as a run of its own"),
+                           ("roles/issue_triager.md", "A report with several problems is several tasks"),
+                           ("roles/issue_triager.md", "`priority`, `category`, `action` and `existing_prs` are then that problem's and no other's"),
+                           ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
+                           ("roles/issue_triager.md", "Return the others as `other_problems`"),
+                           ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
+                           ("templates/issue_triage.md", "| problems in the report |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
+                         "another problem may have a fix already: the reply gives its known state")
 
 
 class DetachedRunTest(unittest.TestCase):

@@ -17,6 +17,7 @@
 | Class | Evidence |
 |---|---|
 | code regression / dependency bump / test bug / flaky / infrastructure | |
+| accuracy problem: yes / no | <the score the test measures: its threshold when it last passed, the last green run's score, the failing run's> |
 | performance problem: yes / no | <the number the test measures: its threshold, the last green run's value, the failing run's> |
 
 ## Culprit (code regression or dependency bump)
@@ -27,6 +28,7 @@
 | culprit | <commit, PR, merge time> |
 | how found | diff reading / `git bisect run` (<steps>) |
 | confirmation | fails at culprit, passes at its parent (artifacts) |
+| defect of an AMD component | none / <the component, how it shows without the framework, and the issue drafted for its repository: `component_issue.md`> |
 
 ## Fix or handover
 
@@ -34,7 +36,8 @@
      (G0 when the fix is behind a feature's switch), and gsm8k on the fix against the base, or against
      the culprit's parent where the base cannot serve, when the fix changes code the server runs (G2);
      its speed on the task's client against the same commit (G5), and for a performance problem the
-     number the fix restores, whatever it changes.
+     number the fix restores, whatever it changes; for an accuracy problem the score the fix restores,
+     by the failing test's own measurement (G2), whatever it changes.
      Handover: who, what evidence. -->
 
 ## Dates

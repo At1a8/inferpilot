@@ -1737,6 +1737,86 @@ const scenarios = [
     const flaky = await run({ mode: 'ci', task: 'c' }, classified({ performance: true, failure_class: 'flaky', failing_test_cmd: '' }));
     check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no number asked of it: ${flaky.result.status}`);
   }],
+  ['ci: a failure on a score the test measures is an accuracy problem: its score is measured whatever the fix changes, and no round is accepted without it', async () => {
+    const claim = 'GSM8K back to 0.93 on GLM-5.3-Flash in test_gsm8k (0.94 in the last green run)';
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const verified = (out) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), ...out }) });
+    const accuracy = classified({ accuracy: true, accuracy_claim: claim });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const restored = { accuracy_claim: "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)" };
+    const unmeasured = { gates: { G2: 'not run: no code the server runs changed' }, server_code_changed: false };
+    const stopsAtVerify = (r) => r.result.status === 'blocked' && r.result.stopped_at === 'Verify' && !r.keys.includes('reviewer:review');
+    const ok = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: restored }) });
+    const ve = ok.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ok.result.status === 'ready_for_review' && ve && ve.ins.accuracy_claim === claim,
+      `the score the fix must restore reaches the verify engineer: ${ended(ok)}, ${ve && ve.ins.accuracy_claim}`);
+    check(ok.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('accuracy: ')), 'and the run record names it an accuracy failure');
+    // A threshold moved in the test: the failing test passes, the fix changes a test alone, and nothing measured the score.
+    const moved = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified(unmeasured) });
+    check(stopsAtVerify(moved) && !moved.keys.includes('investigator:investigate') && /without the score coming back/.test(JSON.stringify(moved.result.phases)),
+      `a round that passes without the score is not accepted, and nothing goes on to review: ${ended(moved)}`);
+    const silent = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: {} }) });
+    check(stopsAtVerify(silent), `nor one that says nothing of it: ${ended(silent)}`);
+    // gsm8k against the base is G2's, and is not the score of the claim: an MMMU claim is not met by it.
+    const gsm8k = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: { G2: 'pass 0.893 vs 0.895 (1319 q)' } }) });
+    check(stopsAtVerify(gsm8k) && /accuracy_claim is not reported/.test(JSON.stringify(gsm8k.result.phases)),
+      `gsm8k against the base does not stand in for the score to restore: ${ended(gsm8k)}`);
+    // Only "pass" is a pass: no other word the role may write.
+    for (const word of ['fail 0.871, the claim is 0.93', 'failed: 0.871, the claim is 0.93', 'skipped: the test took too long', 'not run: no code changed']) {
+      const said = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: { accuracy_claim: word }, all_pass: true, failures: [] }) });
+      check(stopsAtVerify(said), `a round that calls itself passed with accuracy_claim "${word}" is not accepted: ${ended(said)}`);
+    }
+    // The other way a round is accepted: failures that do not block. It is held to the score as well.
+    const reportOnly = [{ gate: 'G3', blocking: false, evidence: 'a report-only item missed' }];
+    const lenient = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified({ ...unmeasured, all_pass: false, failures: reportOnly }) });
+    check(stopsAtVerify(lenient), `a round whose only failures do not block is not accepted without the score either: ${ended(lenient)}`);
+    const measured = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: restored, all_pass: false, failures: reportOnly }) });
+    check(measured.result.status === 'ready_for_review', `with the score measured, a report-only miss stops nothing: ${ended(measured)}`);
+    // A score below the claim is never excused as a known issue: the base scores low too, and that is the failure being fixed.
+    const below = { gates: { accuracy_claim: 'fail 0.871, the claim is 0.93' }, all_pass: false };
+    const excused = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      ...verified({ ...below, failures: [{ gate: 'accuracy_claim', blocking: false, evidence: 'the base scores 0.87 as well: known issue' }] }) });
+    check(stopsAtVerify(excused), `a score that failed without blocking is not accepted: ${ended(excused)}`);
+    const baseToo = () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base fails the same way' }, summary: 'the base fails the same way' });
+    for (const gate of ['accuracy_claim', 'failing_test']) {
+      // failing_test runs first: where the fix restores nothing, the round can end on it before the score is measured.
+      const onBase = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+        ...verified({ ...below, failures: [{ gate, blocking: true, evidence: '0.871 on the fix' }] }), 'investigator:investigate': baseToo });
+      check(onBase.result.status === 'blocked' && onBase.keys.filter((k) => k === 'verify_engineer:verify').length === 1
+        && !(onBase.result.known_issues || []).some((k) => k.id === 'KI-9') && !onBase.keys.includes('issue_triager:spinoff')
+        && /not a known issue/.test(JSON.stringify(onBase.result.phases)),
+        `${gate} failing as on the base is the failure itself: no known issue, no issue drafted for it, and the run stops for a human: ${ended(onBase)}`);
+    }
+    // Any other gate that fails on the base as well is a known issue, as before: G2's gsm8k among them.
+    for (const gate of ['G0', 'G2']) {
+      const other = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+        'verify_engineer:verify': (ins, n) => (n === 1
+          ? { ...DEFAULTS['verify_engineer:verify'](), gates: restored, all_pass: false,
+            failures: [{ gate, blocking: true, evidence: 'fails on the base too' }] }
+          : { ...DEFAULTS['verify_engineer:verify'](), gates: restored }),
+        'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'on the base too' }, summary: 'on the base too' }) });
+      check(other.result.status === 'ready_for_review' && (other.result.known_issues || []).some((k) => k.id === 'KI-8'),
+        `${gate} failing on the base is still a known issue, and is not taken for the claim: ${ended(other)}`);
+    }
+    const plain = await run({ mode: 'ci', task: 'c' }, { ...classified({ failure_class: 'test_bug' }), ...verified(unmeasured) });
+    const pv = plain.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(plain.result.status === 'ready_for_review' && pv && !pv.ins.accuracy_claim,
+      `any other fix to a test alone goes without G2 as before: ${ended(plain)}`);
+    const noScore = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true }));
+    check(noScore.result.status === 'blocked' && noScore.result.stopped_at === 'Classify' && !noScore.keys.includes('ci_guardian:bisect')
+      && /without an accuracy_claim/.test(JSON.stringify(noScore.result.phases)),
+      `an accuracy failure without the score to restore stops before the bisect: ${ended(noScore)}`);
+    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true, failure_class: 'flaky', failing_test_cmd: '' }));
+    check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no score asked of it: ${ended(flaky)}`);
+    const both = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, performance: true,
+      perf_claim: 'output throughput back above 1100 tok/s' }), ...verified({ gates: restored }) });
+    const pe = both.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(both.result.status === 'ready_for_review' && pe && pe.ins.claim === 'output throughput back above 1100 tok/s'
+      && both.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('performance: accuracy: ')),
+      `a test that measures a speed and a score has both to restore: ${ended(both)}`);
+  }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
       'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: '', unit_test_cmd: 'pytest -q t.py' }),
@@ -1953,6 +2033,65 @@ const scenarios = [
       && doc('issue_triager').includes('The one with `cause_of_this_issue` is the exception'),
       'the reply explains the issue\'s own cause as that, and the check does not flag it');
   }],
+  ['issue: a report of a failure that another open issue has is answered, and is not worked on twice', async () => {
+    const r = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: '#38849',
+        reason: 'the same signature and failing path, on a second model', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+    });
+    check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `a duplicate ends at Triage: ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('issue_triager:reproduce') && !r.keys.includes('implementer:implement'), 'nothing is reproduced or fixed for it');
+    check(!r.keys.includes('issue_triager:reply') && r.keys.includes('director:report') && r.result.reply_draft_path === `${RUN}/reply.md`,
+      `the draft written at Triage is its reply: ${r.keys.filter((k) => /reply|report/.test(k))}, ${r.result.reply_draft_path}`);
+    check(r.result.duplicate_of === '#38849'
+      && r.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'duplicate' && p.summary.includes('duplicate of #38849; ')),
+      `the result and the run record name the issue that has the failure: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Triage'))}`);
+    // A duplicate ends before the Reply phase: without the original, or without the draft, it would end with no answer.
+    for (const [lacks, drop] of [['the issue it duplicates', { duplicate_of: '' }], ['the issue it duplicates', { duplicate_of: undefined }],
+      ['the issue it duplicates', { duplicate_of: 'unknown' }], ['the issue it duplicates', { duplicate_of: '#n' }],
+      ['a reply draft', { reply_draft_path: '' }]]) {
+      const bare = await run({ mode: 'issue', task: 'i' }, {
+        'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: '#38849', reason: 'the same failure',
+          triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md`, ...drop }),
+      });
+      check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Triage'
+        && bare.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'fail' && p.summary.includes(`a duplicate without ${lacks}`)),
+        `a duplicate without ${lacks} is not accepted (${JSON.stringify(drop)}): ${bare.result.status} at ${bare.result.stopped_at}`);
+    }
+    // duplicate_of is read with a duplicate only: any other action is as it was.
+    const other = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', duplicate_of: '#1', triage_path: `${RUN}/t.md`,
+        reply_draft_path: `${RUN}/reply.md` }),
+    });
+    check(other.result.status === 'triaged' && !other.result.duplicate_of, 'another action does not take it');
+    // The original is named as an issue is: #<n>, <owner>/<repo>#<n>, or its URL.
+    for (const [given, kept] of [['#38849', '#38849'], ['sgl-project/sglang#38849', 'sgl-project/sglang#38849'],
+      ['https://github.com/sgl-project/sglang/issues/38849', 'sgl-project/sglang#38849']]) {
+      const named = await run({ mode: 'issue', task: 'i' }, {
+        'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: given, reason: 'the same failure',
+          triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      });
+      check(named.result.status === 'triaged' && named.result.duplicate_of === kept, `${given} names the original: ${named.result.duplicate_of}`);
+    }
+  }],
+  ['issue: the other problems of a report with several are offered as runs of their own', async () => {
+    const others = [{ problem: 'GSM8K loses 4 points with the same flags', priority: 'P1', task: 'sgl-project/sglang#41299: the accuracy loss' },
+      { problem: 'the server hangs on shutdown', priority: 'P2' }];
+    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, {
+      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash, the most urgent of three',
+        other_problems: others, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+    });
+    const start = r.result.next.start || [];
+    check(start.length === 2 && start[0].task === others[0].problem && start[0].args.task === 'sgl-project/sglang#41299: the accuracy loss',
+      `each other problem is offered with its task: ${JSON.stringify(start)}`);
+    check(start[1].args.task === 'sgl-project/sglang#41299: the server hangs on shutdown',
+      `one without a task of its own takes the issue and the problem's name: ${start[1] && start[1].args.task}`);
+    check(start.every((x) => x.args.mode === 'issue' && x.args.inferpilot_dir === INFERPILOT && x.args.model_path === '/models/m'
+      && !('stop_after' in x.args) && !('run_dir' in x.args) && !('resume_from' in x.args)),
+      `each starts on this run's definition, and not where this run stops: ${JSON.stringify(start.map((x) => x.args))}`);
+    check(r.result.other_problems.length === 2, 'the result lists them');
+    const one = await run({ mode: 'issue', task: 'i' });
+    check(!one.result.next.start && !one.result.other_problems, 'a report with one problem offers no run');
+  }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
@@ -1973,6 +2112,31 @@ const scenarios = [
     const w = (slowRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
     check(!slowRewrite.keys.includes('reviewer:reply') && w && w.includes('issue_triager:reply timed out and may still be writing it'),
       `nothing checks or posts a draft a timed-out rewrite may still be writing: ${w}`);
+  }],
+  ['issue: a fix whose change cannot be put into effect on this machine stops for a human, and is not investigated', async () => {
+    // A version the fix pins does not install in this image: nothing was measured, and no change to the code repairs that.
+    const cannot = { gate: 'issue_repro', failure_class: 'environment', blocking: true, evidence: 'aiter 0.1.12 cannot be installed in this image' };
+    const r = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [cannot] }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Verify', `the run stops at Verify: ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('investigator:investigate') && !r.keys.includes('perf_engineer:perf_eval') && !r.keys.includes('reviewer:review')
+      && r.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'nothing is investigated, repaired, measured or reviewed after it');
+    check(r.result.phases.some((p) => p.phase === 'Verify' && /issue_repro:environment/.test(p.summary)),
+      `the run record names the gate and its class: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Verify'))}`);
+    check(/could not be put into effect on this machine \(issue_repro\): aiter 0\.1\.12 cannot be installed/.test(r.result.next.say),
+      `the user is told what could not be done: ${r.result.next.say}`);
+    // Any other blocking failure is investigated as before, and one of that class that does not block stops nothing.
+    const usual = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [{ gate: 'G0', failure_class: 'crash', blocking: true }] }
+        : DEFAULTS['verify_engineer:verify']()),
+    });
+    check(usual.keys.includes('investigator:investigate'), 'another class of failure goes to the investigator as before');
+    const mild = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [{ ...cannot, gate: 'G3', blocking: false }] }),
+    });
+    check(mild.result.status === 'ready_for_review', `a report-only item of that class stops nothing: ${mild.result.status}`);
   }],
   ['issue: close_fixed that no longer reproduces', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
@@ -2022,6 +2186,80 @@ const scenarios = [
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].cmd === 'bash repro.sh', `issue_repro gate carries the reproduction: ${JSON.stringify(v && v.ins.extra_gates)}`);
   }],
+  ['issue: a root cause in an AMD component gets an issue drafted for that repository, and a workaround in the framework only for a P0', async () => {
+    const draft = `${RUN}/component_issue.md`;
+    const wps = [{ id: 'FIX1', goal: 'the reference path for the shapes that fail, HIP-only', kind: 'framework', files: ['python/sglang/a.py'], test: 't', depends_on: [] }];
+    const advice = 'aiter 0.1.9 does not have it; --disable-aiter-moe avoids the path';
+    const inAiter = (extra) => ({ verdict: 'fix_needed', root_cause: 'aiter: the fused MoE kernel reads past the last block',
+      component: 'aiter', component_issue_path: draft, summary: advice, ...extra });
+    const triage = (priority) => () => ({ priority, category: 'crash', action: 'reproduce', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` });
+    const filed = (r) => (r.result.next.user || []).find((x) => x.includes('component_issue.md'));
+
+    // Not a P0: no workaround, whatever the diagnosis planned. The run ends with the root cause, the reply and the draft.
+    const p1 = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'), 'investigator:diagnose': () => inAiter({ work_packages: wps }) });
+    check(p1.result.status === 'diagnosed' && p1.result.stopped_at === 'Diagnose', `a P1 ends at Diagnose: ${p1.result.status} at ${p1.result.stopped_at}`);
+    check(!p1.keys.includes('implementer:implement'), 'nothing is implemented for it, although the diagnosis planned a workaround');
+    check(p1.result.component_issue && p1.result.component_issue.component === 'aiter' && p1.result.component_issue.draft_path === draft,
+      `the result names the component and the draft: ${JSON.stringify(p1.result.component_issue)}`);
+    check(/in aiter's repository/.test(filed(p1) || ''), `the user is told to file the draft there: ${filed(p1)}`);
+    const reply = p1.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.component_issue && reply.ins.component_issue.component === 'aiter', 'the reply is written knowing where the root cause is');
+    // What the reporter can do meanwhile is said in the diagnosis' summary only: the reply and the report get it.
+    const report = p1.calls.find((c) => c.key === 'director:report');
+    check(reply.ins.component_issue.summary === advice && report.ins.component_issue.summary === advice && p1.result.component_issue.summary === advice
+      && p1.result.phases.some((p) => p.phase === 'Diagnose' && p.verdict === 'component' && p.summary.includes(advice)),
+      `the diagnosis' advice for the reporter reaches the reply, the report and the run record: ${JSON.stringify(p1.result.component_issue)}`);
+    check(p1.result.phases.some((p) => p.phase === 'Diagnose' && p.verdict === 'component' && /only a P0/.test(p.summary)),
+      `the run record says why no workaround was made: ${JSON.stringify(p1.result.phases.filter((p) => p.phase === 'Diagnose'))}`);
+
+    // A P0 gets the workaround, as a fix like any other: reproduced, verified with the reproduction, measured.
+    const p0 = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'), 'investigator:diagnose': () => inAiter({ work_packages: wps }) });
+    check(p0.result.status === 'ready_for_review' && p0.keys.includes('implementer:implement') && p0.keys.includes('perf_engineer:perf_eval'),
+      `a P0 gets the workaround, verified and measured: ${p0.result.status}`);
+    check(/in aiter's repository/.test(filed(p0) || ''), 'and the draft for the component is still the user\'s to file: a workaround is not the fix');
+    const impl = p0.calls.find((c) => c.key === 'implementer:implement');
+    check(impl.ins.component_issue && impl.ins.component_issue.draft_path === draft, 'the implementer knows which issue the workaround is for');
+    // A P0 no workaround serves ends as any diagnosis without a fix.
+    const none = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'), 'investigator:diagnose': () => inAiter({ work_packages: [] }) });
+    check(none.result.status === 'diagnosed' && !!filed(none) && none.result.component_issue.summary === advice,
+      `a P0 with no workaround to make ends diagnosed, with the draft and why: ${none.result.status}`);
+    // Only the four components are components: an empty one is a root cause in the framework, fixed at any priority.
+    const empty = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+      'investigator:diagnose': () => inAiter({ component: '', component_issue_path: '', work_packages: wps }) });
+    check(empty.result.status === 'ready_for_review' && !empty.result.component_issue, `no component named: the framework's own fix goes on: ${empty.result.status}`);
+    // A word that is no component ("none", a third-party library) is not an answer: it would stop the framework's own fix.
+    for (const word of ['none', 'mooncake']) {
+      const odd = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+        'investigator:diagnose': () => inAiter({ component: word, work_packages: wps }) });
+      check(odd.result.status === 'blocked' && odd.result.stopped_at === 'Diagnose' && !odd.result.component_issue
+        && odd.result.phases.some((p) => p.phase === 'Diagnose' && /no diagnosis/.test(p.summary)),
+        `"${word}" is refused as an answer, not taken for a component: ${odd.result.status} at ${odd.result.stopped_at}`);
+    }
+
+    // A component named without a draft: the diagnosis is not done.
+    const bare = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'),
+      'investigator:diagnose': () => inAiter({ component_issue_path: '', work_packages: wps }) });
+    check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Diagnose' && !bare.keys.includes('implementer:implement'),
+      `a component named without its draft stops at Diagnose: ${bare.result.status} at ${bare.result.stopped_at}`);
+
+    // Only a diagnosis that establishes the root cause names a component: a suspicion is not an issue to file.
+    for (const verdict of ['inconclusive', 'not_amd_side']) {
+      const unsure = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+        'investigator:diagnose': () => inAiter({ verdict, work_packages: [] }) });
+      check(unsure.result.status === 'diagnosed' && !unsure.result.component_issue && !filed(unsure),
+        `${verdict}: no component is recorded, and no draft is given to file: ${unsure.result.status}, ${JSON.stringify(unsure.result.component_issue)}`);
+      const reply = unsure.calls.find((c) => c.key === 'issue_triager:reply');
+      check(reply && !reply.ins.component_issue, `${verdict}: nor does the reply name one`);
+    }
+    const onBase = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+      'investigator:diagnose': () => inAiter({ verdict: 'baseline_bug', work_packages: [], known_issue: { id: 'KI-7', title: 'aiter reads past the block' } }) });
+    check(onBase.result.status === 'diagnosed' && onBase.result.component_issue && !!filed(onBase),
+      `the baseline's own bug, found in a component, has its draft: ${onBase.result.status}`);
+    // A root cause in the framework is unchanged, at any priority.
+    const own = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1') });
+    check(own.result.status === 'ready_for_review' && !own.result.component_issue && !filed(own), 'a root cause in the framework is fixed as before');
+
+  }],
   ['issue: a reproduction without a command stops before any change', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: '  ', evidence: 'segfault 3/3' }),
@@ -2058,6 +2296,29 @@ const scenarios = [
     check(eqList(r.phases, ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('failing_test'), 'failing_test gate passed to verify');
+  }],
+  ['ci: a defect of an AMD component is drafted as an issue for that repository, and the lane is fixed as any other', async () => {
+    const draft = `${RUN}/component_issue.md`;
+    const filed = (r) => (r.result.next.user || []).find((x) => x.includes('component_issue.md'));
+    const ciWps = [{ id: 'WP1', goal: 'pin aiter to the last version that passed', kind: 'framework', files: ['docker/rocm.Dockerfile'], test: 't', depends_on: [] }];
+    const ci = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: true, work_packages: ciWps, component: 'aiter', component_issue_path: draft }) });
+    check(ci.result.status === 'ready_for_review' && ci.keys.includes('implementer:implement'), `a CI failure is still fixed: ${ci.result.status}`);
+    check(/in aiter's repository/.test(filed(ci) || '') && ci.result.component_issue.component === 'aiter', `and the component's defect is drafted: ${filed(ci)}`);
+    const ciBare = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: true, work_packages: ciWps, component: 'aiter' }) });
+    check(ciBare.result.status === 'blocked' && ciBare.result.stopped_at === 'Bisect', `without the draft the bisect is not done: ${ciBare.result.status}`);
+    // A defect the lane cannot be fixed for here: the run stops, and the draft for the component is still the user's to file.
+    const noFix = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'the image of 11-25 (aiter 0.1.12)', confirmed: true, work_packages: [], component: 'aiter',
+        component_issue_path: draft, evidence: 'fails with aiter 0.1.12, passes with 0.1.11; no tag of 0.1.11 for rocm10' }) });
+    check(noFix.result.status === 'blocked' && noFix.result.stopped_at === 'Bisect' && !noFix.keys.includes('implementer:implement')
+      && noFix.result.component_issue && noFix.result.component_issue.draft_path === draft && /in aiter's repository/.test(filed(noFix) || '')
+      && noFix.result.component_issue.summary.includes('passes with 0.1.11'),
+      `with no fix planned, the draft and its evidence survive: ${noFix.result.status}, ${filed(noFix)}`);
+    const unsure = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: false, work_packages: ciWps, component: 'aiter', component_issue_path: draft }) });
+    check(unsure.result.status === 'blocked' && !unsure.result.component_issue, 'a culprit that is not confirmed names no component');
   }],
   ['ci: unconfirmed culprit blocks', async () => {
     const r = await run({ mode: 'ci', task: 'c' }, {

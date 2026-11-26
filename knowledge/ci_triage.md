@@ -15,8 +15,32 @@ fix PR or a handover within a week for anything else.
 - **AMD Failure Tracker** issues on sglang, titled `[Failure Tracker] PR Test (AMD)` (label
   `ci-failure-tracker`). A bot rewrites the body; the machine-readable state sits in an HTML comment
   `<!-- ci-failure-tracker-state: {...} -->`. Entries are keyed by `test_file::test_function` with
-  `cluster` (an error-signature title), `error`, `status`, `job_url`, `job_id`, `detail_url`,
-  `run_started_at`, `first_seen`, `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters.
+  `cluster` (an error-signature title), `error`, `job_url`, `job_id`, `detail_url`, `first_seen`,
+  `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters. The bot has written the state in
+  two forms, and the script reads both:
+  - each entry with a `status` in words (`new regression (since DATE)`, `never-passed`, `flaky`,
+    `infrastructure`): the trackers up to October 2026;
+  - version 3, the tracker open since 2026-10-22: `active` entries carry counts instead. `failed` and
+    `observed` are the runs a test failed, of the runs of its image variants from its first failing
+    run on; `streak` is its failures in a row up to the latest run of those variants; `fail_runs` are
+    the runs that failed, `variants` the images it failed on (rocm10, rocm720, rocm724); `fix_pr` is a
+    pull request the bot's analysis names as the fix, in sglang or in another repository, which may
+    be wrong. An entry stays in `active` for days after the test stopped failing, then moves to
+    `archive`, which keeps its key, dates and counts only. The script gives each entry the bot's own
+    kind, as the tracker's body lists them: `no longer failing` (the latest scan did not see it fail,
+    whatever streak it kept: the run of an image that is not run again keeps one), `broken` (two or
+    more runs in a row, since the day that run of failures began), `new` (one failing run) and
+    `flaky` (the rest). On 2026-11-26 the tracker held 156 active entries, and 14 of them were
+    failing.
+
+  What a status said in words, the counts say in part. `broken` since one day, after runs that
+  passed, is the earlier `new regression (since DATE)`, and `flaky` the earlier `flaky`. Nothing in
+  the counts is the earlier `never-passed`: `observed` begins at the first failure the tracker saw,
+  so a test that failed every run counted may have passed before, and a regression that has not
+  passed since looks the same. Tell the two apart by the lane's runs before `first_seen` (the job's
+  history) before a failure is classified as a `test_bug`. A state in any other form, or one that is
+  not JSON, is reported as not read (`unread` in the script's output): read the issue itself then,
+  and never take an empty result for a tracker without failures.
 - **Nightly** failures and **human-filed** CI issues (`[CI] [AMD] ...`).
 - A tracker only covers a few days (one snapshot covered 10-22 to 10-25). Record first-seen and fixed
   dates yourself; the tracker will not keep them.
@@ -41,6 +65,14 @@ metric, the workload and the value, from the test's threshold or the last green 
 judged on that number (§4), so a threshold moved in the test fixes nothing by itself
 (`reward_hacks.md` C1).
 
+**A failure on a score is an accuracy problem,** whatever its class: the test measures an accuracy
+(a GSM8K or MMMU score against a threshold) and fails because the score fell, not on an error
+(`test_gsm8k` at 0.87 where 0.93 is asked). Record the score the fix must restore: the set, the model
+and the value, from the last green run's log or from the threshold the test had when it last passed.
+The fix is judged on that score: G2 measures it with the test's own measurement whatever the fix
+changes (`validation_doctrine.md`, *G2 for an accuracy problem in CI*), and a lower threshold in the
+test is not a fix.
+
 ## 3. Code regressions: find the culprit
 
 1. **Window:** from the last green run to the first red one (or the tracker's `since` date). Pull the
@@ -57,6 +89,12 @@ judged on that number (§4), so a threshold moved in the test fixes nothing by i
 4. **Confirm** the culprit: the test fails at the culprit and passes at its parent.
 5. **Fix forward** with the smallest change (guard the import, use the shared helper, make the mask
    wave-size aware). Revert only when the fix is not obvious and the lane blocks merges.
+6. **A defect of an AMD component** outside the framework (aiter, MoRI, ROCm, the ROCm build of
+   PyTorch) is that component's to fix, whichever commit or bump exposed it: draft the issue for its
+   repository (`RUN_DIR/component_issue.md`), with the component's own call that fails without the
+   framework. A human files it. The lane is fixed as any other: forward in the framework where a
+   framework commit exposed the defect, with a pin to the last version that passed where a bump
+   brought it.
 
 Reference times from late October 2026 (culprit merge → fix PR opened): 17 h for the stale import,
 25 h for the 32-bit mask, 18 h for the CuTe DSL import. Three of the four fixes came from one person;
@@ -70,15 +108,20 @@ from 10-02 to at least 10-25) had no owner.
   fix; one the regression kept from running at all (the module did not import) is judged against the
   culprit's parent. G0 (`validation_doctrine.md`) only when the fix is behind a feature's switch: most
   CI fixes have none, and nothing to turn off.
-- A fix that changes code the server runs is measured on gsm8k as well (G2 for a fix,
-  `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent where the
-  regression keeps the base from serving. A fix to tests, documentation or CI files alone (a
-  `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of §1).
+- A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well (G2
+  for a fix, `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent
+  where the regression keeps the base from serving. A fix to tests, documentation or CI files alone
+  (a `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of
+  §1).
 - Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
   `client_script`: no slower than the base beyond the noise band, or than the culprit's parent where
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
   unless the failure is a performance problem (§2): G5 then measures the number the fix must restore,
   whatever the fix changes.
+- An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included:
+  G2 measures the score the fix must restore, with the failing test's own measurement, and a
+  threshold moved in the test restores nothing. gsm8k against the base runs besides, by the fix's
+  files.
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output
