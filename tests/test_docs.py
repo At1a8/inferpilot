@@ -1019,6 +1019,72 @@ class FixPerformanceTest(unittest.TestCase):
             self.assertRegex(text, r"its number must come back, whatever the fix changes|掉下去的数值都必须回来", name)
 
 
+class CiAccuracyProblemTest(unittest.TestCase):
+    """A CI failure on a score its test measures is an accuracy problem, as one on a speed number is a
+    performance problem (knowledge/validation_doctrine.md, G2 for an accuracy problem in CI). It is fixed when
+    the score comes back: G2 measures it whatever the fix changes, and a threshold moved in the test restores
+    nothing."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_takes_the_score_from_classify_and_accepts_no_round_without_g2(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        for field in ("accuracy: bool,", "accuracy_claim: str,"):
+            self.assertIn(field, body, "CLASSIFY does not take %s" % field)
+        for said, why in (
+                ("const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';", "the score to restore is not read"),
+                ("if (!handOver && accFailure && !accClaim) {", "an accuracy failure goes on without the score its fix must restore"),
+                ("if (!handOver && accClaim) C.accuracy_claim = accClaim;", "the claim does not reach the verify engineer"),
+                ("const claimGate = String((v.gates || {}).accuracy_claim || '').trim();",
+                 "the score to restore is read from G2, which also holds gsm8k against the base"),
+                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {",
+                 "a round is accepted without the score's pass: both ways a round is accepted are held to it, and only \"pass\" is one"),
+                ("const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];",
+                 "the fix's own gates are not told from the others"),
+                ("const mine = own(blocking).map((f) => f.gate);", "a gate of the fix's own that fails on the base becomes a known issue")):
+            self.assertIn(said, src, why)
+        # The check sits before the line that accepts a round, whichever way it is accepted; and what the task is
+        # there to fix is never recorded as a known issue, which the next round would excuse.
+        self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
+        self.assertLess(src.index("const mine = own(blocking).map((f) => f.gate);"), src.index("if (inv.known_issue) R.known_issues.push(inv.known_issue);"))
+
+    def test_the_documents_say_what_is_measured(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a CI accuracy problem is judged")
+        for said in ("A CI failure on a score its test measures", "It is fixed when the score comes back, so the score is the claim",
+                     "`accuracy_claim`: the set, the model and the value", "with the failing test's own measurement, whatever the fix changes",
+                     "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
+                     "No known issue excuses it: the base scores low as well",
+                     "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "cannot stand in for it",
+                     "that is a human's to say"):
+            self.assertIn(said, note[0])
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure on a score is an accuracy problem,** whatever its class"),
+                ("knowledge/ci_triage.md", "a lower threshold in the test is not a fix"),
+                ("roles/ci_guardian.md", "`accuracy`: true when the test fails on a score it measures"),
+                ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
+                ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
+                ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
+                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
+                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
+                ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
+                ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
+                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
+                ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
+                ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),
+                ("knowledge/acceptance.md", "A failure that is itself one of accuracy or of performance is measured whatever its fix changes"),
+                ("templates/ci_triage.md", "for an accuracy problem the score the fix restores"),
+                ("templates/ci_triage.md", "| accuracy problem: yes / no |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class FeaturePerformanceTest(unittest.TestCase):
     """G5 is part of every feature (knowledge/validation_doctrine.md, G5 for a feature): whoever reviews a new
     feature asks what it does to accuracy and to speed, so it is measured against the baseline whether it claims

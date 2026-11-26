@@ -772,6 +772,10 @@ const CLASSIFY = S({
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
   performance: bool,
   perf_claim: str,
+  // the same for a score the test measures (an accuracy threshold): accuracy_claim is the score the fix must
+  // restore, the set, the model and the value
+  accuracy: bool,
+  accuracy_claim: str,
   evidence: str,
   triage_path: str,
 }, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
@@ -1473,6 +1477,19 @@ async function verifyLoop(extraGates) {
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
+    // An accuracy problem is fixed when its score comes back. The verify engineer measures that apart from G2's
+    // gsm8k against the base, as gates.accuracy_claim, and a round is accepted only with its pass, whichever way
+    // the round is accepted (all gates passing, or failures that do not block): not one that left it out or did
+    // not run it (the fix changed a test alone, say its threshold), not one where it failed without blocking.
+    const claimGate = String((v.gates || {}).accuracy_claim || '').trim();
+    // The fix's own gates: what the task is there to fix (the reproduction, the failing test, the score to restore).
+    const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];
+    const own = (fs) => fs.filter((f) => ownGates.includes(String(f.gate || '').trim()));
+    if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
+      note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
+        + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);
+      return { ok: false, reason: 'the accuracy claim is not met' };
+    }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
       note('Verify', 'pass', `${v.summary || 'all blocking gates pass'}${missed ? `; missed without blocking: ${missed}` : ''}`);
@@ -1503,6 +1520,14 @@ async function verifyLoop(extraGates) {
     }
     note('Investigate', inv.verdict, inv.summary || '');
     if (inv.verdict === 'baseline_bug') {
+      // What the task is there to fix fails on the base by definition. A gate of the fix's own that still fails
+      // is the fix not fixing, never a known issue: recorded as one, it would be excused in the next round.
+      const mine = own(blocking).map((f) => f.gate);
+      if (mine.length) {
+        note('Investigate', 'fail', `${mine.join(', ')} still fails with the fix as it does on the base: that is the failure the task is `
+          + 'to fix, not a known issue. A human decides: for a score, whether the threshold itself was wrong');
+        return { ok: false, reason: 'the fix does not fix' };
+      }
       if (inv.known_issue) R.known_issues.push(inv.known_issue);
       continue;
     }
@@ -2032,7 +2057,17 @@ async function runCi() {
     note('Classify', 'fail', 'a performance failure classified without a perf_claim: the number the fix must restore');
     return finish('blocked', 'Classify');
   }
-  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${cl.evidence}`);
+  // A failure on a score the test measures is an accuracy problem, fixed when that score comes back: G2
+  // measures it whatever the fix changes, so that a threshold moved in the test passes for nothing
+  // (validation_doctrine.md, G2 for an accuracy problem in CI). The verify engineer reads the claim.
+  const accFailure = cl.accuracy === true;
+  const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';
+  if (!handOver && accFailure && !accClaim) {
+    note('Classify', 'fail', 'an accuracy failure classified without an accuracy_claim: the score the fix must restore');
+    return finish('blocked', 'Classify');
+  }
+  if (!handOver && accClaim) C.accuracy_claim = accClaim;
+  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${accFailure ? 'accuracy: ' : ''}${cl.evidence}`);
   if (handOver) return finish('handed_off', 'Classify');
   if (stopHere('Classify')) return finish('stopped', 'Classify');
 

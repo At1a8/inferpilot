@@ -65,6 +65,14 @@ metric, the workload and the value, from the test's threshold or the last green 
 judged on that number (§4), so a threshold moved in the test fixes nothing by itself
 (`reward_hacks.md` C1).
 
+**A failure on a score is an accuracy problem,** whatever its class: the test measures an accuracy
+(a GSM8K or MMMU score against a threshold) and fails because the score fell, not on an error
+(`test_gsm8k` at 0.87 where 0.93 is asked). Record the score the fix must restore: the set, the model
+and the value, from the last green run's log or from the threshold the test had when it last passed.
+The fix is judged on that score: G2 measures it with the test's own measurement whatever the fix
+changes (`validation_doctrine.md`, *G2 for an accuracy problem in CI*), and a lower threshold in the
+test is not a fix.
+
 ## 3. Code regressions: find the culprit
 
 1. **Window:** from the last green run to the first red one (or the tracker's `since` date). Pull the
@@ -104,6 +112,10 @@ from 10-02 to at least 10-25) had no owner.
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
   unless the failure is a performance problem (§2): G5 then measures the number the fix must restore,
   whatever the fix changes.
+- An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included:
+  G2 measures the score the fix must restore, with the failing test's own measurement, and a
+  threshold moved in the test restores nothing. gsm8k against the base runs besides, by the fix's
+  files.
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output

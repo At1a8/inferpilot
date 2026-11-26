@@ -1635,6 +1635,86 @@ const scenarios = [
     const flaky = await run({ mode: 'ci', task: 'c' }, classified({ performance: true, failure_class: 'flaky', failing_test_cmd: '' }));
     check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no number asked of it: ${flaky.result.status}`);
   }],
+  ['ci: a failure on a score the test measures is an accuracy problem: its score is measured whatever the fix changes, and no round is accepted without it', async () => {
+    const claim = 'GSM8K back to 0.93 on GLM-5.3-Flash in test_gsm8k (0.94 in the last green run)';
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const verified = (out) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), ...out }) });
+    const accuracy = classified({ accuracy: true, accuracy_claim: claim });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const restored = { accuracy_claim: "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)" };
+    const unmeasured = { gates: { G2: 'not run: no code the server runs changed' }, server_code_changed: false };
+    const stopsAtVerify = (r) => r.result.status === 'blocked' && r.result.stopped_at === 'Verify' && !r.keys.includes('reviewer:review');
+    const ok = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: restored }) });
+    const ve = ok.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ok.result.status === 'ready_for_review' && ve && ve.ins.accuracy_claim === claim,
+      `the score the fix must restore reaches the verify engineer: ${ended(ok)}, ${ve && ve.ins.accuracy_claim}`);
+    check(ok.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('accuracy: ')), 'and the run record names it an accuracy failure');
+    // A threshold moved in the test: the failing test passes, the fix changes a test alone, and nothing measured the score.
+    const moved = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified(unmeasured) });
+    check(stopsAtVerify(moved) && !moved.keys.includes('investigator:investigate') && /without the score coming back/.test(JSON.stringify(moved.result.phases)),
+      `a round that passes without the score is not accepted, and nothing goes on to review: ${ended(moved)}`);
+    const silent = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: {} }) });
+    check(stopsAtVerify(silent), `nor one that says nothing of it: ${ended(silent)}`);
+    // gsm8k against the base is G2's, and is not the score of the claim: an MMMU claim is not met by it.
+    const gsm8k = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: { G2: 'pass 0.893 vs 0.895 (1319 q)' } }) });
+    check(stopsAtVerify(gsm8k) && /accuracy_claim is not reported/.test(JSON.stringify(gsm8k.result.phases)),
+      `gsm8k against the base does not stand in for the score to restore: ${ended(gsm8k)}`);
+    // Only "pass" is a pass: no other word the role may write.
+    for (const word of ['fail 0.871, the claim is 0.93', 'failed: 0.871, the claim is 0.93', 'skipped: the test took too long', 'not run: no code changed']) {
+      const said = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: { accuracy_claim: word }, all_pass: true, failures: [] }) });
+      check(stopsAtVerify(said), `a round that calls itself passed with accuracy_claim "${word}" is not accepted: ${ended(said)}`);
+    }
+    // The other way a round is accepted: failures that do not block. It is held to the score as well.
+    const reportOnly = [{ gate: 'G3', blocking: false, evidence: 'a report-only item missed' }];
+    const lenient = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified({ ...unmeasured, all_pass: false, failures: reportOnly }) });
+    check(stopsAtVerify(lenient), `a round whose only failures do not block is not accepted without the score either: ${ended(lenient)}`);
+    const measured = await run({ mode: 'ci', task: 'c' }, { ...accuracy, ...verified({ gates: restored, all_pass: false, failures: reportOnly }) });
+    check(measured.result.status === 'ready_for_review', `with the score measured, a report-only miss stops nothing: ${ended(measured)}`);
+    // A score below the claim is never excused as a known issue: the base scores low too, and that is the failure being fixed.
+    const below = { gates: { accuracy_claim: 'fail 0.871, the claim is 0.93' }, all_pass: false };
+    const excused = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      ...verified({ ...below, failures: [{ gate: 'accuracy_claim', blocking: false, evidence: 'the base scores 0.87 as well: known issue' }] }) });
+    check(stopsAtVerify(excused), `a score that failed without blocking is not accepted: ${ended(excused)}`);
+    const baseToo = () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base fails the same way' }, summary: 'the base fails the same way' });
+    for (const gate of ['accuracy_claim', 'failing_test']) {
+      // failing_test runs first: where the fix restores nothing, the round can end on it before the score is measured.
+      const onBase = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+        ...verified({ ...below, failures: [{ gate, blocking: true, evidence: '0.871 on the fix' }] }), 'investigator:investigate': baseToo });
+      check(onBase.result.status === 'blocked' && onBase.keys.filter((k) => k === 'verify_engineer:verify').length === 1
+        && !(onBase.result.known_issues || []).some((k) => k.id === 'KI-9') && !onBase.keys.includes('issue_triager:spinoff')
+        && /not a known issue/.test(JSON.stringify(onBase.result.phases)),
+        `${gate} failing as on the base is the failure itself: no known issue, no issue drafted for it, and the run stops for a human: ${ended(onBase)}`);
+    }
+    // Any other gate that fails on the base as well is a known issue, as before: G2's gsm8k among them.
+    for (const gate of ['G0', 'G2']) {
+      const other = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+        'verify_engineer:verify': (ins, n) => (n === 1
+          ? { ...DEFAULTS['verify_engineer:verify'](), gates: restored, all_pass: false,
+            failures: [{ gate, blocking: true, evidence: 'fails on the base too' }] }
+          : { ...DEFAULTS['verify_engineer:verify'](), gates: restored }),
+        'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'on the base too' }, summary: 'on the base too' }) });
+      check(other.result.status === 'ready_for_review' && (other.result.known_issues || []).some((k) => k.id === 'KI-8'),
+        `${gate} failing on the base is still a known issue, and is not taken for the claim: ${ended(other)}`);
+    }
+    const plain = await run({ mode: 'ci', task: 'c' }, { ...classified({ failure_class: 'test_bug' }), ...verified(unmeasured) });
+    const pv = plain.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(plain.result.status === 'ready_for_review' && pv && !pv.ins.accuracy_claim,
+      `any other fix to a test alone goes without G2 as before: ${ended(plain)}`);
+    const noScore = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true }));
+    check(noScore.result.status === 'blocked' && noScore.result.stopped_at === 'Classify' && !noScore.keys.includes('ci_guardian:bisect')
+      && /without an accuracy_claim/.test(JSON.stringify(noScore.result.phases)),
+      `an accuracy failure without the score to restore stops before the bisect: ${ended(noScore)}`);
+    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true, failure_class: 'flaky', failing_test_cmd: '' }));
+    check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no score asked of it: ${ended(flaky)}`);
+    const both = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, performance: true,
+      perf_claim: 'output throughput back above 1100 tok/s' }), ...verified({ gates: restored }) });
+    const pe = both.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(both.result.status === 'ready_for_review' && pe && pe.ins.claim === 'output throughput back above 1100 tok/s'
+      && both.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('performance: accuracy: ')),
+      `a test that measures a speed and a score has both to restore: ${ended(both)}`);
+  }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
       'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: '', unit_test_cmd: 'pytest -q t.py' }),
