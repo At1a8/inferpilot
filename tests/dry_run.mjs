@@ -1016,6 +1016,25 @@ const scenarios = [
     const stoppedReport = featureSkipped.calls.find((c) => c.key === 'director:report');
     check(stoppedReport && stoppedReport.ins.resume_run_dir === RUN && stoppedReport.ins.stopped_at === 'Setup',
       `and is told that it is one: ${stoppedReport && JSON.stringify([stoppedReport.ins.resume_run_dir, stoppedReport.ins.stopped_at])}`);
+    // A script edited in place keeps its path, so the settings compare equal: Setup holds each against the copy
+    // the run kept, before its smoke, and renders nothing again from a harness file that may have changed too.
+    check(doc.includes('Check that every script the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`, '
+      + '`long_context_script`) is still, byte for byte, the copy the run\'s Setup put in `RUN_DIR/scripts/task/`')
+      && doc.includes('A script with no copy there fails the check as well')
+      && doc.includes('copy the task\'s scripts, its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, '
+        + 'which a run resumed from Verify holds them against')
+      && doc.includes('what the file at it holds, Setup held against the run\'s copy before its smoke'),
+      'a script edited in place since the run is not the one the run measured with');
+    check(doc.includes('Nor does it render or write again a script the run has (step 3): it goes on with those in `RUN_DIR/scripts/` as they are, '
+      + 'the ones the run measured with') && doc.includes('a `harness` file, a cookbook page or a template changed since is not read for them'),
+      'and what a harness file holds now is not rendered into the scripts the run measured with');
+    // Such a Setup stopped before its smoke, with no GPUs pinned and no scripts returned: the run stops for what it found.
+    const edited = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, client_script: '/s/client.sh' }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', gpu_ids: '',
+        baseline: 'client_script is not the copy in scripts/task: /s/client.sh was edited after the run' }) });
+    check(stoppedFor(edited, 'client_script is not the copy in scripts/task') && !edited.keys.includes('director:resume')
+      && edited.result.run_dir === RUN,
+      `the stop says what Setup found, not what it did not get to: ${JSON.stringify(edited.result.phases.filter((p) => p.phase === 'Setup'))}`);
     check(doc.includes('one that timed out is not cancelled, and its agent may still be running and start more servers, which idle GPUs do not show')
       && doc.includes('one that timed out was not cancelled, which is why Setup looked for what it left before its smoke')
       && !doc.includes('its servers went with the call'), 'a timed-out Verify is not taken for gone');
@@ -1029,6 +1048,34 @@ const scenarios = [
       && doc.includes('A package whose name or commit it does not record is returned with that field empty, never left out')
       && doc.includes('A resume without its triage record, a `feature` without its spec or its design, or a `perf` run without its analysis, stops'),
       'the director is told what each of these restores or stops');
+    // What Verify gates on and Performance judges is what a phase returned: it is written word for word in a row
+    // of that phase's record and read from that row, so a resume measures the gate and the claim the run had.
+    const read = (...p) => readFileSync(path.join(INFERPILOT, ...p), 'utf8');
+    const said = (role, phase) => phaseSection(read('roles', `${role}.md`), phase).replace(/\s+/g, ' ');
+    for (const [record, rows, by, writes] of [
+      ['issue_triage.md', ['reproduction command', 'performance claim'], said('issue_triager', 'reproduce'),
+        ['Write `repro_cmd` word for word in the *reproduction command* row of `issue_triage.md`',
+          'a `performance` issue\'s `perf_claim` in its *performance claim* row (`none` for any other issue)']],
+      ['ci_triage.md', ['failing test command', 'performance claim'], said('ci_guardian', 'classify'),
+        ['with `failing_test_cmd` word for word in its *failing test command* row',
+          'for a performance problem, `perf_claim` word for word in its *performance claim* row (`none` for any other failure)']],
+      ['feature_spec.md', ['performance claim', 'the claim is a cost the user stated'], said('director', 'spec'),
+        ['Write `perf_claim` word for word in the spec\'s *performance claim* row (`none` when the feature claims none), '
+          + 'and in the row under it whether it is a cost the user stated']],
+      ['perf_analysis.md', ['claim'], said('architect', 'perf_plan'), ['with `perf_claim` word for word in its *claim* row']],
+    ]) {
+      const template = read('templates', record).split('\n');
+      check(rows.every((row) => template.some((l) => l.startsWith(`| ${row} | `))) && writes.every((w) => by.includes(w)),
+        `${record}: the phase writes its gate and its claim word for word, in rows of their own`);
+    }
+    const restore = said('director', 'resume');
+    check(restore.includes('word for word from the *reproduction command* row of `issue_triage.md`')
+      && restore.includes('word for word from the *failing test command* row of `ci_triage.md`')
+      && restore.includes('word for word from the row its phase wrote it in: the *performance claim* row of `issue_triage.md`, `ci_triage.md` or '
+        + '`feature_spec.md`, the *claim* row of the Plan in `perf_analysis.md`')
+      && restore.includes('A row that says `none` is no claim')
+      && restore.includes('as `RUN_DIR/feature_spec.md` has it (the row under its claim)'),
+      'and a resume takes them from those rows');
   }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
     const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });

@@ -23,6 +23,11 @@
 |---|---|---|---|---|---|
 | 1 | | | | reproduced / not reproduced (duration, counts) | |
 
+| Item | Value |
+|---|---|
+| reproduction command | `<repro_cmd, word for word: the command the issue_repro gate runs>` |
+| performance claim | `<perf_claim, word for word: the number the fix must restore; none when the issue is not one of performance>` |
+
 ## Diagnosis
 
 <!-- Root cause with the evidence, or why it is not AMD-side, or what is still unknown. -->

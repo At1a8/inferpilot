@@ -50,7 +50,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
    (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
    was to judge, and `known_issues.json` and
-   `handoffs.json`. Check too that the call whose Verify had no result is over: one that timed out is
+   `handoffs.json`. Check that every script the task brings from outside the run directory
+   (`server_script`, `client_script`, `accuracy_script`, `long_context_script`) is still, byte for
+   byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
+   however the file at it was edited since, and an edited script would measure otherwise than the run
+   did. A script with no copy there fails the check as well: nothing shows what the run ran. Check too
+   that the call whose Verify had no result is over: one that timed out is
    not cancelled, and its agent may still be running and start more servers, which idle GPUs do not
    show.
    `for f in $(grep -l -s -z '^INFERPILOT_RUN_TAG=' /proc/[0-9]*/environ); do t=$(tr '\0' '\n' < "$f"
@@ -64,7 +69,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    what differs, or what still runs, in `baseline`. A run resumed from Verify changes nothing in
    `RUN_DIR/run.json`, at this step or at a later one, and reads its `task` and its `goal` there: the
    file holds what the run it resumes was given, which PHASE=resume restores and holds this run's
-   inputs against, and inputs written there would be compared with themselves.
+   inputs against, and inputs written there would be compared with themselves. Nor does it render or
+   write again a script the run has (step 3): it goes on with those in `RUN_DIR/scripts/` as they are,
+   the ones the run measured with, and a `harness` file, a cookbook page or a template changed since is
+   not read for them.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -125,8 +133,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server is started from the
-   run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts
-   to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
+   run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts,
+   its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, which a run resumed
+   from Verify holds them against, step 1), or InferPilot's template when the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
    `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
@@ -277,15 +286,17 @@ on the commit the run's last Verify round ran on. Change nothing.
    may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
    that moved after the round started (a commit, an edit, a reset) is not what the run verified.
 2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
-   from `issue_triage.md` and the ledger's Reproduce section); `ci`, the failing test (`failing_test_cmd`,
-   word for word from the *failing test command* row of `ci_triage.md`). Leave it empty when the run
-   directory does not record it.
+   word for word from the *reproduction command* row of `issue_triage.md`; a record written before it
+   had that row gives it in its Reproduction table and the ledger's Reproduce section); `ci`, the
+   failing test (`failing_test_cmd`, word for word from the *failing test command* row of
+   `ci_triage.md`). Leave it empty when the run directory does not record it.
 3. `task_definition`: the task definition `RUN_DIR/run.json` recorded, as it is there (`null` when there
    is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
    workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`, and the gates
    the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
    that would measure otherwise is a run of its own. A path, like any other string, is compared as
-   written, since the run uses it as given: a space at its end is part of a file's name. What a
+   written, since the run uses it as given: a space at its end is part of a file's name; what the file
+   at it holds, Setup held against the run's copy before its smoke (step 1 there). What a
    `workload` holds is compared as it is there, a number also where it is written as its digits:
    `"false"` is no empty value in it, and a list of one is not its item. `harness` is
    compared as its lines render (a flag
@@ -297,10 +308,14 @@ on the commit the run's last Verify round ran on. Change nothing.
 4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
    that `issue_triage.md` classifies `performance`, a `ci` failure that `ci_triage.md` gives as a
    performance problem, a `feature` whose spec or design states one, a `perf` plan's gain);
-   `perf_claim`: that claim (for a performance problem, the number the fix must restore, as the
-   reproduction or the triage states it), empty when there was none or the run directory does not
-   record it; `perf_cost` (`feature`): `true` when that claim is a cost the user stated, as
-   `RUN_DIR/feature_spec.md` has it, which stays the claim on InferPilot's client, and `false`
+   `perf_claim`: that claim (for a performance problem, the number the fix must restore), word for
+   word from the row its phase wrote it in: the *performance claim* row of `issue_triage.md`,
+   `ci_triage.md` or `feature_spec.md`, the *claim* row of the Plan in `perf_analysis.md`. A row that
+   says `none` is no claim, and a record written before it had the row states the claim in its text
+   (the reproduction or the triage, the spec's G5 criterion, the plan): empty when there was none or
+   the run directory does not record it. `perf_cost` (`feature`): `true` when that claim is a cost the
+   user stated, as `RUN_DIR/feature_spec.md` has it (the row under its claim), which stays the claim on
+   InferPilot's client, and `false`
    otherwise and in the other modes (always say which: a claim not said to be a cost is a gain, which
    is never claimed on InferPilot's client). A `feature` that states no claim, and a fix of a problem
    that is not one of performance, are judged all the same, as no slower than the baseline
@@ -390,7 +405,10 @@ Return:
    nothing more by default: with `guards` on, add guard workloads of your own (`perf_evaluation.md`
    §2); with `sweep` on, points beyond the workload's own (more concurrencies or lengths,
    `acceptance.md` §1); with `held_out` on, the claim also names its held-out operating point
-   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's.
+   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's. Write
+   `perf_claim` word for word in the spec's *performance claim* row (`none` when the feature claims
+   none), and in the row under it whether it is a cost the user stated: Design copies them from there,
+   and so does a run resumed from Verify.
 5. Accuracy: the sets Setup measured, from `goal` (`acceptance.md` §1.1: gsm8k 1319, and gpqa_diamond
    and simple_qa when `goal` says the change may lose accuracy), each once per arm, at most 1 point below
    the baseline, with no token-level comparison (`validation_doctrine.md`, G2). Performance: one

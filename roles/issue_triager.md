@@ -72,6 +72,10 @@ returned).
 7. A `performance` issue: `perf_claim` is the number the fix must restore — metric, workload and value,
    from the reporter's expectation or the last good commit you measured (e.g. "decode tok/s back to
    2400 at c32, as on v0.5.21"). Without one the task stops here: a fix cannot be judged against it.
+8. Write `repro_cmd` word for word in the *reproduction command* row of `issue_triage.md`, and a
+   `performance` issue's `perf_claim` in its *performance claim* row (`none` for any other issue): the
+   fix is verified with the one and judged on the other, and a run resumed from Verify takes them from
+   there. A call with more time that returns another writes that one there.
 
 Return:
 

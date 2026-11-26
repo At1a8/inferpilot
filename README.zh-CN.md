@@ -341,7 +341,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `bisect_fixed` | `issue`：为 `true` 时，若报告者的 commit 失败而 main 通过，就以复现脚本为测试在两者之间做 bisect，找出修复它的提交 |
 | `confirm_leads` | 默认 `false`：线索（角色遇到的、不属于本任务的问题）在报告里列出，附上复现方法，Spinoff 不占用 GPU；为 `true` 时，在报告前把每条线索放到 base 提交上确认，能复现的起草 issue |
 | `stop_after` | 在该模式的指定阶段之后停下（例如 `Design`、`Reproduce`）；填了该模式没有的阶段，会作为问题返回 |
-| `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行。除 `scan` 外的所有模式：`verify` 在一个 Verify 没有结果就结束的运行里，对 Implement 验证过的那个 commit 重新跑 Verify 及其后的阶段（分支在那之后变过就停下）；这样的运行会在 `next.rerun_with` 里给出这一项 |
+| `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行。除 `scan` 外的所有模式：`verify` 在一个 Verify 没有结果就结束的运行里，对 Implement 验证过的那个 commit 重新跑 Verify 及其后的阶段（分支在那之后变过，或任务自带的脚本在那之后被改过，就停下）；这样的运行会在 `next.rerun_with` 里给出这一项 |
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |

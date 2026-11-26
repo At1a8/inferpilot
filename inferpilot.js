@@ -1386,6 +1386,13 @@ async function setup(requireBaseline) {
     server_script: own(C.server_script) || own(s.server_script),
     client_script: own(C.client_script) || own(s.client_script),
     accuracy_script: own(C.accuracy_script) || own(s.accuracy_script) });
+  const said = `baseline ${s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`;
+  // A Setup that failed says why there. One that stopped before its smoke (what a resume checks first) pinned no
+  // GPUs and returned no scripts: what it lacks for that is not why the run stops.
+  if (s.baseline_status === 'fail') {
+    note('Setup', 'fail', said);
+    return false;
+  }
   if (!C.gpu_ids) {
     note('Setup', 'fail', 'no GPU set pinned (gpu_ids)');
     return false;
@@ -1410,8 +1417,7 @@ async function setup(requireBaseline) {
     return false;
   }
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
-  note('Setup', ok ? 'pass' : 'fail',
-    `baseline ${s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`);
+  note('Setup', ok ? 'pass' : 'fail', said);
   return ok;
 }
 

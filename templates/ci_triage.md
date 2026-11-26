@@ -12,6 +12,7 @@
 | error signature | |
 | first red run / last green run | <run links and times> |
 | failing test command | `<failing_test_cmd, word for word: the command Verify runs on every lane>` |
+| performance claim | `<perf_claim, word for word: the number the fix must restore; none when the failure is no performance problem>` |
 
 ## Classification
 

@@ -74,7 +74,8 @@ Inputs: `opportunities` from the profile (`analysis_path`) and `apply_prs` (cand
    these two values exactly.
 5. `perf_claim`: the conservative combined expectation (workload, metric, size). When `goal` states the
    user's target, the claim addresses it or the plan says why it cannot be reached.
-6. Fill the Plan section of `perf_analysis.md`.
+6. Fill the Plan section of `perf_analysis.md`, with `perf_claim` word for word in its *claim* row: a
+   run resumed from Verify takes the claim from there.
 
 Return:
 

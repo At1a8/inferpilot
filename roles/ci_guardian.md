@@ -26,8 +26,10 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
 4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`), with `failing_test_cmd` word for word in its
-   *failing test command* row: a run resumed from Verify takes the gate from there. For `infrastructure`
-   and `flaky`, write the handover note there (who, what evidence).
+   *failing test command* row and, for a performance problem, `perf_claim` word for word in its
+   *performance claim* row (`none` for any other failure): a run resumed from Verify takes the gate and
+   the claim from there. For `infrastructure` and `flaky`, write the handover note there (who, what
+   evidence).
 
 Return:
 
