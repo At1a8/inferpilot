@@ -328,6 +328,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
   template server followed, and each rendered parameter's value and source
   (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
+  `harness.json` holds only what Setup rendered. Spec's fallback client, where the user took it (the
+  run's `client_script` is a `fallback_client.sh`), has its own record beside it, `fallback_client.json`:
+  give the lengths and the concurrency it measured with from there, or from the script itself when
+  it was written by hand at Spec.
 - G4 (`stability`): give its verdict with the commit it ran on (the verify engineer's `gates`, the
   ledger). It runs once in a run: when the branch's head is a later commit, say near the top that the
   code handed over has not been through G4, and since which commit. A G4 that failed where the baseline
