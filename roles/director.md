@@ -200,11 +200,13 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
      cache keeps it.
-   - `perf`, and a feature with a workload: the run's `client_script` and the task's `workload` are the
-     fixed benchmark. Record them in `RUN_DIR/run.json` as given; every later measurement runs them
-     unchanged. With `held_out` on, record the held-out operating point next to them
-     (`perf_evaluation.md` §3: half the concurrency, when the client reads `CONCURRENCY`), before any
-     number is seen.
+   - `perf`, and every feature: the run's `client_script`, with the task's `workload` when it gives
+     one, is the fixed benchmark. Record them in `RUN_DIR/run.json` as given and, for a client without
+     a `workload`, the scenarios it runs (its lengths and concurrencies, as its script and the
+     baseline's logs show them); every later measurement runs them unchanged. A feature's are recorded
+     whether it claims a gain or not, since G5 judges it either way. With `held_out` on, record the
+     held-out operating point next to them (`perf_evaluation.md` §3: half the concurrency, when the
+     client reads `CONCURRENCY`), before any number is seen.
    - `issue`, `ci`: prepare the environment the reproduction needs; run a baseline only if the task
      needs one now. Report `baseline_status: "skip"` with the reason otherwise. The warm-up, the cache
      lookup and the accuracy probe above belong to a baseline that is measured: without one, skip
@@ -244,15 +246,21 @@ Return:
    criterion: the spec says so and names no tolerance, and the metric is reported.
    - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
-     scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what
-     the task's client runs, what is missing. The run then stops and asks the user; nothing is built on a
-     workload the user did not give. A client of InferPilot's for the source's scenarios is only a
-     fallback the user may take: `perf.sh` at those scenarios (`python3 <inferpilot_dir>/scripts/harness.py
+     scenarios (it runs others, or it is InferPilot's template on the task's own workload), return
+     `workload_gap`: what the source measured, what the task's client runs, what is missing. The run
+     then stops and asks the user; nothing is built on a workload the user did not give. A client of
+     InferPilot's for the source's scenarios is only a fallback the user may take: `perf.sh` at those
+     scenarios (`python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts perf --name fallback_client --task '<harness>' --feature
      RUN_DIR/feature_params.json` writes `RUN_DIR/scripts/fallback_client.sh`), or, when its parameters
      cannot express them, one you write there. Return it as `fallback_client`. It need not reproduce the
-     source's numbers, so what it measures is reported, never a claim; once the user takes it
-     (`client_script`), there is no gap to return.
+     source's numbers, so the source's gain is never the claim on it: G5 judges there only that the
+     feature is no slower than the baseline. Once the user takes it (`client_script`), there is no gap
+     to return.
+   - **Without a claimed gain there is no gap.** A source that claims none, or a `goal` that drops
+     the claim, leaves G5 one thing to show on the task's client: that the feature is no slower than
+     the baseline (`validation_doctrine.md`, *G5 for a feature*). The spec names the scenarios that
+     client runs, as it names the source's.
    - **Out of scope by default.** A scenario the source did not consider, the task's own workload
      included, is not measured unless `goal` names it; it goes under Non-goals with the reason (the
      PARD-2 port: vLLM's PR measured 256-token answers at concurrency 1 and its drafts were trained on
@@ -267,11 +275,16 @@ Return:
    acceptance criteria per gate with a named suite and a threshold relative to the same-pattern
    baseline, non-goals, unsupported combinations (each with a startup rejection), constraints, time-box.
 4. `perf_claim`: the measurable performance benefit the feature promises (workload, budget, metric,
-   size), or empty when it claims none. Performance is measured on the task's workload and the guard
-   workloads its `goal` names, nothing more by default: with `guards` on, add guard workloads of your
-   own (`perf_evaluation.md` §2); with `sweep` on, points beyond the workload's own (more concurrencies
-   or lengths, `acceptance.md` §1); with `held_out` on, the claim also names its held-out operating
-   point (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's.
+   size), or empty when it claims none. G5 runs either way (`validation_doctrine.md`, *G5 for a
+   feature*): an empty claim is judged as no slower than the baseline beyond the noise band, on the
+   run's client. A cost the user states in the request or `goal` is the claim instead, as a bound (`at
+   most 5% below the baseline's output tok/s`), returned with `perf_cost: true`; never state one
+   yourself. It stays the claim on InferPilot's client: only a gain of the source's is never claimed
+   there. Performance is measured on the task's workload and the guard workloads its `goal` names,
+   nothing more by default: with `guards` on, add guard workloads of your own (`perf_evaluation.md`
+   §2); with `sweep` on, points beyond the workload's own (more concurrencies or lengths,
+   `acceptance.md` §1); with `held_out` on, the claim also names its held-out operating point
+   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's.
 5. Accuracy: the sets Setup measured, from `goal` (`acceptance.md` §1.1: gsm8k 1319, and gpqa_diamond
    and simple_qa when `goal` says the change may lose accuracy), each once per arm, at most 1 point below
    the baseline, with no token-level comparison (`validation_doctrine.md`, G2). Performance: one
@@ -290,6 +303,7 @@ Return:
 ```json
 {"spec_path": "/abs/RUN_DIR/feature_spec.md", "gates_measurable": true,
  "perf_claim": "+20% output tok/s vs HiCache-only at equal HBM, 32 x 30k tokens, c32 | ''",
+ "perf_cost": false,
  "skill": "hisparse-v2 (validated) | ''", "notes": "<anything not measurable and why>",
  "workload_gap": "<what the source measured, what the task's client runs, what is missing> | ''",
  "fallback_client": "/abs/RUN_DIR/scripts/fallback_client.sh | ''"}
@@ -324,10 +338,11 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
 - `scan` with `share_daily_report` false (its Dispatch failed or timed out): share nothing, since a daily
   report it left may be partial; say where it is, if there is one, and that it was not shared.
 - List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
-  and the scripts: which were the task's and which were InferPilot's templates the user took (a
-  feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
-  template server followed, and each rendered parameter's value and source
-  (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
+  and the scripts: which were the task's and which were InferPilot's templates the user took (on
+  InferPilot's client a feature's numbers never stand for its source's gain: G5 judged there only
+  that it is no slower than the baseline), the cookbook recipe the template server followed, and each
+  rendered parameter's value and source (`RUN_DIR/scripts/harness.json`), the feature's and the
+  cookbook's with the words they came from.
   `harness.json` holds only what Setup rendered. Spec's fallback client, where the user took it (the
   run's `client_script` is a `fallback_client.sh`), has its own record beside it, `fallback_client.json`:
   give the lengths and the concurrency it measured with from there, or from the script itself when

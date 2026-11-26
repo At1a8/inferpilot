@@ -13,9 +13,9 @@ of it.
 | `task` | the source of truth: upstream PR or design URL, issue URL, CI job or tracker cluster, performance goal | required | required | required | required | — |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
 | `model_path` | the model the baseline and the gates run | required | required unless `stop_after` ends the run before a fix: the reporter's model, which G2 measures the fix on | required unless `stop_after` ends the run before a fix: the model G2 measures the fix on, the one the failing test serves when it serves one | required | — |
-| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
+| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task measures a workload of its own; required with `client_script: template` | for a performance issue | — | required | — |
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended; required with `stability` on | — | required | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; on it a feature is judged as no slower than the baseline, never on its source's gain (§1.2) | required: G5 measures every feature | for a performance issue, or with `stability` on | — | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -52,6 +52,9 @@ the user, but for the server G2 measures a fix on when the report or the job sta
 - **`client_script`** runs the fixed workload against `PORT` and writes its logs to `OUT_DIR`. It is the
   benchmark: InferPilot runs it unchanged and never edits it. If it reads `CONCURRENCY` (a
   space-separated list), the held-out point (`held_out`) can be measured at half the concurrency.
+  A feature names one as a perf task does: G5 measures every feature against the baseline with it,
+  the gain it claims or, where it claims none, that it is no slower
+  (`../knowledge/validation_doctrine.md`, *G5 for a feature*).
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,
@@ -103,10 +106,13 @@ only where the user takes them:
   A feature or perf task runs it when the user answers `server_script: template`.
 - `perf.sh`: sglang's serving benchmark on random prompts: one run per concurrency, with 4 prompts and
   2 warm-up requests per concurrent request after a flush of the prefix cache, as the client above. A
-  feature or perf task runs it on the task's workload when the user answers `client_script: template`.
-  A perf task's numbers on it count as on any client: the workload is the user's, and there is no
-  source to reproduce. A feature's are reported, never a claim: it need not reproduce the source's
-  numbers, and the same holds when a feature takes it as Spec's fallback client for the source's
+  feature or perf task runs it on the task's workload when the user answers `client_script: template`,
+  and a task that takes it gives the whole of that workload, both lengths and the concurrency (in
+  `workload`, or in `harness`), and is asked for what it leaves out: lengths or a concurrency of the
+  template's own are a load nobody chose. A perf task's numbers on it count as on any client: the
+  workload is the user's, and there is no source to reproduce. A feature's never stand for its source's
+  gain, which the template need not reproduce: G5 judges on it only that the feature is no slower than
+  the baseline, and the same holds when a feature takes it as Spec's fallback client for the source's
   scenarios (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the
   user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
@@ -155,7 +161,7 @@ server's context leaves beside a question.
 {"mode": "feature", "task": "https://github.com/sgl-project/sglang/pull/<n>",
  "goal": "the feature passes its gates on DeepSeek-V4.1 at TP4",
  "model_path": "/mnt/models/DeepSeek-V4.1-Flash", "gpu_ids": "0,1,2,3",
- "server_script": "/workspace/scripts/server.sh"}
+ "server_script": "/workspace/scripts/server.sh", "client_script": "/workspace/scripts/client.sh"}
 ```
 
 ```json

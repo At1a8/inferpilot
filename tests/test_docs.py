@@ -408,9 +408,9 @@ class LongGatesTest(unittest.TestCase):
             self.assertIn("scripts/stability.sh", self.flat(path), "%s does not name G4's script" % path)
         self.assertTrue((ROOT / "scripts" / "stability.sh").is_file())
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("const g4 = mode !== 'scan' && asked(a.stability) === 'true';", src)
-        self.assertIn("if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {", src,
-                      "stability is on without a client to run")
+        self.assertIn("const g4 = (mode === 'issue' || mode === 'ci') && asked(a.stability) === 'true';", src,
+                      "a feature and a perf task name their server and their client anyway: G4 asks an issue or a ci task")
+        self.assertIn("if (g4 && !a.client_script) {", src, "stability is on without a client to run")
         for field in self.FLAGS:
             self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
 
@@ -419,10 +419,9 @@ class LongGatesTest(unittest.TestCase):
         asked for where it lacks one, in any mode. No template stands in on G4's account, and InferPilot's client,
         where the task names it all the same, runs the task's workload, never lengths and a concurrency of its own."""
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {", src,
+        self.assertIn("if (g4 && !a.server_script) {", src,
                       "an issue or a ci task with stability on may start without a server for G4")
-        self.assertIn("if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {", src,
-                      "the client template would keep up its own lengths and concurrency")
+        self.assertIn("if (g4 && gaps.length) {", src, "the client template would keep up its own lengths and concurrency")
         block = re.search(r"\n  const g4 = .*?\n  const kb = ", src, re.S)
         self.assertIsNotNone(block, "the G4 questions are not where missingFields has them")
         self.assertEqual(block.group(0).count("ask('"), 3, "G4 asks for its server, its client and the template's workload")
@@ -655,6 +654,128 @@ class FixAccuracyTest(unittest.TestCase):
         self.assertEqual(len(row), 1, "knowledge/acceptance.md §2 has no Accuracy row")
         for stale in ("when the issue is an accuracy loss", "| no regression |"):
             self.assertNotIn(stale, row[0], "the profiles still leave a fix's accuracy to the kind of issue")
+
+
+class FeaturePerformanceTest(unittest.TestCase):
+    """G5 is part of every feature (knowledge/validation_doctrine.md, G5 for a feature): whoever reviews a new
+    feature asks what it does to accuracy and to speed, so it is measured against the baseline whether it claims
+    a gain or not. With a claim the gain shows; without one, or on InferPilot's client, the feature is no slower
+    than the baseline. So a feature names its client as a perf task does, and the roles and documents say so."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_every_feature_names_the_client_g5_measures_it_with(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("if ((mode === 'perf' || mode === 'feature') && !a.client_script) {\n", src,
+                      "a feature without a workload starts without a client, and G5 has nothing to measure it with")
+        self.assertNotIn("(mode === 'feature' && a.workload)", src, "a feature's client still depends on its having a workload")
+        self.assertIn("const gaps = isTemplate(a.client_script) ? templateLoadGaps(a) : [];", src)
+        self.assertIn("if ((mode === 'feature' || (mode === 'perf' && a.workload)) && gaps.length) {\n    ask('workload',", src,
+                      "InferPilot's client would measure a task on lengths or a concurrency nobody chose")
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `client_script` |")]
+        self.assertEqual(len(row), 1)
+        self.assertIn("| required: G5 measures every feature |", row[0], "templates/task_definition.md: a feature's client")
+        workload = [line for line in fields.splitlines() if line.startswith("| `workload` |")]
+        self.assertIn("required with `client_script: template`", workload[0])
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            row = [line for line in text.splitlines() if line.startswith("| `client_script` |")]
+            self.assertEqual(len(row), 1, name)
+            self.assertRegex(row[0], r"required for `feature` and `perf`|`feature` 和 `perf` 必填", "%s: the client_script row" % name)
+            self.assertNotRegex(row[0], r"a feature with a `workload`|给了 `workload` 的 feature", name)
+
+    def test_the_whole_of_the_load_inferpilots_client_runs_is_the_tasks(self):
+        """A workload that names a part of it would leave the rest to the feature's source or to the template: the
+        three the check asks of the task are the ones scripts/harness.py takes from a workload."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        harness = (ROOT / "scripts" / "harness.py").read_text(encoding="utf-8")
+        takes = dict(re.findall(r'"(\w+)": "(\w+)"', re.search(r"^WORKLOAD = \{(.*?)\}$", harness, re.M).group(1)))
+        ours = re.search(r"\nconst TEMPLATE_LOAD = \{(.*?)\};\n", src)
+        self.assertIsNotNone(ours, "inferpilot.js does not say what a task that takes the client template gives")
+        self.assertEqual(dict(re.findall(r"(\w+): \['(\w+)'", ours.group(1))), takes,
+                         "inferpilot.js asks for other dimensions than scripts/harness.py takes from a workload")
+        self.assertIn("function templateLoadGaps(a) {", src)
+        for path, said in (("templates/task_definition.md", "gives the whole of that workload, both lengths and the concurrency (in "
+                                                            "`workload`, or in `harness`), and is asked for what it leaves out"),
+                           ("roles/intake.md", "a task that takes the template gives the whole `workload` it runs: both lengths and "
+                                               "the concurrency")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_a_feature_without_a_claimed_gain_is_judged_as_no_slower_than_the_baseline(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("const NO_SLOWER = \"no gain is claimed: no slower than the baseline beyond the noise band, on the run's client\";",
+                      src)
+        self.assertIn("const ours = fallback || isTemplate(A.client_script);\n"
+                      "  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;",
+                      src, "a feature without a claimed gain, or on InferPilot's client, is measured and nothing is judged")
+        self.assertEqual(src.count("claimOf("), 2, "the first run and the resumed one read the claim the same way")
+        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)"):
+            self.assertIn(call, src, "a cost the user stated is lost on the way to Performance")
+        self.assertEqual(src.count("perf_cost: bool,"), 2,
+                         "the spec and the approved design both say whether the claim is a cost the user stated")
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a feature.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say that every feature is measured")
+        for said in ("Every feature is measured against the baseline, whether it claims a gain or not",
+                     "what it does to accuracy and to speed", "G2 and G5",
+                     "One that claims none is no slower than the baseline beyond the noise band",
+                     "on which the source's gain is never the claim",
+                     "A cost the user states in the request or `goal`", "no role states one for the user",
+                     "stops the task at Performance for a human, and nothing is rolled back",
+                     "a feature task names its client as it names its server"):
+            self.assertIn(said, note[0])
+        gates = [line for line in (ROOT / "knowledge" / "validation_doctrine.md").read_text(encoding="utf-8").splitlines()
+                 if line.startswith("| G5 performance |")]
+        self.assertEqual(len(gates), 1)
+        self.assertIn("a change that claims none is no slower there", gates[0])
+        for path, said in (("knowledge/acceptance.md", "**Without a claimed gain** a feature is measured all the same"),
+                           ("knowledge/acceptance.md", "a feature that claims no gain is no slower when that median lies no further below "
+                                                       "the baseline than the noise band"),
+                           ("knowledge/perf_evaluation.md", "A feature is measured whether it claims a gain or not"),
+                           ("knowledge/perf_evaluation.md", "or a slowdown beyond the noise band where no gain is claimed"),
+                           ("knowledge/dev_methodology.md", "a feature that claims none is no slower than the baseline"),
+                           ("knowledge/pr_playbook.md", "A feature that claims no gain gives the same table"),
+                           ("roles/perf_engineer.md", "for a feature that claims no gain or is measured with InferPilot's client, that it "
+                                                      "is no slower than the baseline beyond the noise band"),
+                           ("roles/perf_engineer.md", "`no slower than the baseline` is met when the median lies no further below the "
+                                                      "baseline than the noise band"),
+                           ("roles/perf_engineer.md", "the claim still holds: a gain still beyond the noise band, no slowdown still none"),
+                           ("roles/director.md", "**Without a claimed gain there is no gap.**"),
+                           ("roles/director.md", "G5 runs either way"),
+                           ("roles/director.md", "an empty claim is judged as no slower than the baseline beyond the noise band"),
+                           ("roles/director.md", "returned with `perf_cost: true`; never state one yourself"),
+                           ("roles/director.md", "It stays the claim on InferPilot's client: only a gain of the source's is never "
+                                                 "claimed there"),
+                           ("roles/director.md", "`perf`, and every feature: the run's `client_script`, with the task's `workload` "
+                                                 "when it gives one, is the fixed benchmark"),
+                           ("roles/director.md", "A feature's are recorded whether it claims a gain or not"),
+                           ("roles/architect.md", "`perf_claim` and `perf_cost` copied from `RUN_DIR/feature_spec.md`"),
+                           ("roles/architect.md", "and `perf_cost` with it: true when the claim is a cost the user stated"),
+                           ("knowledge/validation_doctrine.md", "on the user's client and on InferPilot's alike"),
+                           ("roles/perf_engineer.md", "A cost the user stated (`at most 5% below the baseline`) is met when the "
+                                                      "median lies within that bound"),
+                           ("roles/perf_engineer.md", "`RUN_DIR/run.json` in `perf` and in `feature`"),
+                           ("templates/feature_spec.md", "a cost the user stated in `goal`: no more than it, on either client"),
+                           ("roles/director.md", "the source's gain is never the claim on it: G5 judges there only that the feature is "
+                                                 "no slower than the baseline"),
+                           ("roles/intake.md", "A feature needs its client as a perf task does, whether it claims a gain or not"),
+                           ("templates/task_definition.md", "G5 measures every feature against the baseline with it"),
+                           ("templates/task_definition.md", "G5 judges on it only that the feature is no slower than the baseline"),
+                           ("templates/feature_spec.md", "no claimed gain, or InferPilot's client: no slower than the baseline beyond the "
+                                                         "noise band"),
+                           ("templates/validation_report.md", "where none is claimed, no slower than the baseline")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
+        row = [line for line in acceptance.splitlines()
+               if line.startswith("| Performance | ") and "when the issue is a performance problem" in line]
+        self.assertEqual(len(row), 1, "knowledge/acceptance.md §2 has no Performance row")
+        self.assertIn("| Performance | required: the gain the feature claims, or, where it claims none, no slower than the baseline",
+                      row[0])
+        self.assertNotIn("when the feature claims a gain", row[0], "the profile still leaves a feature's G5 to its claim")
+        for path in ("roles/perf_engineer.md", "roles/director.md", "templates/task_definition.md", "knowledge/perf_evaluation.md"):
+            self.assertNotRegex(self.flat(path), r"reported, never a claim|reported, never claimed|true when `claim` is empty",
+                                "%s still says that nothing is judged without a claimed gain" % path)
 
 
 BUNDLE = "RUN_DIR/branch.bundle"

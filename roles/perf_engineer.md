@@ -55,7 +55,10 @@ A profile the machine was not idle for is `{"analysis_path": "", "path_ok": fals
 
 ## PHASE=perf_eval (G5 in feature and perf; guards in every mode that runs it)
 
-Inputs: `claim` (empty when the task claims no gain).
+Inputs: `claim`, what the measurement must show: the gain the task claims; the number an issue's fix
+must restore; a cost the user stated for a feature, as a bound; or, for a feature that claims no gain
+or is measured with InferPilot's client, that it is no slower than the baseline beyond the noise band
+(`validation_doctrine.md`, *G5 for a feature*).
 
 Before the servers of every round start, this run's earlier ones stopped, the machine idle
 (`gpu_status.py --check all`, `env_hygiene.md`). A GPU another job uses means the measurement is not run:
@@ -65,26 +68,31 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
    template the user took), run unchanged with `OUT_DIR` set, against servers started from the run's
    `server_script` (the change's flags in `EXTRA_ARGS`); equal budget for the scarce resource; guard
    workloads only where the goal or the acceptance matrix lists them; fresh server per arm; prefix cache
-   flushed; one warm-up, then one A/B round (one timed run per arm), and a round that shows no gain is
-   reproduced at most twice and judged on the median (`perf_evaluation.md` §3); interleave arms on a
-   shared box.
+   flushed; one warm-up, then one A/B round (one timed run per arm), and a round that misses the claim
+   is reproduced at most twice and judged on the median (`perf_evaluation.md` §3); interleave arms on
+   a shared box.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
-3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, the spec's
-   claim in `feature`, the reproduction in `issue` — with no case added, dropped or resized after
-   results were seen. `path_ok`: the path check of the profile phase holds for both arms. Either false
-   means the numbers are not evidence.
+3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf` and in
+   `feature`, where the spec names the same scenarios, the reproduction in `issue` — with no case
+   added, dropped or resized after results were seen. `path_ok`: the path check of the profile phase
+   holds for both arms. Either false means the numbers are not evidence.
 4. **Reward hacks.** Check the P entries of `reward_hacks.md` on both arms: the two `server_args=`
    lines (P3), the budget (P4), output token totals counted from the client's responses (P5), the
    prefix-cache hit rates (P6), every run reported (P9). Put a suspected hack in `results` and
    `summary` with its id, for the reviewer; a gain that depends on one is not reproduced.
 5. In `mode=perf`, re-capture the trace metrics too: the mechanism must have moved (e.g. syncs per step
    5 → 0), not only the headline number.
-6. `claim_reproduced`: the median of the rounds meets `claim` (true when `claim` is empty). `held_out_ok`: with `held_out` on, at the held-out operating point (`perf_evaluation.md` §3:
-   the client at half the concurrency through `CONCURRENCY`, fixed at Setup), measured the same way, the
-   change still wins beyond the noise band (true when `held_out` is off, when `claim` is empty, or when the
-   client cannot take another concurrency: say which in `summary`). `guards_ok`: no guard workload the
-   goal or the matrix lists regresses beyond the noise band (true when there is none: say so).
+6. `claim_reproduced`: the median of the rounds meets `claim`. A claimed gain is met by a win beyond
+   the noise band, of the size the claim names where it names one. `no slower than the baseline` is met
+   when the median lies no further below the baseline than the noise band, so a gain meets it too; a
+   feature that is slower does not, whatever else it brings. A cost the user stated (`at most 5% below
+   the baseline`) is met when the median lies within that bound. `held_out_ok`: with `held_out` on, at
+   the held-out operating point (`perf_evaluation.md` §3: the client at half the concurrency through
+   `CONCURRENCY`, fixed at Setup), measured the same way, the claim still holds: a gain still beyond
+   the noise band, no slowdown still none (true when `held_out` is off, or when the client cannot take
+   another concurrency: say which in `summary`). `guards_ok`: no guard workload the goal or the matrix
+   lists regresses beyond the noise band (true when there is none: say so).
 7. Write the performance section of `RUN_DIR/validation_report.md` or `perf_analysis.md`, with the
    held-out result and the reward-hack checks.
 
