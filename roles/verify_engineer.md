@@ -112,31 +112,41 @@ clock can start before your session does.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model; Setup says so with `text_model` false, and you say so in your answer when you find it
        yourself), there is no gsm8k to run on it. G2 is an output comparison in its place, by the
-       task's own test, its `output_script` (`task_definition.md` §1.1; `validation_doctrine.md`,
-       *G2 for a model that answers no text questions*): the same inputs with the same seeds on both
-       arms, and the fix's outputs compared with the baseline's. Run it unchanged, once per arm,
-       each against a server launched with the run's launch script on the same GPUs, each in a
-       directory of its own that you make first. The baseline arm first: `mkdir -p
-       RUN_DIR/outputs/base`, then `PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>`.
-       Then the fix, with the baseline's outputs: `PORT=<port> OUT_DIR=RUN_DIR/outputs/fix
-       BASE_DIR=RUN_DIR/outputs/base bash <output_script>`, which compares, and exits non-zero when
-       an output differs by more than the script tolerates. Never write such a test yourself, and
-       never change the task's: its inputs, the seeds, the measure and the tolerance are the
-       user's. `gates` says what it compared, and with what: `"G2": "pass: 16 images match the
-       base's (output_script: PSNR >= 35 dB on each)"`. A difference beyond the tolerance is a
-       blocking failure (`gate: "G2"`), with the outputs that differ as its evidence. So is a fix
-       arm that compared nothing (a script that does not read `BASE_DIR`, or says nothing of a
+       task's own test, its `output_script` (`task_definition.md` §1.1; `validation_doctrine.md`, *G2
+       for a model that answers no text questions*): the same inputs with the same seeds on both
+       arms, and the fix's outputs compared with the baseline's. Run it unchanged, once per arm, each
+       against a server launched with the run's launch script on the same GPUs, each in a directory
+       of its own that you make first. The baseline arm first: `mkdir -p RUN_DIR/outputs/base`, then
+       `PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>`. Then the fix, with the
+       baseline's outputs, in a directory that no earlier execution wrote to, named for the commit it
+       runs: `mkdir RUN_DIR/outputs/fix-<commit>` (which must not find it there: a commit that runs
+       again takes `fix-<commit>-2`, and so on), then `PORT=<port>
+       OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash <output_script>`,
+       which compares, and exits non-zero when an output differs by more than the script tolerates. A
+       retry or a repaired fix never writes where an earlier execution wrote: that would overwrite
+       the evidence of its round, and an output the script did not write again would be compared as
+       this round's. Only the baseline's directory is reused, for the commit it was measured on.
+       Never write such a test yourself, and never change the task's: its inputs, the seeds, the
+       measure and the tolerance are the user's. `gates` says what it compared, of which commit,
+       where and with what: `"G2": "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match
+       the base's (output_script: PSNR >= 35 dB on each)"`. A difference beyond the tolerance is a
+       blocking failure (`gate: "G2"`), with the outputs that differ as its evidence. So is a fix arm
+       that compared nothing (a script that does not read `BASE_DIR`, or says nothing of a
        comparison): never a pass on its exit status alone. The baseline arm is the one gsm8k would
        have: the base, measured once and kept for the later rounds, or the last commit that served
        the configuration where the base cannot (next items). Where the failure being fixed is in
-       these outputs (the base's are the wrong ones), the base is no reference either: compare
-       with that last commit, and where the run knows none, keep the fix's outputs and report them
-       (`"G2": "16 images written to RUN_DIR/outputs/fix, no baseline: the base's are the black
-       images the issue reports"`). Write both commands in the ledger, where the report's *Before
-       pushing* section finds them. What the model is shows on its server: where one Setup took
-       for such a model answers text questions all the same (the server has chat completions, and
-       answers one), run gsm8k as for any other fix, leave the task's script unrun, and say so in
-       `gates`.
+       these outputs (the base's are the wrong ones), the base is no reference either: compare with
+       that last commit, and where the run knows none, keep the fix's outputs and report them (`"G2":
+       "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline: the base's are the
+       black images the issue reports"`). InferPilot accepts a round for such a model only on one of
+       those two results, a `pass` or outputs kept with `no baseline`: never leave G2 out, and never
+       report it `not run` where the task names the script. Write both commands in the ledger, with
+       the directory and the commit of each arm, where the report's *Before pushing* section finds
+       them. What the model is shows on its server: where one Setup took for such a model answers
+       text questions all the same (the server has chat completions, and answers one), run gsm8k as
+       for any other fix, leave the task's script unrun, and say so in `gates` and with
+       `"text_model": true` in your answer, so that the later rounds and the report read the model as
+       what it is.
      - With no `output_script` there is nothing to compare the outputs of such a model with, and
        gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
        `"G2": "not run: the model answers no text questions, and the task names no output_script"`
@@ -272,7 +282,9 @@ did not run are `not run`.
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
 `false` only when every file the fix changes is a test, a documentation file or a CI file. It adds
 `"text_model": false` when the model answers no text questions, whether G2 compared its outputs or
-had no `output_script` to compare them with.
+had no `output_script` to compare them with, and `"text_model": true` when a model Setup took for
+such a one answers text questions after all. What you say replaces what Setup said, for the later
+rounds and the report; say nothing where you did not look.
 
 A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the

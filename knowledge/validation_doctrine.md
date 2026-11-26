@@ -88,10 +88,13 @@ Notes per gate:
   fixed is in these very outputs (the base's images are the black ones), the base is no reference
   either, and that last commit is; where the run knows none, the fix's outputs are kept and
   reported, not judged. An output that differs by more than the script tolerates is a blocking
-  failure, and so is a run that compared nothing. This is the one G2 that compares outputs (*G2
-  compares scores, not tokens*): InferPilot measures no score set on such a model, the inputs and
-  the seeds are fixed, and what two runs of one commit still differ by is what the script's
-  tolerance is for.
+  failure, and so is a run that compared nothing. A round is accepted only on the comparison's
+  result, a pass or outputs kept where there is no baseline: never on a G2 that did not run, with
+  the script named or without. Each run of the fix writes to a directory of its own, named for its
+  commit, so that no round's outputs are read as another's. This is the one G2 that compares
+  outputs (*G2 compares scores, not tokens*): InferPilot measures no score set on such a model, the
+  inputs and the seeds are fixed, and what two runs of one commit still differ by is what the
+  script's tolerance is for.
 - **G2 for an accuracy problem in CI.** A CI failure on a score its test measures (a GSM8K threshold,
   an MMMU score), not on an error, is an accuracy problem, as a failure on a speed number is a
   performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the

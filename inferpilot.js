@@ -1564,10 +1564,11 @@ async function verifyLoop(extraGates) {
     // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     // Setup says what the model is, and no fix for one that answers no text questions starts without the task's
-    // output comparison (outputsLacking). A round that finds such a model all the same, where Setup took it for
-    // one that answers them, had no gsm8k to run and nothing to compare its outputs with: its fix has no G2, and
-    // the round passes nothing, whatever it reports.
-    if (BEFORE_A_FIX[MODE] && v.text_model === false) C.text_model = false;
+    // output comparison (outputsLacking). The verify engineer, who has the server, has the last word either way,
+    // for the later rounds and the report; a round that does not say leaves what is known. A round that finds
+    // such a model all the same, where Setup took it for one that answers them, had no gsm8k to run and nothing
+    // to compare its outputs with: its fix has no G2, and the round passes nothing, whatever it reports.
+    if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;
     if (C.server_code_changed && outputsLacking()) {
       const why = 'the model answers no text questions, and the task names no output_script: G2 has no gsm8k to run on it and no test '
         + "of the task's to compare the fix's outputs with. Name the script (output_script), and run the task again";
@@ -1584,6 +1585,18 @@ async function verifyLoop(extraGates) {
     // The fix's own gates: what the task is there to fix (the reproduction, the failing test, the score to restore).
     const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];
     const own = (fs) => fs.filter((f) => ownGates.includes(String(f.gate || '').trim()));
+    // With the task's script, G2 of such a model is the comparison the script makes, and a round is accepted only
+    // on its result, whichever way the round is accepted: a pass, or outputs kept where the run has no baseline
+    // to compare them with (verify_engineer.md). Not on a G2 the round left out or did not run: the script the
+    // task names is no evidence until it has compared something.
+    const compared = String((v.gates || {}).G2 || '').trim();
+    if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))
+      && !/^pass\b/i.test(compared) && !/\bno baseline\b/i.test(compared)) {
+      const why = `the model answers no text questions, and the round was accepted without the result of its output comparison: G2 is ${
+        compared ? `"${compared}"` : 'not reported'}. G2 of such a fix is the task's output_script, run on the base and on the fix`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
       note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
         + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);

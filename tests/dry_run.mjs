@@ -1591,8 +1591,49 @@ const scenarios = [
       `a round that finds such a model without the script does not pass, whatever it reports: ${late.result.status} at ${late.result.stopped_at}`);
     check(/the model answers no text questions, and the task names no output_script/.test(why) && /Name the script \(output_script\), and run the task again/.test(why)
       && /Name the script \(output_script\)/.test(late.result.next.say), `and the result says what to do: ${why} | ${late.result.next.say}`);
-    const withScript = await run({ mode: 'issue', task: 'i', output_script: '/s/outputs.sh' }, found(true));
-    check(withScript.result.status === 'ready_for_review', `with the task's script the same finding stops nothing: ${withScript.result.status}`);
+    // With the script, G2 is the comparison it makes, and the round is accepted only on its result: a pass, or the
+    // outputs kept where the run has no baseline. A G2 the round skipped or left out passes nothing, script or not.
+    const compared = (gates, more = {}) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false,
+      server_code_changed: true, gates: { issue_repro: 'pass', ...gates }, ...more }) });
+    const scripted = { mode: 'issue', task: 'i', output_script: '/s/outputs.sh' };
+    for (const g2 of ["pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)",
+      "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline: the base's are the black images the issue reports"]) {
+      const withScript = await run(scripted, compared({ G2: g2 }));
+      check(withScript.result.status === 'ready_for_review', `with the task's script and its result (${g2.slice(0, 24)}...) the round is accepted: ${
+        withScript.result.status}`);
+    }
+    for (const [said, gates, more] of [
+      ['says it did not run the comparison', { G2: 'not run: the fix changes one line' }, {}],
+      ['leaves G2 out', {}, {}],
+      ['reports a comparison that failed without blocking', { G2: 'fail: 3 of 16 images differ beyond the tolerance (KI-002)' },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-002' }] }],
+    ]) {
+      const skipped = await run(scripted, compared(gates, more));
+      const said2 = (skipped.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(skipped.result.status === 'blocked' && skipped.result.stopped_at === 'Verify' && !skipped.keys.includes('perf_engineer:perf_eval')
+        && !skipped.keys.some((k) => k.startsWith('pr_engineer')),
+        `with the script, a round that ${said} is not accepted: ${skipped.result.status} at ${skipped.result.stopped_at}`);
+      check(/accepted without the result of its output comparison: G2 is ("|not reported)/.test(said2)
+        && /G2 of such a fix is the task's output_script, run on the base and on the fix/.test(said2), `and the run record says why: ${said2}`);
+    }
+    // The verify engineer has the server, and the last word on what the model is, either way. A model Setup took
+    // for one that answers no text questions and that answers them after all is measured on gsm8k: the later
+    // roles read it so, and the guard for the comparison does not apply. A round that does not say changes nothing.
+    const afterAll = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: true,
+      server_code_changed: true, gates: { issue_repro: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q); the model answers text questions, output_script not run' } }) });
+    const seen = (r, key) => (r.calls.find((c) => c.key === key) || { ins: {} }).ins.text_model;
+    check(afterAll.result.status === 'ready_for_review' && seen(afterAll, 'verify_engineer:verify') === false
+      && seen(afterAll, 'perf_engineer:perf_eval') === true && seen(afterAll, 'reviewer:review') === true,
+      `a model that answers text questions after all is one for the roles after Verify: ${afterAll.result.status}, ${
+        JSON.stringify([seen(afterAll, 'verify_engineer:verify'), seen(afterAll, 'perf_engineer:perf_eval'), seen(afterAll, 'reviewer:review')])}`);
+    const silent = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true,
+      gates: { issue_repro: 'pass', G2: "pass: 16 images match the base's" } }) });
+    check(silent.result.status === 'ready_for_review' && seen(silent, 'perf_engineer:perf_eval') === false && seen(silent, 'reviewer:review') === false,
+      `a round that does not say leaves what Setup said: ${silent.result.status}, ${JSON.stringify([seen(silent, 'perf_engineer:perf_eval'), seen(silent, 'reviewer:review')])}`);
+    const silentSkip = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true,
+      gates: { issue_repro: 'pass', G2: 'not run' } }) });
+    check(silentSkip.result.status === 'blocked' && silentSkip.result.stopped_at === 'Verify',
+      `and Setup's word is enough for the guard: a skipped comparison is not accepted (${silentSkip.result.status} at ${silentSkip.result.stopped_at})`);
     const testsOnly = await run({ mode: 'issue', task: 'i' }, found(false));
     check(testsOnly.result.status === 'ready_for_review' && !testsOnly.keys.includes('perf_engineer:perf_eval'),
       `a fix to tests, documentation or CI files alone has no G2, and needs no script: ${testsOnly.result.status}`);

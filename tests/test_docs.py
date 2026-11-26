@@ -987,8 +987,15 @@ class OutputComparisonTest(unittest.TestCase):
                          "a task that can reach a fix is not asked for the script after Setup")
         self.assertIn("const outputs = outputsLacking();\n  if (outputs) lacks.push('output_script');", src,
                       "a run whose stop before the fix was lifted starts its fix without the script")
-        self.assertIn("if (BEFORE_A_FIX[MODE] && v.text_model === false) C.text_model = false;\n    if (C.server_code_changed && outputsLacking()) {", src,
+        # The verify engineer has the last word on what the model is, either way; a round that does not say changes nothing.
+        self.assertIn("if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;\n"
+                      "    if (C.server_code_changed && outputsLacking()) {", src,
                       "a round that finds such a model without the script can pass")
+        # With the script, a round is accepted only on the comparison's result: not on a G2 it left out or did not run.
+        self.assertIn("const compared = String((v.gates || {}).G2 || '').trim();\n"
+                      "    if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))\n"
+                      "      && !/^pass\\b/i.test(compared) && !/\\bno baseline\\b/i.test(compared)) {", src,
+                      "a round can be accepted for such a model without the result of its output comparison")
         self.assertIn("\nFIX_NEEDS.output_script = ", src, "the result does not say what to give")
         question = re.search(r"\nconst OUTPUTS_ASK = (.*?);\n", src, re.S).group(1)
         for said in ("PORT", "OUT_DIR", "BASE_DIR", "same inputs with the same seeds", "exits non-zero", "no template for it"):
@@ -1006,7 +1013,10 @@ class OutputComparisonTest(unittest.TestCase):
                      "is asked for it then, before anything else runs", "by the fix's files and after the reproduction or the failing test",
                      "the last commit that served the configuration where the base cannot",
                      "Where the failure being fixed is in these very outputs", "kept and reported, not judged",
-                     "is a blocking failure, and so is a run that compared nothing", "This is the one G2 that compares outputs"):
+                     "is a blocking failure, and so is a run that compared nothing", "This is the one G2 that compares outputs",
+                     "A round is accepted only on the comparison's result, a pass or outputs kept where there is no baseline",
+                     "never on a G2 that did not run, with the script named or without",
+                     "Each run of the fix writes to a directory of its own, named for its commit"):
             self.assertIn(said, note[0])
         fix = [i for i in notes if i.startswith("- **G2 for a fix.**")]
         self.assertIn("is measured by an output comparison in its place (*G2 for a model that answers no text questions*)", fix[0])
@@ -1014,7 +1024,21 @@ class OutputComparisonTest(unittest.TestCase):
         for path, said in (("roles/verify_engineer.md", "G2 is an output comparison in its place, by the task's own test, its `output_script`"),
                            ("roles/verify_engineer.md", "Run it unchanged, once per arm"),
                            ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>"),
-                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix BASE_DIR=RUN_DIR/outputs/base bash <output_script>"),
+                           # every run of the fix writes to a directory of its own; only the baseline's is reused
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash "
+                                                        "<output_script>"),
+                           ("roles/verify_engineer.md", "in a directory that no earlier execution wrote to, named for the commit it runs: `mkdir "
+                                                        "RUN_DIR/outputs/fix-<commit>`"),
+                           ("roles/verify_engineer.md", "a commit that runs again takes `fix-<commit>-2`"),
+                           ("roles/verify_engineer.md", "A retry or a repaired fix never writes where an earlier execution wrote"),
+                           ("roles/verify_engineer.md", "Only the baseline's directory is reused, for the commit it was measured on"),
+                           ("roles/verify_engineer.md", "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline"),
+                           ("roles/verify_engineer.md", "InferPilot accepts a round for such a model only on one of those two results, a `pass` or "
+                                                        "outputs kept with `no baseline`"),
+                           ("roles/verify_engineer.md", "never report it `not run` where the task names the script"),
+                           ("roles/verify_engineer.md", 'say so in `gates` and with `"text_model": true` in your answer'),
+                           ("roles/verify_engineer.md", '`"text_model": true` when a model Setup took for such a one answers text questions after all'),
+                           ("roles/verify_engineer.md", "What you say replaces what Setup said, for the later rounds and the report"),
                            ("roles/verify_engineer.md", "Never write such a test yourself, and never change the task's"),
                            ("roles/verify_engineer.md", "never a pass on its exit status alone"),
                            ("roles/verify_engineer.md", "Where the failure being fixed is in these outputs"),
