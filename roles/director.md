@@ -402,6 +402,8 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed. With
   `component_issue`, name the component the root cause is in and the draft a human is to file in its
   repository.
+- With `existing_pr_result`, say that the run first verified that pull request, where it did not pass
+  and why, and give the comment drafted for it (`comment_path`), which a human posts there.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when

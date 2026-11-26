@@ -257,6 +257,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `experiment_ledger.md` | 环境、基线和每一次测量 |
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
+| `pr_comment.md` | 已有的修复 PR 验证不通过时，写给那个 PR 的评论草稿，说明运行测到了什么（由你来发） |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `component_issue.md` | 根因在框架之外的 AMD 组件（aiter、MoRI、ROCm、PyTorch 的 ROCm 版）时，给那个组件的仓库起草的 issue（由你来提） |
 | `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |

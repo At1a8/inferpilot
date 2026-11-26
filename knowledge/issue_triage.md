@@ -63,7 +63,7 @@ Judgement calls, decided once so they are applied the same way every time:
 | Action | When | Output |
 |---|---|---|
 | `reproduce` | no usable fix exists | reproduction on the reporter's configuration, then diagnosis and a fix PR |
-| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR |
+| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
 | `close_fixed` | the fix is merged and covers every point | verification on main and a closing comment draft |
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
@@ -72,6 +72,17 @@ Judgement calls, decided once so they are applied the same way every time:
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
+it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for
+a fix of the run's own. Where it does not pass (it no longer applies to main, its own tests fail, the
+reproduction still fails, it loses accuracy or speed against the base), nothing is repaired on top of
+it. The run drafts a comment for that pull request with what it measured (`RUN_DIR/pr_comment.md`, for
+a human to post), takes the pull request off the task branch, and goes on to Diagnose and a fix of its
+own, as for an issue nobody had opened a pull request for. That fix's pull request names the earlier
+one and says in one sentence what it did not pass. A failure the baseline shares is not the pull
+request's (`validation_doctrine.md`, *Same-pattern baseline control*), and a measurement that could not
+be trusted decides nothing: the run stops for a human then, as for any fix.
 
 **A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
 the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails

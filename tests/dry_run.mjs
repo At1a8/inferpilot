@@ -2073,6 +2073,108 @@ const scenarios = [
     check(stopped.result.status === 'fixed_on_main' && !stopped.keys.includes('ci_guardian:bisect_fix'),
       `stop_after=Reproduce runs no bisect: ${stopped.result.status}`);
   }],
+  ['issue: an existing fix PR that does not pass verification gets its comment, and the run then fixes the failure itself', async () => {
+    const existing = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+      triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const pass = () => DEFAULTS['verify_engineer:verify']();
+    const failing = (gate, extra) => ({ ...pass(), all_pass: false, failures: [{ gate, blocking: true, evidence: 'fails 3 of 3 with the PR applied', ...extra }] });
+    const packages = (r) => r.calls.filter((c) => c.key === 'implementer:implement').map((c) => `${c.ins.work_package.id}:${c.ins.work_package.kind || 'framework'}`);
+    const comment = (r) => r.calls.find((c) => c.key === 'pr_engineer:comment');
+    const fellBack = (r, at) => !!comment(r) && comment(r).ins.failed_at === at && comment(r).ins.existing_pr_result.prs === '#40872'
+      && r.calls.some((c) => c.key === 'implementer:rollback' && c.ins.work_package.id === 'ALL')
+      && r.keys.indexOf('investigator:diagnose') > r.keys.indexOf('pr_engineer:comment');
+
+    // The reproduction still fails with the pull request applied, and the investigator can say what it lacks.
+    const r = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()) });
+    check(r.result.status === 'ready_for_review' && fellBack(r, 'Verify'), `the comment is drafted, the PR taken off the branch, and the run diagnoses: ${ended(r)}`);
+    check(eqList(packages(r), ['WP1:apply_pr', 'WP1:framework']),
+      `nothing is repaired on top of the pull request (the investigator's FIX1 is not implemented), and the run's own fix follows: ${packages(r)}`);
+    check(eqList(r.phases, ['Setup', 'Triage', 'Reproduce', 'Implement', 'Verify', 'Investigate', 'Diagnose', 'Implement', 'Verify', 'Performance', 'Review',
+      'PR', 'Reply', 'Report']), `phases ${r.phases}`);
+    const res = r.result.existing_pr_result;
+    check(res.prs === '#40872' && res.failed_at === 'Verify' && /issue_repro.*race in hook/.test(res.why) && res.comment_path === `${RUN}/pr_comment.md`,
+      `the result says which pull request, where it failed and why, and where its comment is: ${JSON.stringify(res)}`);
+    check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'existing_fix_failed' && p.summary.startsWith('#40872 did not pass verification: ')),
+      'and so does the run record');
+    check(r.result.next.user.some((u) => u.startsWith('post the comment on #40872')) && r.result.next.user.some((u) => /push/.test(u)),
+      `the user has a comment to post there and the run's own pull request to push: ${JSON.stringify(r.result.next.user)}`);
+    const own = r.calls.filter((c) => c.key === 'verify_engineer:verify')[1];
+    check(eqList(own.ins.verified_work_packages.map((d) => d.commit), ['c_WP1']) && own.ins.extra_gates[0].gate === 'issue_repro',
+      `the run's own fix is verified alone, with the same reproduction as its gate: ${JSON.stringify(own.ins.verified_work_packages)}`);
+    for (const key of ['investigator:diagnose', 'pr_engineer:pr', 'issue_triager:reply', 'director:report']) {
+      const c = r.calls.filter((x) => x.key === key).pop();
+      check(c && c.ins.existing_pr_result && c.ins.existing_pr_result.prs === '#40872', `${key} knows that #40872 was verified first and did not pass`);
+    }
+
+    // Every way it can fail to pass, and each is the pull request's: it does not apply, its accuracy, its speed.
+    const blocked = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'implementer:implement': (ins) => (ins.work_package.kind === 'apply_pr' ? { wp: 'WP1', status: 'blocked', notes: 'conflicts in python/sglang/a.py' }
+        : DEFAULTS['implementer:implement'](ins)) });
+    check(blocked.result.status === 'ready_for_review' && fellBack(blocked, 'Implement') && /conflicts in python\/sglang\/a\.py/.test(comment(blocked).ins.failure),
+      `a pull request that no longer applies: ${ended(blocked)}`);
+    const lossy = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('G2') : pass()),
+      'investigator:investigate': () => ({ verdict: 'inconclusive', summary: 'gsm8k 0.84 against 0.89 on the base; no mechanism found' }) });
+    check(lossy.result.status === 'ready_for_review' && fellBack(lossy, 'Verify') && /G2: gsm8k 0\.84/.test(lossy.result.existing_pr_result.why),
+      `one that loses accuracy, which the investigator cannot explain: ${ended(lossy)}`);
+    const slow = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'perf_engineer:perf_eval': (ins, n) => ({ ...DEFAULTS['perf_engineer:perf_eval'](), claim_reproduced: n > 1 }) });
+    check(slow.result.status === 'ready_for_review' && fellBack(slow, 'Performance'), `one that is slower than the base: ${ended(slow)}`);
+    const stillThere = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base fails the same way' }, summary: 'as on the base' }) });
+    check(stillThere.result.status === 'ready_for_review' && fellBack(stillThere, 'Verify') && !(stillThere.result.known_issues || []).length,
+      `one with which the reproduction fails as on the base does not fix, and that is no known issue: ${ended(stillThere)}`);
+
+    // What is not the pull request's stops the run as for any fix: nothing is decided against it.
+    const shared = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('G0') : pass()),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'a module test' }, summary: 'on the base too' }) });
+    check(shared.result.status === 'ready_for_review' && !comment(shared) && !shared.keys.includes('investigator:diagnose')
+      && shared.result.known_issues.some((k) => k.id === 'KI-8'), `a failure the baseline shares is a known issue, and the pull request passes: ${ended(shared)}`);
+    const busy = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'perf_engineer:perf_eval': () => ({ ...DEFAULTS['perf_engineer:perf_eval'](), claim_reproduced: false, not_run: 'GPU 1: VRAM 40%, pids 777' }) });
+    check(busy.result.status === 'blocked' && busy.result.stopped_at === 'Performance' && !comment(busy) && !busy.keys.includes('investigator:diagnose'),
+      `a measurement that was not run decides nothing against it: ${ended(busy)}`);
+    const unset = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => failing('issue_repro', { failure_class: 'environment', evidence: 'aiter 0.1.12 cannot be installed in this image' }) });
+    check(unset.result.status === 'blocked' && unset.result.stopped_at === 'Verify' && !comment(unset),
+      `nor does a change that could not be put into effect here: ${ended(unset)}`);
+    const held = await run({ mode: 'issue', task: 'i' }, { ...existing, 'test_engineer:unit': () => null });
+    check(held.result.status === 'blocked' && held.result.stopped_at === 'Implement' && !comment(held)
+      && !held.calls.some((c) => c.key === 'implementer:rollback'), `a gate without a result may still be running: nothing is rolled back: ${ended(held)}`);
+
+    // The branch has to be back at the base before a fix of the run's own starts on it.
+    const dirty = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => failing('issue_repro'), 'implementer:rollback': () => ({ wp: 'ALL', reset_to: 'base', clean: false }) });
+    check(dirty.result.status === 'blocked' && dirty.result.stopped_at === 'Verify' && !dirty.keys.includes('investigator:diagnose')
+      && !!comment(dirty) && dirty.result.next.user.some((u) => u.startsWith('post the comment on #40872'))
+      && dirty.result.attention.some((a) => /left the worktree unclean/.test(a.issue)),
+      `a branch that is not clean stops the run, with the comment drafted all the same: ${ended(dirty)}`);
+    // The comment is the pull request's due, but a run without one still fixes the failure.
+    const mute = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()), 'pr_engineer:comment': () => null });
+    check(mute.result.status === 'ready_for_review' && mute.keys.includes('investigator:diagnose') && !mute.result.existing_pr_result.comment_path
+      && !mute.result.next.user.some((u) => u.startsWith('post the comment on'))
+      && mute.result.phases.some((p) => p.verdict === 'warning' && /no comment was drafted for #40872/.test(p.summary)),
+      `without a comment the run goes on, and says that none was drafted: ${ended(mute)}`);
+    // Whatever comes of the run's own fix, the comment stays the user's to post.
+    const noFix = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => failing('issue_repro'),
+      'investigator:diagnose': () => ({ verdict: 'inconclusive', root_cause: 'not found' }) });
+    check(noFix.result.status === 'diagnosed' && noFix.result.next.user.some((u) => u.startsWith('post the comment on #40872')),
+      `a run that finds no fix of its own still has the comment for the pull request: ${ended(noFix)}`);
+
+    // A pull request that passes is verified as before, and a fix of the run's own that fails is repaired as before.
+    const fine = await run({ mode: 'issue', task: 'i' }, existing);
+    check(fine.result.status === 'ready_for_review' && !comment(fine) && !fine.keys.includes('investigator:diagnose') && !fine.result.existing_pr_result
+      && eqList(packages(fine), ['WP1:apply_pr']), `one that passes: ${ended(fine)}`);
+    const ours = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()) });
+    check(ours.result.status === 'ready_for_review' && !comment(ours) && eqList(packages(ours), ['WP1:framework', 'FIX1:framework']),
+      `the run's own fix is repaired by what the investigator plans, as before: ${packages(ours)}`);
+  }],
   ['issue: an existing fix PR is reproduced on main first and gated on that reproduction', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'], triage_path: `${RUN}/t.md` }),

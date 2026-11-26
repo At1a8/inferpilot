@@ -283,6 +283,70 @@ class EnvironmentTest(unittest.TestCase):
                               for name in sorted(table_names(EN)) if ENV_NAME.match(name) and name not in read])
 
 
+class ExistingFixFailsTest(unittest.TestCase):
+    """An existing fix PR is verified, not repaired (knowledge/issue_triage.md §4). Where it does not pass, the
+    run drafts the comment that says so for that pull request, takes it off the task branch and fixes the
+    failure itself; the comment is written whatever comes of that fix."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_falls_back_to_a_fix_of_its_own(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const PR_COMMENT = S({ comment_path: str, summary: str }, ['comment_path']);", "the comment has no answer to give"),
+                ("async function existingFailed(prs, at, why) {", "nothing happens when an existing fix does not pass"),
+                ("const cm = await call('pr_engineer', 'comment', inputs({ failed_at: at, failure: why }), PR_COMMENT);", "no comment is drafted for the pull request"),
+                ("ROLLBACK, 'implementer:rollback:existing');", "the pull request stays on the branch the run's own fix is made on"),
+                ("R.done.length = 0;", "the pull request's package still counts as a verified one"),
+                ("async function verifyLoop(extraGates, existing) {", "the verify loop does not know that the fix is someone else's"),
+                ("if (existing && ['fix_needed', 'inconclusive'].includes(inv.verdict)) {", "what the pull request lacks is repaired on top of it"),
+                ("if (!impl.ok) return existing && !impl.held ? existingFailed(existing, 'Implement', impl.reason) : finish('blocked', 'Implement');",
+                 "a pull request that does not apply ends the run, or one whose gate may still be running is rolled back"),
+                ("if (!ver.ok) return existing && ver.theirs ? existingFailed(existing, 'Verify', ver.reason) : ended(ver, 'Verify');",
+                 "a failure that is not the pull request's is decided against it"),
+                ("if (existing && perf.trusted && perf.claimed && !perf.reproduced) {", "a measurement that was not trusted is decided against the pull request"),
+                ("const tried = await deliver([wp], gates, issueClaim, runPerf, prs || 'the existing fix PR');", "an issue's existing fix is not verified as someone else's"),
+                ("if (tried !== EXISTING_FAILED) return tried;", "the run ends where its own fix should begin")):
+            self.assertIn(said, src, why)
+        issue = src[src.index("async function runIssue() {"):src.index("async function runCi() {")]
+        self.assertLess(issue.index("if (tried !== EXISTING_FAILED) return tried;"), issue.index("enter('Diagnose');"),
+                        "the run's own fix does not start with a diagnosis")
+        # The repair of a fix of the run's own is unchanged: the check for someone else's comes first.
+        self.assertLess(src.index("if (existing && ['fix_needed', 'inconclusive'].includes(inv.verdict)) {"),
+                        src.index("const fix = await implementAll(inv.work_packages);"))
+
+    def test_the_documents_say_it(self):
+        role = (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8")
+        self.assertIn("\n## PHASE=comment (issue: an existing fix PR that did not pass verification)\n", role)
+        phase = " ".join(role[role.index("## PHASE=comment"):].split())
+        for said in ("Its author is owed what the run saw, whatever becomes of the fix the run now makes itself",
+                     "You change no code and run nothing: every number comes from the ledger",
+                     "`RUN_DIR/pr_comment.md`", "the commit of it the run applied",
+                     "what passed, since a comment that lists only failures misleads",
+                     "no verdict on the pull request, no request to close it, and no attribution line",
+                     "a fix for the same failure is being prepared and will be linked here",
+                     "Run the leak scan on it as on a PR body",
+                     '"comment_path": "/abs/RUN_DIR/pr_comment.md"'):
+            self.assertIn(said, phase)
+        for path, said in (
+                ("knowledge/issue_triage.md", "**An existing fix that does not pass is answered, then replaced.**"),
+                ("knowledge/issue_triage.md", "nothing is repaired on top of it"),
+                ("knowledge/issue_triage.md", "goes on to Diagnose and a fix of its own, as for an issue nobody had opened a pull request for"),
+                ("knowledge/issue_triage.md", "That fix's pull request names the earlier one and says in one sentence what it did not pass"),
+                ("knowledge/issue_triage.md", "a measurement that could not be trusted decides nothing"),
+                ("knowledge/issue_triage.md", "where it does not pass, the comment says so and the run fixes the failure itself |"),
+                ("roles/investigator.md", "**After an existing fix PR that did not pass** (`existing_pr_result`"),
+                ("roles/investigator.md", "plan from the root cause, not as a patch on that pull request"),
+                ("roles/issue_triager.md", "With `existing_pr_result` an open fix PR was verified first and did not pass"),
+                ("roles/director.md", "With `existing_pr_result`, say that the run first verified that pull request"),
+                ("knowledge/pr_playbook.md", "names that PR and says in one sentence what it did not pass"),
+                ("templates/issue_triage.md", "the comment drafted for it (`pr_comment.md`)"),
+                ("README.md", "| `pr_comment.md` |"), ("README.zh-CN.md", "| `pr_comment.md` |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class LongContextScriptTest(unittest.TestCase):
     """G3 runs the task's own long-context test, `long_context_script`, as G4 keeps up the task's own client
     (knowledge/validation_doctrine.md): the user who asks for the gate says what it runs. A task with

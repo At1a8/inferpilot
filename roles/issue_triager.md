@@ -190,6 +190,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile,
    as the diagnosis gave it (`component_issue.summary`). `ready_for_review`: that the pull request is
    a workaround, and what it leaves to the component.
+   With `existing_pr_result` an open fix PR was verified first and did not pass: say so in one
+   sentence, with what it did not pass, and that the fix now offered is another one. The comment for
+   that pull request is a draft of its own (`comment_path`), not part of this reply.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
 3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
    `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they

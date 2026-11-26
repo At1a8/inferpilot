@@ -474,6 +474,7 @@ the container with its status. A run directory holds:
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>_XXXXXX.log` from `mktemp`, with its `.pid` and `.exit` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
+| `pr_comment.md` | for an existing fix PR that did not pass verification: the comment that says what the run measured, for you to post on that PR |
 | `reply_draft.md`, `reply_check.md` | an issue's reply draft, for you to post, and the reviewer's check of it against the run |
 | `component_issue.md` | an issue drafted for the AMD component a root cause is in (aiter, MoRI, ROCm, the ROCm build of PyTorch), for you to file in its repository |
 | `knowledge_pr.md`, `knowledge.patch` | the description of the curator's pull request to InferPilot's repository, and its change, which `scripts/propose_knowledge.py --patch` proposes later from any checkout |

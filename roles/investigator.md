@@ -81,6 +81,11 @@ says what the reporter can do meanwhile (a version that works, a flag that avoid
 workaround serves: the reply and the report take it from there. Never change the component: it comes
 from the image (`env_hygiene.md`).
 
+**After an existing fix PR that did not pass** (`existing_pr_result`: the pull request, where its
+verification failed and why; `issue_triage.md` §4): the task branch is back at the base, and the fix is
+the run's own to plan. What that pull request changed and what it failed is evidence of where the cause
+is and is not: use it, and plan from the root cause, not as a patch on that pull request.
+
 Return:
 
 ```json
