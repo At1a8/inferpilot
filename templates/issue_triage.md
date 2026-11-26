@@ -16,7 +16,7 @@
 | category | wrong result / crash / startup or build failure / performance / feature request / CI / tool |
 | priority | P0 / P1 / P2, with the rule from `issue_triage.md` that decides it |
 | action | reproduce / push_existing_pr / close_fixed / needs_info / not_amd / plan / duplicate (of #<n>) |
-| problems in the report | one, or each on a line: what fails, its category and priority, and which one this run takes |
+| problems in the report | one, or each on a line: what fails, its category, its priority and its own fix PRs, its known state, and which one this run takes |
 
 ## Reproduction
 

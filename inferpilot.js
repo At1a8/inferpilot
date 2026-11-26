@@ -724,6 +724,7 @@ const TRIAGE = S({
     enum: ['wrong result', 'crash', 'startup or build failure', 'performance', 'feature request', 'CI', 'tool'],
   },
   action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
+  duplicate_of: str, // with duplicate: the open issue that has the failure, the original (#<n>)
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1888,7 +1889,16 @@ async function runIssue() {
   }
   Object.assign(C, { triage_path: tri.triage_path, reply_draft_path: tri.reply_draft_path || '', priority: tri.priority });
   R.priority = tri.priority;
-  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${tri.reason || ''}`);
+  // A duplicate ends here, before the Reply phase: without the issue it duplicates, or without the draft written
+  // at Triage, the run would end with no answer and no issue to follow.
+  const duplicateOf = tri.action === 'duplicate' ? String(tri.duplicate_of || '').trim() : '';
+  if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {
+    note('Triage', 'fail', `a duplicate without ${duplicateOf ? 'a reply draft' : 'the issue it duplicates (duplicate_of)'}: `
+      + `${tri.reason || ''}`);
+    return finish('blocked', 'Triage');
+  }
+  if (duplicateOf) R.duplicate_of = duplicateOf;
+  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${duplicateOf ? `duplicate of ${duplicateOf}; ` : ''}${tri.reason || ''}`);
   // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside
   // AMD code, a feature request, and a report of a failure that another open issue already has.
   if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');

@@ -1853,15 +1853,33 @@ const scenarios = [
   }],
   ['issue: a report of a failure that another open issue has is answered, and is not worked on twice', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
-      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', reason: 'the failure of #38849, on a second model',
-        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: '#38849',
+        reason: 'the same signature and failing path, on a second model', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
     });
     check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `a duplicate ends at Triage: ${r.result.status} at ${r.result.stopped_at}`);
     check(!r.keys.includes('issue_triager:reproduce') && !r.keys.includes('implementer:implement'), 'nothing is reproduced or fixed for it');
     check(!r.keys.includes('issue_triager:reply') && r.keys.includes('director:report') && r.result.reply_draft_path === `${RUN}/reply.md`,
       `the draft written at Triage is its reply: ${r.keys.filter((k) => /reply|report/.test(k))}, ${r.result.reply_draft_path}`);
-    check(r.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'duplicate' && p.summary.includes('#38849')),
-      `the run record names the issue that has the failure: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Triage'))}`);
+    check(r.result.duplicate_of === '#38849'
+      && r.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'duplicate' && p.summary.includes('duplicate of #38849; ')),
+      `the result and the run record name the issue that has the failure: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Triage'))}`);
+    // A duplicate ends before the Reply phase: without the original, or without the draft, it would end with no answer.
+    for (const [lacks, drop] of [['the issue it duplicates', { duplicate_of: '' }], ['the issue it duplicates', { duplicate_of: undefined }],
+      ['a reply draft', { reply_draft_path: '' }]]) {
+      const bare = await run({ mode: 'issue', task: 'i' }, {
+        'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', duplicate_of: '#38849', reason: 'the same failure',
+          triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md`, ...drop }),
+      });
+      check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Triage'
+        && bare.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'fail' && p.summary.includes(`a duplicate without ${lacks}`)),
+        `a duplicate without ${lacks} is not accepted (${JSON.stringify(drop)}): ${bare.result.status} at ${bare.result.stopped_at}`);
+    }
+    // duplicate_of is read with a duplicate only: any other action is as it was.
+    const other = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', duplicate_of: '#1', triage_path: `${RUN}/t.md`,
+        reply_draft_path: `${RUN}/reply.md` }),
+    });
+    check(other.result.status === 'triaged' && !other.result.duplicate_of, 'another action does not take it');
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
