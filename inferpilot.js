@@ -537,6 +537,18 @@ const stopHere = (title) => {
 const stopAt = (title) => (stopHere(title) ? { ok: false, stopped: true, at: title } : null);
 const ended = (r, at) => finish(r.stopped ? 'stopped' : 'blocked', r.at || at);
 
+// A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that
+// component's to fix: the role that found it drafts the issue for its repository, and a human files it
+// (issue_triage.md §5, ci_triage.md §3). Records it; returns what the answer lacks, or ''.
+function componentCause(found) {
+  const component = String((found || {}).component || '').trim();
+  if (!component) return '';
+  const draft = String(found.component_issue_path || '').trim();
+  if (!draft) return `the root cause is in ${component}, and no issue was drafted for its repository`;
+  C.component_issue = R.component_issue = { component, draft_path: draft };
+  return '';
+}
+
 // Inputs every role sees: the context plus what earlier phases produced.
 const inputs = (extra) => ({
   ...C,
@@ -777,6 +789,11 @@ const CLASSIFY = S({
 }, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
 const BISECT = S({ culprit: str, confirmed: bool, work_packages: WPS, evidence: str }, ['culprit', 'confirmed']);
 const BISECT_FIX = S({ fix_commit: str, confirmed: bool, evidence: str }, ['fix_commit', 'confirmed']);
+// A diagnosis and a bisect can both find the root cause in an AMD component outside the framework (aiter, MoRI,
+// ROCm, the ROCm build of PyTorch): which one, and the issue drafted for that component's repository.
+const COMPONENT_CAUSE = { component: str, component_issue_path: str };
+Object.assign(DIAG.properties, COMPONENT_CAUSE);
+Object.assign(BISECT.properties, COMPONENT_CAUSE);
 const PROFILE = S({
   analysis_path: str,
   path_ok: bool,
@@ -1141,6 +1158,9 @@ function nextSteps(status, at) {
       : `post the reply draft on the issue: ${R.reply_draft_path}`);
   }
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
+  if (R.component_issue) {
+    user.push(`file the issue draft in ${R.component_issue.component}'s repository, where the root cause is: ${R.component_issue.draft_path}`);
+  }
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   else if (R.knowledge_patch) {
     // The run directory is the task container's own unless exp_root is a host mount, which is not known here.
@@ -1986,6 +2006,18 @@ async function runIssue() {
     return finish('blocked', 'Diagnose');
   }
   note('Diagnose', dg.verdict, dg.root_cause);
+  const noDraft = componentCause(dg);
+  if (noDraft) {
+    note('Diagnose', 'fail', noDraft);
+    return finish('blocked', 'Diagnose');
+  }
+  // What the framework does about a component's defect goes by the priority: only a P0 gets a workaround here.
+  // Any other issue ends with the root cause, the reply and the issue drafted for the component.
+  if (C.component_issue && C.priority !== 'P0') {
+    note('Diagnose', 'component', `the root cause is in ${C.component_issue.component} and the issue is ${C.priority}: `
+      + 'no workaround in the framework, which only a P0 gets; the issue for the component is drafted');
+    return finish('diagnosed', 'Diagnose');
+  }
   // The baseline's bug is what the issue reported: the reply explains it as the cause, not as something else seen.
   if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
@@ -2034,6 +2066,12 @@ async function runCi() {
   }
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
+  // The lane is fixed as any other, by the pin or the fix forward; the component's defect gets its draft besides.
+  const noDraft = componentCause(bi);
+  if (noDraft) {
+    note('Bisect', 'fail', noDraft);
+    return finish('blocked', 'Bisect');
+  }
   if (stopHere('Bisect')) return finish('stopped', 'Bisect');
   const lacking = askForFix('Bisect');
   if (lacking) return lacking;

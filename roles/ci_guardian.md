@@ -47,12 +47,19 @@ Return:
    how long it took where it passed: the verify engineer's time limits for the test come from it.
 4. Plan the fix forward as work packages; the package's `test` is the failing test. For a
    `dependency_bump`, the package pins or adapts and the triage record says what to report upstream.
+5. Where what fails is a defect of an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm
+   build of PyTorch; `ci_triage.md` §3), whichever commit or bump exposed it, return `component` and
+   draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): the
+   component's own call that fails without the framework, the versions, the GPU, counts and short log
+   excerpts, never paths or names of this machine. The lane is still fixed by the package.
 
 Return:
 
 ```json
 {"culprit": "<sha> (#<pr>)", "confirmed": true,
  "work_packages": [{"id": "WP1", "goal": "...", "kind": "framework", "files": [], "test": "<failing_test_cmd>", "depends_on": []}],
+ "component": "<aiter | mori | rocm | pytorch_rocm, when what fails is its defect>",
+ "component_issue_path": "/abs/RUN_DIR/component_issue.md",
  "evidence": "<fails at culprit, passes at parent: logs>"}
 ```
 

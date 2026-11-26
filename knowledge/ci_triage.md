@@ -57,6 +57,12 @@ judged on that number (§4), so a threshold moved in the test fixes nothing by i
 4. **Confirm** the culprit: the test fails at the culprit and passes at its parent.
 5. **Fix forward** with the smallest change (guard the import, use the shared helper, make the mask
    wave-size aware). Revert only when the fix is not obvious and the lane blocks merges.
+6. **A defect of an AMD component** outside the framework (aiter, MoRI, ROCm, the ROCm build of
+   PyTorch) is that component's to fix, whichever commit or bump exposed it: draft the issue for its
+   repository (`RUN_DIR/component_issue.md`), with the component's own call that fails without the
+   framework. A human files it. The lane is fixed as any other: forward in the framework where a
+   framework commit exposed the defect, with a pin to the last version that passed where a bump
+   brought it.
 
 Reference times from late October 2026 (culprit merge → fix PR opened): 17 h for the stale import,
 25 h for the 32-bit mask, 18 h for the CuTe DSL import. Three of the four fixes came from one person;

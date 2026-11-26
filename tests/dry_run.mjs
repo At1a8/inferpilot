@@ -1920,6 +1920,48 @@ const scenarios = [
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].cmd === 'bash repro.sh', `issue_repro gate carries the reproduction: ${JSON.stringify(v && v.ins.extra_gates)}`);
   }],
+  ['issue: a root cause in an AMD component gets an issue drafted for that repository, and a workaround in the framework only for a P0', async () => {
+    const draft = `${RUN}/component_issue.md`;
+    const wps = [{ id: 'FIX1', goal: 'the reference path for the shapes that fail, HIP-only', kind: 'framework', files: ['python/sglang/a.py'], test: 't', depends_on: [] }];
+    const inAiter = (extra) => ({ verdict: 'fix_needed', root_cause: 'aiter: the fused MoE kernel reads past the last block',
+      component: 'aiter', component_issue_path: draft, ...extra });
+    const triage = (priority) => () => ({ priority, category: 'crash', action: 'reproduce', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` });
+    const filed = (r) => (r.result.next.user || []).find((x) => x.includes('component_issue.md'));
+
+    // Not a P0: no workaround, whatever the diagnosis planned. The run ends with the root cause, the reply and the draft.
+    const p1 = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'), 'investigator:diagnose': () => inAiter({ work_packages: wps }) });
+    check(p1.result.status === 'diagnosed' && p1.result.stopped_at === 'Diagnose', `a P1 ends at Diagnose: ${p1.result.status} at ${p1.result.stopped_at}`);
+    check(!p1.keys.includes('implementer:implement'), 'nothing is implemented for it, although the diagnosis planned a workaround');
+    check(p1.result.component_issue && p1.result.component_issue.component === 'aiter' && p1.result.component_issue.draft_path === draft,
+      `the result names the component and the draft: ${JSON.stringify(p1.result.component_issue)}`);
+    check(/in aiter's repository/.test(filed(p1) || ''), `the user is told to file the draft there: ${filed(p1)}`);
+    const reply = p1.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.component_issue && reply.ins.component_issue.component === 'aiter', 'the reply is written knowing where the root cause is');
+    check(p1.result.phases.some((p) => p.phase === 'Diagnose' && p.verdict === 'component' && /only a P0/.test(p.summary)),
+      `the run record says why no workaround was made: ${JSON.stringify(p1.result.phases.filter((p) => p.phase === 'Diagnose'))}`);
+
+    // A P0 gets the workaround, as a fix like any other: reproduced, verified with the reproduction, measured.
+    const p0 = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'), 'investigator:diagnose': () => inAiter({ work_packages: wps }) });
+    check(p0.result.status === 'ready_for_review' && p0.keys.includes('implementer:implement') && p0.keys.includes('perf_engineer:perf_eval'),
+      `a P0 gets the workaround, verified and measured: ${p0.result.status}`);
+    check(/in aiter's repository/.test(filed(p0) || ''), 'and the draft for the component is still the user\'s to file: a workaround is not the fix');
+    const impl = p0.calls.find((c) => c.key === 'implementer:implement');
+    check(impl.ins.component_issue && impl.ins.component_issue.draft_path === draft, 'the implementer knows which issue the workaround is for');
+    // A P0 no workaround serves ends as any diagnosis without a fix.
+    const none = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'), 'investigator:diagnose': () => inAiter({ work_packages: [] }) });
+    check(none.result.status === 'diagnosed' && !!filed(none), `a P0 with no workaround to make ends diagnosed, with the draft: ${none.result.status}`);
+
+    // A component named without a draft: the diagnosis is not done.
+    const bare = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P0'),
+      'investigator:diagnose': () => inAiter({ component_issue_path: '', work_packages: wps }) });
+    check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Diagnose' && !bare.keys.includes('implementer:implement'),
+      `a component named without its draft stops at Diagnose: ${bare.result.status} at ${bare.result.stopped_at}`);
+
+    // A root cause in the framework is unchanged, at any priority.
+    const own = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1') });
+    check(own.result.status === 'ready_for_review' && !own.result.component_issue && !filed(own), 'a root cause in the framework is fixed as before');
+
+  }],
   ['issue: a reproduction without a command stops before any change', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: '  ', evidence: 'segfault 3/3' }),
@@ -1956,6 +1998,18 @@ const scenarios = [
     check(eqList(r.phases, ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('failing_test'), 'failing_test gate passed to verify');
+  }],
+  ['ci: a defect of an AMD component is drafted as an issue for that repository, and the lane is fixed as any other', async () => {
+    const draft = `${RUN}/component_issue.md`;
+    const filed = (r) => (r.result.next.user || []).find((x) => x.includes('component_issue.md'));
+    const ciWps = [{ id: 'WP1', goal: 'pin aiter to the last version that passed', kind: 'framework', files: ['docker/rocm.Dockerfile'], test: 't', depends_on: [] }];
+    const ci = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: true, work_packages: ciWps, component: 'aiter', component_issue_path: draft }) });
+    check(ci.result.status === 'ready_for_review' && ci.keys.includes('implementer:implement'), `a CI failure is still fixed: ${ci.result.status}`);
+    check(/in aiter's repository/.test(filed(ci) || '') && ci.result.component_issue.component === 'aiter', `and the component's defect is drafted: ${filed(ci)}`);
+    const ciBare = await run({ mode: 'ci', task: 'c' }, {
+      'ci_guardian:bisect': () => ({ culprit: 'abc (#1)', confirmed: true, work_packages: ciWps, component: 'aiter' }) });
+    check(ciBare.result.status === 'blocked' && ciBare.result.stopped_at === 'Bisect', `without the draft the bisect is not done: ${ciBare.result.status}`);
   }],
   ['ci: unconfirmed culprit blocks', async () => {
     const r = await run({ mode: 'ci', task: 'c' }, {
