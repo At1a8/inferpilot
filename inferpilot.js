@@ -723,7 +723,7 @@ const TRIAGE = S({
     type: 'string',
     enum: ['wrong result', 'crash', 'startup or build failure', 'performance', 'feature request', 'CI', 'tool'],
   },
-  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan'] },
+  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1889,7 +1889,9 @@ async function runIssue() {
   Object.assign(C, { triage_path: tri.triage_path, reply_draft_path: tri.reply_draft_path || '', priority: tri.priority });
   R.priority = tri.priority;
   note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${tri.reason || ''}`);
-  if (['needs_info', 'not_amd', 'plan'].includes(tri.action)) return finish('triaged', 'Triage');
+  // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside
+  // AMD code, a feature request, and a report of a failure that another open issue already has.
+  if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,

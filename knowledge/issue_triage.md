@@ -68,9 +68,24 @@ Judgement calls, decided once so they are applied the same way every time:
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
 | `plan` | feature request | a dispatch entry (`dispatch.md`) and a reply with the plan or the reason |
+| `duplicate` | another open issue reports the same failure | a reply that names that issue, and what this report adds to it (a configuration, a log, a second model) |
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
+the path that fails are the same, not when the titles are alike: a second model, GPU or flag that
+fails the same way is the same failure with more evidence. The run ends at Triage. The failure is
+fixed once, in a run on the issue that has it, and that issue's record takes over what this report
+adds.
+
+**A report with several problems is several tasks.** One issue can list more than one defect (a crash
+and an accuracy loss, a hang and a speed problem, a batch of eleven): each has its own category, its
+own reproduction and its own fix, and what its pull request changes decides its gates one by one. The
+triage record lists them separately, with a priority each. A run takes one, the one `task` names or
+else the most urgent, and says which in `reason`; the reply covers every one, and says for each of
+the others that it is not yet worked on. Each of them starts as a run of its own, with the issue and
+the problem's name as its `task`.
 
 ## 5. Reproduction
 

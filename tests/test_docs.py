@@ -1155,6 +1155,40 @@ def alive(pid):
         return True
 
 
+class TriageCasesTest(unittest.TestCase):
+    """Two cases the triage of an issue left open (knowledge/issue_triage.md §4): a report of a failure that
+    another open issue already has is answered and not worked on twice, and a report with several problems is
+    several tasks, each with its own reproduction, fix and gates."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_a_duplicate_ends_at_triage(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },", src)
+        self.assertIn("if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');", src,
+                      "a duplicate goes on to a reproduction")
+        table = [line for line in (ROOT / "knowledge" / "issue_triage.md").read_text(encoding="utf-8").splitlines()
+                 if line.startswith("| `duplicate` |")]
+        self.assertEqual(len(table), 1, "knowledge/issue_triage.md §4 has no row for a duplicate")
+        for path, said in (("knowledge/issue_triage.md", "**A duplicate is answered, not worked on twice.**"),
+                           ("knowledge/issue_triage.md", "when the signature and the path that fails are the same, not when the titles are alike"),
+                           ("roles/issue_triager.md", "A report of a failure that another open issue already has is a `duplicate`"),
+                           ("roles/issue_triager.md", "needs_info | not_amd | plan | duplicate"),
+                           ("templates/issue_triage.md", "/ plan / duplicate (of #<n>) |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_a_report_with_several_problems_is_several_tasks(self):
+        for path, said in (("knowledge/issue_triage.md", "**A report with several problems is several tasks.**"),
+                           ("knowledge/issue_triage.md", "what its pull request changes decides its gates one by one"),
+                           ("knowledge/issue_triage.md", "A run takes one, the one `task` names or else the most urgent, and says which in `reason`"),
+                           ("knowledge/issue_triage.md", "Each of them starts as a run of its own"),
+                           ("roles/issue_triager.md", "A report with several problems is several tasks"),
+                           ("templates/issue_triage.md", "| problems in the report |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class DetachedRunTest(unittest.TestCase):
     """A run longer than one tool call starts detached, and a later tool shell cannot wait for it: the
     documented launcher leaves the run's PID and exit status where that shell reads them, whatever the

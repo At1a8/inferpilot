@@ -1851,6 +1851,18 @@ const scenarios = [
       && doc('issue_triager').includes('The one with `cause_of_this_issue` is the exception'),
       'the reply explains the issue\'s own cause as that, and the check does not flag it');
   }],
+  ['issue: a report of a failure that another open issue has is answered, and is not worked on twice', async () => {
+    const r = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'duplicate', reason: 'the failure of #38849, on a second model',
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+    });
+    check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `a duplicate ends at Triage: ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('issue_triager:reproduce') && !r.keys.includes('implementer:implement'), 'nothing is reproduced or fixed for it');
+    check(!r.keys.includes('issue_triager:reply') && r.keys.includes('director:report') && r.result.reply_draft_path === `${RUN}/reply.md`,
+      `the draft written at Triage is its reply: ${r.keys.filter((k) => /reply|report/.test(k))}, ${r.result.reply_draft_path}`);
+    check(r.result.phases.some((p) => p.phase === 'Triage' && p.verdict === 'duplicate' && p.summary.includes('#38849')),
+      `the run record names the issue that has the failure: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Triage'))}`);
+  }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),

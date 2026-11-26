@@ -20,9 +20,12 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    (read a merged fix's diff against every point of the report), skipped tests.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
-   `plan`. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code change,
-   `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the fix
-   must pass.
+   `plan`, `duplicate`. A report of a failure that another open issue already has is a `duplicate`: the
+   reply names that issue and what this report adds to it. A report with several problems is several
+   tasks: list each in the triage record with its own category and priority, take the one `task` names
+   or else the most urgent, and say which in `reason`; the reply covers every one. `existing_prs` lists
+   the open fix PRs (`#<n>`). Every action that leads to a code change, `push_existing_pr` included, is
+   reproduced on main first; that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -33,7 +36,7 @@ Return:
 
 ```json
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
- "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan",
+ "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```
