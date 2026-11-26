@@ -1007,6 +1007,50 @@ def doc_command(path, start):
     return m.group(1) if m else None
 
 
+class CiOnMainTest(unittest.TestCase):
+    """A red CI job says what one image saw of one commit. Before a ci run classifies or fixes anything, main is
+    judged in the environment of the lane that failed (knowledge/ci_triage.md §2): a test that passes there has
+    nothing to fix, one this machine cannot run as that lane does is handed over, and only a failure main shows
+    there is classified."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_ends_at_classify_when_main_passes_or_the_lane_cannot_be_matched(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[(.*?)\]\);", src, re.S)
+        self.assertIn("on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },", body.group(1))
+        self.assertIn("fixed_by: str,", body.group(1))
+        self.assertNotIn("'failure_class'", body.group(2), "a failure main no longer shows has no class to give")
+        for said, why in (
+                ("const onMain = String(cl.on_main || 'fails').trim().toLowerCase();", "an answer without on_main is not a failure of main"),
+                ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
+                ("if (onMain === 'not_run') {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
+            self.assertIn(said, src, why)
+        order = [src.index(x) for x in ("const onMain = ", "if (!handOver && !failingCmd) {", "const perfFailure = ")]
+        self.assertEqual(order, sorted(order), "main is judged before anything only a fix needs is asked for")
+
+    def test_the_documents_say_how_main_is_judged(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**First: does main still fail, on the lane's own image?**"),
+                ("knowledge/ci_triage.md", "that lane's newest image, its GPU model and its node count"),
+                ("knowledge/ci_triage.md", "the run ends with no fix and no reply"),
+                ("knowledge/ci_triage.md", "the lane is supported, so the test or the code has to run on it"),
+                ("knowledge/ci_triage.md", "no conclusion is drawn, in either direction"),
+                ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
+                ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
+                ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
+                ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
+                ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            row = [line for line in text.splitlines() if line.startswith("| `ci` |")]
+            self.assertEqual(len(row), 1, name)
+            self.assertRegex(row[0], r"nothing to fix when main passes on the lane's own image|通过时不用修", name)
+
+
 class BranchBundleTest(unittest.TestCase):
     """What an attempt committed outlives its container: every role that moves the branch refreshes the
     bundle; a retry starts from the base and takes its commits from a side ref, a resume gets its branch

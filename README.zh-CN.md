@@ -14,7 +14,7 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 |---|---|---|---|
 | `feature` | 把上游 PR 或设计移植到 AMD | Setup → Spec → Recon → Design → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 分支 + PR 描述 + 验证报告 |
 | `issue` | 一个 AMD 用户 issue | Setup → Triage → Reproduce → Diagnose（已有修复 PR 时跳过）→ Implement → (Kernel) → Verify → Performance（只改测试、文档或 CI 文件的修复跳过）→ Review → PR → (Spinoff) → Reply → Report | 修复 PR，或一个结论（已分诊、未复现、main 上已修复、已定位）；总会附一份回复草稿，并在结束时按运行结果重写 |
-| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance（跳过的条件同 issue）→ Review → PR → (Spinoff) → Report | 修复 PR，或把偶发 / 基础设施失败移交出去 |
+| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance（跳过的条件同 issue）→ Review → PR → (Spinoff) → Report | 修复 PR；偶发 / 基础设施失败、或本机配不出那条 lane 的环境时移交出去；main 在那条 lane 自己的镜像上通过时不用修 |
 | `perf` | 针对某个模型和固定负载的系统级性能目标 | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 带实测收益的 PR，或放弃改动；kernel 级的工作交给 kernel 后端 |
 | `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（作为 issue 分享到 InferPilot 仓库，否则是一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
 

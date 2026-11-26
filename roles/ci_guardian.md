@@ -12,6 +12,23 @@ Read: `knowledge/ci_triage.md` (all of it), `knowledge/known_issues.md`, `knowle
 
 Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
 
+**Main first, on the lane's own image.** Once you have the failing test (step 3), and before you
+classify anything, run it on main, the task worktree. The run counts only in the environment of the
+lane that failed (`ci_triage.md` §2): that lane's newest image (rocm10, rocm720 or rocm724: compare
+`$INFERPILOT_IMAGE` with the image of the job's container), its GPU model and its node count.
+
+- It passes there: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older than
+  the lane's newest, or a fix has merged since (then `fixed_by` names that pull request or commit).
+  `evidence` names the image the job ran and the one the test passes on. The run ends here, with no
+  fix and no reply. Fill the triage record all the same, and leave `failure_class` out.
+- It fails there: `on_main: "fails"`, and the failure is main's, whatever the age of the image:
+  classify it (step 2). A lane whose Python or PyTorch is older than the code or the test needs is
+  such a failure: the lane is supported, and one of the two has to run on it.
+- This machine cannot be that lane (another GPU model, another ROCm, a second node it lacks):
+  `on_main: "not_run"`, with what the lane needs in `evidence`. Never conclude from a run in another
+  environment, in either direction: the run hands the failure over, and the note says which image
+  and hardware to start InferPilot on.
+
 1. Collect the failure: `python3 <inferpilot_dir>/scripts/scan_ci.py --tracker <n> --out RUN_DIR/ci.json`
    for tracker clusters (tests, lanes, statuses, since dates), plus the job logs.
 2. Classify it with `ci_triage.md` §2: `code_regression`, `dependency_bump`, `test_bug`, `flaky`,
@@ -32,6 +49,7 @@ Return:
 
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
+ "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
