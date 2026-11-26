@@ -68,9 +68,30 @@ Judgement calls, decided once so they are applied the same way every time:
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
 | `plan` | feature request | a dispatch entry (`dispatch.md`) and a reply with the plan or the reason |
+| `duplicate` | another open issue reports the same failure | a reply that names that issue, and what this report adds to it (a configuration, a log, a second model) |
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
+the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails
+the same way is the same failure with more evidence. One of them is the original: the one the
+maintainers already call so (a label, a comment), else the one opened first. Only the others are
+duplicates, so that two reports are never each the other's. A run on a duplicate ends at Triage, with
+the original as `duplicate_of` and a reply that names it; the original keeps its normal actions. The
+failure is fixed once, in a run on the original, whose triage searches for its duplicates and takes
+what they add into its record and its reproduction.
+
+**A report with several problems is several tasks.** One issue can list more than one defect (a crash
+and an accuracy loss, a hang and a speed problem, a batch of eleven): each has its own category, its
+own reproduction and its own fix, and what its pull request changes decides its gates one by one. The
+triage record lists them separately, each with its priority and the fix PRs that are its own. A run
+takes one, the one `task` names or else the most urgent, and says which in `reason`: the run's
+priority, category, action and existing fix PRs are that problem's. The reply covers every one: what
+this run showed for the problem it took, and for each of the others its known state (a fix linked to
+it, open or merged, or nothing yet) and that this run did not cover it. Each of them starts as a run of
+its own, with the issue and the problem's name as its `task`: the run's result offers those runs
+(`next.start`), each on this run's own definition.
 
 ## 5. Reproduction
 
@@ -109,6 +130,22 @@ human decision.
   tuned table and may run another kernel. Compare the selected kernel name with the reporter's log
   before calling a reproduction faithful. Record bare metal or VF too: sglang #41299 and #38849 both
   came from VFs.
+- **A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of
+  PyTorch) is that component's to fix. Show it there first: the component's own call fails without the
+  framework, on the shapes and dtypes of the reproduction, or the failure is gone with that call
+  replaced. The investigator then drafts the issue for the component's repository
+  (`RUN_DIR/component_issue.md`): that reproduction, the versions, the GPU, counts and short log
+  excerpts. A human files it. What the framework does meanwhile goes by the priority (§2):
+  - **P0:** a workaround in the framework, HIP-only (`pr_playbook.md`) and the smallest that serves
+    the reported configuration (another kernel, or the reference path, for the shapes that fail). It
+    is a fix that changes code the server runs, so G2 and G5 measure it. Its comment and its pull
+    request name the component's issue, and say what to remove once the component is fixed.
+  - **P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`), and the reply gives the root
+    cause, the component, and what the reporter can do meanwhile (a version that works, a flag that
+    avoids the path).
+
+  A component that changed its interface on purpose has no defect: following it is the framework's
+  fix, as for any other issue.
 
 ## 6. Auto-close
 

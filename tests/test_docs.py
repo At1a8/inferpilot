@@ -536,6 +536,70 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("so the task names both", both[0])
 
 
+class ComponentCauseTest(unittest.TestCase):
+    """A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is
+    that component's to fix: the issue for its repository is drafted, and the framework gets a workaround only
+    for a P0 issue (knowledge/issue_triage.md §5). A CI failure is fixed as any other, with the draft besides."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_decides_by_the_priority(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said in ("function componentCause(found, said) {",
+                     "C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };",
+                     "if (C.component_issue && C.priority !== 'P0') {",
+                     "const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';",
+                     "file the issue draft in ${R.component_issue.component}'s repository"):
+            self.assertIn(said, src)
+        self.assertIn("const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];", src)
+        self.assertIn("const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };", src,
+                      'any word is taken for a component: "none" would stop a fix of the framework\'s own')
+        self.assertIn("if (!COMPONENTS.includes(component)) return '';", src)
+        # ci: the draft is recorded before the check that ends a run without a fix to make.
+        self.assertLess(src.index("const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';"),
+                        src.index("if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {"),
+                        "a defect the lane cannot be fixed for loses its draft")
+        for schema in ("DIAG", "BISECT"):
+            self.assertIn("Object.assign(%s.properties, COMPONENT_CAUSE);" % schema, src, "%s takes no component" % schema)
+
+    def test_the_rule_is_written_where_each_role_reads_it(self):
+        for path, said in (
+                ("knowledge/issue_triage.md", "**A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that component's to fix."),
+                ("knowledge/issue_triage.md", "**P0:** a workaround in the framework, HIP-only"),
+                ("knowledge/issue_triage.md", "so G2 and G5 measure it"),
+                ("knowledge/issue_triage.md", "**P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`)"),
+                ("knowledge/issue_triage.md", "A component that changed its interface on purpose has no defect"),
+                ("roles/investigator.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/investigator.md", "for a P0, `work_packages` are the workaround in the framework"),
+                ("roles/investigator.md", "for any other issue return none."),
+                ("roles/investigator.md", "Never change the component: it comes from the image"),
+                ("roles/investigator.md", "Return `component` (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause"),
+                ("roles/investigator.md", "Either way `summary` says what the reporter can do meanwhile"),
+                ("roles/issue_triager.md", "as the diagnosis gave it (`component_issue.summary`)"),
+                ("roles/ci_guardian.md", "where you can plan none, return the component and its draft all the same"),
+                ("roles/issue_triager.md", "With `component_issue` the root cause is in an AMD component outside the framework"),
+                ("roles/issue_triager.md", "`<component issue link>` placeholder, since the human files that issue"),
+                ("roles/ci_guardian.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/ci_guardian.md", "The lane is still fixed by the package; where you can plan none"),
+                ("knowledge/ci_triage.md", "**A defect of an AMD component** outside the framework"),
+                ("knowledge/ci_triage.md", "with a pin to the last version that passed where a bump brought it"),
+                ("roles/director.md", "With `component_issue`, name the component the root cause is in"),
+                ("templates/issue_triage.md", "the issue drafted for its repository (`component_issue.md`)"),
+                ("templates/ci_triage.md", "| defect of an AMD component |"),
+                ("README.md", "| `component_issue.md` |"),
+                ("README.zh-CN.md", "| `component_issue.md` |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_the_components_are_the_ones_the_priority_rubric_calls_the_amd_side(self):
+        # issue_triage.md §2 names the AMD-maintained stacks; the rule is about the same four, wherever it is written.
+        rubric = self.flat("knowledge/issue_triage.md")
+        self.assertIn("AMD-maintained stacks (aiter, MoRI, ROCm, the ROCm build of PyTorch)", rubric)
+        for path in ("knowledge/issue_triage.md", "knowledge/ci_triage.md", "roles/investigator.md", "roles/ci_guardian.md"):
+            self.assertIn("(aiter, MoRI, ROCm, the ROCm build of PyTorch", self.flat(path), path)
+
+
 class FlagsTest(unittest.TestCase):
     def test_bootstrap_flags_the_docs_give_exist_and_every_one_is_documented(self):
         defined = argparse_flags(ROOT / "inferpilot" / "bootstrap.py")
@@ -1019,6 +1083,72 @@ class FixPerformanceTest(unittest.TestCase):
             self.assertRegex(text, r"its number must come back, whatever the fix changes|掉下去的数值都必须回来", name)
 
 
+class CiAccuracyProblemTest(unittest.TestCase):
+    """A CI failure on a score its test measures is an accuracy problem, as one on a speed number is a
+    performance problem (knowledge/validation_doctrine.md, G2 for an accuracy problem in CI). It is fixed when
+    the score comes back: G2 measures it whatever the fix changes, and a threshold moved in the test restores
+    nothing."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_takes_the_score_from_classify_and_accepts_no_round_without_g2(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        for field in ("accuracy: bool,", "accuracy_claim: str,"):
+            self.assertIn(field, body, "CLASSIFY does not take %s" % field)
+        for said, why in (
+                ("const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';", "the score to restore is not read"),
+                ("if (!handOver && accFailure && !accClaim) {", "an accuracy failure goes on without the score its fix must restore"),
+                ("if (!handOver && accClaim) C.accuracy_claim = accClaim;", "the claim does not reach the verify engineer"),
+                ("const claimGate = String((v.gates || {}).accuracy_claim || '').trim();",
+                 "the score to restore is read from G2, which also holds gsm8k against the base"),
+                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {",
+                 "a round is accepted without the score's pass: both ways a round is accepted are held to it, and only \"pass\" is one"),
+                ("const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];",
+                 "the fix's own gates are not told from the others"),
+                ("const mine = own(blocking).map((f) => f.gate);", "a gate of the fix's own that fails on the base becomes a known issue")):
+            self.assertIn(said, src, why)
+        # The check sits before the line that accepts a round, whichever way it is accepted; and what the task is
+        # there to fix is never recorded as a known issue, which the next round would excuse.
+        self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
+        self.assertLess(src.index("const mine = own(blocking).map((f) => f.gate);"), src.index("if (inv.known_issue) R.known_issues.push(inv.known_issue);"))
+
+    def test_the_documents_say_what_is_measured(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a CI accuracy problem is judged")
+        for said in ("A CI failure on a score its test measures", "It is fixed when the score comes back, so the score is the claim",
+                     "`accuracy_claim`: the set, the model and the value", "with the failing test's own measurement, whatever the fix changes",
+                     "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
+                     "No known issue excuses it: the base scores low as well",
+                     "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "cannot stand in for it",
+                     "that is a human's to say"):
+            self.assertIn(said, note[0])
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure on a score is an accuracy problem,** whatever its class"),
+                ("knowledge/ci_triage.md", "a lower threshold in the test is not a fix"),
+                ("roles/ci_guardian.md", "`accuracy`: true when the test fails on a score it measures"),
+                ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
+                ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
+                ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
+                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
+                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
+                ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
+                ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
+                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
+                ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
+                ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),
+                ("knowledge/acceptance.md", "A failure that is itself one of accuracy or of performance is measured whatever its fix changes"),
+                ("templates/ci_triage.md", "for an accuracy problem the score the fix restores"),
+                ("templates/ci_triage.md", "| accuracy problem: yes / no |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class FeaturePerformanceTest(unittest.TestCase):
     """G5 is part of every feature (knowledge/validation_doctrine.md, G5 for a feature): whoever reviews a new
     feature asks what it does to accuracy and to speed, so it is measured against the baseline whether it claims
@@ -1373,6 +1503,66 @@ def alive(pid):
         return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
     except OSError:
         return True
+
+
+class TriageCasesTest(unittest.TestCase):
+    """Two cases the triage of an issue left open (knowledge/issue_triage.md §4): a report of a failure that
+    another open issue already has is answered and not worked on twice, and a report with several problems is
+    several tasks, each with its own reproduction, fix and gates."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_a_duplicate_ends_at_triage_with_its_original_and_its_reply(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },", src)
+        self.assertIn("duplicate_of: str,", src)
+        self.assertIn("if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');", src,
+                      "a duplicate goes on to a reproduction")
+        self.assertIn("const duplicateOf = tri.action === 'duplicate' ? issueRef(tri.duplicate_of) : '';", src,
+                      'any word names the original: "unknown" would end the run with no issue to follow')
+        guard = "if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {"
+        self.assertIn(guard, src, "a duplicate is accepted without the issue it duplicates, or without a reply")
+        self.assertLess(src.index(guard), src.index("return finish('triaged', 'Triage');"), "the check comes before the run ends as triaged")
+        table = [line for line in (ROOT / "knowledge" / "issue_triage.md").read_text(encoding="utf-8").splitlines()
+                 if line.startswith("| `duplicate` |")]
+        self.assertEqual(len(table), 1, "knowledge/issue_triage.md §4 has no row for a duplicate")
+        for path, said in (("knowledge/issue_triage.md", "**A duplicate is answered, not worked on twice.**"),
+                           ("knowledge/issue_triage.md", "when the signature and the path that fails are the same, not when the titles are alike"),
+                           ("knowledge/issue_triage.md", "One of them is the original: the one the maintainers already call so (a label, a comment), "
+                                                         "else the one opened first"),
+                           ("knowledge/issue_triage.md", "so that two reports are never each the other's"),
+                           ("knowledge/issue_triage.md", "whose triage searches for its duplicates and takes what they add into its record"),
+                           ("roles/issue_triager.md", "For a `duplicate`, return `duplicate_of` (`#<n>`, the original)"),
+                           ("roles/issue_triager.md", "Then search the open issues for the same failure, by its error signature and the path that fails"),
+                           ("roles/issue_triager.md", "the one the maintainers call so (a label, a comment), and only where they name none, the one "
+                                                      "opened first"),
+                           ("roles/issue_triager.md", "Where that is another report, this one is a `duplicate`"),
+                           ("roles/issue_triager.md", "read them, since the state of an issue is not what it reports"),
+                           ("roles/issue_triager.md", "needs_info | not_amd | plan | duplicate"),
+                           ("roles/issue_triager.md", '"duplicate_of": "<with duplicate: #n, the original>"'),
+                           ("templates/issue_triage.md", "/ plan / duplicate (of #<n>) |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_a_report_with_several_problems_is_several_tasks(self):
+        for path, said in (("knowledge/issue_triage.md", "**A report with several problems is several tasks.**"),
+                           ("knowledge/issue_triage.md", "what its pull request changes decides its gates one by one"),
+                           ("knowledge/issue_triage.md", "each with its priority and the fix PRs that are its own"),
+                           ("knowledge/issue_triage.md", "A run takes one, the one `task` names or else the most urgent, and says which in `reason`"),
+                           ("knowledge/issue_triage.md", "the run's priority, category, action and existing fix PRs are that problem's"),
+                           ("knowledge/issue_triage.md", "for each of the others its known state (a fix linked to it, open or merged, or nothing yet) "
+                                                         "and that this run did not cover it"),
+                           ("knowledge/issue_triage.md", "Each of them starts as a run of its own"),
+                           ("roles/issue_triager.md", "A report with several problems is several tasks"),
+                           ("roles/issue_triager.md", "`priority`, `category`, `action` and `existing_prs` are then that problem's and no other's"),
+                           ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
+                           ("roles/issue_triager.md", "Return the others as `other_problems`"),
+                           ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
+                           ("templates/issue_triage.md", "| problems in the report |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
+                         "another problem may have a fix already: the reply gives its known state")
 
 
 class DetachedRunTest(unittest.TestCase):

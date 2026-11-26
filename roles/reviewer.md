@@ -55,7 +55,10 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
    evidence, check its tell, and check each hack the performance engineer suspected. A confirmed hack
    is a `blocker` finding with `hack` set to its id (`new` when the list lacks it, described well
    enough to add); its work package's `test` is the check that kills it, and it must fail on the
-   current version.
+   current version. For an accuracy problem in CI (`accuracy_claim`: a test that failed on a score it
+   measures), read G2's score against the claim yourself: a score below it, or a threshold lowered
+   in the test with no score at the claim, is hack C1, whatever the base scores and whatever the fix
+   changes (`validation_doctrine.md`, *G2 for an accuracy problem in CI*).
 7. **Verdict.**
    - `approve`: no blocker or major finding; minor ones are listed for the PR engineer.
    - `changes_requested`: each blocker or major finding becomes a work package whose `test` shows it

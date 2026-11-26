@@ -15,14 +15,30 @@ Input: `task` (the issue URL or `<repo>#<n>`).
 1. Fetch the issue, its comments and labels, and the linked PRs:
    `python3 <inferpilot_dir>/scripts/scan_issues.py --issue <n> --with-comments --out RUN_DIR/issue.json`
    (it reports PR states and `closes` on those that close the issue, replies from anyone but the
-   reporter, and the projected auto-close date).
+   reporter, and the projected auto-close date). With `--issue` it also carries the report itself, its
+   `body` and every comment in full (`all_comments`): read them, since the state of an issue is not
+   what it reports.
 2. Do the state checks of `issue_triage.md` §3: linked PRs and their state, replies, partial fixes
-   (read a merged fix's diff against every point of the report), skipped tests.
+   (read a merged fix's diff against every point of the report), skipped tests. Then search the open
+   issues for the same failure, by its error signature and the path that fails (the search API with
+   `GITHUB_TOKEN`, GET only), and read each match in full. One of the reports is the original: the one
+   the maintainers call so (a label, a comment), and only where they name none, the one opened first.
+   Where that is another report, this one is a `duplicate` (§4). Where it is this one, the others are
+   its duplicates: what they add (a configuration, a log, a second model) goes into this triage record
+   and into the reproduction.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
-   `plan`. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code change,
-   `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the fix
-   must pass.
+   `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
+   names that issue and what this report adds to it. A report with several problems is several tasks:
+   list each in the triage record with its own category, priority and fix PRs, take the one `task`
+   names or else the most urgent, and say which in `reason`. `priority`, `category`, `action` and
+   `existing_prs` are then that problem's and no other's: a fix PR for another problem of the report is
+   listed in the triage record only, since the run would apply it and check it against this problem's
+   reproduction. Return the others as `other_problems`, each with its `problem` in a few words, its
+   `priority`, and the `task` that starts a run on it (the issue and the problem's name): the run's
+   result offers them. The reply covers every problem. `existing_prs` lists the open fix PRs (`#<n>`).
+   Every action that leads to a code change, `push_existing_pr` included, is reproduced on main first;
+   that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -33,8 +49,10 @@ Return:
 
 ```json
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
- "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan",
+ "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
+ "duplicate_of": "<with duplicate: #n, the original>",
+ "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>"}],
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```
 
@@ -167,6 +185,11 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    where, not as part of this issue; whether it gets an issue of its own is the human's call. The one
    with `cause_of_this_issue` is the exception: Diagnose found it to be the reported failure itself, on
    the baseline already, and the reply explains it as the cause.
+   With `component_issue` the root cause is in an AMD component outside the framework
+   (`issue_triage.md` §5): name the component and the cause, with a `<component issue link>`
+   placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile,
+   as the diagnosis gave it (`component_issue.summary`). `ready_for_review`: that the pull request is
+   a workaround, and what it leaves to the component.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
 3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
    `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they

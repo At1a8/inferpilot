@@ -53,6 +53,10 @@ Two rules hold across the dimensions:
   `accuracy_script` is measured with it instead, as given, on the sets it measures. A set where a
   question got no answer (a request the server rejected, or one that failed) has no score: the arms
   may miss different questions.
+- **An accuracy problem in CI** (a test that fails on a score it measures, not on an error) is
+  measured whatever its fix changes, a fix to the test alone included: G2 reads the score the fix
+  must restore, with the failing test's own measurement, and a threshold moved in the test restores
+  nothing (`validation_doctrine.md`, *G2 for an accuracy problem in CI*).
 - **Capability suites**, for what the change touches: long context (needle-in-a-haystack, G3, when the
   task asks with `long_context`, on the task's own test, its `long_context_script`), reasoning (GPQA,
   AIME), tool calls, multimodal input.
@@ -134,6 +138,10 @@ extra items of its feature classes (§1.4).
 | Requirement | — | when a requester reported it: the reporter confirms the fix | — | when a requester asked for it | required; the requirement owner signs off |
 
 A scan changes no code; its daily report has its own checks (`scripts/daily_report.py check`).
+
+A failure that is itself one of accuracy or of performance is measured whatever its fix changes,
+also where the table says "none" for a fix to tests alone: the score or the number that fell comes
+back (§1.1, §1.2).
 
 **Strictness.** Every item is either blocking or report-only, decided when the matrix is fixed. A P0
 hotfix may ship on the minimal set: the reproduction passes, the existing tests of the modules it

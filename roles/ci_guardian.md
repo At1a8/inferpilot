@@ -78,6 +78,12 @@ Then:
      default case, 1180 in the last green run"). G5 measures it whatever the fix changes
      (`validation_doctrine.md`, *G5 for a fix*). Without one the task stops here: a fix cannot be
      judged against it.
+   - `accuracy`: true when the test fails on a score it measures (an accuracy threshold), not on an
+     error, whatever its class. Then `accuracy_claim` is the score the fix must restore — set, model
+     and value, from the last green run's log or from the threshold the test had when it last passed
+     (e.g. "GSM8K back to 0.93 on GLM-5.3-Flash in `test_gsm8k`, 0.94 in the last green run"). G2
+     measures it whatever the fix changes (`validation_doctrine.md`, *G2 for an accuracy problem in
+     CI*). Without one the task stops here.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
 4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
@@ -92,6 +98,7 @@ Return:
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
+ "accuracy": false, "accuracy_claim": "<accuracy failures only>",
  "triage_path": "/abs/RUN_DIR/ci_triage.md"}
 ```
 
@@ -104,12 +111,21 @@ Return:
    how long it took where it passed: the verify engineer's time limits for the test come from it.
 4. Plan the fix forward as work packages; the package's `test` is the failing test. For a
    `dependency_bump`, the package pins or adapts and the triage record says what to report upstream.
+5. Where what fails is a defect of an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm
+   build of PyTorch; `ci_triage.md` §3), whichever commit or bump exposed it, return `component`
+   (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause) and draft the issue
+   for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): the component's own
+   call that fails without the framework, the versions, the GPU, counts and short log excerpts, never
+   paths or names of this machine. The lane is still fixed by the package; where you can plan none,
+   return the component and its draft all the same: the run stops, and the draft is still filed.
 
 Return:
 
 ```json
 {"culprit": "<sha> (#<pr>)", "confirmed": true,
  "work_packages": [{"id": "WP1", "goal": "...", "kind": "framework", "files": [], "test": "<failing_test_cmd>", "depends_on": []}],
+ "component": "<aiter | mori | rocm | pytorch_rocm, when what fails is its defect>",
+ "component_issue_path": "/abs/RUN_DIR/component_issue.md",
  "evidence": "<fails at culprit, passes at parent: logs>"}
 ```
 
