@@ -21,7 +21,7 @@ of it.
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
 | `framework` | default `sglang` | | | | | |
 | `platform`, `gpu_ids`, `container` | target and environment; empty `gpu_ids` lets Setup pick free GPUs | | | | | |
-| `apply_prs` | candidate PRs to apply and A/B | | | | optional | |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so one by an author who is not a maintainer of the repository is applied only when named here | | | optional | optional | |
 | `sources`, `since` | what to scan, from when | | | | | optional |
 | `stop_after` | stop after this phase | optional | optional | optional | optional | optional |
 | `bisect_fixed` | when the reporter's code fails and main passes, find the commit that fixed it | | optional | | | |

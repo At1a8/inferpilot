@@ -267,29 +267,46 @@ class CiExistingFixTest(unittest.TestCase):
     """A CI failure that an open pull request already fixes is verified, not fixed a second time
     (knowledge/ci_triage.md §2), as an issue with an open fix PR is: the classification names the pull request,
     the run applies it without a bisect, the failing test is its gate, and the PR phase drafts a verification
-    comment for it."""
+    comment for it. A pull request runs its author's code on this machine: the run applies one on its own only
+    where the author is a maintainer of the repository, and any other on the user's word."""
 
     @staticmethod
     def flat(path):
         return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
-    def test_the_run_applies_the_pull_request_without_a_bisect(self):
+    def test_the_run_applies_one_pull_request_it_may_trust_without_a_bisect(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
-        self.assertIn("existing_prs: strs,", body, "the classification cannot name an open fix")
+        self.assertIn("existing_prs: arr(S({ pr: str, author: str, association: str, head: str }, ['pr'])),", body,
+                      "the classification cannot say who wrote an open fix, or which commit it is at")
+        for said, why in (
+                ("const MAINTAINERS = ['OWNER', 'MEMBER', 'COLLABORATOR'];", "the authors whose code the run applies on its own are not named"),
+                ("const isPr = (p) => /^#\\d+$/.test(p);", "a pull request of another repository is applied to this tree"),
+                ("const trusted = given.length ? candidates.filter((p) => byUser.includes(p.pr)) : candidates.filter((p) => MAINTAINERS.includes(p.association));",
+                 "a pull request by an author who cannot merge is run without the user's word, or the user's word does not decide"),
+                ("const apply = trusted[0] || null;", "several pull requests are applied together"),
+                ("if (!apply && !given.length && candidates.length) {", "the user is not asked, or is asked again after answering"),
+                ("out.rerun_with = { answers: { apply_prs: null } };", "the question has no answer to run again with")):
+            self.assertIn(said, src, why)
         ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
         for said, why in (
-                ("const existing = named.filter((p) => /^#\\d+$/.test(p));", "a pull request of another repository is applied to this tree"),
+                ("const fix = existingFix(cl.existing_prs);", "the open fix is not put through the trust rule"),
                 ("if (stopHere('Bisect')) {", "a stop named for the phase an existing fix skips does not hold"),
+                ("R.questions = [fix.ask.question];", "the run does not ask before it runs another author's code"),
                 ("const lacking = askForFix('Classify');", "an existing fix is applied without the model and the client its gates need"),
-                ("C.existing_prs = existing;", "the roles after Classify do not know which pull request is under verification"),
-                ("kind: 'apply_pr', goal: `apply the existing fix ${existing.join(', ')} and complete what verification needs`",
-                 "the pull request is not applied as a work package"),
+                ("C.existing_prs = [pr];", "the roles after Classify do not know which pull request is under verification"),
+                ("kind: 'apply_pr', goal: `apply the existing fix ${pr}${head ? ` at ${head}` : ''} and complete what verification needs`",
+                 "the pull request is not applied as a work package, or not at the commit the classification read"),
                 ("return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');", "the existing fix is not held to the failing test and the fix's gates")):
             self.assertIn(said, ci, why)
-        self.assertLess(ci.index("if (existing.length) {"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
-        self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("if (existing.length) {"),
+        self.assertLess(ci.index("const fix = existingFix(cl.existing_prs);"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
+        self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("const fix = existingFix(cl.existing_prs);"),
                         "a failure that is handed over is fixed all the same")
+        self.assertLess(ci.index("if (fix.ask) {"), ci.index("if (fix.apply) {"), "the question comes after the pull request is applied")
+        # The run ends in a comment for the pull request, and the user is told to post it, not to push a branch.
+        for said in ("...((C.existing_prs || []).length ? { comment_for: C.existing_prs } : {}) };",
+                     "if (verified) user.push(`post the verification comment on ${verified}, once you have re-run what it cites: ${R.pr.pr_body_path}`);"):
+            self.assertIn(said, src)
 
     def test_the_documents_say_it(self):
         for path, said in (
@@ -297,19 +314,38 @@ class CiExistingFixTest(unittest.TestCase):
                 ("knowledge/ci_triage.md", "a pull request that cites a failure does not always fix it"),
                 ("knowledge/ci_triage.md", "the failing test is its gate, on every lane it failed on, and its accuracy and speed are measured by what it changes"),
                 ("knowledge/ci_triage.md", "It ends in a verification comment for that pull request, drafted for a human to post"),
+                ("knowledge/ci_triage.md", "at which commit of the pull request"),
                 ("knowledge/ci_triage.md", "No second pull request is opened for the same failure"),
                 ("knowledge/ci_triage.md", "A fix that has merged needs none of this: main has it"),
+                # whose code the run executes
+                ("knowledge/ci_triage.md", "Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents hold"),
+                ("knowledge/ci_triage.md", "only where the author can already put code on main, which every run executes: an owner, a member or a "
+                                           "collaborator of the repository"),
+                ("knowledge/ci_triage.md", "For any other it stops and asks which one to verify, or none"),
+                ("knowledge/ci_triage.md", "One pull request is verified in a run: several applied together would show nothing of each"),
                 ("roles/ci_guardian.md", "4. Look for a fix someone has already opened"),
+                ("roles/ci_guardian.md", "Read the diff of each, and run nothing of it"),
                 ("roles/ci_guardian.md", "the fix a tracker names can be wrong"),
-                ("roles/ci_guardian.md", "Return those that are open, drafts included, as `existing_prs` (`#<n>`)"),
+                ("roles/ci_guardian.md", "the author's association with the repository as the API gives it (`author_association`) and its head commit"),
                 ("roles/ci_guardian.md", "One that has merged is not listed"),
                 ("roles/ci_guardian.md", "One in another repository (a component's) is not listed either"),
-                ("roles/ci_guardian.md", '"existing_prs": [],'),
+                ("roles/ci_guardian.md", '"existing_prs": [{"pr": "#<n>", "author": "<login>", "association": "<author_association>", "head": "<sha>"}],'),
+                ("roles/implementer.md", "Write the head you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit"),
+                ("roles/implementer.md", "What you add (a resolution, a missing test) is commits of your own after the author's"),
+                ("roles/test_engineer.md", "the commit the package was made on: the last commit of `verified_work_packages`, or `<base>` for the first package"),
                 ("roles/pr_engineer.md", "(an issue triaged `push_existing_pr`, a CI failure classified with `existing_prs`)"),
+                ("roles/pr_engineer.md", "It names the commit of the PR that was verified"),
+                ("roles/pr_engineer.md", "lists apart what the run added on top of it, commit by commit and why"),
+                ("roles/pr_engineer.md", "None for an existing PR's verification (`push_command` empty)"),
                 ("templates/ci_triage.md", "| open fix PRs |"),
+                ("templates/task_definition.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
                 ("README.md", "A CI failure that an open pull request already fixes skips Bisect"),
-                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect")):
+                ("README.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect"),
+                ("README.zh-CN.md", "`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        self.assertIn("args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none",
+                      (ROOT / "inferpilot.js").read_text(encoding="utf-8").split("\n")[3], "whenToUse does not tell the caller of it")
         # The steps of the classification are numbered through: the new one did not leave two fourth steps.
         role = (ROOT / "roles" / "ci_guardian.md").read_text(encoding="utf-8")
         classify = role[role.index("## PHASE=classify"):role.index("## PHASE=bisect")]

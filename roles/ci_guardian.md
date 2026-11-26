@@ -37,13 +37,17 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
 4. Look for a fix someone has already opened: the pull request the tracker or the CI issue names for
    this failure, the pull requests linked to the issue or the job, and the open pull requests of the
    framework's repository that touch the failing test or name its error (the search API with
-   `GITHUB_TOKEN`, GET only). Read the diff of each. It counts only when it addresses this failure, the
-   same error on the same path, not when it only cites it: the fix a tracker names can be wrong. Return
-   those that are open, drafts included, as `existing_prs` (`#<n>`): the run then verifies them on this
-   machine in place of finding the culprit and fixing the failure a second time (`ci_triage.md` §2),
-   and no bisect follows. One that has merged is not listed: main has its fix, and what still fails
-   there it does not fix. One in another repository (a component's) is not listed either: name it in
-   the triage record.
+   `GITHUB_TOKEN`, GET only). Read the diff of each, and run nothing of it: its code is its author's,
+   and runs on this machine only when the run applies it. It counts only when it addresses this
+   failure, the same error on the same path, not when it only cites it: the fix a tracker names can be
+   wrong. Return those that are open, drafts included, as `existing_prs`, the likeliest first, each
+   with its number (`#<n>`), its author, the author's association with the repository as the API gives
+   it (`author_association`) and its head commit. The run verifies one of them on this machine in place
+   of finding the culprit and fixing the failure a second time (`ci_triage.md` §2), and no bisect
+   follows: on its own where the author is an owner, a member or a collaborator of the repository, and
+   after asking the user for any other. One that has merged is not listed: main has its fix, and what
+   still fails there it does not fix. One in another repository (a component's) is not listed either:
+   name it in the triage record.
 5. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
    handover note there (who, what evidence).
 
@@ -52,7 +56,7 @@ Return:
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
- "existing_prs": [],
+ "existing_prs": [{"pr": "#<n>", "author": "<login>", "association": "<author_association>", "head": "<sha>"}],
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
  "accuracy": false, "accuracy_claim": "<accuracy failures only>",

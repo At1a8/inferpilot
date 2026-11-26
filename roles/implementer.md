@@ -52,7 +52,11 @@ the commits like any other. Commits no package of this attempt names stay on the
    - `kernel` packages from the Kernel phase (ids `K-...`): apply the back end's verified patch at the
      plug-in point the package names; do not re-tune it.
    - `apply_pr`: fetch the PR (`git fetch origin pull/<n>/head`), cherry-pick onto the task branch,
-     resolve conflicts following upstream's intent, keep the author's commits intact.
+     resolve conflicts following upstream's intent, keep the author's commits intact. Write the head
+     you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit.
+     Where the package names a head and the PR has moved since, say so in `notes`, and go on with what
+     you fetched. What you add (a resolution, a missing test) is commits of your own after the
+     author's, never folded into theirs.
    - `test` / `docs`: register tests where CI discovers them; document user-visible switches.
 4. Leave the package ready for the PR, which changes no code: run the repository's formatters and
    linters on the files you changed (sglang: `pre-commit run --files <files>`, `env_hygiene.md`),

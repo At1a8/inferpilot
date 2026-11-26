@@ -64,9 +64,17 @@ requests linked to it, the open ones that touch the failing test. Read its diff,
 that cites a failure does not always fix it. The run applies it to main and verifies it as it would a
 fix of its own: the failing test is its gate, on every lane it failed on, and its accuracy and speed
 are measured by what it changes (§4). It ends in a verification comment for that pull request, drafted
-for a human to post, with what was run, on which image and hardware, and the results (`pr_playbook.md`
-§Attribution). No second pull request is opened for the same failure. A fix that has merged needs none
-of this: main has it.
+for a human to post, with what was run, on which image and hardware, at which commit of the pull
+request, and the results (`pr_playbook.md` §Attribution). No second pull request is opened for the same
+failure. A fix that has merged needs none of this: main has it.
+
+Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents
+hold. The run applies one on its own only where the author can already put code on main, which every
+run executes: an owner, a member or a collaborator of the repository. For any other it stops and asks
+which one to verify, or none. The task can say so from the start (`apply_prs`: the pull requests the
+run may apply, or `none`), and can name one the classification did not find. One pull request is
+verified in a run: several applied together would show nothing of each, and the others are named in the
+triage record.
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a

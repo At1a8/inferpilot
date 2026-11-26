@@ -334,7 +334,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` 后端：GEAK checkout，其中的 kernel lane 作为外部程序运行 |
 | `kernel_backend_command` | `command` 后端：带 `{task_dir}`、`{out_dir}`、`{gpu_ids}`、`{budget}` 占位符的 shell 命令；用于 `geak` 时替换默认命令 |
 | `kernel_budget` | kernel 后端的优化轮数（默认 6），即命令里的 `{budget}` |
-| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR |
+| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR。`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`：验证 PR 会在本机运行它作者的代码，所以作者不是仓库维护者的 PR 只有在这里点名才会应用；没给时运行会先问 |
 | `sources`、`since` | `scan`：`ci`、`issues`、`upstream`（默认）以及 `hardware`、`perf` 中的任意几个；时间窗口的起点（默认为上一份日报） |
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |

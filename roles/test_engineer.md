@@ -68,7 +68,10 @@ clock can start before your session does; on the call that finishes a gate, `inc
    worktree path in the command replaced:
    - a package that **changes behaviour** (a feature, a fix): check out the parent
      (`git -C <worktree> worktree add RUN_DIR/t1-<wp> <commit>^`), bring in the test files the package adds, and run
-     the test against the old code: it must fail;
+     the test against the old code: it must fail. The old code is the tree before the package. For a
+     package of several commits (an `apply_pr` package keeps its author's), that is not `<commit>^`,
+     which can hold the change already, but the commit the package was made on: the last commit of
+     `verified_work_packages`, or `<base>` for the first package;
    - a package that **keeps behaviour** (a performance change, a kernel swap, a refactor, tests of
      existing code): the parent passes too, so check out `<commit>` and break the change in one way that
      matters (skip a step, return the input unchanged, shift an index, zero one output tile): the test

@@ -589,7 +589,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` back end: the GEAK checkout whose kernel lane runs as an outside program |
 | `kernel_backend_command` | `command` back end: shell command with `{task_dir}`, `{out_dir}`, `{gpu_ids}`, `{budget}`; for `geak` it replaces the default command |
 | `kernel_budget` | optimization rounds for the kernel back end (default 6), its `{budget}` |
-| `apply_prs` | `perf`: candidate PRs to apply and A/B |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so one by an author who is not a maintainer of the repository is applied only when named here; without it the run asks |
 | `sources`, `since` | `scan`: any of `ci`, `issues`, `upstream` (the default) and `hardware`, `perf`; the start of the window (default: the previous report) |
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |

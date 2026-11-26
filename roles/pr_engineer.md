@@ -83,7 +83,10 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    where that section puts it); title in the repository's convention
    (sglang: `[Type] [Hardware] scope: title`). When the task was to push an existing PR (an issue
    triaged `push_existing_pr`, a CI failure classified with `existing_prs`), write the verification
-   comment for that PR instead, at the same path, with no attribution line. Run the leak
+   comment for that PR instead, at the same path, with no attribution line. It names the commit of
+   the PR that was verified (the head the implementer fetched, in the ledger), and lists apart what
+   the run added on top of it, commit by commit and why: the results are for that commit with those
+   additions, and a PR that has moved since is not what was verified. Run the leak
    scan again with `--body RUN_DIR/pr_body.md`, and write the body so that it finds nothing there: model
    ids, not local paths. The body gives **the command that shows the change works**: for a feature or a
    performance change the launch command, for a CI fix `failing_test_cmd`, for an issue fix the
@@ -96,10 +99,12 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    the fix's environment, and the body gives the setup with the command: the command alone shows the
    image's behaviour.
 6. **Push command:** the exact `git push` the human should run from the worktree, in the container. Do
-   not run it. Also write the branch's commits to `RUN_DIR/patches` (`git -C <worktree> format-patch
-   <base>..inferpilot/<slug> -o RUN_DIR/patches`), so the change leaves the container with the run directory:
-   on the host, `git am` puts them on the same base in the human's own checkout, to push from there
-   (README step 5). Refresh `RUN_DIR/branch.bundle` from the rearranged branch the same way
+   not run it. None for an existing PR's verification (`push_command` empty): the run has no pull
+   request of its own, and what it added on top is in `RUN_DIR/patches` for the comment to offer. Also
+   write the branch's commits to `RUN_DIR/patches` (`git -C <worktree> format-patch
+   <base>..inferpilot/<slug> -o RUN_DIR/patches`), so the change leaves the container with the run
+   directory: on the host, `git am` puts them on the same base in the human's own checkout, to push
+   from there (README step 5). Refresh `RUN_DIR/branch.bundle` from the rearranged branch the same way
    (`implementer.md`, PHASE=implement step 4). A worktree on a host mount: first give it back to its
    owner (`scripts/restore_owner.sh <worktree>`) and check that nothing in `.git` is still root's
    (`env_hygiene.md`).
