@@ -90,6 +90,17 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
      (`repro_cmd`) or the failing test (`failing_test_cmd`), on the workload `claim` names, run on the
      fix and on the base, which shows the number that fell. The claim holds when the fix's median
      reaches the number, whatever the fix changed: a threshold moved in a test restores nothing.
+   - **A fix is measured whatever file it changes,** tests, documentation and CI files apart
+     (`validation_doctrine.md`, *What a fix changes decides its gates*): never judge whether the
+     server runs it. One that moves the version of a package the server runs (aiter, PyTorch, Triton,
+     flashinfer), in a dependency file or a Dockerfile, is measured with that version: the base arm
+     on the image's, the fix arm with the fix's installed in the container, the image's put back
+     when the measurement ends, both versions in `results`. A version that cannot be installed here
+     leaves the fix unmeasured: `claim_reproduced` false, and `summary` says `<package> <version>
+     cannot be installed in this image`; never measure the fix arm on the image's version and call
+     it the fix. Where the change is otherwise not in this container (a Dockerfile, a dependency
+     declaration that moves no version), measure all the same and say so in `summary`: both arms
+     then ran one environment.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
 3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, in

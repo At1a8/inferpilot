@@ -45,13 +45,12 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
 5. **Evidence.** Every number in the ledger points at an artifact; the gates ran against the
    same-pattern baseline; a performance claim was measured on the fixed workload with the same flags on
    both arms and enough runs, and, with `held_out` on, held at the held-out operating point; nothing was re-run until it
-   passed without saying so. For a fix (issue, ci), check both gates against the diff of step 1
-   (`validation_doctrine.md`, *What a fix changes decides its gates*). G2 is missing only for a fix
-   to tests, documentation or CI files alone: any other file among the changed ones, and no G2, is a
-   `blocker` finding. `server_code_changed` false means the run did not measure the fix's speed, and
-   `claim` is empty: a file the server runs among the changed ones is a `blocker` finding as well.
-   Either way the verdict is `blocked`: the evidence was not produced, and no work package produces
-   it.
+   passed without saying so. For a fix (issue, ci), `server_code_changed` false means the run
+   measured neither its accuracy nor its speed (`validation_doctrine.md`, *G2 for a fix*, *G5 for a
+   fix*), and `claim` is empty: check it against the diff of step 1. A changed file that is not a
+   test, a documentation file or a CI file is a `blocker` finding and the verdict is `blocked`,
+   whether or not the server runs it (*What a fix changes decides its gates*): the evidence was not
+   produced, and no work package produces it.
 6. **Reward hacks.** Start from `reward_hacks.md`: for every entry that applies to this diff and its
    evidence, check its tell, and check each hack the performance engineer suspected. A confirmed hack
    is a `blocker` finding with `hack` set to its id (`new` when the list lacks it, described well

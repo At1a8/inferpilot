@@ -75,9 +75,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
   collapsed `<details>` block. A feature that claims no gain gives the same table: a reviewer reads in
   it that the feature is no slower (`validation_doctrine.md`, *G5 for a feature*). So does a fix that
-  changes code the server runs, the fix next to the base (*G5 for a fix*); where the base cannot serve
-  the configuration, next to the last commit that served it, named, or alone, saying that it has no
-  baseline. The fix of a performance problem shows the number that fell and the number it restores.
+  changes anything but tests, documentation and CI files, the fix next to the base (*G5 for a fix*);
+  where the base cannot serve the configuration, next to the last commit that served it, named, or
+  alone, saying that it has no baseline. The fix of a performance problem shows the number that fell
+  and the number it restores.
   A fix to tests, documentation or CI files alone says that it changes no code the server runs, and
   gives no table.
 - **Checklist:** tick only what holds for this PR.

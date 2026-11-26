@@ -68,31 +68,28 @@ clock can start before your session does.
      answer has no score.
    - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
      when it changes anything but tests, documentation and CI files** (`validation_doctrine.md`, *G2
-     for a fix*). That gate of
-     `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then decide
-     whether G2 runs, before any server of its own is launched:
-     - `git -C <worktree> diff --name-only <base>...HEAD` decides G2 and G5, each by its own line
-       (`validation_doctrine.md`, *What a fix changes decides its gates*).
-       G2 runs unless every file it names is a test, a documentation file or a CI file: then `gates`
-       says `"G2": "not run: no code the server runs changed"`. Never judge whether the server runs
-       any other file: a fix to a Dockerfile, a benchmark or tool script or a dependency file is
-       measured like one to a model file. Where its change is not in this container (a Dockerfile,
-       a dependency declaration), say so next to the score: `"G2": "pass 0.893 vs 0.895 (1319 q);
-       the Dockerfile change is not in effect in this container"`.
-       G5 has the narrower line. When no file the diff names is code the server runs (every one is
-       a test, a documentation file, a CI file, a Dockerfile, a benchmark or tool script, or a
-       dependency declaration that moves no version), the answer says `"server_code_changed":
-       false`, and the run does not measure the fix's speed. With any other file among them the
-       answer says `true`, and without the field the run measures it. That one diff decides G5 as
-       well as G2. Read the diff in every round: a repair, or a change the review asked for, can
-       add a file the server runs, or take the last one away.
+     for a fix*). That gate of `extra_gates` runs first: a fix that does not fix has no accuracy worth
+     measuring. Then decide whether G2 runs, before any server of its own is launched:
+     - `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
+       documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the
+       server runs changed"`, and the answer `"server_code_changed": false`. With any other file
+       among them the answer says `true`. That one diff decides G5 as well (`validation_doctrine.md`,
+       *G5 for a fix*): on `false` the run measures the fix's speed no more than its accuracy, and
+       without the field it measures it. Read the diff in every round: a repair, or a change the
+       review asked for, can add a file the server runs, or take the last one away.
+       The line is drawn by the file's path, and by nothing else (*What a fix changes decides its
+       gates*). Never judge whether the server runs a file that is none of the three: a fix to a
+       Dockerfile, a benchmark or tool script or a dependency file is measured like one to a model
+       file. Where its change is not in this container (a Dockerfile, a dependency declaration that
+       moves no version), say so next to the score: `"G2": "pass 0.893 vs 0.895 (1319 q); the
+       Dockerfile change is not in effect in this container"`.
      - A fix that moves the version of a package the server runs (aiter, PyTorch, Triton,
-       flashinfer), in a dependency file or a Dockerfile, changes code the server runs:
-       `"server_code_changed": true`. Measure the base arm on the image's version first; install the
-       fix's version in the container, measure the fix arm, and put the image's version back before
-       the round ends, with both versions in the ledger. A version you cannot install here is a
-       blocking failure of G2, `"<package> <version> cannot be installed in this image"`: never
-       measure the fix arm on the image's version and call it the fix.
+       flashinfer), in a dependency file or a Dockerfile, is measured with that version. Measure the
+       base arm on the image's version first; install the fix's version in the container, measure
+       the fix arm, and put the image's version back before the round ends, with both versions in
+       the ledger. A version you cannot install here is a blocking failure of G2, `"<package>
+       <version> cannot be installed in this image"`: never measure the fix arm on the image's
+       version and call it the fix.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
        questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
@@ -210,7 +207,7 @@ A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking 
 did not run are `not run`.
 
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
-`false` only when no file the fix changes is code the server runs.
+`false` only when every file the fix changes is a test, a documentation file or a CI file.
 
 A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the
