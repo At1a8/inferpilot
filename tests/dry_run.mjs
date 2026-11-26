@@ -1530,6 +1530,99 @@ const scenarios = [
       && /Give the model and the whole workload of InferPilot's client/.test(ciPart.result.next.say),
       `ci: the same, asked together with what else the fix lacks: ${JSON.stringify((ciPart.result.next || {}).ask)} | ${ciPart.result.next.say}`);
   }],
+  ['issue: the fix for a model that answers no text questions is measured by the task\'s own output comparison, which a task that names none is asked for after Setup', async () => {
+    const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
+    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script'])
+      && 'output_script' in ((((r.result.next || {}).rerun_with || {}).answers) || {});
+    const none = await run({ mode: 'issue', task: 'i' }, noText);
+    const q = ((none.result.next || {}).ask || [])[0] || {};
+    check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup' && asked(none)
+      && !none.keys.includes('issue_triager:triage') && none.keys.includes('director:report'),
+      `Setup says the model answers no text questions and the task names no script: the run asks for it before anything else runs, and reports (${
+        none.result.status} at ${none.result.stopped_at}, asks ${JSON.stringify(((none.result.next || {}).ask || []).map((x) => x.field))})`);
+    check(/compares the model's outputs/.test(q.question || '') && /PORT/.test(q.question || '') && /OUT_DIR/.test(q.question || '')
+      && /BASE_DIR/.test(q.question || '') && /InferPilot has no template for it/.test(q.question || '') && !(q.options || []).length,
+      `the question says what the script does, and offers nothing in its place: ${JSON.stringify(q)}`);
+    check(/\/models\/m answers no text questions, so gsm8k cannot be put to it/.test(q.why || '') && /the same inputs and seeds on the base and on the fix/.test(q.why || '')
+      && /with stop_after set to a phase before the fix, no script is needed/.test(q.why || ''), `and why it is asked: ${q.why}`);
+    check(/Give the script that compares the model's outputs, and run the task again/.test(none.result.next.say),
+      `the result says what to give: ${none.result.next.say}`);
+    const given = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, answers: { output_script: ' /s/outputs.sh ' } }, noText);
+    const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
+      `with the answer the run goes to its end, and the verify engineer reads the script and what the model is: ${given.result.status}, ${
+        ve && JSON.stringify([ve.ins.output_script, ve.ins.text_model])}`);
+    check(given.result.task_def.output_script === ' /s/outputs.sh ', `the definition the run records names it: ${JSON.stringify(given.result.task_def.output_script)}`);
+    // A model that answers text questions is measured on gsm8k: nothing is asked, with a script or without.
+    const text = await run({ mode: 'issue', task: 'i' });
+    const tv = text.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(text.result.status === 'ready_for_review' && tv && tv.ins.text_model === true && !tv.ins.output_script,
+      `a Setup that does not say counts the model as one that answers text questions, and nothing is asked: ${text.result.status}, ${tv && tv.ins.text_model}`);
+    const says = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: true }) });
+    check(says.result.status === 'ready_for_review', `nor of a model Setup says answers them: ${says.result.status}`);
+    // A run that stops before its fix needs no script. Where the control file lifts the stop, the run asks before any code changes.
+    const early = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, noText);
+    check(early.result.status === 'stopped' && early.result.stopped_at === 'Diagnose',
+      `a run that stops before its fix is not asked: ${early.result.status} at ${early.result.stopped_at}`);
+    const atSetup = await run({ mode: 'issue', task: 'i', stop_after: 'Setup' }, noText);
+    check(atSetup.result.status === 'stopped' && atSetup.result.stopped_at === 'Setup', `nor one that stops after Setup: ${atSetup.result.status}`);
+    let reproduced = false;
+    const lifted = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      ...noText,
+      'issue_triager:reproduce': () => {
+        reproduced = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'black images 3/3' };
+      },
+    }, { control: () => (reproduced ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Diagnose' && asked(lifted)
+      && !lifted.keys.includes('implementer:implement') && lifted.keys.includes('director:report'),
+      `a stop the control file lifts starts no fix without the script: ${lifted.result.status} at ${lifted.result.stopped_at}`);
+    check(/G2 on the task's own output comparison, since the model answers no text questions/.test(lifted.result.next.say)
+      && /Give the script that compares the model's outputs, and run the task again/.test(lifted.result.next.say),
+      `and says what the fix lacks, and why: ${lifted.result.next.say}`);
+    // Setup took the model for one that answers text questions, and the round finds that it does not: no gsm8k ran, and
+    // there is no script to compare outputs with. The fix has no G2, and the round passes nothing.
+    const found = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, server_code_changed: changed,
+      gates: { issue_repro: 'pass', G2: 'not run: the model answers no text questions, and the task names no output_script' } }) });
+    const late = await run({ mode: 'issue', task: 'i' }, found(true));
+    const why = (late.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+    check(late.result.status === 'blocked' && late.result.stopped_at === 'Verify' && !late.keys.includes('perf_engineer:perf_eval')
+      && !late.keys.some((k) => k.startsWith('pr_engineer')),
+      `a round that finds such a model without the script does not pass, whatever it reports: ${late.result.status} at ${late.result.stopped_at}`);
+    check(/the model answers no text questions, and the task names no output_script/.test(why) && /Name the script \(output_script\), and run the task again/.test(why)
+      && /Name the script \(output_script\)/.test(late.result.next.say), `and the result says what to do: ${why} | ${late.result.next.say}`);
+    const withScript = await run({ mode: 'issue', task: 'i', output_script: '/s/outputs.sh' }, found(true));
+    check(withScript.result.status === 'ready_for_review', `with the task's script the same finding stops nothing: ${withScript.result.status}`);
+    const testsOnly = await run({ mode: 'issue', task: 'i' }, found(false));
+    check(testsOnly.result.status === 'ready_for_review' && !testsOnly.keys.includes('perf_engineer:perf_eval'),
+      `a fix to tests, documentation or CI files alone has no G2, and needs no script: ${testsOnly.result.status}`);
+  }],
+  ['ci: the fix for a model that answers no text questions is asked for its output comparison as an issue\'s is', async () => {
+    const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
+    const none = await run({ mode: 'ci', task: 'c' }, noText);
+    check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup'
+      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !none.keys.includes('ci_guardian:classify'),
+      `asked after Setup, before the failure is classified: ${none.result.status} at ${none.result.stopped_at}`);
+    const given = await run({ mode: 'ci', task: 'c', output_script: '/s/outputs.sh' }, noText);
+    const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
+      `with the script the fix is verified on it: ${given.result.status}, ${ve && ve.ins.output_script}`);
+    for (const stop of ['Classify', 'Bisect']) {
+      const r = await run({ mode: 'ci', task: 'c', stop_after: stop }, noText);
+      check(r.result.status === 'stopped' && r.result.stopped_at === stop, `a run that stops after ${stop} is not asked: ${r.result.status} at ${r.result.stopped_at}`);
+    }
+    let classified = false;
+    const lifted = await run({ mode: 'ci', task: 'c', stop_after: 'Bisect' }, {
+      ...noText,
+      'ci_guardian:classify': () => {
+        classified = true;
+        return { failure_class: 'code_regression', failing_test_cmd: 'pytest test_x.py', window: 'a..b', evidence: 'new regression', triage_path: `${RUN}/ci_triage.md` };
+      },
+    }, { control: () => (classified ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Bisect'
+      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !lifted.keys.includes('implementer:implement'),
+      `a stop the control file lifts starts no fix without it: ${lifted.result.status} at ${lifted.result.stopped_at}`);
+  }],
   ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
     const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
     const verified = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: changed }) });
@@ -2814,6 +2907,35 @@ const scenarios = [
     const plain = await run({ mode: 'issue', task: 't', client_script: 'template', stop_after: 'Reproduce' }, rendered);
     check(plain.result.status !== 'needs_input',
       `without stability, and stopping before its fix, a task that names the template is asked nothing more: ${plain.result.status}`);
+  }],
+  ['arguments: an output_script that names no script is asked about before anything runs, so that the answer can take its place', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    for (const mode of ['issue', 'ci']) {
+      for (const value of ['template', '   ']) {
+        const r = await run({ mode, task: 't', output_script: value });
+        const q = (r.result.questions || []).find((x) => x.field === 'output_script') || {};
+        check(asks(r, 'output_script') && eqList(fields(r), ['output_script']) && /names no script/.test(q.why || '')
+          && /InferPilot has no template for it/.test(q.question || ''),
+          `${mode}: ${JSON.stringify(value)} names no script, and InferPilot has no template for one: ${fields(r)} ${JSON.stringify(q.why)}`);
+        // The value the run could not use is cleared for the next run: left there, it would win over the answer.
+        const again = (r.result.next || {}).rerun_with || {};
+        check(again.output_script === '' && 'output_script' in (again.answers || {}), `${mode}: and it is cleared for the next run: ${JSON.stringify(again)}`);
+        const answered = await run({ mode, task: 't', output_script: value, ...again, answers: { output_script: '/s/outputs.sh' } });
+        const ve = answered.calls.find((c) => c.key === 'verify_engineer:verify');
+        check(answered.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh',
+          `${mode}: with the answer the run starts on the script the user named: ${answered.result.status}, ${ve && ve.ins.output_script}`);
+        // A model that answers text questions needs none: the question left unanswered, the run starts.
+        const left = await run({ mode, task: 't', output_script: value, ...again });
+        check(left.result.status === 'ready_for_review', `${mode}: left unanswered, the run starts without one: ${left.result.status}`);
+      }
+      const named = await run({ mode, task: 't', output_script: '/s/outputs.sh' });
+      check(named.result.status === 'ready_for_review', `${mode}: a task that names its script is asked nothing: ${named.result.status}`);
+    }
+    // A feature or a perf task measures gsm8k from its baseline on, and reads no such script: nothing is asked of it.
+    const feature = await run({ mode: 'feature', task: 't', output_script: 'template' });
+    check(feature.result.status !== 'needs_input', `a feature task is not asked about it: ${feature.result.status}`);
+    const noText = await run({ mode: 'feature', task: 't' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
+    check(noText.result.status === 'ready_for_review', `nor does what Setup says of the model stop a feature: ${noText.result.status}`);
   }],
   ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);

@@ -953,6 +953,118 @@ class FixAccuracyTest(unittest.TestCase):
             self.assertNotIn(stale, row[0], "the profiles still leave a fix's accuracy to the kind of issue")
 
 
+class OutputComparisonTest(unittest.TestCase):
+    """gsm8k cannot be put to a model that answers no text questions (a diffusion, speech or embedding model). The
+    fix of an issue or of a CI failure on one is measured by an output comparison in its place: the task's own
+    test, its `output_script`, on the same inputs and seeds for the base and for the fix
+    (knowledge/validation_doctrine.md, G2 for a model that answers no text questions). InferPilot has no template
+    for one and no role writes one: Setup says what the model is, and a task that can reach a fix without the
+    script is asked for it."""
+
+    FIELD = "output_script"
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_task_names_the_script_and_no_fix_starts_without_it(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the script")
+        self.assertIn("\n  %s: str," % self.FIELD, intake, "the intake cannot return the script")
+        self.assertIn("\n  %s: String(A.%s || '').trim()," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
+        for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
+            body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
+            self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
+        self.assertIn("if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;", src,
+                      "what Setup says of the model does not reach the roles; left out, the model answers text questions")
+        self.assertIn("function outputsLacking() {\n  if (C.text_model !== false || C.output_script) return null;", src)
+        # Asked after Setup of a task that can reach a fix, at the fix of a run whose stop before it was lifted, and
+        # a round that finds such a model without the script passes nothing.
+        self.assertRegex(src, r"if \(stopHere\('Setup'\)\) return finish\('stopped', 'Setup'\);\n(?:\s*//.*\n)*\s*const stop = liveStopAfter\(\);\n"
+                              r"\s*const lacking = BEFORE_A_FIX\[MODE\] && stop !== 'now' && !BEFORE_A_FIX\[MODE\]\.includes\(stop\) \? outputsLacking\(\) : null;",
+                         "a task that can reach a fix is not asked for the script after Setup")
+        self.assertIn("const outputs = outputsLacking();\n  if (outputs) lacks.push('output_script');", src,
+                      "a run whose stop before the fix was lifted starts its fix without the script")
+        self.assertIn("if (BEFORE_A_FIX[MODE] && v.text_model === false) C.text_model = false;\n    if (C.server_code_changed && outputsLacking()) {", src,
+                      "a round that finds such a model without the script can pass")
+        self.assertIn("\nFIX_NEEDS.output_script = ", src, "the result does not say what to give")
+        question = re.search(r"\nconst OUTPUTS_ASK = (.*?);\n", src, re.S).group(1)
+        for said in ("PORT", "OUT_DIR", "BASE_DIR", "same inputs with the same seeds", "exits non-zero", "no template for it"):
+            self.assertIn(said, question, "the question does not say what the script does")
+        # A value that names no script would win over the answer and be asked about again: Intake asks first.
+        self.assertIn("if (BEFORE_A_FIX[mode] && outputs && (!outputs.trim() || isTemplate(outputs))) {\n    ask('output_script', OUTPUTS_ASK,", src)
+
+    def test_the_documents_say_how_such_a_fix_is_measured(self):
+        notes = items("knowledge/validation_doctrine.md")
+        note = [i for i in notes if i.startswith("- **G2 for a model that answers no text questions.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how such a fix is measured")
+        for said in ("Its G2 is an output comparison", "its `output_script`", "the same inputs with the same seeds to the base and to the fix, each once",
+                     "by the measure and within the tolerance the script fixes", "The test is the user's, as G3's is",
+                     "InferPilot has no template for one, and no role writes one in its place", "Setup says what the model is",
+                     "is asked for it then, before anything else runs", "by the fix's files and after the reproduction or the failing test",
+                     "the last commit that served the configuration where the base cannot",
+                     "Where the failure being fixed is in these very outputs", "kept and reported, not judged",
+                     "is a blocking failure, and so is a run that compared nothing", "This is the one G2 that compares outputs"):
+            self.assertIn(said, note[0])
+        fix = [i for i in notes if i.startswith("- **G2 for a fix.**")]
+        self.assertIn("is measured by an output comparison in its place (*G2 for a model that answers no text questions*)", fix[0])
+        self.assertNotIn("Nor has the fix for a model that answers no text questions", fix[0], "the doctrine still leaves such a fix unmeasured")
+        for path, said in (("roles/verify_engineer.md", "G2 is an output comparison in its place, by the task's own test, its `output_script`"),
+                           ("roles/verify_engineer.md", "Run it unchanged, once per arm"),
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>"),
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix BASE_DIR=RUN_DIR/outputs/base bash <output_script>"),
+                           ("roles/verify_engineer.md", "Never write such a test yourself, and never change the task's"),
+                           ("roles/verify_engineer.md", "never a pass on its exit status alone"),
+                           ("roles/verify_engineer.md", "Where the failure being fixed is in these outputs"),
+                           ("roles/verify_engineer.md", 'Say `"text_model": false` in your answer'),
+                           ("roles/verify_engineer.md", "not run: the model answers no text questions, and the task names no output_script"),
+                           ("roles/verify_engineer.md", "Never pass G2 for such a fix on the reproduction or the failing test alone"),
+                           ("roles/verify_engineer.md", 'It adds `"text_model": false` when the model answers no text questions'),
+                           ("roles/director.md", "`issue`, `ci`, with a `model_path`: say what the model is"),
+                           ("roles/director.md", '`"text_model": false` for one that answers no text questions'),
+                           ("roles/director.md", "a model that takes images or audio and answers in text included"),
+                           ("roles/director.md", "Judge by the model's files and by the command the report or the job serves it with, not by its name"),
+                           ("roles/director.md", "a run that can reach a fix without one stops after Setup and asks for it"),
+                           ("roles/director.md", "Never write that test in the task's place"),
+                           ("roles/director.md", 'An issue or a ci task with a `model_path` adds `"text_model": true | false`'),
+                           ("roles/director.md", "and `output_script` and `long_context_script`, for which there is no template) run as given"),
+                           ("roles/intake.md", "`output_script` (`task_definition.md` §1.1): the user's own test that compares the outputs"),
+                           ("roles/intake.md", "Ask for it when the request names none, and offer nothing in its place"),
+                           ("roles/intake.md", "Never ask it of a model that answers text questions"),
+                           ("roles/intake.md", "G2 compares its outputs with the task's `output_script`"),
+                           ("roles/perf_engineer.md", "That is the commit G2 measured against, which the ledger names"),
+                           ("knowledge/acceptance.md", "is measured by an output comparison in gsm8k's place: the task's own test, its `output_script`"),
+                           ("knowledge/ci_triage.md", "is measured by the task's own output comparison in gsm8k's place (`output_script`"),
+                           ("knowledge/issue_triage.md", "the task's own output comparison stands in gsm8k's place (`output_script`"),
+                           ("knowledge/pr_playbook.md", "for a model that answers no text questions, what the task's own test compared in their place"),
+                           ("templates/task_definition.md", "**`output_script`** is the task's own test of the outputs of a model that answers no text questions"),
+                           ("templates/task_definition.md", "With `BASE_DIR` set, the directory its run on the baseline wrote to, it compares its outputs with those"),
+                           ("templates/task_definition.md", "exits non-zero when one differs by more than it tolerates"),
+                           ("templates/task_definition.md", "It has no template for one, and writes none")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for path in ("roles/verify_engineer.md", "roles/intake.md", "knowledge/acceptance.md", "knowledge/ci_triage.md"):
+            for stale in ("What its outputs are worth is the reproduction's or the failing test's to show", "G2 says that gsm8k cannot be put to it",
+                          "nor one for a model that answers no text questions"):
+                self.assertNotIn(stale, self.flat(path), "%s still leaves such a fix unmeasured" % path)
+
+    def test_the_task_definition_and_both_readmes_list_the_script(self):
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the script")
+        self.assertEqual(row[0].count("| required for such a model unless `stop_after` ends the run before a fix "), 2,
+                         "an issue and a ci task each name it for a model that answers no text questions")
+        for name, text, said in (("README.md", EN, ("`BASE_DIR`", "`OUT_DIR`", "InferPilot has no template for it", "once on the base and once on the fix")),
+                                 ("README.zh-CN.md", ZH, ("`BASE_DIR`", "`OUT_DIR`", "InferPilot 没有这种脚本的模板", "base 和修复各跑一次"))):
+            row = [line for line in text.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+            self.assertEqual(len(row), 1, "%s has no row for the script" % name)
+            for words in said:
+                self.assertIn(words, row[0], "%s: the output_script row" % name)
+        self.assertRegex(EN, r"the question after Setup\s+for the script that compares outputs \(`output_script`\)", "README.md does not list the question")
+        self.assertIn("Setup 之后会问比较输出的脚本（`output_script`）", ZH, "README.zh-CN.md does not list the question")
+
+
 class FixPerformanceTest(unittest.TestCase):
     """The fix of an issue or of a CI failure is measured for speed as it is for accuracy, and on the same condition
     (knowledge/validation_doctrine.md, G5 for a fix): when it changes code the server runs, it is no slower than the
@@ -1026,8 +1138,8 @@ class FixPerformanceTest(unittest.TestCase):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
         for said in ("when it changes anything but tests, documentation and CI files", "no slower than the base beyond the noise band",
-                     "One diff decides both gates", "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
-                     "the one the triage record names", "reported and not judged", "names its client as it names its model",
+                     "One diff decides both gates", "has no G5 either", "the last commit that served it", "where G2 did not run, the one the triage record names",
+                     "reported and not judged", "names its client as it names its model",
                      "no template is offered for it", "A performance problem is measured whatever its fix changes",
                      "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
                      "stops the task at Performance for a human, and nothing is rolled back"):
@@ -1038,8 +1150,7 @@ class FixPerformanceTest(unittest.TestCase):
                            ("roles/perf_engineer.md", "**A fix (issue, ci) has no baseline from Setup:** measure both arms yourself"),
                            ("roles/perf_engineer.md", "the baseline is the last commit that served it, in a throwaway worktree. That "
                                                       "is the commit G2 measured against, which the ledger names"),
-                           ("roles/perf_engineer.md", "Where G2 measured none, as for a model that answers no text questions, which it "
-                                                      "does not run on, the commit is still known: take it from the triage record"),
+                           ("roles/perf_engineer.md", "Where G2 measured none, the commit is still known: take it from the triage record"),
                            ("roles/perf_engineer.md", "Only where the run knows no such commit, measure the fix alone"),
                            ("roles/perf_engineer.md", "return `no_baseline` with the reason"),
                            ("roles/perf_engineer.md", "**A performance problem is measured where it showed:**"),
