@@ -12,7 +12,7 @@ of it.
 | `mode` | the kind of task | required | required | required | required | required |
 | `task` | the source of truth: upstream PR or design URL, issue URL, CI job or tracker cluster, performance goal | required | required | required | required | — |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
-| `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
+| `model_path` | the model the baseline and the gates run | required | required unless `stop_after` ends the run before a fix: the reporter's model, which G2 measures the fix on | required unless `stop_after` ends the run before a fix: the model G2 measures the fix on, the one the failing test serves when it serves one | required | — |
 | `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
 | `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
@@ -42,8 +42,8 @@ when the likely path of the task needs them.
 A task that measures accuracy or performance brings the scripts that run its baseline, so every arm is
 launched and measured the way the user runs the model, not the way an agent guessed. A script the user
 gives runs unchanged, whatever the templates or the feature's source say. A user who has none may take
-InferPilot's template instead (§1.2) by answering `template` when the run asks; it is never chosen for
-the user.
+InferPilot's template instead (§1.2) by answering `template` when the run asks; it is not chosen for
+the user, but for the server G2 measures a fix on when the report or the job starts none (§1.2).
 
 - **`server_script`** starts one server in the foreground. InferPilot runs it with `PORT`,
   `HIP_VISIBLE_DEVICES`, `PYTHONPATH` (the tree under test) and `EXTRA_ARGS` (the feature's flags; empty
@@ -60,7 +60,10 @@ the user.
   through evalscope, once, and the change passes at most 1 point below the baseline. A change the user
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more
   runs are named there too. It runs through InferPilot's `accuracy.sh` (§1.2), which fixes the settings
-  for every arm.
+  for every arm. The fix of an issue or a ci task is measured the same way when it changes code the
+  server runs, which is why those tasks name a `model_path`; one that stops before its fix
+  (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none
+  (`../knowledge/validation_doctrine.md`, *G2 for a fix*).
 - **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
   on needle-in-a-haystack prompts, G4 as the `client_script` run back to back for more than 48 hours
   against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;
@@ -109,7 +112,10 @@ only where the user takes them:
   measures are its arguments, from `goal` (gsm8k when none), never a template parameter.
 
 An issue or a ci task launches its server with the reporter's or the job's own command, as given, never
-with a template's or the cookbook's flags.
+with a template's or the cookbook's flags. Where they start no server at all (a unit test, an import
+that fails), there is no command to follow: G2 then serves the fix of a task that has a `model_path`
+with `server.sh`. It is the one case in which a template runs without the user's answer, and the
+report says so.
 
 Setup renders the templates a run uses into `RUN_DIR/scripts/` with `scripts/harness.py`, which takes
 each parameter from, in this order:
@@ -155,7 +161,8 @@ server's context leaves beside a question.
 ```
 
 ```json
-{"mode": "ci", "task": "Failure Tracker #<n>, cluster <signature>"}
+{"mode": "ci", "task": "Failure Tracker #<n>, cluster <signature>",
+ "model_path": "/mnt/models/<the model the failing test serves>"}
 ```
 
 ```json

@@ -29,7 +29,9 @@
 
 ## Fix
 
-<!-- Work packages, commits, the PR body path; or the existing PR that was verified and the results. -->
+<!-- Work packages, commits, the PR body path; or the existing PR that was verified and the results.
+     gsm8k on the fix against the base when the fix changes code the server runs (G2), or against the
+     commit or release the report says worked where the base cannot serve the configuration. -->
 
 ## Reply draft
 

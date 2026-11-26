@@ -84,6 +84,11 @@ human decision.
   existing tests of the modules the fix touches still pass. G0 (`validation_doctrine.md`) only when the
   fix is behind a feature's switch: most fixes have none, and on the reported configuration main fails,
   so there is nothing to turn off and no baseline to compare with.
+- A fix that changes code the server runs is measured on gsm8k as well (G2 for a fix,
+  `validation_doctrine.md`), on the reporter's model: at most 1 point below the base, or below the
+  commit or release the report says worked where the base cannot serve the configuration; with neither,
+  the fix's score is reported and not judged. Record the model, and what the report says worked, in
+  the triage record.
 - **Match the load before concluding.** A crash the reporter saw on one request can need queued load
   elsewhere: sglang #41299, reported on an MI350X VF for a single 32k prompt, on the reporter's commit
   and bare metal passed 6 sequential 32k prompts and crashed 3 of 3 times with 32 of them at concurrency

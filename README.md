@@ -36,8 +36,9 @@ the fields `inferpilot.js` takes, the same names every role reads. It can be giv
 request in plain words: then an Intake phase runs first and turns the request into a definition,
 checking what it can without changing anything (the checkout, the model on this machine, the GPUs,
 the issue). A definition that still lacks something its mode needs — the issue, the checkout, the
-model for `feature` and `perf`, the fixed workload for `perf` — starts nothing and comes back as
-questions, one per field, each with options or a default. A complete definition skips the Intake.
+model for `feature` and `perf` and for an issue or CI fix, the fixed workload for `perf` — starts
+nothing and comes back as questions, one per field, each with options or a default. A complete
+definition skips the Intake.
 
 Every implementation runs one work package at a time; an independent test engineer re-runs its unit
 test, checks that the test fails without the change, and runs the feature-off check; a package that
@@ -569,7 +570,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `task` | the upstream PR/design, issue URL, CI job/cluster or performance goal (required except `scan`) |
 | `goal` | what done means, measurable when the mode measures; the spec and the performance plan address it |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (for sglang the image's `/sgl-workspace/sglang` by default, which the image installs sglang from) |
-| `model_path` | the model the baseline and the gates run (required for `feature` and `perf`) |
+| `model_path` | the model the baseline and the gates run (required for `feature` and `perf`; for `issue` and `ci` too, unless `stop_after` ends the run before a fix: a fix that changes code the server runs is measured on gsm8k against the base, G2) |
 | `framework`, `platform`, `gpu_ids` | target and environment (`sglang`; empty `gpu_ids` lets Setup pick idle GPUs, which every later role then uses through `HIP_VISIBLE_DEVICES`) |
 | `workload` | the benchmark every measurement uses, e.g. `{"isl":8192,"osl":1024,"conc":64}`; required for `perf`, fixed at Setup |
 | `server_script` | your script that starts the server for `model_path`; InferPilot sets `PORT`, `HIP_VISIBLE_DEVICES`, `PYTHONPATH` and `EXTRA_ARGS` (the feature's flags, empty for the baseline), and the script passes `--port $PORT` and `$EXTRA_ARGS` to the server; required for `feature` and `perf` ([`templates/task_definition.md`](templates/task_definition.md) §1.1). Without one, you may answer `template`: InferPilot's `templates/harness/server.sh`, after the model's recipe in the sglang cookbook |
@@ -603,7 +604,8 @@ definition; the result of every run that started records the definition it used 
 each field came from (`provenance`) and the intake's `assumptions`.
 
 Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a port's client does not
-run its source's scenarios; any `stop_after`; with `auto_approve_design`
+run its source's scenarios; the question for a model, when an issue or a ci run reaches its fix without
+one; any `stop_after`; with `auto_approve_design`
 set to `false`, L3 tasks and designs the architect flags stop at Design (`awaiting_design_review`; by
 default they go on, and the report says no human approved the design); a review the reviewer marks `blocked`
 stops before the PR; the PR engineer returns the exact `git push` instead of pushing; issue replies
