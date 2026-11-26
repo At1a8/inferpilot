@@ -14,7 +14,9 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
 
 1. Collect the failure: `python3 <inferpilot_dir>/scripts/scan_ci.py --tracker <n> --out RUN_DIR/ci.json`
    for tracker clusters (tests, image variants, statuses, since dates, the fix PRs the tracker
-   names), plus the job logs. A tracker it reports as `unread` is read from the issue itself.
+   names), plus the job logs. A tracker it reports as `unread` is read from the issue itself. Only
+   the tests its latest scan saw fail are failing now (`n_failing`; `broken`, `flaky`, `new`): a
+   `no longer failing` entry is history, which the tracker keeps for some days.
 2. Classify it with `ci_triage.md` §2: `code_regression`, `dependency_bump`, `test_bug`, `flaky`,
    `infrastructure`. For `flaky`, rerun the test enough times to state a rate.
    - `performance`: true when the test fails on a number it measures (a throughput, a latency, a
