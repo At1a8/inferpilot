@@ -866,7 +866,7 @@ const VERIFY = S({
   summary: str,
 }, ['all_pass', 'failures']);
 // in_use: '' when the pinned GPUs are idle; otherwise each one another job uses, its VRAM%, GPU% and pids
-const GPU_CHECK = S({ in_use: str }, ['in_use']);
+const GPU_CHECK = S({ in_use: str, env_changed: str }, ['in_use']); // env_changed: after a check on main that left no answer
 const INVESTIGATE = S({
   verdict: { type: 'string', enum: ['fix_needed', 'baseline_bug', 'kernel_regression', 'inconclusive'] },
   work_packages: WPS,
@@ -1783,6 +1783,18 @@ async function recheckOnMain(extraGates, claim) {
       ATTENTION.push({ call: label, issue: 'returned no answer and may have left its servers running: stop them before reusing its GPUs' });
       return stopped('the check on the latest main returned nothing, and what it left on the GPUs could not be stopped or checked: '
         + `no pull request is prepared next to it. ${kept}`, 'the check on the latest main may have left its servers running');
+    }
+    // The check installs nothing in place, and one that left no answer cannot say that it did not: the same call
+    // compares the image's packages with the record the check wrote first, and puts back what differs. What it
+    // could not put back leaves an image other than the one the fix was verified in: the pull request's checks
+    // are not run in it.
+    const changed = String(gpus.env_changed || '').trim();
+    if (changed) {
+      ATTENTION.push({ call: label, issue: `left the image's environment changed, and it could not be put back: ${changed}. `
+        + 'Restore it before anything else runs in this image' });
+      return stopped(`the check on the latest main returned nothing and left the image's environment changed (${changed}): no pull request `
+        + `is prepared in an image other than the one the fix was verified in. ${kept}; restore the image, then run the task again`,
+      `the check on the latest main left the image's environment changed: ${changed}`);
     }
     const inUse = String(gpus.in_use || '').trim();
     note('PR', 'recheck', 'the gate was not run again on the latest main: the verify engineer returned nothing; what it left was stopped'

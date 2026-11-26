@@ -17,7 +17,16 @@ name: a test engineer's, an earlier round's), then `python3 <inferpilot_dir>/scr
 with its VRAM%, GPU% and pids, in `in_use`, empty when they are idle: InferPilot warns the user before
 the round starts, and the round goes on. Start nothing.
 
-Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
+With `round: recheck`, look at the image's environment as well, once the launches have stopped. The
+check is told to install nothing in place, and one that left no answer cannot say that it did not:
+compare the image's packages with the record it wrote first (`RUN_DIR/recheck_env.txt`, PHASE=recheck
+step 1), put back what differs (the recorded versions, and `RUN_DIR/env_restore.sh` where a call
+wrote one), and compare again. `env_changed` names what you could not put back, and is empty when
+the image is as recorded, or when the check ended before it wrote the record: InferPilot prepares no
+pull request in an image that is not the one the fix was verified in.
+
+Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "env_changed": "<round recheck: what
+could not be put back | ''>"}`
 
 ## PHASE=verify
 
@@ -259,11 +268,22 @@ no longer shows needs no pull request: this call finds out, and changes nothing.
 verified fix, so `passes` is said only on proof; anything short of it is `inconclusive`, and the pull
 request is prepared.
 
-1. `git fetch origin`, then a throwaway worktree of the latest main, without the fix
+1. First write the image's packages to `RUN_DIR/recheck_env.txt` (`python3 -m pip freeze`, where the
+   servers run): this call installs nothing in place (step 3), and the record is what shows it
+   afterwards. Where an earlier attempt of this check wrote it, keep it, compare the image with it,
+   and put back what differs before anything else. Then `git -C <framework_dir> fetch
+   origin` (in the framework's checkout: this call's own directory is InferPilot's, and a bare fetch
+   there leaves `origin/main` of the framework where it was), and a throwaway worktree of the latest
+   main, without the fix
    (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`). `main` is its commit.
    A `RUN_DIR/recheck` an earlier call left behind is removed first (`git -C <framework_dir> worktree
    remove --force RUN_DIR/recheck`, or the directory itself where git no longer knows it): it is a
-   tree of main and holds nothing of the task.
+   tree of main and holds nothing of the task. Before removing it, stop what that call launched: it
+   may have ended without an answer and left a server that still reads this tree. Stop every launch
+   whose log is under `RUN_DIR/logs/recheck/` (`python3 <inferpilot_dir>/scripts/stop_launch.py
+   <log>...`, until it exits 0) and confirm it on the GPUs (`gpu_status.py --check <gpu_ids>`). Where
+   you cannot confirm that nothing of it still runs, leave the tree as it is, run nothing, and
+   answer `inconclusive` with `left_running` naming what is left.
 2. Point the gate at that tree, and at nothing else. Its command was written for the task worktree,
    which has the fix: set `TREE` to the recheck worktree (an issue's reproduction script reads it),
    put that tree first on `PYTHONPATH` (`env_hygiene.md`, *The code under test*), and replace every
@@ -276,8 +296,11 @@ request is prepared.
 3. Main runs in the environment its own files call for (`validation_doctrine.md`, *What a fix changes
    decides its gates*): where main has changed a dependency declaration or the Dockerfile since
    `<base>`, that may be its fix, and the image this run began on does not have it. Put the change
-   into effect for these runs as step 1 of PHASE=verify does for an arm, or answer `inconclusive`
-   where you cannot.
+   into effect for these runs in a directory of the check's own, as step 1 of PHASE=verify does for
+   an arm (a package in `RUN_DIR/env/recheck`, first on `PYTHONPATH`; a variable for these processes
+   alone). Never in place: this call changes nothing, the pull request is checked in this image
+   after it, and a call that ends without an answer cannot put anything back. Where main's change
+   must replace a package of the image, or cannot be put into effect at all, answer `inconclusive`.
 4. Run it as you ran it on the base: the same model and settings, on the GPUs in `gpu_ids`, and as
    many times as the base needed to show the failure (the ledger has the counts), at least 6 for a
    failure that did not show on every run there (`validation_doctrine.md`, *Noise characterization*):
@@ -299,13 +322,18 @@ request is prepared.
    `evidence` gives the runs and their counts, the logs, and for `inconclusive` what kept the check
    from deciding. Write the same in the ledger (`RUN_DIR/experiment_ledger.md`), with main's commit
    and the two paths, and keep each run's log under `RUN_DIR/logs/`, not in the worktree: a reply
-   that says main has fixed the failure is checked against them.
+   that says main has fixed the failure is checked against them. The log of each launch goes in
+   `RUN_DIR/logs/recheck/`, where a later attempt finds what this one started (step 1).
 6. Stop what you started (`env_hygiene.md`, *Servers*), and confirm it on the GPUs
    (`python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before your first launch and
    after the stop). What you could not stop goes in `left_running`, whatever the answer, and an
    empty string when all of it stopped: say one or the other. InferPilot prepares no pull request
    next to it. Remove the worktree once everything you started has stopped: one a live process may
-   still read stays where it is, and `left_running` names it. Give `.git` back
+   still read stays where it is, and `left_running` names it. Then compare the image's packages
+   with `RUN_DIR/recheck_env.txt`: they are the same, since nothing was installed in place. A
+   difference you find all the same is put back, and one you cannot put back goes in `left_running`
+   too (`"the image's environment: aiter 0.1.9 in place of 0.1.7"`): the pull request is not
+   prepared in an image other than the one the fix was verified in. Give `.git` back
    (`scripts/restore_owner.sh`).
 
 Return:

@@ -404,6 +404,9 @@ class RecheckOnMainTest(unittest.TestCase):
                 ("if (TIMED_OUT_CALLS.has(label)) {", "the pull request is prepared next to a check that may still be running"),
                 ("const gpus = await call('verify_engineer', 'gpus', inputs({ round: 'recheck' }), GPU_CHECK, 'verify_engineer:gpus#recheck');",
                  "what a check without an answer left on the GPUs is not stopped"),
+                ("const GPU_CHECK = S({ in_use: str, env_changed: str }, ['in_use']);", "the call after a check without an answer cannot say what "
+                                                                                       "it left in the image"),
+                ("const changed = String(gpus.env_changed || '').trim();\n    if (changed) {", "the pull request is prepared in an image the check left changed"),
                 ("if (rc.fixed) return finish('fixed_on_main', 'PR');", "a fix main no longer needs still gets a pull request"),
                 ("if (rc.stop) return finish('blocked', 'PR');", "the run goes on next to a check that may hold the GPUs"),
                 ("if (PHASE !== 'PR') enter('PR');", "the PR phase is entered twice")):
@@ -423,6 +426,22 @@ class RecheckOnMainTest(unittest.TestCase):
                      "so `passes` is said only on proof; anything short of it is `inconclusive`",
                      "a throwaway worktree of the latest main, without the fix",
                      "A `RUN_DIR/recheck` an earlier call left behind is removed first",
+                     # the fetch is the framework's, not that of the directory the call runs in
+                     "Then `git -C <framework_dir> fetch origin`",
+                     "a bare fetch there leaves `origin/main` of the framework where it was",
+                     # an earlier attempt may have left a server that reads the tree
+                     "Before removing it, stop what that call launched",
+                     "Stop every launch whose log is under `RUN_DIR/logs/recheck/`",
+                     "Where you cannot confirm that nothing of it still runs, leave the tree as it is, run nothing, and answer `inconclusive` "
+                     "with `left_running` naming what is left",
+                     "The log of each launch goes in `RUN_DIR/logs/recheck/`",
+                     # the image is the one the fix was verified in, before the check and after it
+                     "First write the image's packages to `RUN_DIR/recheck_env.txt`",
+                     "Put the change into effect for these runs in a directory of the check's own",
+                     "Never in place: this call changes nothing, the pull request is checked in this image after it",
+                     "Where main's change must replace a package of the image, or cannot be put into effect at all, answer `inconclusive`",
+                     "Then compare the image's packages with `RUN_DIR/recheck_env.txt`",
+                     "one you cannot put back goes in `left_running` too",
                      # the gate was written for the task worktree, which has the fix
                      "Point the gate at that tree, and at nothing else",
                      "set `TREE` to the recheck worktree", "replace every path of the task worktree in the command itself",
@@ -456,6 +475,14 @@ class RecheckOnMainTest(unittest.TestCase):
                            ("knowledge/pr_playbook.md", "A verified fix is dropped only on proof"),
                            ("knowledge/pr_playbook.md", "A check that decides less than that prepares the PR"),
                            ("roles/director.md", "or the check on the latest main before the pull request"),
+                           # bisect_fixed is an issue's: a ci task is given the range, and no run that does not exist
+                           ("roles/director.md", "Where neither names it, say that the change that fixed it is not named, and give the range it "
+                                                 "lies in"),
+                           ("roles/director.md", "For an issue, give the `bisect_fixed` run that would name it; a ci task has no such run, so offer "
+                                                 "none"),
+                           ("roles/verify_engineer.md", "With `round: recheck`, look at the image's environment as well, once the launches have "
+                                                        "stopped"),
+                           ("roles/verify_engineer.md", "`env_changed` names what you could not put back"),
                            ("roles/director.md", "say that its branch was not proposed, and where it is"),
                            ("roles/issue_triager.md", "main fixed it while the run worked on a fix of its own, which is not offered"),
                            ("roles/verify_engineer.md", "`recheck` when it follows a check on the latest main that left no answer"),

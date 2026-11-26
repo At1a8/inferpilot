@@ -928,6 +928,18 @@ const scenarios = [
         && unknown.result.attention.some((a) => a.call === 'verify_engineer:recheck' && /may have left its servers running/.test(a.issue))
         && prPhase(unknown).some((p) => p.verdict === 'fail' && /The fix is verified and on /.test(p.summary)),
         `${mode}: where what it left cannot be stopped or checked, no pull request is prepared next to it: ${ended(unknown)}`);
+      // The check installs nothing in place, and one that left no answer cannot say that it did not: what the same
+      // call finds changed in the image and cannot put back stops the run before the pull request's checks run in it.
+      const dirty = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
+        'verify_engineer:gpus': (ins) => ({ in_use: '', env_changed: ins.round === 'recheck' ? 'aiter 0.1.9 in place of 0.1.7' : '' }) });
+      check(dirty.result.status === 'blocked' && dirty.result.stopped_at === 'PR' && !dirty.keys.includes('pr_engineer:pr')
+        && dirty.result.attention.some((a) => a.call === 'verify_engineer:recheck' && /left the image's environment changed.*aiter 0\.1\.9/.test(a.issue))
+        && prPhase(dirty).some((p) => p.verdict === 'fail' && /an image other than the one the fix was verified in\. The fix is verified and on /.test(p.summary)),
+        `${mode}: an image the check left changed gets no pull request prepared in it: ${ended(dirty)}`);
+      const clean = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
+        'verify_engineer:gpus': () => ({ in_use: '', env_changed: '' }) });
+      check(clean.result.status === 'ready_for_review' && clean.keys.includes('pr_engineer:pr'),
+        `${mode}: one that is as recorded stops nothing: ${ended(clean)}`);
     }
     // A test the fix corrected is still the fixed one when it is collected from the task worktree: for a failing test, the
     // test file is from main too. An issue's reproduction has no such file.
