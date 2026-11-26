@@ -200,11 +200,13 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
      cache keeps it.
-   - `perf`, and a feature with a workload: the run's `client_script` and the task's `workload` are the
-     fixed benchmark. Record them in `RUN_DIR/run.json` as given; every later measurement runs them
-     unchanged. With `held_out` on, record the held-out operating point next to them
-     (`perf_evaluation.md` §3: half the concurrency, when the client reads `CONCURRENCY`), before any
-     number is seen.
+   - `perf`, and every feature: the run's `client_script`, with the task's `workload` when it gives
+     one, is the fixed benchmark. Record them in `RUN_DIR/run.json` as given and, for a client without
+     a `workload`, the scenarios it runs (its lengths and concurrencies, as its script and the
+     baseline's logs show them); every later measurement runs them unchanged. A feature's are recorded
+     whether it claims a gain or not, since G5 judges it either way. With `held_out` on, record the
+     held-out operating point next to them (`perf_evaluation.md` §3: half the concurrency, when the
+     client reads `CONCURRENCY`), before any number is seen.
    - `issue`, `ci`: prepare the environment the reproduction needs; run a baseline only if the task
      needs one now. Report `baseline_status: "skip"` with the reason otherwise. The warm-up, the cache
      lookup and the accuracy probe above belong to a baseline that is measured: without one, skip
@@ -276,12 +278,13 @@ Return:
    size), or empty when it claims none. G5 runs either way (`validation_doctrine.md`, *G5 for a
    feature*): an empty claim is judged as no slower than the baseline beyond the noise band, on the
    run's client. A cost the user states in the request or `goal` is the claim instead, as a bound (`at
-   most 5% below the baseline's output tok/s`); never state one yourself. Performance is measured on
-   the task's workload and the guard workloads its `goal` names, nothing more by default: with
-   `guards` on, add guard workloads of your own (`perf_evaluation.md` §2); with `sweep` on, points
-   beyond the workload's own (more concurrencies or lengths, `acceptance.md` §1); with `held_out` on,
-   the claim also names its held-out operating point (`perf_evaluation.md` §3), fixed here with the
-   workload. For a port, the claim is step 1's.
+   most 5% below the baseline's output tok/s`), returned with `perf_cost: true`; never state one
+   yourself. It stays the claim on InferPilot's client: only a gain of the source's is never claimed
+   there. Performance is measured on the task's workload and the guard workloads its `goal` names,
+   nothing more by default: with `guards` on, add guard workloads of your own (`perf_evaluation.md`
+   §2); with `sweep` on, points beyond the workload's own (more concurrencies or lengths,
+   `acceptance.md` §1); with `held_out` on, the claim also names its held-out operating point
+   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's.
 5. Accuracy: the sets Setup measured, from `goal` (`acceptance.md` §1.1: gsm8k 1319, and gpqa_diamond
    and simple_qa when `goal` says the change may lose accuracy), each once per arm, at most 1 point below
    the baseline, with no token-level comparison (`validation_doctrine.md`, G2). Performance: one
@@ -300,6 +303,7 @@ Return:
 ```json
 {"spec_path": "/abs/RUN_DIR/feature_spec.md", "gates_measurable": true,
  "perf_claim": "+20% output tok/s vs HiCache-only at equal HBM, 32 x 30k tokens, c32 | ''",
+ "perf_cost": false,
  "skill": "hisparse-v2 (validated) | ''", "notes": "<anything not measurable and why>",
  "workload_gap": "<what the source measured, what the task's client runs, what is missing> | ''",
  "fallback_client": "/abs/RUN_DIR/scripts/fallback_client.sh | ''"}

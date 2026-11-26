@@ -421,8 +421,7 @@ class LongGatesTest(unittest.TestCase):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         self.assertIn("if (g4 && !a.server_script) {", src,
                       "an issue or a ci task with stability on may start without a server for G4")
-        self.assertIn("if (g4 && isTemplate(a.client_script) && !a.workload) {", src,
-                      "the client template would keep up its own lengths and concurrency")
+        self.assertIn("if (g4 && gaps.length) {", src, "the client template would keep up its own lengths and concurrency")
         block = re.search(r"\n  const g4 = .*?\n  const kb = ", src, re.S)
         self.assertIsNotNone(block, "the G4 questions are not where missingFields has them")
         self.assertEqual(block.group(0).count("ask('"), 3, "G4 asks for its server, its client and the template's workload")
@@ -672,8 +671,9 @@ class FeaturePerformanceTest(unittest.TestCase):
         self.assertIn("if ((mode === 'perf' || mode === 'feature') && !a.client_script) {\n", src,
                       "a feature without a workload starts without a client, and G5 has nothing to measure it with")
         self.assertNotIn("(mode === 'feature' && a.workload)", src, "a feature's client still depends on its having a workload")
-        self.assertIn("if (mode === 'feature' && isTemplate(a.client_script) && !a.workload) {\n    ask('workload',", src,
-                      "InferPilot's client would measure a feature on lengths and a concurrency nobody chose")
+        self.assertIn("const gaps = isTemplate(a.client_script) ? templateLoadGaps(a) : [];", src)
+        self.assertIn("if ((mode === 'feature' || (mode === 'perf' && a.workload)) && gaps.length) {\n    ask('workload',", src,
+                      "InferPilot's client would measure a task on lengths or a concurrency nobody chose")
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
         row = [line for line in fields.splitlines() if line.startswith("| `client_script` |")]
         self.assertEqual(len(row), 1)
@@ -686,13 +686,35 @@ class FeaturePerformanceTest(unittest.TestCase):
             self.assertRegex(row[0], r"required for `feature` and `perf`|`feature` 和 `perf` 必填", "%s: the client_script row" % name)
             self.assertNotRegex(row[0], r"a feature with a `workload`|给了 `workload` 的 feature", name)
 
+    def test_the_whole_of_the_load_inferpilots_client_runs_is_the_tasks(self):
+        """A workload that names a part of it would leave the rest to the feature's source or to the template: the
+        three the check asks of the task are the ones scripts/harness.py takes from a workload."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        harness = (ROOT / "scripts" / "harness.py").read_text(encoding="utf-8")
+        takes = dict(re.findall(r'"(\w+)": "(\w+)"', re.search(r"^WORKLOAD = \{(.*?)\}$", harness, re.M).group(1)))
+        ours = re.search(r"\nconst TEMPLATE_LOAD = \{(.*?)\};\n", src)
+        self.assertIsNotNone(ours, "inferpilot.js does not say what a task that takes the client template gives")
+        self.assertEqual(dict(re.findall(r"(\w+): \['(\w+)'", ours.group(1))), takes,
+                         "inferpilot.js asks for other dimensions than scripts/harness.py takes from a workload")
+        self.assertIn("function templateLoadGaps(a) {", src)
+        for path, said in (("templates/task_definition.md", "gives the whole of that workload, both lengths and the concurrency (in "
+                                                            "`workload`, or in `harness`), and is asked for what it leaves out"),
+                           ("roles/intake.md", "a task that takes the template gives the whole `workload` it runs: both lengths and "
+                                               "the concurrency")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
     def test_a_feature_without_a_claimed_gain_is_judged_as_no_slower_than_the_baseline(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         self.assertIn("const NO_SLOWER = \"no gain is claimed: no slower than the baseline beyond the noise band, on the run's client\";",
                       src)
-        self.assertIn("const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : String(c || '').trim()) || NO_SLOWER;",
+        self.assertIn("const ours = fallback || isTemplate(A.client_script);\n"
+                      "  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;",
                       src, "a feature without a claimed gain, or on InferPilot's client, is measured and nothing is judged")
         self.assertEqual(src.count("claimOf("), 2, "the first run and the resumed one read the claim the same way")
+        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)"):
+            self.assertIn(call, src, "a cost the user stated is lost on the way to Performance")
+        self.assertEqual(src.count("perf_cost: bool,"), 2,
+                         "the spec and the approved design both say whether the claim is a cost the user stated")
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a feature.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say that every feature is measured")
         for said in ("Every feature is measured against the baseline, whether it claims a gain or not",
@@ -722,7 +744,19 @@ class FeaturePerformanceTest(unittest.TestCase):
                            ("roles/director.md", "**Without a claimed gain there is no gap.**"),
                            ("roles/director.md", "G5 runs either way"),
                            ("roles/director.md", "an empty claim is judged as no slower than the baseline beyond the noise band"),
-                           ("roles/director.md", "never state one yourself"),
+                           ("roles/director.md", "returned with `perf_cost: true`; never state one yourself"),
+                           ("roles/director.md", "It stays the claim on InferPilot's client: only a gain of the source's is never "
+                                                 "claimed there"),
+                           ("roles/director.md", "`perf`, and every feature: the run's `client_script`, with the task's `workload` "
+                                                 "when it gives one, is the fixed benchmark"),
+                           ("roles/director.md", "A feature's are recorded whether it claims a gain or not"),
+                           ("roles/architect.md", "`perf_claim` and `perf_cost` copied from `RUN_DIR/feature_spec.md`"),
+                           ("roles/architect.md", "and `perf_cost` with it: true when the claim is a cost the user stated"),
+                           ("knowledge/validation_doctrine.md", "on the user's client and on InferPilot's alike"),
+                           ("roles/perf_engineer.md", "A cost the user stated (`at most 5% below the baseline`) is met when the "
+                                                      "median lies within that bound"),
+                           ("roles/perf_engineer.md", "`RUN_DIR/run.json` in `perf` and in `feature`"),
+                           ("templates/feature_spec.md", "a cost the user stated in `goal`: no more than it, on either client"),
                            ("roles/director.md", "the source's gain is never the claim on it: G5 judges there only that the feature is "
                                                  "no slower than the baseline"),
                            ("roles/intake.md", "A feature needs its client as a perf task does, whether it claims a gain or not"),

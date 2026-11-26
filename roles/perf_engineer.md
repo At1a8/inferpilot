@@ -56,8 +56,9 @@ A profile the machine was not idle for is `{"analysis_path": "", "path_ok": fals
 ## PHASE=perf_eval (G5 in feature and perf; guards in every mode that runs it)
 
 Inputs: `claim`, what the measurement must show: the gain the task claims; the number an issue's fix
-must restore; or, for a feature that claims no gain or is measured with InferPilot's client, that it
-is no slower than the baseline beyond the noise band (`validation_doctrine.md`, *G5 for a feature*).
+must restore; a cost the user stated for a feature, as a bound; or, for a feature that claims no gain
+or is measured with InferPilot's client, that it is no slower than the baseline beyond the noise band
+(`validation_doctrine.md`, *G5 for a feature*).
 
 Before the servers of every round start, this run's earlier ones stopped, the machine idle
 (`gpu_status.py --check all`, `env_hygiene.md`). A GPU another job uses means the measurement is not run:
@@ -72,10 +73,10 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
    a shared box.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
-3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, the spec's
-   scenarios in `feature`, the reproduction in `issue` — with no case added, dropped or resized after
-   results were seen. `path_ok`: the path check of the profile phase holds for both arms. Either false
-   means the numbers are not evidence.
+3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf` and in
+   `feature`, where the spec names the same scenarios, the reproduction in `issue` — with no case
+   added, dropped or resized after results were seen. `path_ok`: the path check of the profile phase
+   holds for both arms. Either false means the numbers are not evidence.
 4. **Reward hacks.** Check the P entries of `reward_hacks.md` on both arms: the two `server_args=`
    lines (P3), the budget (P4), output token totals counted from the client's responses (P5), the
    prefix-cache hit rates (P6), every run reported (P9). Put a suspected hack in `results` and
@@ -83,10 +84,11 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
 5. In `mode=perf`, re-capture the trace metrics too: the mechanism must have moved (e.g. syncs per step
    5 → 0), not only the headline number.
 6. `claim_reproduced`: the median of the rounds meets `claim`. A claimed gain is met by a win beyond
-   the noise band, of the size the claim names where it names one. `no slower than the baseline` is
-   met when the median lies no further below the baseline than the noise band, so a gain meets it
-   too; a feature that is slower does not, whatever else it brings. `held_out_ok`: with `held_out` on,
-   at the held-out operating point (`perf_evaluation.md` §3: the client at half the concurrency through
+   the noise band, of the size the claim names where it names one. `no slower than the baseline` is met
+   when the median lies no further below the baseline than the noise band, so a gain meets it too; a
+   feature that is slower does not, whatever else it brings. A cost the user stated (`at most 5% below
+   the baseline`) is met when the median lies within that bound. `held_out_ok`: with `held_out` on, at
+   the held-out operating point (`perf_evaluation.md` §3: the client at half the concurrency through
    `CONCURRENCY`, fixed at Setup), measured the same way, the claim still holds: a gain still beyond
    the noise band, no slowdown still none (true when `held_out` is off, or when the client cannot take
    another concurrency: say which in `summary`). `guards_ok`: no guard workload the goal or the matrix

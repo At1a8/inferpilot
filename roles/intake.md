@@ -41,8 +41,8 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      workload, whose numbers count for a perf task; for a feature they never stand for its source's
      gain, and G5 judges on them only that it is no slower than the baseline. Only the user takes it;
      never answer `template` yourself. A feature needs its client as a perf task does, whether it
-     claims a gain or not (`knowledge/validation_doctrine.md`, *G5 for a feature*), and one that takes
-     the template gives the `workload` it runs.
+     claims a gain or not (`knowledge/validation_doctrine.md`, *G5 for a feature*), and a task that
+     takes the template gives the whole `workload` it runs: both lengths and the concurrency.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):

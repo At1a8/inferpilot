@@ -605,6 +605,22 @@ const scenarios = [
     const gp = gain.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(gain.result.status === 'ready_for_review' && gp && gp.ins.claim === '+20% output tok/s at equal HBM',
       `a claimed gain stays the claim: ${JSON.stringify(gp && gp.ins.claim)}`);
+    // A cost the user stated is no number of the source's: it stays the claim on InferPilot's client, where a gain never is.
+    const BOUND = 'at most 5% below the baseline output tok/s (goal)';
+    const stated = (cost) => ({ 'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true,
+      perf_claim: BOUND, ...(cost == null ? {} : { perf_cost: cost }) }) });
+    const ours = { mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000,"osl":1000,"conc":32}' };
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const claimed = async (args, answers) => ((await run(args, { ...rendered, ...measured({}), ...answers })).calls
+      .find((c) => c.key === 'perf_engineer:perf_eval') || { ins: {} }).ins.claim;
+    check(await claimed(ours, stated(true)) === BOUND, 'a cost the user stated stays the claim on InferPilot\'s client');
+    check(NO_SLOWER.test(await claimed(ours, stated(false))) && NO_SLOWER.test(await claimed(ours, stated(null))),
+      'a claim that is not marked as one is a gain, never claimed there');
+    check(await claimed({ mode: 'feature', task: 't' }, stated(true)) === BOUND, 'and on the task\'s own client, as any claim is');
+    const approvedCost = { 'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1')], gate_ok: true,
+      perf_claim: BOUND, perf_cost: true }) };
+    check(await claimed({ ...ours, resume_from: 'implement', run_dir: RUN }, approvedCost) === BOUND,
+      'a resumed run keeps it, from the approved design');
     // A design a human approved carries its claim: a resumed run judges an empty one the same way.
     const resumed = await run({ mode: 'feature', task: 't', resume_from: 'implement', run_dir: RUN }, {
       'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1')], gate_ok: true, perf_claim: '' }),
@@ -1738,7 +1754,8 @@ const scenarios = [
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
       worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
-    const took = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: 'template', client_script: 'template',
+    const whole = '{"isl":8000,"osl":1000,"conc":32}';
+    const took = await run({ mode: 'feature', task: 't', workload: whole, server_script: 'template', client_script: 'template',
       harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
     const setupIns = took.calls.find((c) => c.key === 'director:setup');
     check(setupIns && setupIns.ins.server_script === 'template' && setupIns.ins.client_script === 'template'
@@ -1760,7 +1777,26 @@ const scenarios = [
     const noAccuracy = await run({ mode: 'feature', task: 't' }, setup({}));
     check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
       && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)), `no accuracy script stops the run at Setup: ${noAccuracy.result.status}`);
-    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, {
+    // The whole of the load is the task's: what a workload leaves out is asked for, and what harness gives counts.
+    const part = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}' });
+    const pq = (part.result.questions || []).find((q) => q.field === 'workload') || {};
+    check(asks(part, 'workload') && /gives no output length and no concurrency for it/.test(pq.why || ''),
+      `a workload that gives only its input length is asked for again, and the question says what it lacks: ${JSON.stringify(pq.why)}`);
+    const again = (part.result.next || {}).rerun_with || {};
+    check(again.workload === '' && 'workload' in (again.answers || {}),
+      `the answer takes the place of the part the task gave, which would otherwise win over it: ${JSON.stringify(again)}`);
+    const answered = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}', ...again,
+      answers: { workload: whole } }, setup(rendered));
+    check(answered.result.status !== 'needs_input' && answered.result.task_def.workload === whole,
+      `and with the answer the run starts on it: ${answered.result.status}, ${JSON.stringify(answered.result.task_def.workload)}`);
+    const byHarness = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}',
+      harness: { OSL: 256, CONCURRENCY: 1 } }, setup(rendered));
+    check(byHarness.result.status !== 'needs_input', `a length and a concurrency the task gives in harness count: ${byHarness.result.status}`);
+    const words = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '8k in, 1k out, c64' }, setup(rendered));
+    check(words.result.status !== 'needs_input', `a workload in words is the director's to turn into the three: ${words.result.status}`);
+    const ownClient = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}' });
+    check(ownClient.result.status !== 'needs_input', `the task's own client runs what it runs, whatever the workload names: ${ownClient.result.status}`);
+    const gap = await run({ mode: 'feature', task: 't', workload: whole, client_script: 'template' }, {
       ...setup(rendered),
       'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
         workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in." }),
@@ -1784,6 +1820,14 @@ const scenarios = [
     check(r.result.status === 'ready_for_review' && perf && perf.ins.server_script === `${RUN}/scripts/server.sh`
       && perf.ins.client_script === `${RUN}/scripts/perf.sh` && perf.ins.claim,
       `on InferPilot's server and client, the planned gain is the claim: ${r.result.status}, ${JSON.stringify(perf && perf.ins.claim)}`);
+    // InferPilot's client runs the whole of the task's workload: what it leaves out is asked for, never the template's own.
+    const part = await run({ mode: 'perf', task: 'p', client_script: 'template', workload: '{"isl":8000,"osl":1000}' });
+    const pq = (part.result.questions || []).find((q) => q.field === 'workload') || {};
+    check(asks(part, 'workload') && eqList((part.result.questions || []).map((q) => q.field), ['workload'])
+      && /gives no concurrency for it/.test(pq.why || ''),
+    `a perf task that takes InferPilot's client with a part of its workload is asked for the rest: ${JSON.stringify(pq.why)}`);
+    const own = await run({ mode: 'perf', task: 'p', workload: '{"isl":8000,"osl":1000}' });
+    check(own.result.status !== 'needs_input', `with its own client the workload is as the task gives it: ${own.result.status}`);
   }],
   ['perf: a profile of the wrong path stops before any plan', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
@@ -1913,6 +1957,10 @@ const scenarios = [
     check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
     const tplFeature = await run({ mode: 'feature', task: 't', stability: true, client_script: 'Template' });
     check(asks(tplFeature, 'workload') && eqList(fields(tplFeature), ['workload']), `the same for a feature, asked once: ${fields(tplFeature)}`);
+    const tplPart = await run({ mode: 'ci', task: 'c', stability: true, server_script: '/s/server.sh', client_script: 'template',
+      workload: '{"conc":64}' });
+    check(asks(tplPart, 'workload') && eqList(fields(tplPart), ['workload']),
+      `and a workload that names only a part of the load is asked for again: ${fields(tplPart)}`);
     const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
     const load = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template',
       workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);

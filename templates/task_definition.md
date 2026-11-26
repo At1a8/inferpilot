@@ -107,13 +107,14 @@ only where the user takes them:
 - `perf.sh`: sglang's serving benchmark on random prompts: one run per concurrency, with 4 prompts and
   2 warm-up requests per concurrent request after a flush of the prefix cache, as the client above. A
   feature or perf task runs it on the task's workload when the user answers `client_script: template`,
-  and a feature that takes it gives that workload: the template's own lengths and concurrency are a
-  load nobody chose. A perf task's numbers on it count as on any client: the workload is the user's,
-  and there is no source to reproduce. A feature's never stand for its source's gain, which the
-  template need not reproduce: G5 judges on it only that the feature is no slower than the baseline,
-  and the same holds when a feature takes it as Spec's fallback client for the source's scenarios
-  (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the user's own
-  client.
+  and a task that takes it gives the whole of that workload, both lengths and the concurrency (in
+  `workload`, or in `harness`), and is asked for what it leaves out: lengths or a concurrency of the
+  template's own are a load nobody chose. A perf task's numbers on it count as on any client: the
+  workload is the user's, and there is no source to reproduce. A feature's never stand for its source's
+  gain, which the template need not reproduce: G5 judges on it only that the feature is no slower than
+  the baseline, and the same holds when a feature takes it as Spec's fallback client for the source's
+  scenarios (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the
+  user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
   task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 32768 tokens
   per answer); only the task or the feature's source changes them (PARD-2: thinking off). The sets it

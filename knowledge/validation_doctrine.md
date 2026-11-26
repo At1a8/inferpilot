@@ -174,7 +174,8 @@ Notes per gate:
   noise band, on the run's client, by the median of its rounds. So is one measured with InferPilot's
   client (its template, or Spec's fallback for the source's scenarios), on which the source's gain is
   never the claim. A cost the user states in the request or `goal` (determinism, memory bought with
-  speed) is the claim instead, and the feature loses no more than it; no role states one for the user.
+  speed) is the claim instead, on the user's client and on InferPilot's alike, and the feature loses no
+  more than it; no role states one for the user.
   A feature that is slower stops the task at Performance for a human, and nothing is rolled back. So
   a feature task names its client as it names its server, and one that names none is asked for it
   (`templates/task_definition.md` §1.1).

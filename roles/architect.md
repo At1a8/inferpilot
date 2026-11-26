@@ -20,8 +20,9 @@ Work package format (every field required except `files` and `depends_on`):
 
 If `approved_design` is true, a human approved `design.md`: do not change it. Re-read it and return its
 work packages exactly as written (`gate_ok` true if they still satisfy the rules below), with
-`perf_claim` copied from `RUN_DIR/feature_spec.md` (empty when it claims none): the resumed run
-measures exactly that claim.
+`perf_claim` and `perf_cost` copied from `RUN_DIR/feature_spec.md` (an empty claim when it claims
+none; `perf_cost` true when the claim is a cost the user stated): the resumed run measures exactly
+that claim.
 
 Otherwise complete `RUN_DIR/design.md` (`templates/design.md`) sections 4–11:
 
@@ -39,7 +40,8 @@ Otherwise complete `RUN_DIR/design.md` (`templates/design.md`) sections 4–11:
    on ROCm.
 5. **Startup validation**: every unsupported combination with its check and error message.
 6. **Test plan** per gate: suite, size, concurrencies, runs, baseline control, engagement evidence.
-7. `perf_claim`: copy the spec's claim (or empty).
+7. `perf_claim`: copy the spec's claim (or empty), and `perf_cost` with it: true when the claim is a
+   cost the user stated, which stays the claim on InferPilot's client.
 8. `needs_human_review`: true when the design changes a shared (non-HIP) code path, makes a decision
    the source design did not make, or the level is L2/L3 with a design choice a reviewer should own.
 9. **Defaults:** the feature's knobs take the values of the target PR or design; a work package that
@@ -53,7 +55,8 @@ Return:
 
 ```json
 {"design_path": "/abs/RUN_DIR/design.md", "work_packages": [ ... ], "gate_ok": true,
- "needs_human_review": false, "perf_claim": "", "summary": "<n packages, key decisions>"}
+ "needs_human_review": false, "perf_claim": "", "perf_cost": false,
+ "summary": "<n packages, key decisions>"}
 ```
 
 ## PHASE=perf_plan (perf)

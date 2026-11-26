@@ -205,6 +205,19 @@ const BEFORE_A_FIX = {
 const TEMPLATE = 'template';
 const isTemplate = (v) => String(v || '').trim().toLowerCase() === TEMPLATE;
 
+// What InferPilot's client runs is the task's to give: two lengths and a concurrency, in workload (isl, osl, conc)
+// or in harness (ISL, OSL, CONCURRENCY), as scripts/harness.py takes them. One the task leaves out would come
+// from the feature's source or from the template: a load nobody chose. A workload given in words is the
+// director's to turn into the three, and cannot be read here.
+const TEMPLATE_LOAD = { isl: ['ISL', 'input length'], osl: ['OSL', 'output length'], conc: ['CONCURRENCY', 'concurrency'] };
+function templateLoadGaps(a) {
+  const workload = asObject(a.workload);
+  if (typeof a.workload === 'string' && a.workload.trim() && !Object.keys(workload).length) return [];
+  const harness = asObject(a.harness);
+  const given = (v) => v != null && String(v).trim() !== '';
+  return Object.keys(TEMPLATE_LOAD).filter((k) => !given(workload[k]) && !given(harness[TEMPLATE_LOAD[k][0]]));
+}
+
 // What a definition still lacks before its mode can start; every gap is a question for the user.
 function missingFields(a) {
   const qs = [];
@@ -243,11 +256,16 @@ function missingFields(a) {
       feature ? 'G5 measures every feature against the baseline with it, unchanged: the gain it claims, or no slowdown when it claims none'
         : 'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
   }
-  // InferPilot's client runs the task's workload: a feature that takes it gives one. Without one the template would
-  // measure lengths and a concurrency of its own, which nobody chose, and G5 would judge the feature on them.
-  if (mode === 'feature' && isTemplate(a.client_script) && !a.workload) {
-    ask('workload', "Which workload should InferPilot's client run for the feature (input and output lengths, concurrency)?",
-      `client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
+  // InferPilot's client runs the task's workload: a task that takes it gives the whole of it. What it leaves out
+  // the template would fill with lengths or a concurrency of its own, and G5 would judge the change on them.
+  // A perf task without any workload is asked for one above.
+  const gaps = isTemplate(a.client_script) ? templateLoadGaps(a) : [];
+  const lacks = gaps.length < Object.keys(TEMPLATE_LOAD).length
+    ? `gives no ${gaps.map((k) => TEMPLATE_LOAD[k][1]).join(' and no ')} for it` : 'names none';
+  if ((mode === 'feature' || (mode === 'perf' && a.workload)) && gaps.length) {
+    ask('workload', `Which workload should InferPilot's client run${mode === 'feature' ? ' for the feature' : ''} (input and output `
+      + 'lengths, concurrency)?',
+      `client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
   }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
@@ -273,9 +291,9 @@ function missingFields(a) {
   }
   // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
   // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
-  if (g4 && isTemplate(a.client_script) && !a.workload) {
+  if (g4 && gaps.length) {
     ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
-      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
+      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {
@@ -335,11 +353,14 @@ async function intakeStage(raw) {
     return stopped('rejected', why, { reason: why, next: { say: `Outside what InferPilot does: ${why}` } });
   }
   if (questions.length) {
+    // A field the caller set wins over an answer. One that is asked about all the same (a value the run cannot
+    // use, or only a part of what it needs) is cleared for the next run, so that the answer takes its place.
+    const rejected = Object.fromEntries(questions.filter((q) => q.field in given).map((q) => [q.field, '']));
     return stopped('needs_input', `missing: ${questions.map((q) => q.field).join(', ')}`, {
       questions,
       // null until the user answers: a run that still has it asks again rather than taking a placeholder
       next: { say: 'InferPilot needs these answers before it starts; nothing ran.', ask: questions,
-        rerun_with: { answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
+        rerun_with: { ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
     });
   }
   return {
@@ -650,7 +671,8 @@ const SETUP = S({
   notes: str,
 }, ['lock', 'run_dir', 'baseline_status', 'gpu_ids']);
 // workload_gap: the task's client does not run the scenarios the source measured its gain on; the run asks.
-const SPEC = S({ spec_path: str, gates_measurable: bool, perf_claim: str, skill: str, notes: str,
+// perf_cost: perf_claim is a cost the user stated (a bound), not a gain: it is the claim on any client.
+const SPEC = S({ spec_path: str, gates_measurable: bool, perf_claim: str, perf_cost: bool, skill: str, notes: str,
   workload_gap: str, fallback_client: str }, ['spec_path', 'gates_measurable']);
 const RECON = S({
   design_path: str,
@@ -667,6 +689,7 @@ const DESIGN = S({
   gate_ok: bool,
   needs_human_review: bool,
   perf_claim: str, // required, '' for none: a resumed run measures exactly this claim
+  perf_cost: bool, // the claim is a cost the user stated, as the spec has it
   summary: str,
 }, ['work_packages', 'gate_ok', 'perf_claim']);
 const TRIAGE = S({
@@ -1617,9 +1640,11 @@ async function runFeature() {
   // Spec's fallback client, which the user took for the source's scenarios.
   const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
   // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
-  // reproduce the source's numbers: the source's gain is never the claim on it. Every feature is judged all the
-  // same (validation_doctrine.md, G5 for a feature): where no gain is claimed, G5 shows that it is no slower.
-  const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : String(c || '').trim()) || NO_SLOWER;
+  // reproduce the source's numbers: the source's gain is never the claim on it. A cost the user stated (cost) is
+  // no number of the source's, and stays the claim there. Every feature is judged all the same
+  // (validation_doctrine.md, G5 for a feature): where neither is claimed, G5 shows that it is no slower.
+  const ours = fallback || isTemplate(A.client_script);
+  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;
 
   // Resume after a human approved design.md (a run that stopped at Design).
   if (RESUME === 'implement') {
@@ -1634,7 +1659,7 @@ async function runFeature() {
       return finish('blocked', 'Design');
     }
     note('Design', 'approved', `${approved.work_packages.length} work package(s) from the approved design`);
-    return deliver(approved.work_packages, [], claimOf(approved.perf_claim), true);
+    return deliver(approved.work_packages, [], claimOf(approved.perf_claim, approved.perf_cost), true);
   }
 
   enter('Spec');
@@ -1680,7 +1705,7 @@ async function runFeature() {
       + ` that no human gave; ${C.design_path} goes to the PR's reviewer${design.summary ? `; ${design.summary}` : ''}`);
   }
 
-  return deliver(design.work_packages, [], claimOf(spec.perf_claim), true);
+  return deliver(design.work_packages, [], claimOf(spec.perf_claim, spec.perf_cost), true);
 }
 
 async function runIssue() {
