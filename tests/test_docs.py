@@ -408,9 +408,46 @@ class LongGatesTest(unittest.TestCase):
             self.assertIn("scripts/stability.sh", self.flat(path), "%s does not name G4's script" % path)
         self.assertTrue((ROOT / "scripts" / "stability.sh").is_file())
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertRegex(src, r"asked\(a\.stability\) === 'true' && !a\.client_script", "stability is on without a client to run")
+        self.assertIn("const g4 = mode !== 'scan' && asked(a.stability) === 'true';", src)
+        self.assertIn("if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {", src,
+                      "stability is on without a client to run")
         for field in self.FLAGS:
             self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
+
+    def test_with_stability_on_the_task_names_its_server_and_its_client_and_no_template_is_offered(self):
+        """The user asks for G4 and says what it keeps up for two days: the server and the client are the task's,
+        asked for where it lacks one, in any mode. No template stands in on G4's account, and InferPilot's client,
+        where the task names it all the same, runs the task's workload, never lengths and a concurrency of its own."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {", src,
+                      "an issue or a ci task with stability on may start without a server for G4")
+        self.assertIn("if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {", src,
+                      "the client template would keep up its own lengths and concurrency")
+        block = re.search(r"\n  const g4 = .*?\n  const kb = ", src, re.S)
+        self.assertIsNotNone(block, "the G4 questions are not where missingFields has them")
+        self.assertEqual(block.group(0).count("ask('"), 3, "G4 asks for its server, its client and the template's workload")
+        self.assertNotIn("[TEMPLATE]", block.group(0), "a G4 question offers the template")
+        self.assertNotIn("Or ${TEMPLATE}", block.group(0), "a G4 question offers the template")
+        self.assertNotIn("A.client_script = TEMPLATE", src, "the run takes the template for G4 without being told to")
+        for path, said in (("templates/task_definition.md", "names its `server_script` and its `client_script`, whatever its mode"),
+                           ("templates/task_definition.md", "No template is offered for either on G4's account"),
+                           ("templates/task_definition.md", "gives the `workload` it runs, and is asked for that"),
+                           ("knowledge/validation_doctrine.md", "The server, the client and the workload are the task's to bring"),
+                           ("knowledge/validation_doctrine.md", "no template is taken for it"),
+                           ("knowledge/validation_doctrine.md", "never on lengths and a concurrency of its own"),
+                           ("roles/intake.md", "a task without a `server_script` or without a `client_script` is asked for it, in any mode"),
+                           ("roles/intake.md", "Where only G4 needs the script"),
+                           ("roles/intake.md", "the question offers no `template`"),
+                           ("README.md", "names its `server_script` and its `client_script`, in any mode, and is asked for the one it lacks: "
+                                         "G4 takes no template of its own accord"),
+                           ("README.zh-CN.md", "任何模式下任务都要给出自己的 `server_script` 和 `client_script`，缺哪个就问哪个：G4 不会自行改用模板")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        server = [line for line in fields.splitlines() if line.startswith("| `server_script` |")]
+        self.assertEqual(len(server), 1)
+        self.assertIn("| recommended; required with `stability` on |", server[0], "an issue with stability on needs its server script")
+        both = [line for line in fields.splitlines() if line.startswith("| `long_context`, `stability` |")]
+        self.assertIn("so the task names both", both[0])
 
 
 class FlagsTest(unittest.TestCase):

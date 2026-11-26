@@ -242,12 +242,26 @@ function missingFields(a) {
         `${field} takes true or false, and ${JSON.stringify(a[field])} is neither: the run would leave the gate out`, ['true', 'false']);
     }
   }
-  // G4 keeps the task's performance test up for more than 48 hours: it needs the client that runs it,
-  // also where the mode alone asks for none (asked above for perf, and for a feature with a workload).
-  if (mode !== 'scan' && mode !== 'perf' && !(mode === 'feature' && a.workload) && asked(a.stability) === 'true' && !a.client_script) {
+  // G4 keeps the task's performance test up for more than 48 hours, and the user asked for it: the task names the
+  // server that test runs against and the client that runs it, also where the mode alone asks for neither (the
+  // server is asked above for a feature and a perf task, the client for a perf task and a feature with a workload).
+  // No template is offered on G4's account.
+  const g4 = mode !== 'scan' && asked(a.stability) === 'true';
+  if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {
+    ask('server_script', 'Which script starts the server that G4 keeps up for more than 48 hours (absolute path)? It must pass '
+      + '--port $PORT and $EXTRA_ARGS to the server.',
+      'stability is on: G4 runs its client back to back against one server, which this script starts');
+  }
+  if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {
     ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
-      + `writes its logs to OUT_DIR. Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload.`,
-      'stability is on: G4 runs this client back to back against one server', [TEMPLATE]);
+      + 'writes its logs to OUT_DIR.',
+      'stability is on: G4 runs this client back to back against one server');
+  }
+  // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
+  // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
+  if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {
+    ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
+      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {

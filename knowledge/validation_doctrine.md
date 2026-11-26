@@ -96,9 +96,13 @@ Notes per gate:
   `scripts/stability.sh` runs it and writes one line per pass, with the client's result and the memory
   in use. It is one run, not repeated and not taken to other concurrencies, after everything else in
   its round. `perf.sh` keeps its concurrency full within a pass; the server is idle only while one pass
-  ends and the next starts, and the lines show how much of the run was under load. The workload is the
-  task's to bring: long prompts at high concurrency, on which the feature engages. Where it does not
-  engage, the report says that G4 showed the server's stability, not the feature path's.
+  ends and the next starts, and the lines show how much of the run was under load. The server, the
+  client and the workload are the task's to bring: the user asked for G4, so a task with `stability` on
+  that lacks its `server_script` or its `client_script` is asked for it, in any mode, and no template is
+  taken for it. InferPilot's client is G4's load only where the task names it and gives the workload
+  it runs, never on lengths and a concurrency of its own. The load that shows most is long prompts at
+  high concurrency, on which the feature engages. Where it does not engage, the report says that G4
+  showed the server's stability, not the feature path's.
 - **G4 passes on what its run shows.** The server neither crashes, hangs nor runs out of memory, no
   request fails, and nothing drifts: not the client's throughput, nor the memory in use on the run's
   GPUs or on the host. Each hour of the run has one value of throughput and one of memory: the median of
