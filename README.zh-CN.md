@@ -22,7 +22,7 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 
 任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 以及 issue、CI 修复需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
 
-实现阶段一次只处理一个工作包；独立的测试工程师会重新运行它的单元测试，检查这个测试在没有该改动时会失败，并做关闭特性时的检查；一直通不过的工作包会被回滚。验证失败交给排查者：它先做对照实验，再考虑加插桩，最后给出修复、证明该失败在基线上本就存在，或者给出无法定论的结论并停止任务。在 PR 之前，审阅者像维护者一样阅读 diff 和证据，并以一份已知 reward hack 目录为起点——也就是让数字变好、却违背了它本来含义的改动（[`knowledge/reward_hacks.md`](knowledge/reward_hacks.md)）；要求的修改，以及为每个确认的 hack 写的测试，都会变成工作包，重新经过 Implement 和 Verify。性能数据只有在 Setup 时固定的负载上、在任务所针对的服务路径上测得才算数，任务要求时（`held_out`），收益还必须在与负载一起固定下来的 held-out 工作点上同样成立（[`knowledge/perf_evaluation.md`](knowledge/perf_evaluation.md) §3）。
+实现阶段一次只处理一个工作包；独立的测试工程师会重新运行它的单元测试，检查这个测试在没有该改动时会失败，并做关闭特性时的检查；一直通不过的工作包会被回滚，而门禁还没出结果的工作包会再调用一次测试工程师把它跑完，仍没有结果就停下交给人，不会回滚。验证失败交给排查者：它先做对照实验，再考虑加插桩，最后给出修复、证明该失败在基线上本就存在，或者给出无法定论的结论并停止任务。在 PR 之前，审阅者像维护者一样阅读 diff 和证据，并以一份已知 reward hack 目录为起点——也就是让数字变好、却违背了它本来含义的改动（[`knowledge/reward_hacks.md`](knowledge/reward_hacks.md)）；要求的修改，以及为每个确认的 hack 写的测试，都会变成工作包，重新经过 Implement 和 Verify。性能数据只有在 Setup 时固定的负载上、在任务所针对的服务路径上测得才算数，任务要求时（`held_out`），收益还必须在与负载一起固定下来的 held-out 工作点上同样成立（[`knowledge/perf_evaluation.md`](knowledge/perf_evaluation.md) §3）。
 
 kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者 kernel 级的性能机会——会在 Implement 和 Verify 之间的 Kernel 阶段交给 **kernel 工作流后端**（[`knowledge/kernel_backends.md`](knowledge/kernel_backends.md)）：
 
@@ -259,7 +259,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `handoffs.json`、`known_issues.json` | report 时的 kernel 交接记录和基线自带的失败；从 Verify 续跑时据此恢复 |
-| `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
+| `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 
 scan 的 `daily_report.md` 就是为分享而写的，`scripts/daily_report.py check` 已经确认它不含本机信息。`GITHUB_TOKEN` 能写这个仓库时（第 1 步），director 会把它作为标题为 `InferPilot daily report <date>` 的 issue 分享到 InferPilot 仓库（当天的已经在那里时除外），结果里会给出它的链接。没有这样的 token、而当天的日报还不在那里时，在 GitHub 上 InferPilot 仓库里新建一个 issue，用这个标题，把整个文件粘贴进去；或者设好 token 后运行 `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`。Dispatch 失败的 scan 什么都不分享：它留下的日报可能不完整。文件第一行是一个隐藏标记，下一次 scan 不管在哪个容器里，都能靠它在那里找到这份日报，并标出之后的变化。
@@ -325,7 +325,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
 | `workload` | 每次测量都使用的基准负载，例如 `{"isl":8192,"osl":1024,"conc":64}`；`perf` 必填，在 Setup 时固定 |
 | `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1）。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/server.sh`，按模型在 sglang cookbook 里的配方启动 |
-| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`perf` 必填，给了 `workload` 的 feature 也必填。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`；feature 用它测出的数只报告、不算 claim |
+| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`feature` 和 `perf` 必填：每个 feature 都要和 baseline 比性能（G5），声称了收益就验证这个收益，没有声称就验证没有变慢。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`，feature 选它时要给出这个 `workload`；feature 用它只判定有没有比 baseline 慢，不验证源 PR 的收益 |
 | `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
 | `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
@@ -345,7 +345,8 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
-| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任何模式下任务都要给出自己的 `server_script` 和 `client_script`，缺哪个就问哪个：G4 不会自行改用模板），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
+| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3，即任务自己的长上下文测试（`long_context_script`：在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任何模式下任务都要给出自己的 `server_script` 和 `client_script`，缺哪个就问哪个：G4 不会自行改用模板），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
+| `long_context_script` | 你自己的长上下文测试脚本，对 `PORT` 上的 server 跑测试，把每个请求的结果写到 `OUT_DIR`；G3 在 baseline 和改动上原样运行它，至少跑两个并发（`CONCURRENCY`）；打开 `long_context` 时必填，任务没给时会提问：InferPilot 没有对应的模板（[`templates/task_definition.md`](templates/task_definition.md) §1.1） |
 | `review_model` | reviewer 使用的模型，随它的 agent 调用一起传入（InferPilot 的 runner 把它作为命令行工具的 `--model` 传入；在 Claude Code 里取决于它的 Workflow 工具） |
 | `max_fix_rounds`、`max_investigate_rounds`、`max_review_rounds`、`max_work_packages` | 预算 |
 | `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer、investigator 和 issue 的复现为 6 小时；Verify 一轮或一次复现需要更长时间时，会说明需要多久并获得一次延长，最多到上限的 2 倍，除非给了 `agent_timeout_ms` |

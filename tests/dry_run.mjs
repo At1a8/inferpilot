@@ -116,8 +116,8 @@ const scenarios = [
   ['feature: unit gate fails once, feedback reaches the second round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => (n === 1
-        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'case 7 mismatches the reference' }
-        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent' }),
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'case 7 mismatches the reference' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const second = r.calls.filter((c) => c.key === 'implementer:implement')[1];
@@ -126,7 +126,7 @@ const scenarios = [
   ['implement: a unit test that passes without the change is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true,
-        fails_without_change: n === 1 ? 'no' : 'mutant', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
+        fails_without_change: n === 1 ? 'no' : 'mutant', incomplete: '', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const rounds = r.calls.filter((c) => c.key === 'implementer:implement');
@@ -134,7 +134,7 @@ const scenarios = [
       && rounds[1].ins.feedback.includes('never calls the new path'), `feedback: ${rounds[1] && rounds[1].ins.feedback}`);
   }],
   ['implement: only a docs package may have nothing to fail', async () => {
-    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a' });
+    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a', incomplete: '' });
     const docs = await run({ mode: 'feature', task: 't' }, {
       'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('D1', { kind: 'docs' })], gate_ok: true, perf_claim: '' }),
       'test_engineer:unit': asNa,
@@ -292,6 +292,63 @@ const scenarios = [
       counts: {}, leads: [lead] }) });
     check(!scan.keys.includes('issue_triager:spinoff'), 'a scan takes no leads');
   }],
+  ['next: knowledge changes the curator could not propose reach the user with the saved patch and why', async () => {
+    const updates = [{ file: 'knowledge/known_issues.md', change: 'KI-007 added' }];
+    const held = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/knowledge.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const say = (held.result.next.user || []).find((u) => u.includes('knowledge.patch'));
+    check(say && say.includes('GITHUB_TOKEN is not set')
+      && say.endsWith(`:\n    python3 scripts/propose_knowledge.py --run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch ${RUN}/knowledge.patch`),
+      `the saved patch is the user's to propose, with why the run did not, by a command on a line of its own that nothing follows: ${say}`);
+    check(held.result.knowledge_notes === 'GITHUB_TOKEN is not set' && held.result.knowledge_patch === `${RUN}/knowledge.patch`,
+      'the curator\'s notes and its patch are in the result');
+    const opened = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates,
+      pr_url: 'https://github.com/o/inferpilot/pull/7', patch_path: `${RUN}/knowledge.patch`, notes: '' }) });
+    check(opened.result.next.user.some((u) => u.endsWith('pull/7')) && !opened.result.next.user.some((u) => u.includes('--patch'))
+      && opened.result.knowledge_patch === '', 'a pull request that is open needs no patch proposed');
+    check(say.includes(`Unless exp_root is on a host mount, ${RUN} goes with the task's container: copy it out first, under the same name,`
+      + ' which the branch takes, and give the command\'s three paths as they are in the copy'),
+      `the user is told the run directory may not outlive the container, and what the command needs of a copy: ${say}`);
+    const odd = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/my runs/it's; echo x.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const quoted = (odd.result.next.user || []).find((u) => u.includes('--patch')) || '';
+    check(quoted.endsWith(`--run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch '${RUN}/my runs/it'\\''s; echo x.patch'`),
+      `a path with a space or a quote is one word of the command the user pastes, and the command's last: ${quoted}`);
+    const refused = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '', patch_path: '',
+      notes: 'exit 3: knowledge/known_issues.md line 12 names a local path' }) });
+    const left = (refused.result.next.user || []).find((u) => u.includes('no patch of them was saved')) || '';
+    check(left.includes('exit 3: knowledge/known_issues.md line 12 names a local path') && left.includes(`${INFERPILOT}/knowledge`)
+      && left.includes('goes with the task\'s container') && !refused.result.next.user.some((u) => u.includes('--patch')),
+      `changes neither proposed nor saved reach the user with the curator's reason and where they are: ${left}`);
+    const none = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates: [], pr_url: '', patch_path: '', notes: '' }) });
+    check(!(none.result.next.user || []).some((u) => u.includes('knowledge')), 'a curator that changed nothing leaves the user nothing to propose');
+    // No answer is not "changed nothing": the curator may have edited knowledge/ and saved a patch before it.
+    const where = [`${INFERPILOT}/knowledge`, `${RUN}/knowledge.patch`, `${RUN}/knowledge_pr.md`,
+      'the checkout and the run directory go with the task\'s container: copy what is there out'];
+    const silent = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => null });
+    const unknown = (silent.result.next.user || []).filter((u) => u.includes('knowledge'));
+    check(unknown.length === 1 && unknown[0].startsWith('the curator returned no answer, so what it changed under knowledge/ is not known: look at')
+      && where.every((w) => unknown[0].includes(w)) && !unknown[0].includes('stop it')
+      && silent.result.knowledge_notes === 'the curator returned no answer',
+      `a curator without an answer leaves the user what to look at and keep: ${unknown}`);
+    const late = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, { 'curator:learn': async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { updates, pr_url: '', patch_path: `${RUN}/knowledge.patch`, notes: '' };
+    } });
+    const running = (late.result.next.user || []).filter((u) => u.includes('knowledge'));
+    check(running.length === 1 && running[0].startsWith('the curator timed out, so what it changed under knowledge/ is not known: it may still be'
+      + ' editing or proposing, so stop it first. Then look at') && where.every((w) => running[0].includes(w))
+      && late.result.knowledge_notes === 'the curator timed out' && !late.result.knowledge_patch,
+      `a curator that timed out is stopped first, and its answer, which came late, is not used: ${running}`);
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'curator.md'), 'utf8'), 'learn').replace(/\s+/g, ' ');
+    check(doc.includes('return it as `patch_path`') && doc.includes('only where `RUN_DIR` does, with `exp_root` on a host mount'),
+      'the curator returns the patch, which outlives the container only on a host mount');
+    check(doc.includes('When neither exists') && doc.includes('`notes` says what it refused') && doc.includes('`--dry-run` writes none')
+      && doc.includes('`knowledge.patch.earlier`'), 'the curator says why nothing was saved, and what a refusal does to an earlier patch');
+    check(doc.includes('So does a file of the run named after it (`spinoff/KI-007.md`), in the change and in the description')
+      && doc.includes('The same when it can make no patch of the change and says why (exit 1): a file that is not UTF-8 text, a binary'
+        + ' file, a symbolic link'), 'the curator knows which names keep their number, and that a change no patch is made of is refused');
+  }],
   ['feature: investigation budget is bounded', async () => {
     const r = await run({ mode: 'feature', task: 't', max_investigate_rounds: 2 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
@@ -362,7 +419,7 @@ const scenarios = [
     check(big.keys.filter((k) => k === 'verify_engineer:verify').length === 1 && big.result.phases.some((p) => p.phase === 'Verify'
       && /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)), 'a round gets at most twice its limit');
   }],
-  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
+  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt, a unit gate\'s to the call that finishes it, with a limit of its own, told what the first left', async () => {
     // The first answer of each, 300 ms late, is one InferPilot cannot use.
     const once = (key) => async (ins, n) => {
       if (n > 1) return DEFAULTS[key](ins, n);
@@ -374,9 +431,13 @@ const scenarios = [
       Object.fromEntries(keys.map((k) => [k, once(k)])), { schemaRetries: 1 });
     for (const key of keys.slice(0, 2)) {
       const [first, again] = r.calls.filter((c) => c.key === key);
-      check(first && again && !first.prompt.includes('This is attempt') && again.prompt.includes('This is attempt 2: an earlier attempt '
-        + 'of this call failed and may have left work behind') && !again.prompt.includes('An earlier session of this same request'),
-        `${key}: not asked again by the engine but by the call's next attempt, which checks first what the one before left`);
+      // A unit gate is not asked again blind either: its answer goes to the call that finishes the gate.
+      const unit = key === 'test_engineer:unit';
+      check(first && again && !first.prompt.includes('This is attempt') && !again.prompt.includes('An earlier session of this same request')
+        && (unit ? !again.prompt.includes('This is attempt') && String(again.ins.incomplete || '').includes('returned no answer')
+          : again.prompt.includes('This is attempt 2: an earlier attempt of this call failed and may have left work behind')),
+        `${key}: not asked again by the engine but by ${unit ? 'the call that finishes the gate, told the first returned no answer'
+          : 'the call\'s next attempt, which checks first what the one before left'}`);
       check(first && again && again.ins.time_limit_min === 120
         && Date.parse(again.ins.deadline_utc) - Date.parse(first.ins.deadline_utc) >= 250,
         `${key}: with a limit of its own: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
@@ -398,8 +459,10 @@ const scenarios = [
       `a unit gate with no answer gets no further round and no rollback: ${impl}`);
     const usp = unit.calls.find((c) => c.key === 'issue_triager:spinoff');
     check(usp && usp.ins.confirm_leads === false && (usp.ins.confirm_skipped || []).includes('the unit gate of WP1 may have left runs going')
-      && (unit.result.next.user || []).some((u) => u.includes('returned no answer: commit c_WP1 stays in the worktree')),
+      && (unit.result.next.user || []).some((u) => u.includes('the unit gate of WP1 has no result')
+        && u.includes('returned no answer') && u.includes('commit c_WP1 stays in the worktree')),
       `no lead is checked on its GPUs, and a human is told to stop what it left: ${JSON.stringify(usp && usp.ins.confirm_skipped)}`);
+    check(unit.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'the gate went to the call that finishes it first, and no further');
     const ver = await run({ mode: 'feature', task: 't', confirm_leads: true },
       { 'implementer:implement': leading, 'verify_engineer:verify': () => ({}) });
     const vsp = ver.calls.find((c) => c.key === 'issue_triager:spinoff');
@@ -511,8 +574,9 @@ const scenarios = [
       'no limit, no deadline');
     const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
     check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
-      && unitDoc.includes('the gate fails, and `failure_summary` names the check, how far it got and its log'),
-      'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
+      && unitDoc.includes('A check still running at the reserve is not waited for, and not failed: it goes to `incomplete` (below) '
+        + 'and runs on, with the server it uses, for the call that finishes the gate'),
+      'the reserve fits a short limit, and a check still running when it starts is left to the call that finishes the gate, not waited for');
     check(unitDoc.includes('poll each server until it is up, each run that ends by itself (a suite, a driver) until it has its exit '
       + 'status (`<log>.exit`), and every check until it has its result')
       && unitDoc.includes('A run whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it wrote'),
@@ -569,8 +633,76 @@ const scenarios = [
       `the answer replaces the task's client: ${JSON.stringify(n.rerun_with)}`);
     const taken = await run({ mode: 'feature', task: 't', exp_root: path.dirname(RUN), client_script: fallback }, { 'director:spec': spec({}) });
     const perf = taken.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(taken.result.status === 'ready_for_review' && perf && !perf.ins.claim,
-      `InferPilot's own client, once taken, is measured and reported, never claimed: ${taken.result.status}, claim ${perf && perf.ins.claim}`);
+    check(taken.result.status === 'ready_for_review' && perf && /^no gain is claimed: no slower than the baseline/.test(perf.ins.claim),
+      `on InferPilot's own client, once taken, the source's gain is not the claim, and G5 judges that the feature is no slower: ${
+        taken.result.status}, claim ${perf && perf.ins.claim}`);
+    check(/G5 judges there only that the feature is no slower than the baseline/.test(n.say),
+      `the question says what InferPilot's client is judged on: ${n.say}`);
+  }],
+  ['feature: G5 judges every feature: the gain it claims, and where it claims none, that it is no slower than the baseline', async () => {
+    const noGain = (claim) => ({ 'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: claim }) });
+    const measured = (out) => ({ 'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: true, guards_ok: true,
+      workload_unchanged: true, path_ok: true, ...out }) });
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    for (const claim of ['', '  ']) {
+      const ok = await run({ mode: 'feature', task: 't' }, { ...noGain(claim), ...measured({}) });
+      const pe = ok.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      check(ok.result.status === 'ready_for_review' && pe && NO_SLOWER.test(pe.ins.claim),
+        `a feature that claims no gain (${JSON.stringify(claim)}) is measured, and what G5 judges is that it is no slower: ${
+          ok.result.status}, ${JSON.stringify(pe && pe.ins.claim)}`);
+      const rv = ok.calls.find((c) => c.key === 'reviewer:review');
+      check(rv && pe && rv.ins.claim === pe.ins.claim, `the reviewer reads the same claim: ${JSON.stringify(rv && rv.ins.claim)}`);
+    }
+    const slower = await run({ mode: 'feature', task: 't' },
+      { ...noGain(''), ...measured({ claim_reproduced: false, summary: '-4% output tok/s; the noise band is 1%' }) });
+    check(slower.result.status === 'blocked' && slower.result.stopped_at === 'Performance'
+      && !slower.keys.includes('implementer:rollback') && !slower.keys.includes('reviewer:review'),
+    `a feature that is slower than the baseline stops at Performance, for a human, and nothing is rolled back: ${
+      slower.result.status} at ${slower.result.stopped_at}`);
+    check(slower.result.phases.some((p) => p.phase === 'Performance' && p.verdict === 'fail' && p.summary.includes('-4% output tok/s')),
+      'the result says by how much');
+    const heldOut = await run({ mode: 'feature', task: 't', held_out: true }, { ...noGain(''), ...measured({ held_out_ok: false }) });
+    check(heldOut.result.status === 'blocked' && heldOut.result.stopped_at === 'Performance'
+      && heldOut.result.phases.some((p) => p.phase === 'Performance' && p.summary.includes('the claim does not hold at the held-out operating point')),
+    `with held_out on, no slowdown holds at the held-out point too: ${heldOut.result.status}`);
+    const gain = await run({ mode: 'feature', task: 't' });
+    const gp = gain.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(gain.result.status === 'ready_for_review' && gp && gp.ins.claim === '+20% output tok/s at equal HBM',
+      `a claimed gain stays the claim: ${JSON.stringify(gp && gp.ins.claim)}`);
+    // A cost the user stated is no number of the source's: it stays the claim on InferPilot's client, where a gain never is.
+    const BOUND = 'at most 5% below the baseline output tok/s (goal)';
+    const stated = (cost) => ({ 'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true,
+      perf_claim: BOUND, ...(cost == null ? {} : { perf_cost: cost }) }) });
+    const ours = { mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000,"osl":1000,"conc":32}' };
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const claimed = async (args, answers) => ((await run(args, { ...rendered, ...measured({}), ...answers })).calls
+      .find((c) => c.key === 'perf_engineer:perf_eval') || { ins: {} }).ins.claim;
+    check(await claimed(ours, stated(true)) === BOUND, 'a cost the user stated stays the claim on InferPilot\'s client');
+    check(NO_SLOWER.test(await claimed(ours, stated(false))) && NO_SLOWER.test(await claimed(ours, stated(null))),
+      'a claim that is not marked as one is a gain, never claimed there');
+    check(await claimed({ mode: 'feature', task: 't' }, stated(true)) === BOUND, 'and on the task\'s own client, as any claim is');
+    const approvedCost = { 'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1')], gate_ok: true,
+      perf_claim: BOUND, perf_cost: true }) };
+    check(await claimed({ ...ours, resume_from: 'implement', run_dir: RUN }, approvedCost) === BOUND,
+      'a resumed run keeps it, from the approved design');
+    // A design a human approved carries its claim: a resumed run judges an empty one the same way.
+    const resumed = await run({ mode: 'feature', task: 't', resume_from: 'implement', run_dir: RUN }, {
+      'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1')], gate_ok: true, perf_claim: '' }),
+      ...measured({ claim_reproduced: false }),
+    });
+    const rp = resumed.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(resumed.result.status === 'blocked' && resumed.result.stopped_at === 'Performance' && rp && NO_SLOWER.test(rp.ins.claim),
+      `a resumed run whose design claims no gain is judged the same way: ${resumed.result.status}, ${JSON.stringify(rp && rp.ins.claim)}`);
+    // After a review's change Performance runs again, on the same claim.
+    const again = await run({ mode: 'feature', task: 't' }, {
+      ...noGain(''), ...measured({}),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', issue: 'x' }], work_packages: [WP('R1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+    });
+    const evals = again.calls.filter((c) => c.key === 'perf_engineer:perf_eval');
+    check(again.result.status === 'ready_for_review' && evals.length === 2 && evals.every((c) => NO_SLOWER.test(c.ins.claim)),
+      `a review's change is measured again on the same claim: ${again.result.status}, ${evals.length} measurement(s)`);
   }],
   ['feature: with auto_approve_design false, L3 waits for a human-approved design', async () => {
     const r = await run({ mode: 'feature', task: 't', auto_approve_design: false }, {
@@ -858,7 +990,7 @@ const scenarios = [
       const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
         [role]: slow(role === 'implementer:implement'
           ? (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py' })
-          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent' })),
+          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' })),
       });
       check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `${role}: status ${r.result.status}`);
       check(r.keys.filter((k) => k === 'implementer:implement').length === 1, `${role}: the work package gets no second round`);
@@ -1126,12 +1258,284 @@ const scenarios = [
   }],
   ['feature: a work package that never passes is rolled back', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'still wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'still wrong' }),
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
     check(r.keys.filter((k) => k === 'implementer:implement').length === 2, 'max_fix_rounds + 1 attempts');
     check(r.keys.includes('implementer:rollback'), 'rollback called');
     check(!r.keys.includes('verify_engineer:verify'), 'no verification of a failed package');
+  }],
+  ['implement: a unit gate with checks still running is finished by one more call, which spends no fix round', async () => {
+    const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'runs 1-5 pass' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const units = r.calls.filter((c) => c.key === 'test_engineer:unit');
+    check(units.length === 3, `WP1 twice, WP2 once: ${units.length}`);
+    check(units[1] && units[1].ins.commit === 'c_WP1' && String(units[1].ins.incomplete).includes('pid 4242')
+      && units[1].ins.earlier_evidence === 'runs 1-3 pass', 'the second call finishes the same commit, told what is left');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 2 && !r.keys.includes('implementer:rollback'),
+      'no fix round and no rollback for a gate without a result');
+  }],
+  ['implement: a unit gate still without a result stops the package for a human: not rolled back, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'DCP1 never started: the GPUs were taken' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
+    check(r.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'one call to finish it, no more');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 1, 'no fix round');
+    check(!r.keys.includes('implementer:rollback'), 'nothing measured went against the change: no rollback');
+    const imp = r.result.phases.find((p) => p.phase === 'Implement');
+    check(imp && imp.verdict === 'incomplete' && imp.summary.includes('DCP1 never started'), `the stop says why: ${imp && imp.summary}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('unverified')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+    const nothing = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'run 3 still going' } : null),
+    });
+    check(nothing.result.stopped_at === 'Implement' && !nothing.keys.includes('implementer:rollback')
+      && nothing.result.attention.some((a) => a.wp === 'WP1'), 'a finishing call that returns nothing leaves the gate without a result too');
+    const failed = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: '', failure_summary: 'run 2 diverged' }),
+    });
+    check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
+      'a check that failed is a failure: rolled back as before');
+  }],
+  ['implement: a unit call with no answer at all is finished by one more call, not a fix round or a rollback', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_retries: 1, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? null
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const fin = r.calls.filter((c) => c.key === 'test_engineer:unit')[1];
+    check(fin && fin.ins.commit === 'c_WP1' && String(fin.ins.incomplete).includes('returned no answer'),
+      `the second call finishes the same commit, told the first gave no answer: ${fin && fin.ins.incomplete}`);
+    check(!r.keys.includes('implementer:rollback') && r.keys.filter((k) => k === 'implementer:implement').length === 2, 'no fix round, no rollback');
+    const none = await run({ mode: 'feature', task: 't', agent_retries: 1 }, { 'test_engineer:unit': () => null });
+    check(none.result.stopped_at === 'Implement' && !none.keys.includes('implementer:rollback'), `no answer twice: held, not rolled back: ${none.result.status}`);
+    const imp = none.result.phases.find((p) => p.phase === 'Implement' && p.verdict === 'incomplete');
+    check(imp && imp.summary.includes('the call to finish it returned no answer'), `the stop names the missing finishing answer: ${imp && imp.summary}`);
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    const leads = await run({ mode: 'feature', task: 't', agent_retries: 1, confirm_leads: true }, {
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+      'test_engineer:unit': () => null,
+    });
+    const sp = leads.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(sp && sp.ins.confirm_leads === false && (sp.ins.confirm_skipped || []).some((x) => x.includes('unit gate of WP1')),
+      `no lead runs on GPUs a gate without a result may still use: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+  }],
+  ['implement: a unit answer is never asked for again blind, and one with checks not run says so with null', async () => {
+    const finishing = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit')[1] || { ins: {} };
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent',
+      incomplete: '', evidence: 'ok' });
+    const unusable = await run({ mode: 'feature', task: 't', agent_retries: 2, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false } : good(ins)),
+    }, { schemaRetries: 1 });
+    check(String(finishing(unusable).ins.incomplete).includes('returned no answer') && unusable.result.status === 'ready_for_review',
+      `an unusable answer goes to the call that finishes the gate, not to the same prompt again: ${finishing(unusable).ins.incomplete}`);
+    const thrown = await run({ mode: 'feature', task: 't', agent_retries: 2, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => {
+        if (n === 1) throw new Error('the backend died');
+        return good(ins);
+      },
+    });
+    check(String(finishing(thrown).ins.incomplete).includes('returned no answer'), 'nor is a unit call that failed retried blind');
+    const silent = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', failure_summary: 'the driver still runs' } : good(ins)),
+    });
+    check((CONTRACTS.get('test_engineer:unit') || []).includes('incomplete') && !silent.keys.includes('implementer:rollback')
+      && silent.keys.filter((k) => k === 'implementer:implement').length === 2,
+      'an answer without incomplete is not a failed gate: no fix round and no rollback');
+    const unrun = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: null,
+        fails_without_change: null, incomplete: 'feature off and T1 not started: driver pid 4242 writes logs/unit_WP1.log' } : good(ins)),
+    });
+    check(String(finishing(unrun).ins.incomplete).includes('pid 4242') && unrun.result.status === 'ready_for_review',
+      `checks not run are null, and the gate reaches its finishing call as it was: ${finishing(unrun).ins.incomplete}`);
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(doc.includes('stop the runs this gate started with `stop_launch.py`, as above'), 'a failed gate stops its runs before it returns');
+    const hygiene = readFileSync(path.join(INFERPILOT, 'knowledge', 'env_hygiene.md'), 'utf8').replace(/\s+/g, ' ');
+    check(doc.includes('The one exception is what a check you return in `incomplete` still needs, which the call that finishes the gate takes over')
+      && doc.includes('This call leaves nothing running: before it returns it stops what the call before left, by the `<log>`s that call gave')
+      && hygiene.includes('A role returns before that only when its answer says what still runs and where it writes, for the call that takes it '
+        + 'over and stops it (`incomplete`, `roles/test_engineer.md`)'),
+      'what a gate without a result leaves running is the finishing call\'s to stop, and nothing else outlives the call that started it');
+    check(doc.includes('Steps 1 to 4 run only the checks that never started'), 'the finishing call runs only what is missing');
+  }],
+  ['implement: a check given as null with nothing in incomplete is a gate without a result, not a failed one', async () => {
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' });
+    const open = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: null, fails_without_change: null, incomplete: '' });
+    const units = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit');
+    const implements_ = (r) => r.keys.filter((k) => k === 'implementer:implement').length;
+    const finished = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins, n) => (n === 1 ? open(ins) : good(ins)) });
+    check(finished.result.status === 'ready_for_review' && implements_(finished) === 2 && !finished.keys.includes('implementer:rollback'),
+      `finished by one more call, no fix round and no rollback: ${finished.result.status}`);
+    check(units(finished).length === 3 && units(finished)[1].ins.commit === 'c_WP1'
+      && /the feature-off check and the check that the test can fail did not run/.test(units(finished)[1].ins.incomplete),
+      `the finishing call is told which checks: ${units(finished)[1] && units(finished)[1].ins.incomplete}`);
+    const one = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { ...good(ins), fails_without_change: null } : good(ins)) });
+    check(units(one)[1] && /^the check that the test can fail did not run/.test(units(one)[1].ins.incomplete),
+      `only the check that is null is named: ${units(one)[1] && units(one)[1].ins.incomplete}`);
+    const never = await run({ mode: 'feature', task: 't' }, { 'test_engineer:unit': open });
+    check(never.result.status === 'blocked' && never.result.stopped_at === 'Implement' && units(never).length === 2
+      && implements_(never) === 1 && !never.keys.includes('implementer:rollback'),
+      `still null after the finishing call: the package stops, its commit kept: ${never.result.status} at ${never.result.stopped_at}`);
+    check(never.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('the feature-off check')),
+      `attention: ${JSON.stringify(never.result.attention)}`);
+    for (const [why, bad] of [['the unit test failed', { unit_pass: false }], ['the feature-off run changed', { feature_off_unchanged: false }],
+      ['the test cannot fail', { fails_without_change: 'no' }]]) {
+      const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins) => ({ ...open(ins), ...bad }) });
+      check(r.keys.includes('implementer:rollback') && units(r).length === 1,
+        `${why}, whatever else did not run: a failure as before, rolled back with no finishing call`);
+    }
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(doc.includes('Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed gate names '
+      + 'nothing there, and a check it did not run stays `null`')
+      && doc.includes('A gate with checks still without a result, none of those that ran having failed, returns `unit_pass` false'),
+      'what the answer holds says the same as step 0: a failed gate leaves incomplete empty');
+  }],
+  ['kernel: a held integration whose implementer timed out has a commit not reported, which the report does not take for none', async () => {
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100, ...CMD }, {
+      'implementer:implement': async (ins) => {
+        if (ins.work_package.id === 'K-K-WP1') await new Promise((resolve) => setTimeout(resolve, 400));
+        return implement(ins);
+      },
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === '',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+    const director = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
+    check(director.includes('An empty `commit` is one not reported, not one not made: the implementer\'s call timed out, and may have '
+      + 'committed or still be running, so say that the branch is to be inspected once that call has stopped')
+      && !director.includes('empty when the implementer made none'),
+      'the director is told what an empty commit means');
+  }],
+  ['implement: a call finishing a unit gate that times out leaves the human its commit and what was still going', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
+      'test_engineer:unit': async (ins, n) => {
+        if (n > 1) await new Promise((resolve) => setTimeout(resolve, 400));
+        return { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5: driver pid 4242 writes logs/unit_WP1_driver.log' };
+      },
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement' && !r.keys.includes('implementer:rollback'),
+      `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('pid 4242')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+  }],
+  ['spinoff: no lead runs on GPUs a Verify round that stopped for time may still use', async () => {
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    for (const [why, args] of [['a limit the user gave', { agent_timeout_ms: 7200000 }], ['the limit it asked for', {}]]) {
+      const r = await run({ mode: 'feature', task: 't', confirm_leads: true, ...args }, {
+        'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`,
+          unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+        'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
+      });
+      const sp = r.calls.find((c) => c.key === 'issue_triager:spinoff');
+      check(r.result.stopped_at === 'Verify' && sp && sp.ins.confirm_leads === false
+        && (sp.ins.confirm_skipped || []).some((x) => x.includes('Verify round 0 stopped for time')),
+        `${why}: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+    }
+  }],
+  ['kernel: an integration whose unit gate has no result stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-K-WP1', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
+  ['kernel: the hand-offs after one whose integration is held are recorded, not left without a status', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O2', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O2' ? 'the kernel suite still runs' : '' }) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integration_held' && byId.O4 === 'recorded', `statuses ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 1, 'the back end is not run on a hand-off after the held one');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase says so: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: a hand-off an integration raised is recorded too when one is held, not only those the stage began with', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+        kernel_handoff: { op_spec_path: `${RUN}/handoffs/K-${ins.work_package.id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O4', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O4' ? 'the kernel suite still runs' : '' }) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integrated' && byId.O4 === 'integration_held', `statuses ${JSON.stringify(byId)}`);
+    check(byId['K-K-O2'] === 'recorded' && byId['K-K-O4'] === 'recorded',
+      `the one an earlier integration raised and the held one's own: ${JSON.stringify(byId)}`);
+    check(r.result.handoffs.every((h) => h.status), `none is left without a status: ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 2, 'the back end is not run on them');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /K-K-O2, K-K-O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase names them: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: an integration without a unit result stops the run also from a Verify fix, a review change or a kernel retry', async () => {
+    const heldFor = (id) => (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== id, feature_off_unchanged: true,
+      fails_without_change: 'parent', incomplete: ins.work_package.id === id ? 'the kernel suite still runs' : '' });
+    const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+      kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
+    const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
+    const fix = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(fix.result.status === 'blocked' && verifies(fix) === 1 && !fix.keys.includes('implementer:rollback')
+      && fix.result.handoffs[0].status === 'integration_held', `a Verify fix's kernel: Verify ran ${verifies(fix)} time(s), ${JSON.stringify(fix.result.handoffs)}`);
+    check(fix.result.stopped_at === 'Kernel' && fix.result.next.say.includes(' at Kernel'),
+      `a Verify fix's kernel stops the run at Kernel: ${fix.result.stopped_at}; ${fix.result.next.say}`);
+    const review = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('RV1'),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }], work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+      'test_engineer:unit': heldFor('K-K-RV1'),
+    });
+    check(review.result.status === 'blocked' && review.result.stopped_at === 'Kernel' && verifies(review) === 1,
+      `a review change's kernel: ${review.result.status} at ${review.result.stopped_at}, Verify ran ${verifies(review)} time(s)`);
+    const afterReview = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'reviewer:review': () => ({ verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }],
+        work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: true, failures: [] } : { all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(afterReview.result.status === 'blocked' && afterReview.result.stopped_at === 'Kernel' && verifies(afterReview) === 2,
+      `the kernel of a Verify fix after a review change: ${afterReview.result.status} at ${afterReview.result.stopped_at}, Verify ran ${verifies(afterReview)} time(s)`);
+    let kernelGates = 0;
+    let kernelCommits = 0;
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const retry = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': (ins) => ({ ...implement(ins),
+        ...(ins.work_package.id === 'K-K-WP1' && ++kernelCommits > 1 ? { commit: 'c_K-K-WP1_retry' } : {}) }),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle' }),
+      'test_engineer:unit': (ins) => heldFor(ins.work_package.id === 'K-K-WP1' && ++kernelGates > 1 ? 'K-K-WP1' : '')(ins),
+    });
+    check(retry.result.status === 'blocked' && verifies(retry) === 1 && retry.result.handoffs[0].status === 'integration_held'
+      && retry.keys.filter((k) => k === 'implementer:rollback').length === 1,
+      `a kernel handed back: Verify ran ${verifies(retry)} time(s), ${JSON.stringify(retry.result.handoffs[0])}`);
+    check(retry.result.handoffs[0].commit === 'c_K-K-WP1_retry',
+      `the held hand-off names the commit left on the branch, not the reverted one: ${retry.result.handoffs[0].commit}`);
+    check(retry.result.stopped_at === 'Kernel', `a kernel handed back stops the run at Kernel: ${retry.result.stopped_at}`);
   }],
   ['feature: baseline that does not reproduce blocks at Setup', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
@@ -1221,7 +1625,7 @@ const scenarios = [
   }],
   ['rollback: an unclean rollback goes on the attention list of the report', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
       'implementer:rollback': () => ({ wp: 'WP1', reset_to: 'base', clean: false }),
     });
     check(r.result.status === 'blocked' && r.result.attention.length === 1 && r.result.attention[0].wp === 'WP1',
@@ -1229,7 +1633,7 @@ const scenarios = [
     const rep = r.calls.find((c) => c.key === 'director:report');
     check(rep && Array.isArray(rep.ins.attention) && rep.ins.attention.length === 1, 'the report sees what a human must clean up');
     const clean = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
     });
     check(clean.result.attention.length === 0, 'a clean rollback needs no attention');
   }],
@@ -1615,7 +2019,7 @@ const scenarios = [
       'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: false, guards_ok: true, workload_unchanged: true, path_ok: true }),
     });
     check(noClaim.result.status === 'ready_for_review' && noClaim.keys.includes('perf_engineer:perf_eval'),
-      `no claim, only guards: ${noClaim.result.status}`);
+      `no claimed gain, held_out off: no slowdown reproduced is enough: ${noClaim.result.status}`);
   }],
   ['perf: held_out, guards, sweep and tune are off by default, and every role sees them', async () => {
     const vanish = {
@@ -1641,11 +2045,14 @@ const scenarios = [
     check(off.length >= 3 && off.every((c) => c.ins.long_context === false && c.ins.stability === false),
       `off for every role: ${JSON.stringify(off.map((c) => [c.key, c.ins.long_context, c.ins.stability]))}`);
     check(!('long_context' in plain.result.task_def) && !('stability' in plain.result.task_def), 'and not in the definition the run records');
-    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh' });
+    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh',
+      long_context_script: '/s/niah.sh' });
     const sp = asked.calls.find((c) => c.key === 'director:spec');
     const ve = asked.calls.find((c) => c.key === 'verify_engineer:verify');
     check(sp && sp.ins.long_context === true && sp.ins.stability === true, 'on for the spec when the task sets them');
     check(ve && ve.ins.long_context === true && ve.ins.stability === true, 'on for the verify engineer, which runs G3 and G4 only then');
+    check(sp && sp.ins.long_context_script === '/s/niah.sh' && ve && ve.ins.long_context_script === '/s/niah.sh',
+      `and both read the script G3 runs: ${JSON.stringify(ve && ve.ins.long_context_script)}`);
     const one = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' });
     const ov = one.calls.find((c) => c.key === 'verify_engineer:verify');
     check(ov && ov.ins.stability === true && ov.ins.long_context === false, 'each on its own');
@@ -1878,23 +2285,32 @@ const scenarios = [
     check(asks(await run({ mode: 'feature', task: 't', model_path: '' }), 'model_path'), 'feature without a model asked');
     check(asks(await run({ mode: 'feature', task: 't', server_script: '' }), 'server_script'), 'feature without a server script asked');
     check(asks(await run({ mode: 'perf', task: 'p', client_script: '' }), 'client_script'), 'perf without a client script asked');
-    check(asks(await run({ mode: 'feature', task: 't', workload: '{"isl":8000}' }), 'client_script'), 'a feature with a workload but no client script asked');
+    check(asks(await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: '' }), 'client_script'),
+      'a feature with a workload but no client script asked');
+    check(asks(await run({ mode: 'feature', task: 't', client_script: '' }), 'client_script'),
+      'and a feature without a workload: G5 measures every feature, so each names the client that measures');
     const plain = await run({ mode: 'feature', task: 't' });
-    check(!asks(plain, 'client_script'), 'a feature without a workload needs no client script');
     const setupIns = plain.calls.find((c) => c.key === 'director:setup');
-    check(setupIns && setupIns.ins.server_script === '/s/server.sh', 'the server script reaches the roles');
+    check(setupIns && setupIns.ins.server_script === '/s/server.sh' && setupIns.ins.client_script === '/s/client.sh',
+      'the server and the client scripts reach the roles');
   }],
-  ['feature: InferPilot\'s templates run only where the user took them, and its client\'s numbers are reported, never claimed', async () => {
+  ['feature: InferPilot\'s templates run only where the user took them, and its client never stands for the source\'s gain', async () => {
     const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
     const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
     check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
-      && eqList(question(none, 'client_script').options, ['template']) && /never a claim/.test(question(none, 'client_script').question),
-      `the questions offer the templates, the client's as reported only: ${JSON.stringify(none.result.questions)}`);
+      && eqList(question(none, 'client_script').options, ['template'])
+      && /never stands for the gain of the feature's source: on it G5 judges only that the feature is no slower/.test(question(none, 'client_script').question),
+      `the questions offer the templates, the client's as no claim of the source's gain: ${JSON.stringify(none.result.questions)}`);
+    // InferPilot's client runs the task's workload: without one G5 would judge the feature on lengths nobody chose.
+    const bare = await run({ mode: 'feature', task: 't', client_script: 'template' });
+    check(asks(bare, 'workload') && eqList((bare.result.questions || []).map((q) => q.field), ['workload']),
+      `a feature that takes InferPilot's client without a workload is asked for the workload: ${JSON.stringify((bare.result.questions || []).map((q) => q.field))}`);
     const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
       worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
-    const took = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: 'template', client_script: 'template',
+    const whole = '{"isl":8000,"osl":1000,"conc":32}';
+    const took = await run({ mode: 'feature', task: 't', workload: whole, server_script: 'template', client_script: 'template',
       harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
     const setupIns = took.calls.find((c) => c.key === 'director:setup');
     check(setupIns && setupIns.ins.server_script === 'template' && setupIns.ins.client_script === 'template'
@@ -1902,19 +2318,40 @@ const scenarios = [
       `Setup renders what the user took, with the task's values: ${JSON.stringify(setupIns && setupIns.ins.harness)}`);
     const perf = took.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(took.result.status === 'ready_for_review' && perf && perf.ins.server_script === rendered.server_script
-      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script && !perf.ins.claim,
-      `the rendered scripts reach the performance engineer, and InferPilot's client claims nothing: ${took.result.status}, claim ${perf && perf.ins.claim}`);
+      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script
+      && /^no gain is claimed: no slower than the baseline/.test(perf.ins.claim),
+      `the rendered scripts reach the performance engineer, and on InferPilot's client G5 judges no slowdown, not the spec's gain: ${
+        took.result.status}, claim ${perf && perf.ins.claim}`);
     const own = await run({ mode: 'feature', task: 't', accuracy_script: '/s/accuracy.sh' }, setup(rendered));
     const ownIns = own.calls.find((c) => c.key === 'verify_engineer:verify');
-    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.accuracy_script === '/s/accuracy.sh',
-      'the task\'s own scripts win over rendered ones');
+    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.client_script === '/s/client.sh'
+      && ownIns.ins.accuracy_script === '/s/accuracy.sh', 'the task\'s own scripts win over rendered ones');
     const unrendered = await run({ mode: 'feature', task: 't', server_script: 'template' }, setup({}));
     check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
       && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
     const noAccuracy = await run({ mode: 'feature', task: 't' }, setup({}));
     check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
       && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)), `no accuracy script stops the run at Setup: ${noAccuracy.result.status}`);
-    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, {
+    // The whole of the load is the task's: what a workload leaves out is asked for, and what harness gives counts.
+    const part = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}' });
+    const pq = (part.result.questions || []).find((q) => q.field === 'workload') || {};
+    check(asks(part, 'workload') && /gives no output length and no concurrency for it/.test(pq.why || ''),
+      `a workload that gives only its input length is asked for again, and the question says what it lacks: ${JSON.stringify(pq.why)}`);
+    const again = (part.result.next || {}).rerun_with || {};
+    check(again.workload === '' && 'workload' in (again.answers || {}),
+      `the answer takes the place of the part the task gave, which would otherwise win over it: ${JSON.stringify(again)}`);
+    const answered = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}', ...again,
+      answers: { workload: whole } }, setup(rendered));
+    check(answered.result.status !== 'needs_input' && answered.result.task_def.workload === whole,
+      `and with the answer the run starts on it: ${answered.result.status}, ${JSON.stringify(answered.result.task_def.workload)}`);
+    const byHarness = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '{"isl":8000}',
+      harness: { OSL: 256, CONCURRENCY: 1 } }, setup(rendered));
+    check(byHarness.result.status !== 'needs_input', `a length and a concurrency the task gives in harness count: ${byHarness.result.status}`);
+    const words = await run({ mode: 'feature', task: 't', client_script: 'template', workload: '8k in, 1k out, c64' }, setup(rendered));
+    check(words.result.status !== 'needs_input', `a workload in words is the director's to turn into the three: ${words.result.status}`);
+    const ownClient = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}' });
+    check(ownClient.result.status !== 'needs_input', `the task's own client runs what it runs, whatever the workload names: ${ownClient.result.status}`);
+    const gap = await run({ mode: 'feature', task: 't', workload: whole, client_script: 'template' }, {
       ...setup(rendered),
       'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
         workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in." }),
@@ -1927,7 +2364,7 @@ const scenarios = [
     const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
     check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
       && eqList(question(none, 'client_script').options, ['template'])
-      && !/never a claim/.test(question(none, 'client_script').question),
+      && !/never stands for/.test(question(none, 'client_script').question),
       `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
     const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
@@ -1938,6 +2375,14 @@ const scenarios = [
     check(r.result.status === 'ready_for_review' && perf && perf.ins.server_script === `${RUN}/scripts/server.sh`
       && perf.ins.client_script === `${RUN}/scripts/perf.sh` && perf.ins.claim,
       `on InferPilot's server and client, the planned gain is the claim: ${r.result.status}, ${JSON.stringify(perf && perf.ins.claim)}`);
+    // InferPilot's client runs the whole of the task's workload: what it leaves out is asked for, never the template's own.
+    const part = await run({ mode: 'perf', task: 'p', client_script: 'template', workload: '{"isl":8000,"osl":1000}' });
+    const pq = (part.result.questions || []).find((q) => q.field === 'workload') || {};
+    check(asks(part, 'workload') && eqList((part.result.questions || []).map((q) => q.field), ['workload'])
+      && /gives no concurrency for it/.test(pq.why || ''),
+    `a perf task that takes InferPilot's client with a part of its workload is asked for the rest: ${JSON.stringify(pq.why)}`);
+    const own = await run({ mode: 'perf', task: 'p', workload: '{"isl":8000,"osl":1000}' });
+    check(own.result.status !== 'needs_input', `with its own client the workload is as the task gives it: ${own.result.status}`);
   }],
   ['perf: a profile of the wrong path stops before any plan', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
@@ -2056,9 +2501,10 @@ const scenarios = [
     check(offers(none).length === 0, `neither question offers a template: ${JSON.stringify(offers(none).map((q) => q.field))}`);
     const ci = await run({ mode: 'ci', task: 'c', stability: 'true', client_script: '/s/client.sh' });
     check(asks(ci, 'server_script') && eqList(fields(ci), ['server_script']), `a ci task is asked for the one it lacks: ${fields(ci)}`);
-    const feature = await run({ mode: 'feature', task: 't', stability: true });
-    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 0,
-      `a feature without a workload, whose server the mode asked for, is asked for its client, with no template: ${fields(feature)}`);
+    // A feature is asked for both scripts by its mode, stability on or off (G5 measures every feature): G4 adds no question.
+    const feature = await run({ mode: 'feature', task: 't', stability: true, client_script: '' });
+    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 1,
+      `a feature is asked for its client once, by its mode, as with stability off: ${fields(feature)}`);
     const noServer = await run({ mode: 'feature', task: 't', stability: true, server_script: '', client_script: '/s/client.sh' });
     check(fields(noServer).filter((f) => f === 'server_script').length === 1, `the server is asked once where the mode asks too: ${fields(noServer)}`);
     const off = await run({ mode: 'issue', task: 't', stability: false });
@@ -2067,7 +2513,11 @@ const scenarios = [
     const tpl = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template' });
     check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
     const tplFeature = await run({ mode: 'feature', task: 't', stability: true, client_script: 'Template' });
-    check(asks(tplFeature, 'workload'), 'the same for a feature');
+    check(asks(tplFeature, 'workload') && eqList(fields(tplFeature), ['workload']), `the same for a feature, asked once: ${fields(tplFeature)}`);
+    const tplPart = await run({ mode: 'ci', task: 'c', stability: true, server_script: '/s/server.sh', client_script: 'template',
+      workload: '{"conc":64}' });
+    check(asks(tplPart, 'workload') && eqList(fields(tplPart), ['workload']),
+      `and a workload that names only a part of the load is asked for again: ${fields(tplPart)}`);
     const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
     const load = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template',
       workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);
@@ -2077,6 +2527,55 @@ const scenarios = [
       `with its workload the run starts, on the task's server and the rendered client: ${load.result.status} ${ve && ve.ins.client_script}`);
     const plain = await run({ mode: 'issue', task: 't', client_script: 'template' }, rendered);
     check(plain.result.status !== 'needs_input', `without stability nothing more is asked of a task that names the template: ${plain.result.status}`);
+  }],
+  ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    for (const mode of ['feature', 'issue', 'ci', 'perf']) {
+      const none = await run({ mode, task: 't', long_context: true });
+      const q = (none.result.questions || []).find((x) => x.field === 'long_context_script') || {};
+      check(asks(none, 'long_context_script') && eqList(fields(none), ['long_context_script']),
+        `${mode}: with long_context on and no test of its own, the task is asked for it, and for nothing else: ${fields(none)}`);
+      check(!(q.options || []).length && /InferPilot has no template for it/.test(q.question || ''),
+        `${mode}: the question offers nothing in its place: ${JSON.stringify(q)}`);
+    }
+    const tpl = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template' });
+    check(asks(tpl, 'long_context_script'), `"template" is no answer, since InferPilot has none: ${fields(tpl)}`);
+    // The answer takes the place of the value the task gave, which would otherwise win over it and be asked about again.
+    const again = (tpl.result.next || {}).rerun_with || {};
+    check(again.long_context_script === '' && 'long_context_script' in (again.answers || {}),
+      `the value the run could not use is cleared for the next run: ${JSON.stringify(again)}`);
+    const answered = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template', ...again,
+      answers: { long_context_script: '/s/niah.sh' } });
+    const av = answered.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(answered.result.status !== 'needs_input' && av && av.ins.long_context_script === '/s/niah.sh',
+      `and with the answer the run starts on the script the user named: ${answered.result.status}, ${av && av.ins.long_context_script}`);
+    const blank = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: '   ' });
+    check(asks(blank, 'long_context_script'), `a path of blanks names no script: ${fields(blank)}`);
+    const padded = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: ' /s/niah.sh ' });
+    const pv = padded.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(pv && pv.ins.long_context_script === '/s/niah.sh', `the roles read the path without the blanks around it: ${JSON.stringify(pv && pv.ins.long_context_script)}`);
+    const off = await run({ mode: 'feature', task: 't', long_context: false });
+    check(off.result.status !== 'needs_input', `with long_context off a task names no test: ${off.result.status}`);
+    const unused = await run({ mode: 'feature', task: 't', long_context_script: '/s/niah.sh' });
+    const uv = unused.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(unused.result.status !== 'needs_input' && uv && uv.ins.long_context === false,
+      `a test the task names does not turn the gate on: ${unused.result.status}, long_context ${uv && uv.ins.long_context}`);
+    const ready = await run({ mode: 'issue', task: 't', long_context: true, long_context_script: '/s/niah.sh' });
+    const ve = ready.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ready.result.status !== 'needs_input' && ve && ve.ins.long_context === true && ve.ins.long_context_script === '/s/niah.sh',
+      `with its test the run starts, and the verify engineer reads which one G3 runs: ${ready.result.status}, ${ve && ve.ins.long_context_script}`);
+    check(ready.result.task_def.long_context_script === '/s/niah.sh', 'the definition the run records names it');
+    // From a request in plain words the intake sets the gate and the script; the same check then applies.
+    const said = await run({ request: 'port this PR and run the long-context test with /s/niah.sh', mode: 'feature', task: 't' }, {
+      'intake:define': () => ({ status: 'ready', questions: [],
+        task_def: { mode: 'feature', task: 't', long_context: true, long_context_script: '/s/niah.sh' } }),
+    });
+    const sv = said.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sv && sv.ins.long_context === true && sv.ins.long_context_script === '/s/niah.sh', 'the intake turns the request into both fields');
+    const half = await run({ request: 'port this PR and run the long-context gate', mode: 'feature', task: 't' }, {
+      'intake:define': () => ({ status: 'ready', questions: [], task_def: { mode: 'feature', task: 't', long_context: true } }),
+    });
+    check(asks(half, 'long_context_script'), `a definition the intake calls ready, with the gate on and no test, is still asked: ${fields(half)}`);
   }],
   ['intake: a complete definition starts without it', async () => {
     const r = await run({ mode: 'issue', task: 'i' });

@@ -7,7 +7,9 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -615,12 +617,48 @@ class EvalAccuracyTest(unittest.TestCase):
             echo "$*" >> "$CALLS"
             printf '%s\\n' "$@" > "$CALLS.argv"
             [ -n "${FAKE_NO_REPORT:-}" ] && exit 1
+            jm=""
             while [ $# -gt 0 ]; do
-              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; esac
+              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; --judge-model-args) jm=$2; shift ;; esac
               shift
             done
             echo "work dir $wd"
-            mkdir -p "$wd/run/reports/fake-model"
+            # as evalscope does: its arguments, the judge's among them, in its configs and its log
+            mkdir -p "$wd/configs" "$wd/run/reports/fake-model"
+            echo "judge_model_args: $jm" > "$wd/configs/task_config.yaml"
+            echo "judge_model_args=$jm"
+            [ -n "${FAKE_READONLY:-}" ] && chmod 444 "$wd/configs/task_config.yaml"
+            # a directory of its files that cannot be listed
+            if [ -n "${FAKE_LOCKED_DIR:-}" ]; then
+              mkdir -p "$wd/configs/locked"
+              echo "judge_model_args: $jm" > "$wd/configs/locked/cfg.yaml"
+              chmod 000 "$wd/configs/locked"
+            fi
+            # a directory of its files that can be listed, and its files not looked at
+            if [ -n "${FAKE_NO_SEARCH_DIR:-}" ]; then
+              mkdir -p "$wd/configs/listed"
+              echo "judge_model_args: $jm" > "$wd/configs/listed/cfg.yaml"
+              chmod 444 "$wd/configs/listed"
+            fi
+            # a child that outlives it, holds its output open and writes its arguments later on
+            if [ -n "${FAKE_CHILD:-}" ]; then
+              ( sleep "$FAKE_CHILD"; echo "judge_model_args: $jm" > "$wd/configs/child.yaml" ) &
+              echo $! > "$CALLS.child"
+            fi
+            # the script stopped while evalscope runs (a timeout, the agent's call ending)
+            [ -n "${FAKE_STOPPED:-}" ] && { kill -TERM "$PPID"; exit 143; }
+            # a run that takes a while, and writes its arguments again later on
+            if [ -n "${FAKE_SLOW:-}" ]; then
+              echo $$ > "$CALLS.pid"
+              [ -n "${FAKE_IGNORE_TERM:-}" ] && trap '' TERM
+              # more than a pipe holds
+              if [ -n "${FAKE_FLOOD:-}" ]; then
+                line=$(printf 'x%.0s' $(seq 1024))
+                for _ in $(seq 300); do echo "$line"; sleep 0.01; done
+              fi
+              sleep "$FAKE_SLOW"
+              echo "judge_model_args: $jm" > "$wd/configs/later.yaml"
+            fi
             # every question answered, unless FAKE_NUM says how many were
             case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
             echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
@@ -698,6 +736,278 @@ class EvalAccuracyTest(unittest.TestCase):
         argv = Path(str(self.calls) + ".argv").read_text().splitlines()
         self.assertEqual(json.loads(argv[argv.index("--dataset-args") + 1])["longbench_v2"]["local_path"], str(data))
         self.assertEqual(argv[argv.index("--limit") + 1], "5")
+
+    def test_the_judge_key_reaches_only_a_judged_set_and_no_result_keeps_it(self):
+        key = "judge-key-for-the-test-7f3a"
+
+        def holding_key():
+            return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                          if p.is_file() and key in p.read_text(errors="replace"))
+        r = self.run_script("gsm8k", JUDGE_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertNotIn("--judge-model-args", argv, "gsm8k is graded by rule: no judge, no key")
+        self.assertEqual(holding_key(), [])
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--judge-strategy") + 1], "auto")
+        self.assertIn(key, argv[argv.index("--judge-model-args") + 1], "simple_qa's judge needs the key")
+        self.assertEqual(holding_key(), [], "evalscope's configs and log keep the key")
+        run = next((self.tmp / "results" / "eval_simple_qa").iterdir())
+        self.assertIn("<JUDGE_KEY>", (run / "configs" / "task_config.yaml").read_text())
+        self.assertIn("<JUDGE_KEY>", (run / "evalscope.log").read_text())
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200", FAKE_STOPPED="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(holding_key(), [], "a run stopped on its way keeps the key")
+
+    KEY = "judge-key-for-the-test-7f3a"
+
+    def holding_key(self):
+        return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                      if p.is_file() and self.KEY in p.read_text(errors="replace"))
+
+    def start_slow_run(self, seconds, **env):
+        """simple_qa with a judge, its evalscope running for `seconds`; returns the script and evalscope's pid."""
+        p = subprocess.Popen(["bash", str(self.SCRIPT), "simple_qa"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env={**self.env, "LLM_GATEWAY_KEY": self.KEY, "FAKE_JUDGE": "200",
+                                             "FAKE_SLOW": str(seconds), **env})
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        pidfile = Path(str(self.calls) + ".pid")
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+
+        def gone():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(gone)
+        return p, pid
+
+    def test_the_log_shows_no_key_while_evalscope_runs(self):
+        p, _ = self.start_slow_run(3)
+        log = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            logs = list((self.tmp / "results").rglob("evalscope.log"))
+            if logs and "judge_model_args=" in logs[0].read_text(errors="replace"):
+                log = logs[0].read_text(errors="replace")
+                break
+            time.sleep(0.05)
+        self.assertIsNone(p.poll(), "evalscope ended before its log was read")
+        self.assertIsNotNone(log, "evalscope's line never reached its log")
+        self.assertNotIn(self.KEY, log, "an agent reading the log while the run goes sees the key")
+        self.assertIn("judge_model_args=", log)
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err + out)
+        self.assertEqual(self.holding_key(), [])
+
+    def test_a_stopped_run_stops_evalscope_before_it_redacts(self):
+        p, pid = self.start_slow_run(3)
+        p.send_signal(signal.SIGTERM)  # to the script alone, as a timeout of the agent's shell does
+        p.communicate(timeout=60)
+        self.assertNotEqual(p.returncode, 0)
+        with self.assertRaises(ProcessLookupError, msg="evalscope runs on after the script and writes the key again"):
+            os.kill(pid, 0)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipUnless(Path("/proc/self/status").exists(), "reads the ignored signals in /proc")
+    def test_the_redaction_ignores_the_signals_of_the_runners_shutdown(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-" ] && grep SigIgn /proc/self/status >> "$CALLS.sigign"
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200",
+                            PATH="%s:%s" % (wrap, self.env["PATH"]))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        masks = [int(line.split()[1], 16) for line in Path(str(self.calls) + ".sigign").read_text().splitlines()]
+        self.assertTrue(masks, "the redaction did not run")
+        for mask in masks:
+            for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+                self.assertTrue(mask >> (sig - 1) & 1, "%s stops the redaction halfway" % sig.name)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root writes a read-only file")
+    def test_a_file_the_redaction_cannot_rewrite_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_READONLY="1")
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("task_config.yaml", r.stderr, "no word of the file that keeps the key")
+        self.assertIn("could not be removed", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that still holds the key were read")
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists any directory")
+    def test_a_directory_the_redaction_cannot_list_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_LOCKED_DIR="1")
+        for locked in (self.tmp / "results").rglob("locked"):
+            locked.chmod(0o755)
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("configs/locked", r.stderr, "no word of the directory whose files may keep the key")
+        self.assertIn("could not be removed", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that may still hold the key were read")
+
+    @unittest.skipIf(os.geteuid() == 0, "root looks at any file")
+    def test_a_file_the_redaction_cannot_look_at_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_NO_SEARCH_DIR="1")
+        for listed in (self.tmp / "results").rglob("listed"):
+            listed.chmod(0o755)
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("configs/listed/cfg.yaml", r.stderr, "no word of the file that may keep the key")
+        self.assertIn("could not be removed", r.stderr)
+        self.assertEqual(self.holding_key(), ["results/eval_simple_qa/%s/configs/listed/cfg.yaml" % run.name
+                                              for run in (self.tmp / "results" / "eval_simple_qa").iterdir()],
+                         "the file the redaction could not look at is the one that keeps the key")
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that may still hold the key were read")
+
+    def test_without_setsid_nothing_starts(self):
+        r = subprocess.run([shutil.which("bash"), str(self.SCRIPT), "gsm8k"], env={**self.env, "PATH": str(self.tmp / "bin")},
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stderr + r.stdout)
+        self.assertIn("setsid", r.stderr)
+        self.assertFalse(self.calls.exists(), "evalscope ran in the script's own process group")
+
+    @staticmethod
+    def running(pid):
+        try:
+            return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except OSError:
+            return False
+
+    def test_an_evalscope_that_ignores_sigterm_is_stopped_in_time_for_the_redaction(self):
+        p, pid = self.start_slow_run(60, FAKE_IGNORE_TERM="1")
+        began = time.time()
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=60)
+        took = time.time() - began
+        self.assertEqual(p.returncode, 143)
+        self.assertLess(took, 9, "the runner SIGKILLs what is left of a run 10 seconds after its SIGTERM: the key would stay")
+        self.assertFalse(self.running(pid), "evalscope runs on after the script")
+        self.assertEqual(self.holding_key(), [])
+
+    def test_a_stop_before_evalscope_leads_its_group_stops_the_launch(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # a setsid that takes its time: one process, which leads no group yet and has started nothing
+        (wrap / "setsid").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            echo $$ > "$CALLS.setsid"
+            exec %s -c 'import os, sys, time; time.sleep(15); os.execv(sys.argv[1], ["setsid"] + sys.argv[2:])' %s "$@"
+            """ % (shlex.quote(sys.executable), shlex.quote(shutil.which("setsid") or "/usr/bin/setsid"))))
+        (wrap / "setsid").chmod(0o755)
+        p = subprocess.Popen(["bash", str(self.SCRIPT), "simple_qa"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env={**self.env, "LLM_GATEWAY_KEY": self.KEY, "FAKE_JUDGE": "200",
+                                             "PATH": "%s:%s" % (wrap, self.env["PATH"])})
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        started = Path(str(self.calls) + ".setsid")
+        deadline = time.time() + 30
+        while not (started.exists() and started.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        launch = int(started.read_text())
+        self.addCleanup(lambda: self.running(launch) and os.kill(launch, signal.SIGKILL))
+        began = time.time()
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=60)
+        took = time.time() - began
+        self.assertEqual(p.returncode, 143)
+        self.assertLess(took, 8, "the script waited for a launch it had not stopped: the runner SIGKILLs it first, and the key stays")
+        self.assertFalse(self.running(launch), "the launch runs on after the script")
+        self.assertFalse(self.calls.exists(), "evalscope started after the stop")
+        self.assertEqual(self.holding_key(), [])
+
+    def test_an_evalscope_whose_log_nobody_writes_any_more_is_stopped_not_waited_for(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # the process that masks the key in the log (python3 -u -c ...) fails after the first of what it reads
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-u" ] && { head -c 1000 > /dev/null; exit 1; }
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        # evalscope prints more than a pipe holds, and has a minute to go
+        p, pid = self.start_slow_run(60, FAKE_FLOOD="1", PATH="%s:%s" % (wrap, self.env["PATH"]))
+        try:
+            out, err = p.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            self.fail("the script waits for an evalscope that waits on a pipe nobody reads")
+        self.assertEqual(p.returncode, 1, err + out)
+        self.assertIn("ended before it", err)
+        self.assertIn("its log is not whole", err)
+        self.assertFalse(self.running(pid), "evalscope runs on, with nothing reading what it prints")
+        self.assertEqual(self.holding_key(), [])
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(), "a set whose log is not whole was given a score")
+
+    def test_a_child_evalscope_left_is_stopped_before_the_log_ends_and_the_key_is_removed(self):
+        began = time.time()
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_CHILD="20")
+        took = time.time() - began
+        child = int(Path(str(self.calls) + ".child").read_text())
+        self.addCleanup(lambda: self.running(child) and os.kill(child, signal.SIGKILL))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertLess(took, 15, "the script waited for the child to close the log's pipe")
+        self.assertFalse(self.running(child), "a child of evalscope's outlived it, and can write the key after the redaction")
+        self.assertEqual(self.holding_key(), [])
+        self.assertIn("eval simple_qa:", (self.tmp / "results" / "summary.txt").read_text())
+
+    def test_the_log_ends_though_no_writer_opened_its_pipe_and_a_writer_that_stays_does_not_hold_it(self):
+        found = [re.search(r"^%s\(\) \{.*?^\}\n" % name, self.SCRIPT.read_text(), re.S | re.M) for name in ("start_log", "end_log")]
+        self.assertNotIn(None, found, "eval_accuracy.sh has no start_log or end_log")
+        # the script's two functions, with cat for the masker; no writer at all, one that ends, one that stays
+        body = "".join(f.group(0) for f in found) + textwrap.dedent("""\
+            mask_key() { exec cat; }
+            FIFO_DIR=$1
+            mkfifo "$FIFO_DIR/out"
+            start_log "$FIFO_DIR/log"
+            case "$2" in
+                written) echo "a line" > "$FIFO_DIR/out" 3>&- ;;
+                held) sleep 30 > "$FIFO_DIR/out" 2> /dev/null 3>&- &
+                      echo $! > "$FIFO_DIR/writer" ;;
+            esac
+            end_log
+            echo "status $?"
+            """)
+        for case, whole in (("none", True), ("written", True), ("held", False)):
+            d = tempfile.mkdtemp(dir=self.tmp)
+            began = time.time()
+            r = subprocess.run(["bash", "-c", body, "_", d, case], capture_output=True, text=True, timeout=30)
+            took = time.time() - began
+            writer = Path(d) / "writer"
+            if writer.exists():
+                os.kill(int(writer.read_text()), signal.SIGKILL)
+            self.assertLess(took, 8, "%s: the script hangs on a log that never ends" % case)
+            self.assertEqual(r.stdout.split()[-1] == "0", whole, "%s: %s" % (case, r.stdout + r.stderr))
+            self.assertEqual((Path(d) / "log").read_text(), "a line\n" if case == "written" else "", case)
+
+    def test_a_set_whose_log_is_not_whole_has_no_score(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # the process that masks the key in the log (python3 -u -c ...) reads what it gets and fails
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-u" ] && { cat > /dev/null; exit 1; }
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        r = self.run_script("gsm8k", PATH="%s:%s" % (wrap, self.env["PATH"]))
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("its log is not whole", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "gsm8k" in summary.read_text(), "a set whose log is not whole was given a score")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
         def sent():
@@ -1156,15 +1466,146 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.show = lambda ref: subprocess.run(["git", "--git-dir", str(self.origin), "show", ref],
                                                capture_output=True, text=True).stdout
 
-    def propose(self, token="t", api=None):
+    def propose(self, token="t", api=None, extra=(), inferpilot=None):
         env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
         if token:
             env["GITHUB_TOKEN"] = token
         with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()) as out, \
                 redirect_stderr(io.StringIO()) as err, mock.patch.object(propose_knowledge, "api", side_effect=api):
             rc = propose_knowledge.main(["--run-dir", str(self.run), "--body", str(self.body), "--repo", "At1a8/inferpilot",
-                                         "--inferpilot-dir", str(self.inferpilot), "--push-url", str(self.origin)])
+                                         "--inferpilot-dir", str(inferpilot or self.inferpilot), "--push-url", str(self.origin),
+                                         *extra])
         return rc, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def github(calls):
+        def fake(method, path, token="", data=None):
+            calls.append((method, path, data))
+            return [] if method == "GET" else {"number": 12, "html_url": "https://github.com/At1a8/inferpilot/pull/12"}
+        return fake
+
+    def test_a_known_issue_numbered_on_an_older_main_takes_the_next_free_number(self):
+        other = self.origin.parent / "other"
+        git("clone", "-q", "-b", "main", str(self.origin), str(other))
+        (other / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — aiter import segfault\nmain\n")
+        git("commit", "-qam", "another run's known issue, merged meanwhile", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nours\n")
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("dcp 8: see KI-001\n")
+        calls = []
+        rc, out, err = self.propose(api=self.github(calls))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-001": "KI-002"})
+        branch = "inferpilot/knowledge/" + self.run.name
+        known = self.show(branch + ":knowledge/known_issues.md")
+        self.assertIn("## KI-001 — aiter import segfault\nmain\n\n## KI-002 — GLM-5.3 dcp 8\nours\n", known,
+                      "main's entry kept, this run's after it with the next number")
+        self.assertEqual(self.show(branch + ":knowledge/dispatch.md"), "dcp 8: see KI-002\n", "its references follow")
+        body = calls[1][2]["body"]
+        self.assertTrue(body.startswith("KI-002: GLM-5.3") and "KI-001 is KI-002 here" in body, body)
+
+    def test_the_patch_outlives_the_checkout_and_is_proposed_later_from_another(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        rc, _, err = self.propose(token="")
+        self.assertEqual(rc, 2)
+        self.assertIn("--patch %s" % saved, err)
+        self.assertIn("+## KI-001 — GLM-5.3 dcp 8", saved.read_text())
+        shutil.rmtree(self.inferpilot)  # the task's container is gone, and the checkout with it
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        calls = []
+        rc, out, err = self.propose(api=self.github(calls), extra=["--patch", str(saved)], inferpilot=fresh)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("## KI-001 — GLM-5.3 dcp 8", self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name))
+        self.assertEqual((fresh / "knowledge" / "known_issues.md").read_text(), "# Known issues\n", "that checkout is left as it is")
+        outside = self.run / "outside.patch"
+        outside.write_text(saved.read_text().replace("knowledge/known_issues.md", "inferpilot.js"))
+        self.assertEqual(self.propose(extra=["--patch", str(outside)], inferpilot=fresh)[0], 1, "only knowledge/ goes in")
+
+    def test_proposed_later_from_the_checkout_that_saved_it_that_checkout_reads_main_again(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(known.read_text(), "# Known issues\n", "the proposed edits leave the checkout that held them")
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n\n## KI-002 — more\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("KI-002 — more", known.read_text(), "edits beyond the saved patch stay")
+
+    def test_a_saved_patch_reaching_outside_knowledge_by_any_path_is_not_pushed(self):
+        import subprocess
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        (self.inferpilot / "odd dir").mkdir()
+        (self.inferpilot / "odd dir" / "x.sh").write_text("echo outside\n")
+        git("add", "-N", "odd dir/x.sh", cwd=self.inferpilot)
+        sneaky = self.run / "sneaky.patch"
+        sneaky.write_text(subprocess.run(["git", "-C", str(self.inferpilot), "diff", "--binary"],
+                                         capture_output=True, text=True, check=True).stdout)
+        self.assertIn("diff --git a/odd dir/x.sh b/odd dir/x.sh", sneaky.read_text())
+        git("reset", "-q", cwd=self.inferpilot)
+        git("checkout", "-q", "--", "knowledge", cwd=self.inferpilot)
+        shutil.rmtree(self.inferpilot / "odd dir")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(sneaky)])
+        self.assertEqual(rc, 1, err)
+        self.assertIn("odd dir/x.sh", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def _main_and_checkout_have(self, text):
+        other = self.origin.parent / "other"
+        if not other.exists():
+            git("clone", "-q", "-b", "main", str(self.origin), str(other))
+        (other / "knowledge" / "known_issues.md").write_text(text)
+        git("commit", "-qam", "main", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        return other
+
+    def test_an_entry_main_and_the_run_both_changed_stops_for_a_human(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("open", "workaround: AITER_X=0"))
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #123"))
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("knowledge/known_issues.md", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_an_entry_the_run_changed_and_one_main_appended_are_both_kept(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base + "\n## KI-002 — main's\nmain\n")
+        git("commit", "-qam", "main appends", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(
+            base.replace("open", "fixed by #123") + "\n## KI-002 — GLM-5.3 dcp 8\nours\n")
+        rc, out, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-002": "KI-003"})
+        known = self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name)
+        for want in ("Status: fixed by #123\n", "## KI-002 — main's\nmain\n", "## KI-003 — GLM-5.3 dcp 8\nours\n"):
+            self.assertIn(want, known)
+        self.assertNotIn("Status: open", known)
+        self.assertNotIn("<<<<<<<", known)
+
+    def test_without_the_file_it_was_made_against_the_patch_itself_tells_its_new_known_issues(self):
+        diff = ("diff --git a/knowledge/known_issues.md b/knowledge/known_issues.md\n"
+                "index %s..%s 100644\n--- a/knowledge/known_issues.md\n+++ b/knowledge/known_issues.md\n"
+                "@@ -1,4 +1,7 @@\n # Known issues\n \n-## KI-001 — aiter segfault\n+## KI-001 — aiter import segfault\n main\n"
+                "+\n+## KI-002 — GLM-5.3 dcp 8\n+see KI-001 and KI-002\n" % ("1" * 40, "2" * 40))
+        self.assertEqual(propose_knowledge.preimage(str(self.inferpilot), diff, propose_knowledge.KNOWN), "",
+                         "a blob this checkout lacks: not its HEAD, which may hold main's entries")
+        main = "# Known issues\n\n## KI-001 — aiter segfault\nmain\n\n## KI-002 — another run's\n"
+        out, mapping = propose_knowledge.renumber(diff, "", main)
+        self.assertEqual(mapping, {"KI-002": "KI-003"}, "the KI-001 the patch edits is main's own")
+        self.assertIn("+## KI-001 — aiter import segfault\n", out)
+        self.assertIn("+## KI-003 — GLM-5.3 dcp 8\n+see KI-001 and KI-003\n", out)
 
     def test_only_knowledge_goes_to_its_branch_and_the_checkout_reads_main_again(self):
         (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\nKI-001 GLM-5.3 dcp 8\n")
@@ -1198,6 +1639,297 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.assertEqual(self.propose()[0], 3)
         self.assertIn("/data/models/x", (self.inferpilot / "knowledge" / "known_issues.md").read_text(), "left as it was")
         self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_a_change_that_names_this_machine_is_not_saved_for_later(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\nweights in /data/models/x\n")
+        self.assertEqual(self.propose(token="")[0], 3)
+        self.assertFalse((self.run / "knowledge.patch").exists(), "saved for a --patch elsewhere, whose check knows nothing of here")
+        known.write_text("# Known issues\nKI-001 GLM-5.3 dcp 8\n")
+        self.body.write_text("found with /data/models/x\n")
+        self.assertEqual(self.propose(token="")[0], 3)
+        self.assertIn("KI-001 GLM-5.3 dcp 8", (self.run / "knowledge.patch").read_text(), "a clean change is kept while its description is fixed")
+
+    def test_a_file_whose_name_is_this_machines_is_refused_as_a_line_that_names_it_is(self):
+        with mock.patch.object(propose_knowledge, "this_host", return_value="gpu-node-17"):
+            (self.inferpilot / "knowledge" / "gpu-node-17.md").write_text("notes on dcp 8\n")
+            rc, _, err = self.propose(api=self.github([]))
+            self.assertEqual(rc, 3, err)
+            self.assertIn("path 1: knowledge/gpu-node-17.md", err)
+            self.assertFalse((self.run / "knowledge.patch").exists(), "its path is published as its lines are")
+            git("mv", "knowledge/known_issues.md", "knowledge/gpu-node-18.md", cwd=self.inferpilot)
+            (self.inferpilot / "knowledge" / "gpu-node-17.md").unlink()
+            rc, _, err = self.propose(api=self.github([]))
+            self.assertEqual(rc, 3, "a rename to a sibling's name: %s" % err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_an_added_line_that_begins_with_two_pluses_is_checked_and_a_binary_file_is_not_proposed(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.write_text("# Known issues\n-- not a header either\n++ weights in /data/models/x\n")
+        self.assertEqual(propose_knowledge.added("--- a/k\n+++ b/k\n@@ -1,2 +1,2 @@\n ctx\n--- gone\n+++ here\n"
+                                                 "diff --git a/l b/l\n--- a/l\n+++ b/l\n@@ -0,0 +1 @@\n+new\n"),
+                         "++ here\nnew", "inside a hunk +++ is an added line, and outside it a header")
+        rc, _, err = self.propose()
+        self.assertEqual(rc, 3, err)
+        self.assertIn("/data/models/x", err)
+        known.write_text("# Known issues\n")
+        (self.inferpilot / "knowledge" / "trace.bin").write_bytes(b"\x00\x01/data/models/x\x00" * 40)
+        rc, _, err = self.propose()
+        self.assertEqual(rc, 1, err)
+        self.assertIn("a binary file, whose contents cannot be checked", err)
+        self.assertFalse((self.run / "knowledge.patch").exists())
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+
+    def test_a_description_that_names_the_machine_the_patch_was_made_on_is_refused_on_another(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        with mock.patch.object(propose_knowledge, "this_host", return_value="gpu-node-17"):
+            self.body.write_text("KI-001: seen on gpu-node-17 with dcp 8\n")
+            self.assertEqual(self.propose(token="")[0], 3, "the description names the machine")
+        self.assertTrue(saved.read_text().startswith("origin gpu-node-17\n"), "the clean change is kept, with where it was made")
+        with mock.patch.object(propose_knowledge, "this_host", return_value="laptop"):
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+            self.assertEqual(rc, 3, err)
+            self.assertIn("gpu-node-17", err)
+            self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+            self.body.write_text("KI-001: seen with dcp 8\n")
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+            self.assertEqual(rc, 0, err)
+        self.assertNotIn("gpu-node-17", self.show("inferpilot/knowledge/" + self.run.name), "the name stays in the run's file")
+
+    def test_a_path_that_is_local_where_the_patch_was_made_is_refused_where_it_is_not(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        self.body.write_text("KI-001: weights in /fastvault/private-model, dcp 8\n")
+        # the machine the run is on mounts storage on /fastvault
+        with mock.patch.object(propose_knowledge, "mounted_roots", return_value=("fastvault",)), \
+                mock.patch.object(daily_report, "LOCAL", daily_report.local_paths(("fastvault",))):
+            self.assertEqual(self.propose(token="")[0], 3, "the description names a path of the machine")
+        self.assertIn('\nmounts ["fastvault"]\n', "\n" + saved.read_text(), "the clean change is kept, with what is local there")
+        # the machine it is proposed from does not
+        self.assertEqual(daily_report.leaks(self.body.read_text()), [], "the test meant a path that is not local here")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 3, err)
+        self.assertIn("/fastvault/private-model", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        odd = self.run / "odd.patch"
+        odd.write_text(saved.read_text().replace('mounts ["fastvault"]', "mounts fastvault"))
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(odd)])
+        self.assertEqual(rc, 1, "what it cannot read of the patch's machine is not passed over: %s" % err)
+        self.assertIn("mounts line", err)
+        self.body.write_text("KI-001: dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("fastvault", self.show("inferpilot/knowledge/" + self.run.name), "the mounts stay in the run's file")
+
+    def test_a_file_of_the_run_named_after_a_known_issue_keeps_its_name_in_the_description(self):
+        body = ("KI-001: dcp 8 (KI-001). Proof: spinoff/KI-001.md, [KI-001](spinoff/KI-001.md), KI-001.json,\n"
+                "KI-001-draft.md and notes_KI-001.md. See KI-001.\n")
+        out = propose_knowledge.with_renumbering(body, {"KI-001": "KI-004"})
+        self.assertTrue(out.startswith(
+            "KI-004: dcp 8 (KI-004). Proof: spinoff/KI-001.md, [KI-004](spinoff/KI-001.md), KI-001.json,\n"
+            "KI-001-draft.md and notes_KI-001.md. See KI-004.\n"), out)
+        self.assertIn("KI-001 is KI-004 here; the run's own files keep KI-001", out)
+
+    def test_in_the_knowledge_lines_a_file_keeps_its_name_and_a_line_of_two_pluses_its_reference(self):
+        self._main_and_checkout_have("# Known issues\n\n## KI-001 — aiter import segfault\nmain\n")
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(
+            "# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nReport: [KI-001](spinoff/KI-001.md), logs/KI-001/server.log;"
+            " a KI-001-related hang, as KI-001/KI-001 would be.\n")
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("++ see KI-001\n-- and KI-001.\ndraft: KI-001-draft.md\n")
+        rc, out, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-001": "KI-002"})
+        branch = "inferpilot/knowledge/" + self.run.name
+        self.assertIn("## KI-002 — GLM-5.3 dcp 8\nReport: [KI-002](spinoff/KI-001.md), logs/KI-001/server.log;"
+                      " a KI-002-related hang, as KI-002/KI-002 would be.\n", self.show(branch + ":knowledge/known_issues.md"),
+                      "the issue takes its new number where it is named, and a file of the run keeps the name it has")
+        self.assertEqual(self.show(branch + ":knowledge/dispatch.md"), "++ see KI-002\n-- and KI-002.\ndraft: KI-001-draft.md\n",
+                         "an added line that begins with ++ is not a file header: its reference follows")
+
+    def test_a_patch_without_the_file_it_was_made_against_is_not_applied_where_the_checkout_lacks_it_too(self):
+        import subprocess
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\nWorkaround: none\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("open", "fixed by #9"))
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        bare = self.run / "bare.patch"
+        bare.write_text("".join(l for l in saved.read_text().splitlines(keepends=True) if not l.startswith("preimage ")))
+        self.assertNotEqual(bare.read_text(), saved.read_text(), "the test meant a patch without its preimage")
+        shutil.rmtree(self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("none", "AITER_X=0"))
+        git("commit", "-qam", "main changes another line of the entry the patch changes", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        shallow = self.origin.parent / "shallow"
+        git("clone", "-q", "--depth=1", "-b", "main", "file://" + str(self.origin), str(shallow))
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(bare)], inferpilot=shallow)
+        self.assertEqual(rc, 4, err)
+        self.assertIn("neither in the patch nor in this checkout", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=shallow)
+        self.assertEqual(rc, 4, "with the preimage the entry both changed is seen: %s" % err)
+        self.assertIn("KI-001 changed on main as well", err)
+
+    def test_a_change_that_is_refused_leaves_no_earlier_patch_as_its_own_and_a_dry_run_writes_none(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        saved = self.run / "knowledge.patch"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        rc, out, err = self.propose(extra=["--dry-run"])
+        self.assertEqual((rc, json.loads(out)["patch"]), (0, ""), err)
+        self.assertFalse(saved.exists(), "a dry run writes nothing")
+        self.assertEqual(self.propose(token="")[0], 2)
+        first = saved.read_text()
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n\n## KI-002 — other\n")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 0)
+        self.assertEqual(saved.read_text(), first, "a dry run leaves the patch to propose later as it was")
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nweights in /data/models/x\n")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 3)
+        self.assertEqual(saved.read_text(), first, "refused in a dry run too, which still writes nothing")
+        rc, _, err = self.propose(token="")
+        self.assertEqual(rc, 3)
+        self.assertFalse(saved.exists(), "the patch of the earlier change is not this one's")
+        self.assertEqual((self.run / "knowledge.patch.earlier").read_text(), first)
+        self.assertIn("knowledge.patch.earlier", err)
+
+    def test_a_change_no_patch_can_be_made_of_leaves_no_earlier_patch_as_its_own(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        saved, earlier = self.run / "knowledge.patch", self.run / "knowledge.patch.earlier"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--push-url", str(self.origin.parent / "no-such-remote.git")])
+        self.assertNotIn(rc, (0, 3, 4), err)
+        first = saved.read_text()
+        self.assertIn("+## KI-001 — GLM-5.3 dcp 8", first, "a clean change whose push failed is kept: it is this change")
+        self.assertFalse(earlier.exists())
+        (self.inferpilot / "knowledge" / "notes.md").write_bytes(b"caf\xe9 at dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 1, err)
+        self.assertIn("knowledge/notes.md is not UTF-8 text", err)
+        self.assertFalse(saved.exists(), "the patch of the earlier change is not this one's")
+        self.assertEqual(earlier.read_text(), first)
+        self.assertIn("knowledge.patch.earlier", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 1)
+        self.assertEqual(earlier.read_text(), first, "a dry run moves nothing")
+
+    def test_the_command_to_propose_later_is_quoted_and_names_the_script_in_a_checkout(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        spaced = self.run.parent / "my runs" / "issue_1; echo x"
+        spaced.mkdir(parents=True)
+        body = spaced / "knowledge_pr.md"
+        body.write_text("KI-001: dcp 8\n")
+        argv = ["--run-dir", str(spaced), "--body", str(body), "--inferpilot-dir", str(self.inferpilot)]
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
+        with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err, \
+                mock.patch.object(sys, "argv", ["gone/with/the/container/propose_knowledge.py"]):
+            self.assertEqual(propose_knowledge.main(argv), 2)
+        command = err.getvalue().strip().splitlines()[-1].strip()
+        self.assertEqual(shlex.split(command), ["python3", "scripts/propose_knowledge.py", "--run-dir", str(spaced), "--body",
+                                                str(body), "--patch", str(spaced / "knowledge.patch")], command)
+        self.assertIn("from any InferPilot checkout", err.getvalue())
+
+    def test_a_patch_that_makes_a_symbolic_link_is_refused_and_nothing_is_written_through_it(self):
+        import subprocess
+        victim = self.origin.parent / "victim.md"
+        victim.write_text("x\n## KI-001 elsewhere\n")
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        known.unlink()
+        # Relative, so that no leak check stops it first; from the worktree beside the victim it reaches the victim.
+        known.symlink_to(os.path.join("..", "..", "victim.md"))
+        git("add", "-A", "knowledge", cwd=self.inferpilot)
+        link = self.run / "link.patch"
+        link.write_text(subprocess.run(["git", "-C", str(self.inferpilot), "diff", "--cached", "--binary"],
+                                       capture_output=True, text=True, check=True).stdout)
+        git("reset", "-q", cwd=self.inferpilot)
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        with mock.patch.object(tempfile, "tempdir", str(self.origin.parent)):
+            rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(link)], inferpilot=fresh)
+            self.assertEqual(rc, 1, err)
+            self.assertIn("symbolic link", err)
+            self.assertEqual(self.propose(api=self.github([]))[0], 1, "nor the checkout's own")
+        self.assertEqual(victim.read_text(), "x\n## KI-001 elsewhere\n", "a file outside the worktree was written")
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_a_name_with_a_space_or_one_git_quotes_is_read_as_git_reads_it(self):
+        names = ["knowledge/notes with spaces.md", 'knowledge/na\u00efve "quoted".md']
+        for name in names:
+            (self.inferpilot / name).write_text("a note\n")
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        fresh = self.origin.parent / "fresh"
+        git("clone", "-q", "-b", "main", str(self.origin), str(fresh))
+        rc, out, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=fresh)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(json.loads(out)["files"]), sorted(names))
+        for name in names:
+            self.assertEqual(self.show("inferpilot/knowledge/%s:%s" % (self.run.name, name)), "a note\n", name)
+        moved = self.run / "moved.patch"
+        moved.write_text("diff --git a/inferpilot.js b/knowledge/x.js\nsimilarity index 100%\n"
+                         "rename from inferpilot.js\nrename to knowledge/x.js\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(moved)], inferpilot=fresh)
+        self.assertEqual(rc, 1, err)
+        self.assertIn("is not a patch of knowledge/: it touches inferpilot.js", err, "a rename's source counts as a path it touches")
+        quoted = ('diff --git "a/knowledge/na\\303\\257ve.md" b/knowledge/plain.md\nsimilarity index 100%\n'
+                  'rename from "knowledge/na\\303\\257ve.md"\nrename to knowledge/plain.md\n')
+        self.assertEqual(propose_knowledge.patched(quoted), ["knowledge/na\u00efve.md", "knowledge/plain.md"])
+
+    def _entry_changed_on_main_and_here(self, base, mains, ours):
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(mains)
+        git("commit", "-qam", "main changes the entry", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(ours)
+        return self.propose(api=self.github([]))
+
+    def test_lines_both_added_inside_one_entry_stop_for_a_human(self):
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nStatus: open\n\n## KI-002 — other\nx\n"
+        rc, _, err = self._entry_changed_on_main_and_here(base, base.replace("open\n", "open\nWorkaround: disable A\n"),
+                                                          base.replace("open\n", "open\nWorkaround: enable A\n"))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("KI-001", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+        inside = ("## KI-001 — aiter segfault\nStatus: open\n<<<<<<< ours\nWorkaround: disable A\n||||||| base\n=======\n"
+                  "Workaround: enable A\n>>>>>>> theirs\n\n## KI-002 — other\nx\n")
+        self.assertIsNone(propose_knowledge.resolve_appends(inside), "lines added inside an entry are no new entries")
+        at_end = ("## KI-001 — a\nx\n<<<<<<< ours\n\n## KI-002 — main's\n||||||| base\n=======\n\n## KI-003 — ours\n"
+                  ">>>>>>> theirs\n")
+        self.assertEqual(propose_knowledge.resolve_appends(at_end), "## KI-001 — a\nx\n\n## KI-002 — main's\n\n## KI-003 — ours\n")
+
+    def test_different_lines_of_one_entry_changed_on_both_sides_stop_for_a_human(self):
+        base = ("# Known issues\n\n## KI-001 — aiter segfault\nSymptom: crash at import\nReproduction: import aiter\n"
+                "Status: open\n")
+        rc, _, err = self._entry_changed_on_main_and_here(base, base.replace("at import", "at import, MI308X only"),
+                                                          base.replace("open", "fixed by #123"))
+        self.assertEqual(rc, 4, err)
+        self.assertIn("KI-001", err)
+        self.assertEqual(self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name), "", "nothing pushed")
+
+    def test_a_shallow_checkout_of_a_later_main_applies_the_patch_three_way(self):
+        import subprocess
+        base = "# Known issues\n\n## KI-001 — aiter segfault\nWorkaround: none\n\n## KI-002 — other\nx\n"
+        other = self._main_and_checkout_have(base)
+        git("pull", "-q", cwd=self.inferpilot)
+        made_against = subprocess.run(["git", "-C", str(self.inferpilot), "rev-parse", "HEAD:knowledge/known_issues.md"],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(base.replace("\nx\n", "\nx, fixed by #9\n"))
+        saved = self.run / "knowledge.patch"
+        self.assertEqual(self.propose(token="")[0], 2)
+        shutil.rmtree(self.inferpilot)
+        (other / "knowledge" / "known_issues.md").write_text(base.replace("none", "AITER_X=0"))
+        git("commit", "-qam", "main changes a line of the patch's context", cwd=other)
+        git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+        shallow = self.origin.parent / "shallow"
+        git("clone", "-q", "--depth=1", "-b", "main", "file://" + str(self.origin), str(shallow))
+        self.assertNotEqual(subprocess.run(["git", "-C", str(shallow), "cat-file", "-e", made_against]).returncode, 0,
+                            "the test meant a checkout without the file the patch was made against")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)], inferpilot=shallow)
+        self.assertEqual(rc, 0, err)
+        known = self.show("inferpilot/knowledge/%s:knowledge/known_issues.md" % self.run.name)
+        self.assertIn("Workaround: AITER_X=0\n", known)
+        self.assertIn("\nx, fixed by #9\n", known)
 
 
 class RunLockTest(unittest.TestCase):

@@ -117,8 +117,9 @@ practice. Artifacts live in the run's working directory; the templates are in `.
   names (more only with `guards`), repeated runs, admission and out-of-memory checks under decode-heavy
   load.
 - **Artifact:** performance section of `validation_report.md`.
-- **Gate:** the claimed benefit reproduces; no guard workload the task names regresses beyond the noise
-  band.
+- **Gate:** the claimed benefit reproduces; a feature that claims none is no slower than the baseline
+  (`validation_doctrine.md`, *G5 for a feature*); no guard workload the task names regresses beyond
+  the noise band.
 
 ### 7. Review — an independent read before the PR
 
@@ -127,7 +128,7 @@ practice. Artifacts live in the run's working directory; the templates are in `.
   fair benchmark.
 - **Artifact:** `review.md`.
 - **Gate:** approved with no blocker; requested changes are work packages that go back through
-  Implement and Verify (and Performance when the task claims a gain) before the next review.
+  Implement and Verify (and Performance, where the task measures it) before the next review.
 
 ### 8. Hygiene & PR
 

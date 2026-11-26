@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: G2 measures on gsm8k a fix that changes code the server runs; with stop_after at a phase before the fix it needs none), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), or "verify" with args.run_dir (every mode but scan: Verify and what follows again, on the commit Implement verified, in a run whose Verify ended without a result), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: G2 measures on gsm8k a fix that changes code the server runs; with stop_after at a phase before the fix it needs none), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), or "verify" with args.run_dir (every mode but scan: Verify and what follows again, on the commit Implement verified, in a run whose Verify ended without a result), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -15,7 +15,7 @@ export const meta = {
     { title: 'Bisect', detail: 'ci_guardian: culprit commit, confirmation, fix work packages [ci]; the commit that fixed it, when the reporter\'s code fails and main does not [issue, bisect_fixed]' },
     { title: 'Profile', detail: 'perf_engineer: trace metrics and the opportunity list [perf]' },
     { title: 'Plan', detail: 'architect: performance work packages, kernel hand-offs, PRs to apply [perf]' },
-    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on failure' },
+    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on a measured failure' },
     { title: 'Kernel', detail: 'kernel_liaison: kernel hand-offs to args.kernel_backend (none records them; geak runs the kernel lane of a GEAK checkout as an outside program; command runs a kernel agent CLI); gains integrated as work packages' },
     { title: 'Verify', detail: 'verify_engineer: G0 and G2 against the same-pattern baseline, G3 and G4 when the task asks, plus mode gates; investigator loop on failure' },
     { title: 'Investigate', detail: 'investigator: controls first, hypothesis ledger, fix or baseline bug' },
@@ -85,9 +85,9 @@ const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
 // rounded up can put the reserve's start before the call's.
 const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100) : 0);
-// The unit and Verify gates are not asked again by the engine, under what is left of the same limit: an
-// answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
-// told to check first what the one before left.
+// A Verify round is not asked again by the engine, under what is left of the same limit: an answer of
+// its that cannot be used goes to call()'s next attempt, which has a limit of its own and is told to
+// check first what the one before left. A unit gate goes to the call that finishes it (UNIT_ONCE).
 const ONE_SESSION = { schemaRetries: 0 };
 // More time for a call (callWithTime) is at most this many times its limit.
 const MAX_GRANT = 2;
@@ -99,6 +99,7 @@ const ATTENTION = []; // state a human must clean up before anything else runs t
 const TIMED_OUT = { timedOut: true };
 const TIMED_OUT_CALLS = new Set(); // labels of calls that timed out: their agents may still be running
 let PHASE = '';
+let curatorSilent = false; // the curator gave no answer: what it did to knowledge/ is not known
 const cfg = (o) => Object.entries(o)
   .filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && v.length === 0))
   .map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
@@ -115,6 +116,8 @@ const num = { type: 'number' };
 const obj = { type: 'object' };
 const arr = (items) => (items ? { type: 'array', items } : { type: 'array' });
 const strs = arr(str);
+// A word for a POSIX shell, in a command the user is given to paste.
+const shq = (s) => (/^[\w@%+=:,./-]+$/.test(String(s)) ? String(s) : `'${String(s).replace(/'/g, "'\\''")}'`);
 
 // ---------------------------------------------------------------------------
 // The task definition (templates/task_definition.md): the fields that define a task, named as the
@@ -125,7 +128,7 @@ const strs = arr(str);
 const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_path', 'platform', 'gpu_ids',
   'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs', 'sources', 'since',
   'stop_after', 'resume_from', 'run_dir',
-  'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability',
+  'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
   'image', 'image_ok', 'bisect_fixed', 'confirm_leads'];
 // '' is accepted for the enums so an undecided field costs no schema retry; pick() drops it.
@@ -157,6 +160,7 @@ const TASK_DEF = S({
   // is asked for again, since on() would read it as off and the run would leave the gate out
   long_context: { enum: [true, false, 'true', 'false', ''] },
   stability: { enum: [true, false, 'true', 'false', ''] },
+  long_context_script: str,
 });
 const INTAKE = S({
   status: { type: 'string', enum: ['ready', 'needs_input', 'rejected'] },
@@ -205,6 +209,19 @@ const BEFORE_A_FIX = {
 const TEMPLATE = 'template';
 const isTemplate = (v) => String(v || '').trim().toLowerCase() === TEMPLATE;
 
+// What InferPilot's client runs is the task's to give: two lengths and a concurrency, in workload (isl, osl, conc)
+// or in harness (ISL, OSL, CONCURRENCY), as scripts/harness.py takes them. One the task leaves out would come
+// from the feature's source or from the template: a load nobody chose. A workload given in words is the
+// director's to turn into the three, and cannot be read here.
+const TEMPLATE_LOAD = { isl: ['ISL', 'input length'], osl: ['OSL', 'output length'], conc: ['CONCURRENCY', 'concurrency'] };
+function templateLoadGaps(a) {
+  const workload = asObject(a.workload);
+  if (typeof a.workload === 'string' && a.workload.trim() && !Object.keys(workload).length) return [];
+  const harness = asObject(a.harness);
+  const given = (v) => v != null && String(v).trim() !== '';
+  return Object.keys(TEMPLATE_LOAD).filter((k) => !given(workload[k]) && !given(harness[TEMPLATE_LOAD[k][0]]));
+}
+
 // What a definition still lacks before its mode can start; every gap is a question for the user.
 function missingFields(a) {
   const qs = [];
@@ -231,12 +248,28 @@ function missingFields(a) {
       + `to the server. Or ${TEMPLATE}: InferPilot's, after the model's sglang cookbook recipe.`,
       'every arm, baseline and feature, is launched with it: the feature arm adds its flags through EXTRA_ARGS', [TEMPLATE]);
   }
-  // A feature is measured on its source's scenarios, which InferPilot's client need not reproduce; a perf
-  // task's workload is the user's own, which it runs.
-  if ((mode === 'perf' || (mode === 'feature' && a.workload)) && !a.client_script) {
-    ask('client_script', 'Which script runs the workload against the server (absolute path)? It reads PORT and writes its logs to OUT_DIR. '
-      + `Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${mode === 'feature' ? ', whose numbers are reported, never a claim' : ''}.`,
-      'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  // G5 measures every feature against the baseline, whether it claims a gain or not (validation_doctrine.md, G5 for
+  // a feature), and every perf task: both name the client that measures. A feature is measured on its source's
+  // scenarios, which InferPilot's client need not reproduce; a perf task's workload is the user's own, which it runs.
+  if ((mode === 'perf' || mode === 'feature') && !a.client_script) {
+    const feature = mode === 'feature';
+    const onTemplate = feature ? " (give the workload with it), which never stands for the gain of the feature's source: on it G5 judges "
+      + 'only that the feature is no slower than the baseline' : '';
+    ask('client_script', `Which script runs the ${feature ? "feature's scenarios" : 'workload'} against the server (absolute path)? `
+      + `It reads PORT and writes its logs to OUT_DIR. Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${onTemplate}.`,
+      feature ? 'G5 measures every feature against the baseline with it, unchanged: the gain it claims, or no slowdown when it claims none'
+        : 'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  }
+  // InferPilot's client runs the task's workload: a task that takes it gives the whole of it. What it leaves out
+  // the template would fill with lengths or a concurrency of its own, and G5 would judge the change on them.
+  // A perf task without any workload is asked for one above.
+  const gaps = isTemplate(a.client_script) ? templateLoadGaps(a) : [];
+  const lacks = gaps.length < Object.keys(TEMPLATE_LOAD).length
+    ? `gives no ${gaps.map((k) => TEMPLATE_LOAD[k][1]).join(' and no ')} for it` : 'names none';
+  if ((mode === 'feature' || (mode === 'perf' && a.workload)) && gaps.length) {
+    ask('workload', `Which workload should InferPilot's client run${mode === 'feature' ? ' for the feature' : ''} (input and output `
+      + 'lengths, concurrency)?',
+      `client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
   }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
@@ -246,26 +279,34 @@ function missingFields(a) {
         `${field} takes true or false, and ${JSON.stringify(a[field])} is neither: the run would leave the gate out`, ['true', 'false']);
     }
   }
+  // G3 runs the task's own long-context test, as G4 keeps up the task's own client: the user asked for the gate
+  // and says what it runs. InferPilot has no template for such a test, and no role writes one in its place. A
+  // path of blanks names no script.
+  const g3script = String(a.long_context_script || '').trim();
+  if (mode !== 'scan' && asked(a.long_context) === 'true' && (!g3script || isTemplate(g3script))) {
+    ask('long_context_script', 'Which script runs the long-context test for G3 (absolute path)? It reads PORT, runs its prompts '
+      + "against the server and writes each request's result to OUT_DIR. InferPilot has no template for it.",
+      'long_context is on: G3 runs this test unchanged on the baseline and on the change');
+  }
   // G4 keeps the task's performance test up for more than 48 hours, and the user asked for it: the task names the
-  // server that test runs against and the client that runs it, also where the mode alone asks for neither (the
-  // server is asked above for a feature and a perf task, the client for a perf task and a feature with a workload).
-  // No template is offered on G4's account.
-  const g4 = mode !== 'scan' && asked(a.stability) === 'true';
-  if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {
+  // server that test runs against and the client that runs it. A feature and a perf task are asked for both above;
+  // an issue or a ci task, whose mode asks for neither, is asked here. No template is offered on G4's account.
+  const g4 = (mode === 'issue' || mode === 'ci') && asked(a.stability) === 'true';
+  if (g4 && !a.server_script) {
     ask('server_script', 'Which script starts the server that G4 keeps up for more than 48 hours (absolute path)? It must pass '
       + '--port $PORT and $EXTRA_ARGS to the server.',
       'stability is on: G4 runs its client back to back against one server, which this script starts');
   }
-  if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {
+  if (g4 && !a.client_script) {
     ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
       + 'writes its logs to OUT_DIR.',
       'stability is on: G4 runs this client back to back against one server');
   }
   // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
   // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
-  if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {
+  if (g4 && gaps.length) {
     ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
-      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
+      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {
@@ -331,11 +372,14 @@ async function intakeStage(raw) {
     return stopped('rejected', why, { reason: why, next: { say: `Outside what InferPilot does: ${why}` } });
   }
   if (questions.length) {
+    // A field the caller set wins over an answer. One that is asked about all the same (a value the run cannot
+    // use, or only a part of what it needs) is cleared for the next run, so that the answer takes its place.
+    const rejected = Object.fromEntries(questions.filter((q) => q.field in given).map((q) => [q.field, '']));
     return stopped('needs_input', `missing: ${questions.map((q) => q.field).join(', ')}`, {
       questions,
       // null until the user answers: a run that still has it asks again rather than taking a placeholder
       next: { say: 'InferPilot needs these answers before it starts; nothing ran.', ask: questions,
-        rerun_with: { answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
+        rerun_with: { ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
     });
   }
   return {
@@ -406,6 +450,7 @@ const C = {
   tune: TUNE,
   long_context: LONG_CONTEXT,
   stability: STABILITY,
+  long_context_script: String(A.long_context_script || '').trim(),
   confirm_leads: CONFIRM_LEADS,
   assumptions: START.assumptions || [],
   kernel_backend: KERNEL_BACKEND,
@@ -551,9 +596,10 @@ function withTimeout(p, ms) {
 }
 
 // One agent call; resolves null (never throws) so every caller decides what a missing answer means
-// for its gate. A failed attempt is retried and the retry is told to check what it left behind. A
-// timeout is not retried: the timed-out agent cannot be cancelled and may still be running, so a
-// retry would run the role twice at once.
+// for its gate. A failed attempt is retried and the retry is told to check what it left behind, unless
+// the caller takes over (opts.attempts; opts.schemaRetries for the engine's asking again with the same
+// prompt). A timeout is not retried: the timed-out agent cannot be cancelled and may still be running,
+// so a retry would run the role twice at once.
 // Every role that works on the task may hand on what it meets that is not the task's; Spinoff checks it.
 const LEAD = S({ title: str, observed: str, where: str, evidence: str, reproduce: str }, ['title', 'observed']);
 // a function, not a const: the Intake calls in before MODE and the consts below exist. Spinoff and what
@@ -570,13 +616,14 @@ async function call(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
   const ms = timeoutFor(role, sub);
   const leads = takesLeads(role, sub);
-  for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+  const { attempts = AGENT_RETRIES, ...agentOpts } = opts || {};
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
     const told = ins.time_limit_min > 0 && ms > 0
       ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
       const r = await withTimeout(agent(rolePrompt(role, sub, told, attempt, leads),
-        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
+        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...agentOpts }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
         log(`  [inferpilot] ${lbl} timed out after ${min} min; not retried`);
@@ -590,9 +637,9 @@ async function call(role, sub, ins, schema, label, opts) {
         }
         return r;
       }
-      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${AGENT_RETRIES})`);
+      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${attempts})`);
     } catch (e) {
-      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${AGENT_RETRIES}): ` +
+      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${attempts}): ` +
         String(e && e.message ? e.message : e).slice(0, 200));
     }
   }
@@ -649,7 +696,8 @@ const SETUP = S({
   notes: str,
 }, ['lock', 'run_dir', 'baseline_status', 'gpu_ids']);
 // workload_gap: the task's client does not run the scenarios the source measured its gain on; the run asks.
-const SPEC = S({ spec_path: str, gates_measurable: bool, perf_claim: str, skill: str, notes: str,
+// perf_cost: perf_claim is a cost the user stated (a bound), not a gain: it is the claim on any client.
+const SPEC = S({ spec_path: str, gates_measurable: bool, perf_claim: str, perf_cost: bool, skill: str, notes: str,
   workload_gap: str, fallback_client: str }, ['spec_path', 'gates_measurable']);
 const RECON = S({
   design_path: str,
@@ -666,6 +714,7 @@ const DESIGN = S({
   gate_ok: bool,
   needs_human_review: bool,
   perf_claim: str, // required, '' for none: a resumed run measures exactly this claim
+  perf_cost: bool, // the claim is a cost the user stated, as the spec has it
   summary: str,
 }, ['work_packages', 'gate_ok', 'perf_claim']);
 const TRIAGE = S({
@@ -758,14 +807,18 @@ const IMPL = S({
   kernel_handoff: { type: ['object', 'null'] },
   notes: str,
 }, ['wp', 'status']);
+// incomplete: the checks that have no result yet, none of those that ran having failed, and where the
+// runs still going write; '' when every check has a result. A gate without a result is not a failed one.
+// null: a check not run yet, which only a gate without a result has.
 const UNIT = S({
   wp: str,
   unit_pass: bool,
-  feature_off_unchanged: bool,
-  fails_without_change: { type: 'string', enum: ['parent', 'mutant', 'no', 'n/a'] },
+  feature_off_unchanged: { type: ['boolean', 'null'] },
+  fails_without_change: { type: ['string', 'null'], enum: ['parent', 'mutant', 'no', 'n/a', null] },
+  incomplete: str,
   failure_summary: str,
   evidence: str,
-}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change']);
+}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete']);
 const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean']);
 const VERIFY = S({
   all_pass: bool,
@@ -917,8 +970,8 @@ const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
   ['report_path', 'daily_report_url', 'daily_report_action']);
-const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, notes: str },
-  ['updates']);
+const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_status: str, pr_url: str, patch_path: str,
+  notes: str }, ['updates']);
 const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'] }, run_dir: str, candidates_path: str,
   counts: obj, recent: obj, notes: str }, ['lock', 'run_dir', 'candidates_path']);
 const DISPATCH = S({
@@ -1063,6 +1116,12 @@ async function finish(status, at) {
     if (learn) {
       R.knowledge_updates = learn.updates || [];
       R.knowledge_pr = learn.pr_url || '';
+      R.knowledge_notes = learn.notes || '';
+      R.knowledge_patch = R.knowledge_pr ? '' : String(learn.patch_path || '').trim();
+    } else {
+      // No answer says nothing of what it did: it may have edited knowledge/ and saved a patch all the same.
+      R.knowledge_notes = TIMED_OUT_CALLS.has('curator:learn') ? 'the curator timed out' : 'the curator returned no answer';
+      curatorSilent = true;
     }
   }
   R.run_dir = C.run_dir;
@@ -1115,9 +1174,11 @@ function nextSteps(status, at) {
     out.rerun_with = {};
   } else if (status === 'needs_input' && at === 'Spec') {
     const fallback = (((R.questions || [])[0] || {}).options || [])[0];
-    out.say = `The run stopped at Spec: ${last}. Give a client that runs the source's scenarios${fallback
-      ? `, or take InferPilot's own (${fallback}): it need not reproduce the source's numbers, so what it measures is reported, never a gate` : ''}. `
-      + `To measure the task's own workload anyway, or to go on without a performance claim, say so in goal and run the task again.${report}`;
+    const own = fallback ? `, or take InferPilot's own (${fallback}): it need not reproduce the source's numbers, so the source's `
+      + 'gain is not claimed on it, and G5 judges there only that the feature is no slower than the baseline' : '';
+    out.say = `The run stopped at Spec: ${last}. Give a client that runs the source's scenarios${own}. `
+      + "To measure the task's own workload anyway, or to go on without a claimed gain, say so in goal and run the task again: "
+      + `G5 then judges on the task's client that the feature is no slower than the baseline.${report}`;
     out.ask = R.questions;
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
@@ -1143,6 +1204,29 @@ function nextSteps(status, at) {
   }
   for (const s of R.spinoffs) if (s && s.status === 'drafted' && s.draft_path) user.push(`file the issue draft upstream: ${s.draft_path}`);
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
+  else if (R.knowledge_patch) {
+    // The run directory is the task container's own unless exp_root is a host mount, which is not known here.
+    // The command comes last, on a line of its own (indented as the runner's log has its commands), with nothing
+    // after it: it is pasted as it stands.
+    user.push(`propose the curator's knowledge changes, which the run did not (${R.knowledge_notes || 'see the curator\'s notes'}),`
+      + ` from an InferPilot checkout, with the command below. Unless exp_root is on a host mount, ${C.run_dir} goes with the`
+      + ' task\'s container: copy it out first, under the same name, which the branch takes, and give the command\'s three'
+      + ' paths as they are in the copy:\n'
+      + `    python3 scripts/propose_knowledge.py --run-dir ${shq(C.run_dir)}`
+      + ` --body ${shq(`${C.run_dir}/knowledge_pr.md`)} --patch ${shq(R.knowledge_patch)}`);
+  } else if ((R.knowledge_updates || []).some((u) => u && /(^|\/)knowledge\//.test(String(u.file || '')))) {
+    user.push(`the curator's knowledge changes were not proposed and no patch of them was saved (${R.knowledge_notes || 'the curator gave no reason'}):`
+      + ` they are only in ${INFERPILOT}/knowledge (git -C ${shq(INFERPILOT)} status -- knowledge), which goes with the task's container:`
+      + ' copy the files out, or clear what the script refused and run it again');
+  } else if (curatorSilent) {
+    // The timeout's own entry (R.attention) speaks of servers and GPUs only.
+    user.push(`${R.knowledge_notes}, so what it changed under knowledge/ is not known`
+      + `${TIMED_OUT_CALLS.has('curator:learn') ? ': it may still be editing or proposing, so stop it first. Then' : ':'}`
+      + ` look at ${INFERPILOT}/knowledge (git -C ${shq(INFERPILOT)} status -- knowledge) and for ${C.run_dir}/knowledge.patch`
+      + ` and ${C.run_dir}/knowledge_pr.md. Unless on a host mount, the checkout and the run directory go with the task's`
+      + ' container: copy what is there out, and propose it from an InferPilot checkout with scripts/propose_knowledge.py'
+      + ' (--patch for a saved patch)');
+  }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;
   return out;
@@ -1266,7 +1350,8 @@ async function setup(requireBaseline) {
 
 // One work package at a time: implement, then an independent unit + feature-off
 // gate; failed rounds feed the test engineer's findings back; after the last round
-// the package is rolled back to the last verified commit and the task stops.
+// the package is rolled back to the last verified commit and the task stops. A gate
+// that has no result is no failure: it costs no round and rolls nothing back.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
 // Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
@@ -1274,16 +1359,41 @@ function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
   return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
 }
+// What a unit answer leaves without a result: what it says in `incomplete`, or, when it says nothing
+// there and no check failed, the checks it gives as null. A check that ran and failed is a failure,
+// whatever else did not run.
+function leftOpen(ut) {
+  const said = String((ut && ut.incomplete) || '').trim();
+  if (!ut || said) return said;
+  if (ut.unit_pass === false || ut.feature_off_unchanged === false || ut.fails_without_change === 'no') return '';
+  const open = [ut.feature_off_unchanged === null && 'the feature-off check',
+    ut.fails_without_change === null && 'the check that the test can fail'].filter(Boolean);
+  return open.length ? `${open.join(' and ')} did not run (null in the answer, which named nothing in incomplete)` : '';
+}
+// A unit gate with checks that have no result, none of those that ran having failed.
+const unfinished = (ut) => leftOpen(ut) !== '';
+// A unit call is never asked again blind: a retry without what the first one left going could start the
+// same tests on the same GPUs. An answer it cannot use, or none, goes to the call that finishes the gate.
+const UNIT_ONCE = { attempts: 1, schemaRetries: 0 };
+// A unit call that timed out may still be running: the human who cleans up gets the commit and what the
+// gate had left going.
+function gateTimedOut(wp, label, commit, left = '') {
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `${label} timed out: commit ${commit} stays in the worktree, `
+    + `unverified${left ? `; what the gate had left without a result before it: ${left}` : ''}` });
+  return stalled(wp, label, commit);
+}
 // Gates and rounds that ended without a result and may have left detached runs on the GPUs.
 const leftRunning = [];
-// A unit gate whose every attempt ended without an answer may have left the runs it started going, as a
-// call that timed out may: no further round and no rollback either, and a human stops what it left.
-function noAnswer(wp, label, commit) {
-  ATTENTION.push({ wp: wp.id, worktree: C.worktree, issue: `${label} returned no answer: commit ${commit} stays in the `
-    + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
+// Still without a result after the call that was to finish it: nothing measured went against the change,
+// so it is not rolled back; the package stops with its commit, on the attention list for a human.
+function noResult(wp, commit, what) {
+  const missing = String(what || '').trim() || 'the test engineer returned nothing';
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `the unit gate of ${wp.id} has no result (${missing}): `
+    + `commit ${commit} stays in the worktree, unverified; stop what the gate left running before reusing its GPUs` });
+  note('Implement', 'incomplete', `${wp.id}: the unit gate has no result after the call that was to finish it `
+    + `(${missing}); not rolled back`);
   leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
-  note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
-  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} returned no answer` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `the unit gate of ${wp.id} has no result` };
 }
 
 async function implementAll(wps) {
@@ -1323,11 +1433,23 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
-        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
-        ONE_SESSION);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
-      if (!ut) return noAnswer(wp, utLabel, im.commit);
+      const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test,
+        time_limit_min: exactMinutes(timeoutFor('test_engineer')) };
+      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel, UNIT_ONCE);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return gateTimedOut(wp, utLabel, im.commit);
+      // A gate without its result, checks still to give one or no answer at all, is finished by one more
+      // call, which spends no fix round and reads the runs the first one left going.
+      if (!ut || unfinished(ut)) {
+        const left = ut ? leftOpen(ut) : 'every check: the test engineer returned no answer';
+        const finLabel = `${utLabel}+finish`;
+        const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
+          earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel, UNIT_ONCE);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return gateTimedOut(wp, finLabel, im.commit, left);
+        if (!fin || unfinished(fin)) {
+          return noResult(wp, im.commit, fin ? leftOpen(fin) : `the call to finish it returned no answer; before it: ${left}`);
+        }
+        ut = fin;
+      }
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
@@ -1380,6 +1502,7 @@ async function verifyLoop(extraGates) {
     });
     if (t.needs) {
       note('Verify', 'fail', `the round needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+      leftRunning.push(`Verify round ${round} stopped for time and may have left its servers running`);
       return { ok: false, reason: `out of time: the round needs ${t.needs} min` };
     }
     const v = t.r;
@@ -1469,6 +1592,10 @@ async function rejectKernels(ids, counterexample) {
   return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
+// What G5 judges where no gain is claimed (validation_doctrine.md, G5 for a feature): the change is measured all
+// the same, and the measurement shows that it costs no speed.
+const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the noise band, on the run's client";
+
 async function performance(claim) {
   enter('Performance');
   const p = await call('perf_engineer', 'perf_eval', inputs({ claim: claim || '' }), PERF);
@@ -1483,7 +1610,7 @@ async function performance(claim) {
     : notRun ? `not run: ${notRun}`
     : !trusted ? `not trusted: ${p.workload_unchanged !== true ? 'workload changed' : 'the run left the intended path'}; ${p.summary || ''}`
       : claim && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true
-        ? `the gain does not hold at the held-out operating point; ${p.summary || ''}`
+        ? `the claim does not hold at the held-out operating point; ${p.summary || ''}`
         : (p.summary || '');
   note('Performance', ok ? 'pass' : 'fail', why);
   return { ok, trusted, claimed: !!claim, reproduced };
@@ -1756,8 +1883,11 @@ async function runFeature() {
   // Spec's fallback client, which the user took for the source's scenarios.
   const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
   // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
-  // reproduce the source's numbers: what it measures is reported, never a claim.
-  const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : c || '');
+  // reproduce the source's numbers: the source's gain is never the claim on it. A cost the user stated (cost) is
+  // no number of the source's, and stays the claim there. Every feature is judged all the same
+  // (validation_doctrine.md, G5 for a feature): where neither is claimed, G5 shows that it is no slower.
+  const ours = fallback || isTemplate(A.client_script);
+  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;
   if (RESUME === 'verify') return resumeVerify(claimOf);
 
   // Resume after a human approved design.md (a run that stopped at Design).
@@ -1773,7 +1903,7 @@ async function runFeature() {
       return finish('blocked', 'Design');
     }
     note('Design', 'approved', `${approved.work_packages.length} work package(s) from the approved design`);
-    return deliver(approved.work_packages, [], claimOf(approved.perf_claim), true);
+    return deliver(approved.work_packages, [], claimOf(approved.perf_claim, approved.perf_cost), true);
   }
 
   enter('Spec');
@@ -1819,7 +1949,7 @@ async function runFeature() {
       + ` that no human gave; ${C.design_path} goes to the PR's reviewer${design.summary ? `; ${design.summary}` : ''}`);
   }
 
-  return deliver(design.work_packages, [], claimOf(spec.perf_claim), true);
+  return deliver(design.work_packages, [], claimOf(spec.perf_claim, spec.perf_cost), true);
 }
 
 async function runIssue() {

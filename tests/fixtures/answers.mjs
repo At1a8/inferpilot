@@ -25,7 +25,7 @@ export const DEFAULTS = {
   'architect:perf_plan': () => ({ work_packages: [WP('WP1')], handoffs: [{ id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/op_spec.md` }], perf_claim: '-5% TPOT', gate_ok: true }),
   'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', files_changed: ['x.py'], kernel_handoff: null }),
   'implementer:rollback': () => ({ wp: 'x', reset_to: 'base', clean: true }),
-  'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', evidence: 'ok' }),
+  'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
   'verify_engineer:gpus': () => ({ in_use: '' }),
   'verify_engineer:verify': () => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass' }, failures: [], ledger_path: `${RUN}/experiment_ledger.md` }),
   'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'race in hook' }),
@@ -87,6 +87,6 @@ export function parseInputs(prompt) {
 export const MODE_DEFAULTS = {
   issue: { model_path: '/models/m' },
   ci: { model_path: '/models/m' },
-  feature: { model_path: '/models/m', server_script: '/s/server.sh' },
+  feature: { model_path: '/models/m', server_script: '/s/server.sh', client_script: '/s/client.sh' },
   perf: { model_path: '/models/m', workload: '{"isl":8192,"osl":1024,"conc":64}', server_script: '/s/server.sh', client_script: '/s/client.sh' },
 };

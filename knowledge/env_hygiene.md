@@ -101,7 +101,8 @@ belongs to a host user, and the rules below are about those.
   status until it is stopped: it is waited for until it is up, and stopping it once the checks that use
   it are done fails nothing. Before the call that started it returns, stop it with
   `scripts/stop_launch.py` (Killing, below), until that exits 0: the next call works on these GPUs and
-  in this worktree.
+  in this worktree. A role returns before that only when its answer says what still runs and where it
+  writes, for the call that takes it over and stops it (`incomplete`, `roles/test_engineer.md`).
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`

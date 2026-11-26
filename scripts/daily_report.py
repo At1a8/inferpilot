@@ -129,12 +129,13 @@ def network(line: str) -> bool:
                 or any(m.group(0).lower() not in PUBLIC_AMD for m in AMD_HOST.finditer(line)))
 
 
-def leaks(body: str, host: str = "") -> list:
+def leaks(body: str, host: str = "", local: re.Pattern | None = None) -> list:
     """Lines that would make something private public: a secret, local paths, this machine or a sibling, the
-    company's network. A secret is listed redacted, so that the listing does not spread it."""
+    company's network. A secret is listed redacted, so that the listing does not spread it. `local`: the paths
+    that are local on the machine a text comes from (local_paths of its roots), when that is not this one."""
     out = []
     for n, line in enumerate(body.splitlines(), 1):
-        if SECRET.search(line) or LOCAL.search(line) or network(line) or machine(line, host):
+        if SECRET.search(line) or (local or LOCAL).search(line) or network(line) or machine(line, host):
             out.append("%d: %s" % (n, SECRET.sub("<secret>", line).strip()[:160]))
     return out
 
