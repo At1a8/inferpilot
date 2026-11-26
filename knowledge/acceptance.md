@@ -69,6 +69,8 @@ Two rules hold across the dimensions:
   concurrency the scheduler reached); startup time when the change touches loading or compilation.
 - **Gain items:** on the task's own workload (its `client_script`, run unchanged) at an equal budget, the change wins beyond the noise
   band, and, with `held_out` on, still wins at the held-out operating point (`perf_evaluation.md` §1, §3).
+- **Without a claimed gain** a feature is measured all the same, on its scenarios, and is no slower
+  than the baseline beyond the noise band (`validation_doctrine.md`, *G5 for a feature*).
 - **Guard items**, the ones the task's `goal` names, and more of InferPilot's own only with `guards` on:
   workloads where the change should be neutral, or where it costs. The change stays
   inside the noise band (a decode-side change at 100k in / 1k out, where prefill sets the total), or its
@@ -117,7 +119,7 @@ extra items of its feature classes (§1.4).
 |---|---|---|---|---|---|
 | Correctness | required | required; the reproduction becomes a regression test | required; the failing test passes on every lane it failed on | required | required |
 | Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | required when the fix changes code the server runs: gsm8k at most 1 point below the base (§1.1); a loss the issue reports comes back as well | required when the fix changes code the server runs, as for an issue fix; none for a fix to tests, documentation or CI files alone | required, as for a feature (§1.1) | on the requester's data set |
-| Performance | when the feature claims a gain | when the issue is a performance problem: the reported number comes back | — | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
+| Performance | required: the gain the feature claims, or, where it claims none, no slower than the baseline (§1.2) | when the issue is a performance problem: the reported number comes back | — | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
 | Stability | when the task asks (`stability`, G4) | when the task asks (`stability`, G4); a reported crash or hang is judged by its reproduction | a flaky test passes repeatedly (§4) | when the task asks (`stability`, G4) | when the requester asks (`stability`, G4) |
 | Compatibility | required | required | required | required | the requester's platforms |
 | Engineering | required | required | required | required | when the change goes upstream |
@@ -161,9 +163,10 @@ this form after the fact:
   stated next to every result.
 - **Runs:** each accuracy set once per arm; performance one A/B round, one timed run per arm after a
   warm-up (`perf_evaluation.md` §3). A result that misses its expectation (accuracy below its budget,
-  no performance gain) is reproduced at most twice, so three results at most, and the verdict is their
-  median. Failure rates at least 4 per configuration (`validation_doctrine.md`); G4 one run of more
-  than 48 hours; a flaky test passes in every one of at least 10 runs.
+  no performance gain, a slowdown where none is claimed) is reproduced at most twice, so three results
+  at most, and the verdict is their median. Failure rates at least 4 per configuration
+  (`validation_doctrine.md`); G4 one run of more than 48 hours; a flaky test passes in every one of at
+  least 10 runs.
 - **Distribution tests** (a goal that claims a sampler or a verification change keeps the target
   distribution exactly): per tested prompt, compare the sampled tokens with the target distribution
   using a stated test, sample size and significance level, e.g. a chi-square test on at least 10,000
@@ -173,9 +176,10 @@ this form after the fact:
 - **Two lanes at once** (two servers on one node): swap the arms between the lanes every round, and
   report the result both pooled and paired by round.
 - **Verdicts:** a gain counts when the median of the rounds shows it (above zero, or at least the size
-  the goal claims), and with `held_out` on when it also holds at the held-out point; a guard holds when
-  the change stays inside the noise band. Every run is reported, with its range, never only the
-  best (`reward_hacks.md` P9).
+  the goal claims), and with `held_out` on when it also holds at the held-out point; a feature that
+  claims no gain is no slower when that median lies no further below the baseline than the noise band;
+  a guard holds when the change stays inside the noise band. Every run is reported, with its range,
+  never only the best (`reward_hacks.md` P9).
 
 ## 5. Fixed before the work
 

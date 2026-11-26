@@ -45,7 +45,7 @@
 
 | Workload | Budget | Reference arm | Feature arm | Delta | Runs | Artifact |
 |---|---|---|---|---|---|---|
-| claimed | | | | | | |
+| the claim's: a gain, or, where none is claimed, no slower than the baseline | | | | | | |
 | held-out (`perf_evaluation.md` §3; only with `held_out`) | | | | | | |
 
 <!-- Also: the guard workloads the task names (and InferPilot's own with `guards`); out-of-memory / retraction checks; the

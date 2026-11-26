@@ -34,9 +34,13 @@ caching; `../templates/task_definition.md` §1.2). A user without a client may t
 sglang's serving benchmark on the task's workload: for a perf task, it is then the benchmark, and its
 numbers count. A port is measured on its source's scenarios: when the task's client does not run them,
 the run stops at Spec and asks the user, and InferPilot's client for them (`perf.sh` at the source's
-lengths, concurrency and sampling) is a fallback the user may take, whose numbers are reported, never
-claimed (`../roles/director.md`, PHASE=spec); so are those of InferPilot's client when a feature takes
-it for its own workload.
+lengths, concurrency and sampling) is a fallback the user may take, whose numbers never stand for the
+source's gain (`../roles/director.md`, PHASE=spec); nor do those of InferPilot's client when a feature
+takes it for its own workload.
+A feature is measured whether it claims a gain or not (`validation_doctrine.md`, *G5 for a feature*):
+with a claim, the gain shows beyond the noise band; without one, or on InferPilot's client, the feature
+is no slower than the baseline beyond the noise band. So a feature task names its client, as a perf
+task does.
 The table below is for the workloads a task lists beside it, and for choosing one with the user when a
 task has none. Guard workloads are the ones the task's `goal` names; InferPilot adds its own from the
 table only when the task sets `guards`. When there is none, the report says that none was measured.
@@ -90,8 +94,9 @@ outputs never triggered it.
 - Flush the prefix cache between runs; use random-token or seed-fixed distinct prompts so prefix hits do
   not differ between arms.
 - One warm-up, then one A/B round: one timed run per arm, back to back on the same GPUs. When the round
-  shows no gain, reproduce it at most twice and judge on the median of the rounds, reporting every
-  round. Interleave arms when the box is shared.
+  shows no gain, or a slowdown beyond the noise band where no gain is claimed, reproduce it at most
+  twice and judge on the median of the rounds, reporting every round. Interleave arms when the box is
+  shared.
 - Metrics: elapsed time, output tok/s, total tok/s, p50 and max request latency, the concurrency the
   scheduler actually reached (`#running-req` in decode logs), and the feature's own counters (e.g.
   demotions, rows swapped in).

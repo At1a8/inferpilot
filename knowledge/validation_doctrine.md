@@ -17,7 +17,7 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 | G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
 | G3 long context | the feature's own data path is exercised and correct | when the task asks (`long_context`): needle-in-a-haystack, single and multi-needle |
 | G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks (`stability`): the task's performance test at high concurrency on long prompts, run back to back for more than 48 hours (`scripts/stability.sh`) |
-| G5 performance | the claimed benefit exists on the task's workload; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
+| G5 performance | the claimed benefit exists on the task's workload, and a change that claims none is no slower there; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
 
 Notes per gate:
 
@@ -167,6 +167,17 @@ Notes per gate:
   one of three default-rope runs with identical built configs gave a different 16-token text.
 - **Run G3 at more than one concurrency.** Concurrency 1 often passes when concurrency 8–32 fails;
   the batch-level interactions are where bugs live.
+- **G5 for a feature.** Every feature is measured against the baseline, whether it claims a gain or
+  not. Whoever reviews a new feature asks what it does to accuracy and to speed, so its pull request
+  shows both on the feature's scenarios: G2 and G5. A feature that claims a gain shows it there, beyond
+  the noise band (`perf_evaluation.md`). One that claims none is no slower than the baseline beyond the
+  noise band, on the run's client, by the median of its rounds. So is one measured with InferPilot's
+  client (its template, or Spec's fallback for the source's scenarios), on which the source's gain is
+  never the claim. A cost the user states in the request or `goal` (determinism, memory bought with
+  speed) is the claim instead, and the feature loses no more than it; no role states one for the user.
+  A feature that is slower stops the task at Performance for a human, and nothing is rolled back. So
+  a feature task names its client as it names its server, and one that names none is asked for it
+  (`templates/task_definition.md` §1.1).
 
 ## Failure taxonomy — classify before counting
 

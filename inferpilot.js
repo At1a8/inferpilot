@@ -231,12 +231,23 @@ function missingFields(a) {
       + `to the server. Or ${TEMPLATE}: InferPilot's, after the model's sglang cookbook recipe.`,
       'every arm, baseline and feature, is launched with it: the feature arm adds its flags through EXTRA_ARGS', [TEMPLATE]);
   }
-  // A feature is measured on its source's scenarios, which InferPilot's client need not reproduce; a perf
-  // task's workload is the user's own, which it runs.
-  if ((mode === 'perf' || (mode === 'feature' && a.workload)) && !a.client_script) {
-    ask('client_script', 'Which script runs the workload against the server (absolute path)? It reads PORT and writes its logs to OUT_DIR. '
-      + `Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${mode === 'feature' ? ', whose numbers are reported, never a claim' : ''}.`,
-      'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  // G5 measures every feature against the baseline, whether it claims a gain or not (validation_doctrine.md, G5 for
+  // a feature), and every perf task: both name the client that measures. A feature is measured on its source's
+  // scenarios, which InferPilot's client need not reproduce; a perf task's workload is the user's own, which it runs.
+  if ((mode === 'perf' || mode === 'feature') && !a.client_script) {
+    const feature = mode === 'feature';
+    const onTemplate = feature ? " (give the workload with it), which never stands for the gain of the feature's source: on it G5 judges "
+      + 'only that the feature is no slower than the baseline' : '';
+    ask('client_script', `Which script runs the ${feature ? "feature's scenarios" : 'workload'} against the server (absolute path)? `
+      + `It reads PORT and writes its logs to OUT_DIR. Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${onTemplate}.`,
+      feature ? 'G5 measures every feature against the baseline with it, unchanged: the gain it claims, or no slowdown when it claims none'
+        : 'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  }
+  // InferPilot's client runs the task's workload: a feature that takes it gives one. Without one the template would
+  // measure lengths and a concurrency of its own, which nobody chose, and G5 would judge the feature on them.
+  if (mode === 'feature' && isTemplate(a.client_script) && !a.workload) {
+    ask('workload', "Which workload should InferPilot's client run for the feature (input and output lengths, concurrency)?",
+      `client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
   }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
@@ -247,23 +258,22 @@ function missingFields(a) {
     }
   }
   // G4 keeps the task's performance test up for more than 48 hours, and the user asked for it: the task names the
-  // server that test runs against and the client that runs it, also where the mode alone asks for neither (the
-  // server is asked above for a feature and a perf task, the client for a perf task and a feature with a workload).
-  // No template is offered on G4's account.
-  const g4 = mode !== 'scan' && asked(a.stability) === 'true';
-  if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {
+  // server that test runs against and the client that runs it. A feature and a perf task are asked for both above;
+  // an issue or a ci task, whose mode asks for neither, is asked here. No template is offered on G4's account.
+  const g4 = (mode === 'issue' || mode === 'ci') && asked(a.stability) === 'true';
+  if (g4 && !a.server_script) {
     ask('server_script', 'Which script starts the server that G4 keeps up for more than 48 hours (absolute path)? It must pass '
       + '--port $PORT and $EXTRA_ARGS to the server.',
       'stability is on: G4 runs its client back to back against one server, which this script starts');
   }
-  if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {
+  if (g4 && !a.client_script) {
     ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
       + 'writes its logs to OUT_DIR.',
       'stability is on: G4 runs this client back to back against one server');
   }
   // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
   // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
-  if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {
+  if (g4 && isTemplate(a.client_script) && !a.workload) {
     ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
       `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
   }
@@ -1031,9 +1041,11 @@ function nextSteps(status, at) {
     out.rerun_with = {};
   } else if (status === 'needs_input' && at === 'Spec') {
     const fallback = (((R.questions || [])[0] || {}).options || [])[0];
-    out.say = `The run stopped at Spec: ${last}. Give a client that runs the source's scenarios${fallback
-      ? `, or take InferPilot's own (${fallback}): it need not reproduce the source's numbers, so what it measures is reported, never a gate` : ''}. `
-      + `To measure the task's own workload anyway, or to go on without a performance claim, say so in goal and run the task again.${report}`;
+    const own = fallback ? `, or take InferPilot's own (${fallback}): it need not reproduce the source's numbers, so the source's `
+      + 'gain is not claimed on it, and G5 judges there only that the feature is no slower than the baseline' : '';
+    out.say = `The run stopped at Spec: ${last}. Give a client that runs the source's scenarios${own}. `
+      + "To measure the task's own workload anyway, or to go on without a claimed gain, say so in goal and run the task again: "
+      + `G5 then judges on the task's client that the feature is no slower than the baseline.${report}`;
     out.ask = R.questions;
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
@@ -1382,6 +1394,10 @@ async function rejectKernels(ids, counterexample) {
   return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
+// What G5 judges where no gain is claimed (validation_doctrine.md, G5 for a feature): the change is measured all
+// the same, and the measurement shows that it costs no speed.
+const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the noise band, on the run's client";
+
 async function performance(claim) {
   enter('Performance');
   const p = await call('perf_engineer', 'perf_eval', inputs({ claim: claim || '' }), PERF);
@@ -1396,7 +1412,7 @@ async function performance(claim) {
     : notRun ? `not run: ${notRun}`
     : !trusted ? `not trusted: ${p.workload_unchanged !== true ? 'workload changed' : 'the run left the intended path'}; ${p.summary || ''}`
       : claim && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true
-        ? `the gain does not hold at the held-out operating point; ${p.summary || ''}`
+        ? `the claim does not hold at the held-out operating point; ${p.summary || ''}`
         : (p.summary || '');
   note('Performance', ok ? 'pass' : 'fail', why);
   return { ok, trusted, claimed: !!claim, reproduced };
@@ -1601,8 +1617,9 @@ async function runFeature() {
   // Spec's fallback client, which the user took for the source's scenarios.
   const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
   // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
-  // reproduce the source's numbers: what it measures is reported, never a claim.
-  const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : c || '');
+  // reproduce the source's numbers: the source's gain is never the claim on it. Every feature is judged all the
+  // same (validation_doctrine.md, G5 for a feature): where no gain is claimed, G5 shows that it is no slower.
+  const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : String(c || '').trim()) || NO_SLOWER;
 
   // Resume after a human approved design.md (a run that stopped at Design).
   if (RESUME === 'implement') {

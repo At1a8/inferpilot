@@ -81,6 +81,6 @@ export function parseInputs(prompt) {
 export const MODE_DEFAULTS = {
   issue: { model_path: '/models/m' },
   ci: { model_path: '/models/m' },
-  feature: { model_path: '/models/m', server_script: '/s/server.sh' },
+  feature: { model_path: '/models/m', server_script: '/s/server.sh', client_script: '/s/client.sh' },
   perf: { model_path: '/models/m', workload: '{"isl":8192,"osl":1024,"conc":64}', server_script: '/s/server.sh', client_script: '/s/client.sh' },
 };

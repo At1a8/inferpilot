@@ -72,7 +72,8 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 - **Speed Tests and Profiling:** the baseline against the feature in one scenario (input and output
   lengths, concurrency, hardware, TP), the same harness and runs for both arms, absolute numbers and the
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
-  collapsed `<details>` block.
+  collapsed `<details>` block. A feature that claims no gain gives the same table: a reviewer reads in
+  it that the feature is no slower (`validation_doctrine.md`, *G5 for a feature*).
 - **Checklist:** tick only what holds for this PR.
 
 Every number comes from `validation_report.md` or the experiment ledger.

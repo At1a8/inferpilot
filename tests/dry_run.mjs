@@ -569,8 +569,60 @@ const scenarios = [
       `the answer replaces the task's client: ${JSON.stringify(n.rerun_with)}`);
     const taken = await run({ mode: 'feature', task: 't', exp_root: path.dirname(RUN), client_script: fallback }, { 'director:spec': spec({}) });
     const perf = taken.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(taken.result.status === 'ready_for_review' && perf && !perf.ins.claim,
-      `InferPilot's own client, once taken, is measured and reported, never claimed: ${taken.result.status}, claim ${perf && perf.ins.claim}`);
+    check(taken.result.status === 'ready_for_review' && perf && /^no gain is claimed: no slower than the baseline/.test(perf.ins.claim),
+      `on InferPilot's own client, once taken, the source's gain is not the claim, and G5 judges that the feature is no slower: ${
+        taken.result.status}, claim ${perf && perf.ins.claim}`);
+    check(/G5 judges there only that the feature is no slower than the baseline/.test(n.say),
+      `the question says what InferPilot's client is judged on: ${n.say}`);
+  }],
+  ['feature: G5 judges every feature: the gain it claims, and where it claims none, that it is no slower than the baseline', async () => {
+    const noGain = (claim) => ({ 'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: claim }) });
+    const measured = (out) => ({ 'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: true, guards_ok: true,
+      workload_unchanged: true, path_ok: true, ...out }) });
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    for (const claim of ['', '  ']) {
+      const ok = await run({ mode: 'feature', task: 't' }, { ...noGain(claim), ...measured({}) });
+      const pe = ok.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      check(ok.result.status === 'ready_for_review' && pe && NO_SLOWER.test(pe.ins.claim),
+        `a feature that claims no gain (${JSON.stringify(claim)}) is measured, and what G5 judges is that it is no slower: ${
+          ok.result.status}, ${JSON.stringify(pe && pe.ins.claim)}`);
+      const rv = ok.calls.find((c) => c.key === 'reviewer:review');
+      check(rv && pe && rv.ins.claim === pe.ins.claim, `the reviewer reads the same claim: ${JSON.stringify(rv && rv.ins.claim)}`);
+    }
+    const slower = await run({ mode: 'feature', task: 't' },
+      { ...noGain(''), ...measured({ claim_reproduced: false, summary: '-4% output tok/s; the noise band is 1%' }) });
+    check(slower.result.status === 'blocked' && slower.result.stopped_at === 'Performance'
+      && !slower.keys.includes('implementer:rollback') && !slower.keys.includes('reviewer:review'),
+    `a feature that is slower than the baseline stops at Performance, for a human, and nothing is rolled back: ${
+      slower.result.status} at ${slower.result.stopped_at}`);
+    check(slower.result.phases.some((p) => p.phase === 'Performance' && p.verdict === 'fail' && p.summary.includes('-4% output tok/s')),
+      'the result says by how much');
+    const heldOut = await run({ mode: 'feature', task: 't', held_out: true }, { ...noGain(''), ...measured({ held_out_ok: false }) });
+    check(heldOut.result.status === 'blocked' && heldOut.result.stopped_at === 'Performance'
+      && heldOut.result.phases.some((p) => p.phase === 'Performance' && p.summary.includes('the claim does not hold at the held-out operating point')),
+    `with held_out on, no slowdown holds at the held-out point too: ${heldOut.result.status}`);
+    const gain = await run({ mode: 'feature', task: 't' });
+    const gp = gain.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(gain.result.status === 'ready_for_review' && gp && gp.ins.claim === '+20% output tok/s at equal HBM',
+      `a claimed gain stays the claim: ${JSON.stringify(gp && gp.ins.claim)}`);
+    // A design a human approved carries its claim: a resumed run judges an empty one the same way.
+    const resumed = await run({ mode: 'feature', task: 't', resume_from: 'implement', run_dir: RUN }, {
+      'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1')], gate_ok: true, perf_claim: '' }),
+      ...measured({ claim_reproduced: false }),
+    });
+    const rp = resumed.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(resumed.result.status === 'blocked' && resumed.result.stopped_at === 'Performance' && rp && NO_SLOWER.test(rp.ins.claim),
+      `a resumed run whose design claims no gain is judged the same way: ${resumed.result.status}, ${JSON.stringify(rp && rp.ins.claim)}`);
+    // After a review's change Performance runs again, on the same claim.
+    const again = await run({ mode: 'feature', task: 't' }, {
+      ...noGain(''), ...measured({}),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', issue: 'x' }], work_packages: [WP('R1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+    });
+    const evals = again.calls.filter((c) => c.key === 'perf_engineer:perf_eval');
+    check(again.result.status === 'ready_for_review' && evals.length === 2 && evals.every((c) => NO_SLOWER.test(c.ins.claim)),
+      `a review's change is measured again on the same claim: ${again.result.status}, ${evals.length} measurement(s)`);
   }],
   ['feature: with auto_approve_design false, L3 waits for a human-approved design', async () => {
     const r = await run({ mode: 'feature', task: 't', auto_approve_design: false }, {
@@ -1399,7 +1451,7 @@ const scenarios = [
       'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: false, guards_ok: true, workload_unchanged: true, path_ok: true }),
     });
     check(noClaim.result.status === 'ready_for_review' && noClaim.keys.includes('perf_engineer:perf_eval'),
-      `no claim, only guards: ${noClaim.result.status}`);
+      `no claimed gain, held_out off: no slowdown reproduced is enough: ${noClaim.result.status}`);
   }],
   ['perf: held_out, guards, sweep and tune are off by default, and every role sees them', async () => {
     const vanish = {
@@ -1662,18 +1714,26 @@ const scenarios = [
     check(asks(await run({ mode: 'feature', task: 't', model_path: '' }), 'model_path'), 'feature without a model asked');
     check(asks(await run({ mode: 'feature', task: 't', server_script: '' }), 'server_script'), 'feature without a server script asked');
     check(asks(await run({ mode: 'perf', task: 'p', client_script: '' }), 'client_script'), 'perf without a client script asked');
-    check(asks(await run({ mode: 'feature', task: 't', workload: '{"isl":8000}' }), 'client_script'), 'a feature with a workload but no client script asked');
+    check(asks(await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: '' }), 'client_script'),
+      'a feature with a workload but no client script asked');
+    check(asks(await run({ mode: 'feature', task: 't', client_script: '' }), 'client_script'),
+      'and a feature without a workload: G5 measures every feature, so each names the client that measures');
     const plain = await run({ mode: 'feature', task: 't' });
-    check(!asks(plain, 'client_script'), 'a feature without a workload needs no client script');
     const setupIns = plain.calls.find((c) => c.key === 'director:setup');
-    check(setupIns && setupIns.ins.server_script === '/s/server.sh', 'the server script reaches the roles');
+    check(setupIns && setupIns.ins.server_script === '/s/server.sh' && setupIns.ins.client_script === '/s/client.sh',
+      'the server and the client scripts reach the roles');
   }],
-  ['feature: InferPilot\'s templates run only where the user took them, and its client\'s numbers are reported, never claimed', async () => {
+  ['feature: InferPilot\'s templates run only where the user took them, and its client never stands for the source\'s gain', async () => {
     const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
     const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
     check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
-      && eqList(question(none, 'client_script').options, ['template']) && /never a claim/.test(question(none, 'client_script').question),
-      `the questions offer the templates, the client's as reported only: ${JSON.stringify(none.result.questions)}`);
+      && eqList(question(none, 'client_script').options, ['template'])
+      && /never stands for the gain of the feature's source: on it G5 judges only that the feature is no slower/.test(question(none, 'client_script').question),
+      `the questions offer the templates, the client's as no claim of the source's gain: ${JSON.stringify(none.result.questions)}`);
+    // InferPilot's client runs the task's workload: without one G5 would judge the feature on lengths nobody chose.
+    const bare = await run({ mode: 'feature', task: 't', client_script: 'template' });
+    check(asks(bare, 'workload') && eqList((bare.result.questions || []).map((q) => q.field), ['workload']),
+      `a feature that takes InferPilot's client without a workload is asked for the workload: ${JSON.stringify((bare.result.questions || []).map((q) => q.field))}`);
     const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
@@ -1686,12 +1746,14 @@ const scenarios = [
       `Setup renders what the user took, with the task's values: ${JSON.stringify(setupIns && setupIns.ins.harness)}`);
     const perf = took.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(took.result.status === 'ready_for_review' && perf && perf.ins.server_script === rendered.server_script
-      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script && !perf.ins.claim,
-      `the rendered scripts reach the performance engineer, and InferPilot's client claims nothing: ${took.result.status}, claim ${perf && perf.ins.claim}`);
+      && perf.ins.client_script === rendered.client_script && perf.ins.accuracy_script === rendered.accuracy_script
+      && /^no gain is claimed: no slower than the baseline/.test(perf.ins.claim),
+      `the rendered scripts reach the performance engineer, and on InferPilot's client G5 judges no slowdown, not the spec's gain: ${
+        took.result.status}, claim ${perf && perf.ins.claim}`);
     const own = await run({ mode: 'feature', task: 't', accuracy_script: '/s/accuracy.sh' }, setup(rendered));
     const ownIns = own.calls.find((c) => c.key === 'verify_engineer:verify');
-    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.accuracy_script === '/s/accuracy.sh',
-      'the task\'s own scripts win over rendered ones');
+    check(ownIns && ownIns.ins.server_script === '/s/server.sh' && ownIns.ins.client_script === '/s/client.sh'
+      && ownIns.ins.accuracy_script === '/s/accuracy.sh', 'the task\'s own scripts win over rendered ones');
     const unrendered = await run({ mode: 'feature', task: 't', server_script: 'template' }, setup({}));
     check(unrendered.result.status === 'blocked' && unrendered.result.stopped_at === 'Setup'
       && !unrendered.keys.includes('director:spec'), `a template Setup did not render stops the run: ${unrendered.result.status}`);
@@ -1711,7 +1773,7 @@ const scenarios = [
     const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
     check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
       && eqList(question(none, 'client_script').options, ['template'])
-      && !/never a claim/.test(question(none, 'client_script').question),
+      && !/never stands for/.test(question(none, 'client_script').question),
       `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
     const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
@@ -1838,9 +1900,10 @@ const scenarios = [
     check(offers(none).length === 0, `neither question offers a template: ${JSON.stringify(offers(none).map((q) => q.field))}`);
     const ci = await run({ mode: 'ci', task: 'c', stability: 'true', client_script: '/s/client.sh' });
     check(asks(ci, 'server_script') && eqList(fields(ci), ['server_script']), `a ci task is asked for the one it lacks: ${fields(ci)}`);
-    const feature = await run({ mode: 'feature', task: 't', stability: true });
-    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 0,
-      `a feature without a workload, whose server the mode asked for, is asked for its client, with no template: ${fields(feature)}`);
+    // A feature is asked for both scripts by its mode, stability on or off (G5 measures every feature): G4 adds no question.
+    const feature = await run({ mode: 'feature', task: 't', stability: true, client_script: '' });
+    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 1,
+      `a feature is asked for its client once, by its mode, as with stability off: ${fields(feature)}`);
     const noServer = await run({ mode: 'feature', task: 't', stability: true, server_script: '', client_script: '/s/client.sh' });
     check(fields(noServer).filter((f) => f === 'server_script').length === 1, `the server is asked once where the mode asks too: ${fields(noServer)}`);
     const off = await run({ mode: 'issue', task: 't', stability: false });
@@ -1849,7 +1912,7 @@ const scenarios = [
     const tpl = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template' });
     check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
     const tplFeature = await run({ mode: 'feature', task: 't', stability: true, client_script: 'Template' });
-    check(asks(tplFeature, 'workload'), 'the same for a feature');
+    check(asks(tplFeature, 'workload') && eqList(fields(tplFeature), ['workload']), `the same for a feature, asked once: ${fields(tplFeature)}`);
     const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
     const load = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template',
       workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);

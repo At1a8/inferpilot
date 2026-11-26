@@ -50,7 +50,7 @@
 | G2 accuracy | gsm8k (1319); gpqa_diamond and simple_qa as well when `goal` says the change may lose accuracy | each at most 1 point below the baseline |
 | G3 long context (only with `long_context` on; else `not run: not asked`) | | e.g. NIAH pass rate within baseline spread, feature engaged |
 | G4 stability (only with `stability` on; else `not run: not asked`) | the run's `client_script` at <its highest concurrency, on long prompts>, run back to back for more than 48 hours (`scripts/stability.sh`) | no crash, hang, out-of-memory or failed request; hour by hour, the last 6 hours' throughput no lower and memory no higher than the range of the first 6 hours' values allows |
-| G5 performance | | e.g. >= +X% output tok/s at equal HBM on <workload> |
+| G5 performance (every feature) | the run's `client_script` on <the source's scenarios, or the task's own workload> | a claimed gain: e.g. >= +X% output tok/s at equal HBM; no claimed gain, or InferPilot's client: no slower than the baseline beyond the noise band |
 
 ## Non-goals and unsupported combinations
 

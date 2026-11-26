@@ -38,8 +38,11 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      server; say what is missing. Never write them for the user: a script you wrote is not the user's
      baseline. A question for one offers `template`, InferPilot's (`task_definition.md` §1.2): the
      server after the model's sglang cookbook recipe, and the client, sglang's serving benchmark on the
-     workload, whose numbers count for a perf task and are reported, never a claim, for a feature. Only
-     the user takes it; never answer `template` yourself.
+     workload, whose numbers count for a perf task; for a feature they never stand for its source's
+     gain, and G5 judges on them only that it is no slower than the baseline. Only the user takes it;
+     never answer `template` yourself. A feature needs its client as a perf task does, whether it
+     claims a gain or not (`knowledge/validation_doctrine.md`, *G5 for a feature*), and one that takes
+     the template gives the `workload` it runs.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
@@ -51,8 +54,8 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      fields of their own, so a `goal` the caller gave does not drop what the request asked. G4 keeps
      the task's performance test running against one server, and the user who asks for it says what
      it keeps up: with `stability` on, a task without a `server_script` or without a `client_script`
-     is asked for it, in any mode. Where only G4 needs the script (an issue's or a ci task's, the
-     client of a feature without a workload), the question offers no `template`. A task that names
+     is asked for it, in any mode. Where only G4 needs the script (an issue's or a ci task's: a
+     feature and a perf task name both anyway), the question offers no `template`. A task that names
      InferPilot's client all the same (`client_script: template`) is asked for the `workload` it runs.
    - feature skills (feature mode): `python3 <inferpilot_dir>/scripts/find_skill.py "<request, task title>"`;
      list each candidate in `assumptions` as `feature skill candidate: <id> (<status>)`. The director
