@@ -64,19 +64,21 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 - **Accuracy Tests:** GSM8K on all 1319 questions with the feature at its default settings, next to the
   baseline measured with the same harness; name the model, hardware, TP, harness and sampling. A loss the
   validation found elsewhere gets one sentence; other suites only when the change targets them (NIAH for
-  a long-context feature). A fix that changes code the server runs gives the same two scores, the fix
-  next to the base (`validation_doctrine.md`, *G2 for a fix*); where the base cannot serve the
-  configuration, next to the last commit that served it, named, or alone, saying that it has no
-  baseline. A fix to tests, documentation or CI files alone says that it changes no code the server
-  runs, and gives no table; one for a model that answers no text questions says that instead.
+  a long-context feature). A fix that changes anything but tests, documentation and CI files gives
+  the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*); where the
+  base cannot serve the configuration, next to the last commit that served it, named, or alone,
+  saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
+  changes no code the server runs, and gives no table; one for a model that answers no text questions
+  says that instead.
 - **Speed Tests and Profiling:** the baseline against the feature in one scenario (input and output
   lengths, concurrency, hardware, TP), the same harness and runs for both arms, absolute numbers and the
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
   collapsed `<details>` block. A feature that claims no gain gives the same table: a reviewer reads in
   it that the feature is no slower (`validation_doctrine.md`, *G5 for a feature*). So does a fix that
-  changes code the server runs, the fix next to the base (*G5 for a fix*); where the base cannot serve
-  the configuration, next to the last commit that served it, named, or alone, saying that it has no
-  baseline. The fix of a performance problem shows the number that fell and the number it restores.
+  changes anything but tests, documentation and CI files, the fix next to the base (*G5 for a fix*);
+  where the base cannot serve the configuration, next to the last commit that served it, named, or
+  alone, saying that it has no baseline. The fix of a performance problem shows the number that fell
+  and the number it restores.
   A fix to tests, documentation or CI files alone says that it changes no code the server runs, and
   gives no table.
 - **Checklist:** tick only what holds for this PR.

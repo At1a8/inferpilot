@@ -1480,6 +1480,15 @@ async function verifyLoop(extraGates) {
     }
     const failing = blocking.map((f) => `${f.gate}${f.failure_class ? `:${f.failure_class}` : ''}`).join(', ');
     note('Verify', 'fail', failing || v.summary || 'gates failed');
+    // A fix whose change could not be put into effect on this machine (a version that does not install here) was
+    // not measured, and no change to the code repairs that: nothing is investigated, and a human decides.
+    const unset = blocking.filter((f) => String(f.failure_class || '').trim().toLowerCase() === 'environment');
+    if (unset.length) {
+      const why = `the fix's change could not be put into effect on this machine (${unset.map((f) => f.gate).join(', ')}): `
+        + `${unset[0].evidence || unset[0].counts || 'see the round'}; nothing was measured, and a human decides`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     if (round >= MAX_INVESTIGATE) return { ok: false, reason: `investigation budget exhausted (${failing})` };
 
     enter('Investigate');
@@ -1555,7 +1564,8 @@ const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the no
 // G5 for a fix (validation_doctrine.md). `when` says when a mode measures: true always (a feature, a perf task,
 // a performance problem, whose number must come back whatever its fix changes), 'fix' when the fix changes code
 // the server runs. The verify engineer reads that from the fix's diff, as it does for G2: a fix to tests,
-// documentation or CI files alone is not measured. A fix whose last Verify round did not say so is measured.
+// documentation or CI files alone is not measured. Any other file counts as code the server runs, by its path:
+// whether the server in fact runs it is not judged. A fix whose last Verify round did not say so is measured.
 const NOT_MEASURED = 'not run: no code the server runs changed';
 const unmeasured = (when) => when === 'fix' && C.server_code_changed === false;
 // The claim the reviewer reads: none where G5 did not run.
