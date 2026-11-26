@@ -222,6 +222,9 @@ function templateLoadGaps(a) {
   const given = (v) => v != null && String(v).trim() !== '';
   return Object.keys(TEMPLATE_LOAD).filter((k) => !given(workload[k]) && !given(harness[TEMPLATE_LOAD[k][0]]));
 }
+// The same in words, for a question: what the task says of the load InferPilot's client runs.
+const loadGapWords = (gaps) => (gaps.length < Object.keys(TEMPLATE_LOAD).length
+  ? `gives no ${gaps.map((k) => TEMPLATE_LOAD[k][1]).join(' and no ')} for it` : 'names none');
 
 // What a definition still lacks before its mode can start; every gap is a question for the user.
 function missingFields(a) {
@@ -265,8 +268,7 @@ function missingFields(a) {
   // the template would fill with lengths or a concurrency of its own, and G5 would judge the change on them.
   // A perf task without any workload is asked for one above.
   const gaps = isTemplate(a.client_script) ? templateLoadGaps(a) : [];
-  const lacks = gaps.length < Object.keys(TEMPLATE_LOAD).length
-    ? `gives no ${gaps.map((k) => TEMPLATE_LOAD[k][1]).join(' and no ')} for it` : 'names none';
+  const lacks = loadGapWords(gaps);
   if ((mode === 'feature' || (mode === 'perf' && a.workload)) && gaps.length) {
     ask('workload', `Which workload should InferPilot's client run${mode === 'feature' ? ' for the feature' : ''} (input and output `
       + 'lengths, concurrency)?',
@@ -1208,7 +1210,9 @@ function nextSteps(status, at) {
     const what = R.questions.map((q) => FIX_NEEDS[q.field]).filter(Boolean).join(' and ');
     out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over.${report}`;
     out.ask = R.questions;
-    out.rerun_with = { answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
+    const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
+    out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1308,21 +1312,29 @@ function askWorkload(spec) {
 }
 
 // A fix that changes code the server runs is measured against the base: G2 on gsm8k, G5 on the task's client. So
-// a fix needs a model and a client. An issue or a ci run can get this far without them: it named a stop before
-// the fix that its route skipped (an existing fix PR has no Diagnose) or that the control file lifted. It stops
-// here and asks, before any code changes; null when it has both.
-const FIX_NEEDS = { model_path: 'the model', client_script: 'the client' };
+// a fix needs a model and a client, and of a task that names InferPilot's client, the whole workload it runs.
+// Intake asks all three of a task that can reach a fix. An issue or a ci run can get this far without them: it
+// named a stop before the fix that its route skipped (an existing fix PR has no Diagnose) or that the control
+// file lifted. It stops here and asks, before any code changes; null when it lacks nothing.
+const FIX_NEEDS = { model_path: 'the model', client_script: 'the client', workload: "the whole workload of InferPilot's client" };
 function askForFix(at) {
-  const lacks = Object.keys(FIX_NEEDS).filter((k) => !C[k]);
+  const lacks = ['model_path', 'client_script'].filter((k) => !C[k]);
+  // Setup rendered the template the task named with the workload the task had: what that leaves out the template
+  // filled with lengths or a concurrency of its own, and G5 would judge the fix on a load nobody chose.
+  const gaps = isTemplate(A.client_script) ? templateLoadGaps(A) : [];
+  if (gaps.length) lacks.push('workload');
   if (!lacks.length) return null;
-  const gate = { model_path: 'G2 on gsm8k', client_script: "G5 on the task's client" };
-  const why = `the run reached a fix without ${lacks.map((k) => FIX_NEEDS[k].replace('the ', 'a ')).join(' and ')}, and a fix that changes `
-    + `code the server runs is measured against the base: ${lacks.map((k) => gate[k]).join(', ')}`;
+  const without = { model_path: 'a model', client_script: 'a client', workload: FIX_NEEDS.workload };
+  const gate = { model_path: 'G2 on gsm8k', client_script: "G5 on the task's client",
+    workload: `G5 on InferPilot's serving benchmark, which runs the task's workload, and the task ${loadGapWords(gaps)}` };
+  const why = `the run reached a fix without ${lacks.map((k) => without[k]).join(' and ')}, and a fix that changes code the server runs `
+    + `is measured against the base: ${lacks.map((k) => gate[k]).join(', ')}`;
   note(at, 'needs_input', why);
   const ask = {
     model_path: `Which model should G2 measure the fix on (local path)? ${MODE === 'issue' ? "The reporter's model"
       : 'The model the failing test serves'}, when it is on this machine.`,
     client_script: 'Which script runs the workload that G5 measures the fix on (absolute path)? It reads PORT and writes its logs to OUT_DIR.',
+    workload: "Which workload should InferPilot's client run for the fix (input and output lengths, concurrency)?",
   };
   R.questions = lacks.map((k) => ({ field: k, question: ask[k], why }));
   return finish('needs_input', at);

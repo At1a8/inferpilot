@@ -61,6 +61,9 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   and the fix is no slower (*G5 for a fix*). It is the benchmark the report or the failing test runs,
   when there is one. A task that names none is asked for it, and no template is offered; one that
   stops before its fix (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none.
+  Where the control file lifts that stop, the run asks before any code changes for what the fix
+  lacks: the model, the client, and of a task that names InferPilot's client all the same, what its
+  `workload` leaves out.
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,

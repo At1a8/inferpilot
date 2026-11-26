@@ -14,9 +14,17 @@ from test_readme import ROOT
 ALL = set(G.TASKS)
 
 
-def scenario_prefixes():
+def scenario_names():
+    """The name of every scenario of tests/dry_run.mjs: the string that opens its ['name', async () => {...}]
+    entry in the scenarios table."""
     src = (ROOT / "tests" / "dry_run.mjs").read_text(encoding="utf-8")
-    return {m.group(1) for m in re.finditer(r"^  \['([a-z_]+): ", src, re.M)}
+    return re.findall(r"^  \['((?:[^'\\\n]|\\.)*)', async \(\) => \{$", src, re.M)
+
+
+def scenario_prefixes():
+    """What the dry run's --only matches: a scenario's name up to its first colon, whatever is in it. A prefix
+    of several words is a prefix like any other: when no group names it, its scenarios run in no group."""
+    return {name.split(":")[0] for name in scenario_names()}
 
 
 def test_classes():
@@ -34,6 +42,14 @@ class PlacementTest(unittest.TestCase):
             for p in G.GROUPS[g]["dry_run"]:
                 placed.setdefault(p, []).append(g)
         self.assertEqual({}, {p: gs for p, gs in placed.items() if len(gs) > 1}, "in more than one group")
+        # Every entry of the table is read, whatever its prefix is made of: one this check passed over would be
+        # run by no group, and missed by nobody.
+        src = (ROOT / "tests" / "dry_run.mjs").read_text(encoding="utf-8")
+        start = src.index("\nconst scenarios = [\n")
+        table = src[start:src.index("\n];\n", start)]
+        self.assertEqual(len(re.findall(r"^  \[", table, re.M)), len(scenario_names()),
+                         "a scenario whose name this check cannot read: write it ['prefix: ...', async () => {")
+        self.assertEqual([], [n for n in scenario_names() if ": " not in n], "scenarios without a prefix")
         self.assertEqual([], sorted(scenario_prefixes() - set(placed)), "scenarios no group runs (tests/groups.json)")
         self.assertEqual([], sorted(set(placed) - scenario_prefixes()), "groups.json names scenarios there are none of")
 

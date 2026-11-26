@@ -835,7 +835,7 @@ const scenarios = [
     const rv = r.calls.find((c) => c.key === 'implementer:rollback' && c.ins.revert);
     check(rv && rv.ins.revert === 'c_K', `a kernel regression reverts the commit the run integrated: ${rv && JSON.stringify(rv.ins)}`);
   }],
-  ['resume_from verify: settings are compared with their boundaries and as the harness renders them; the task and the goal stay the run\'s', async () => {
+  ['setup: a run resumed from Verify has its settings compared with their boundaries and as the harness renders them; the task and the goal stay the run\'s', async () => {
     const resumed = (mode, extra, args = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN, ...args }, {
       'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra(ins) }) });
     const saved = (fields) => (ins) => ({ task_definition: { ...ins.task_def, ...fields } });
@@ -871,7 +871,7 @@ const scenarios = [
     check(unchanged.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && !p.summary.includes('not the run\'s')),
       'a goal that is the run\'s is not reported as another');
   }],
-  ['resume_from verify: stops at Setup without the records Verify and Reply read; no package left is a state of its own', async () => {
+  ['setup: a run resumed from Verify stops without the records Verify and Reply read; no package left is a state of its own', async () => {
     const resumed = (mode, extra) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
       'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra }) });
     const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
@@ -1608,7 +1608,7 @@ const scenarios = [
     const prose = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ run_dir: RUN, baseline: 'PASS - 3/3' }) });
     check(prose.result.status === 'blocked' && prose.result.stopped_at === 'Setup', 'a baseline in prose without baseline_status is rejected');
   }],
-  ['issue and ci: a task that can reach a fix names the model G2 measures it on; one that stops before the fix needs none', async () => {
+  ['arguments: an issue or a ci task that can reach a fix names the model G2 measures it on; one that stops before the fix needs none', async () => {
     check(asks(await run({ mode: 'issue', task: 'i', model_path: '' }), 'model_path'), 'an issue without a model asked');
     check(asks(await run({ mode: 'ci', task: 'c', model_path: '' }), 'model_path'), 'a ci task without a model asked');
     check(asks(await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Implement' }), 'model_path'),
@@ -1637,7 +1637,7 @@ const scenarios = [
         `${mode}: the model, the server script and the accuracy script reach the verify engineer, who measures the fix`);
     }
   }],
-  ['issue and ci: no fix starts without a model, also when the stop before it was on a phase the route skips or the control file lifted it', async () => {
+  ['stop_after: no fix of an issue or a ci task starts without a model, also when the stop before it was on a phase the route skips or the control file lifted it', async () => {
     const existing = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
       triage_path: `${RUN}/t.md` }) };
     const skipped = await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Diagnose' }, existing);
@@ -1668,7 +1668,7 @@ const scenarios = [
     check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci) && !ci.keys.includes('implementer:implement'),
       `ci: the same, after Bisect: ${ci.result.status} at ${ci.result.stopped_at}`);
   }],
-  ['issue and ci: a task that can reach a fix names the client G5 measures it on; one that stops before the fix needs none', async () => {
+  ['arguments: an issue or a ci task that can reach a fix names the client G5 measures it on; one that stops before the fix needs none', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);
     for (const [mode, task] of [['issue', 'i'], ['ci', 'c']]) {
       const none = await run({ mode, task, client_script: '' });
@@ -1704,7 +1704,7 @@ const scenarios = [
         `${mode}: the task's client and the run's server script reach the performance engineer, who measures the fix`);
     }
   }],
-  ['issue and ci: no fix starts without a client either, when the stop before it was on a phase the route skips or the control file lifted it', async () => {
+  ['stop_after: no fix of an issue or a ci task starts without a client either, nor on a workload InferPilot\'s client has only a part of, when the stop before it was on a phase the route skips or the control file lifted it', async () => {
     const asked = (r, want) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), want)
       && want.every((f) => f in ((((r.result.next || {}).rerun_with || {}).answers) || {}));
     let reproduced = false;
@@ -1742,6 +1742,55 @@ const scenarios = [
     check(pr.result.status === 'needs_input' && pr.result.stopped_at === 'Reproduce' && asked(pr, ['client_script'])
       && !pr.keys.includes('implementer:implement'),
       `an existing fix PR is not applied without a client: ${pr.result.status} at ${pr.result.stopped_at}`);
+    // A task that stops before its fix is asked nothing about the workload of InferPilot's client, and Setup renders
+    // the template with what the task had. Where the control file lifts the stop, the run asks for what the workload
+    // leaves out before any code changes: G5 never judges a fix on lengths or a concurrency of the template's own.
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const lifting = (answers) => {
+      let shown = false;
+      return [{ ...rendered, ...answers, 'issue_triager:reproduce': () => {
+        shown = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      } }, { control: () => (shown ? { stop_after: '' } : {}) }];
+    };
+    const partArgs = { mode: 'issue', task: 'i', client_script: 'template', workload: '{"conc":64}', stop_after: 'Diagnose' };
+    const stays = await run(partArgs, rendered);
+    check(stays.result.status === 'stopped' && stays.result.stopped_at === 'Diagnose',
+      `a run that stops before its fix is asked nothing about the template's workload: ${stays.result.status} at ${stays.result.stopped_at}`);
+    const part = await run(partArgs, ...lifting());
+    const pq = ((part.result.next || {}).ask || [])[0] || {};
+    check(part.result.status === 'needs_input' && part.result.stopped_at === 'Diagnose' && asked(part, ['workload'])
+      && !part.keys.includes('implementer:implement') && part.keys.includes('director:report'),
+      `the stop lifted, no fix starts on a workload the template has a part of: ${part.result.status} at ${part.result.stopped_at}, asks ${
+        JSON.stringify(((part.result.next || {}).ask || []).map((q) => q.field))}`);
+    check(/the task gives no input length and no output length for it/.test(pq.why || '') && /lengths, concurrency/.test(pq.question || ''),
+      `the question says what the workload leaves out: ${JSON.stringify(pq)}`);
+    const again = (part.result.next || {}).rerun_with || {};
+    check(again.workload === '' && /Give the whole workload of InferPilot's client, and run the task again/.test(part.result.next.say),
+      `the part the task gave is cleared for the next run, so that the answer takes its place: ${JSON.stringify(again)} | ${part.result.next.say}`);
+    const whole = await run({ ...partArgs, ...again, answers: { workload: '{"isl":8192,"osl":1024,"conc":64}' } }, ...lifting());
+    const pe = whole.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(whole.result.status === 'ready_for_review' && pe && JSON.stringify(pe.ins.workload) === '{"isl":8192,"osl":1024,"conc":64}'
+      && pe.ins.client_script === `${RUN}/scripts/perf.sh`,
+      `with the answer the fix goes on, and is measured on the whole workload: ${whole.result.status}, ${pe && JSON.stringify(pe.ins.workload)}`);
+    const none = await run({ mode: 'issue', task: 'i', client_script: 'template', stop_after: 'Diagnose' }, ...lifting());
+    const nq = ((none.result.next || {}).ask || [])[0] || {};
+    check(none.result.status === 'needs_input' && asked(none, ['workload']) && /the task names none/.test(nq.why || '')
+      && !('workload' in ((none.result.next || {}).rerun_with || {})),
+      `a task that names the template and no workload at all is asked the same, with nothing to clear: ${JSON.stringify(none.result.next)}`);
+    const inHarness = await run({ ...partArgs, harness: '{"ISL":8192,"OSL":1024}' }, ...lifting());
+    check(inHarness.result.status === 'ready_for_review', `lengths given in harness count, as at Intake: ${inHarness.result.status}`);
+    let classified2 = false;
+    const ciPart = await run({ mode: 'ci', task: 'c', client_script: 'template', workload: '{"isl":8192}', model_path: '', stop_after: 'Bisect' }, {
+      ...rendered,
+      'ci_guardian:classify': () => {
+        classified2 = true;
+        return { failure_class: 'code_regression', failing_test_cmd: 'pytest test_x.py', window: 'a..b', evidence: 'new regression', triage_path: `${RUN}/ci_triage.md` };
+      },
+    }, { control: () => (classified2 ? { stop_after: '' } : {}) });
+    check(ciPart.result.status === 'needs_input' && ciPart.result.stopped_at === 'Bisect' && asked(ciPart, ['model_path', 'workload'])
+      && /Give the model and the whole workload of InferPilot's client/.test(ciPart.result.next.say),
+      `ci: the same, asked together with what else the fix lacks: ${JSON.stringify((ciPart.result.next || {}).ask)} | ${ciPart.result.next.say}`);
   }],
   ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
     const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
