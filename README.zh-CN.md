@@ -258,7 +258,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
-| `knowledge_pr.md` | curator 向 InferPilot 仓库提的 PR 的描述 |
+| `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 
 scan 的 `daily_report.md` 就是为分享而写的，`scripts/daily_report.py check` 已经确认它不含本机信息。`GITHUB_TOKEN` 能写这个仓库时（第 1 步），director 会把它作为标题为 `InferPilot daily report <date>` 的 issue 分享到 InferPilot 仓库（当天的已经在那里时除外），结果里会给出它的链接。没有这样的 token、而当天的日报还不在那里时，在 GitHub 上 InferPilot 仓库里新建一个 issue，用这个标题，把整个文件粘贴进去；或者设好 token 后运行 `python3 scripts/share_daily_report.py exp/scan_<time>/daily_report.md`。Dispatch 失败的 scan 什么都不分享：它留下的日报可能不完整。文件第一行是一个隐藏标记，下一次 scan 不管在哪个容器里，都能靠它在那里找到这份日报，并标出之后的变化。

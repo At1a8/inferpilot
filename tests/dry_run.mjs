@@ -292,6 +292,63 @@ const scenarios = [
       counts: {}, leads: [lead] }) });
     check(!scan.keys.includes('issue_triager:spinoff'), 'a scan takes no leads');
   }],
+  ['next: knowledge changes the curator could not propose reach the user with the saved patch and why', async () => {
+    const updates = [{ file: 'knowledge/known_issues.md', change: 'KI-007 added' }];
+    const held = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/knowledge.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const say = (held.result.next.user || []).find((u) => u.includes('knowledge.patch'));
+    check(say && say.includes('GITHUB_TOKEN is not set')
+      && say.endsWith(`:\n    python3 scripts/propose_knowledge.py --run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch ${RUN}/knowledge.patch`),
+      `the saved patch is the user's to propose, with why the run did not, by a command on a line of its own that nothing follows: ${say}`);
+    check(held.result.knowledge_notes === 'GITHUB_TOKEN is not set' && held.result.knowledge_patch === `${RUN}/knowledge.patch`,
+      'the curator\'s notes and its patch are in the result');
+    const opened = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates,
+      pr_url: 'https://github.com/o/inferpilot/pull/7', patch_path: `${RUN}/knowledge.patch`, notes: '' }) });
+    check(opened.result.next.user.some((u) => u.endsWith('pull/7')) && !opened.result.next.user.some((u) => u.includes('--patch'))
+      && opened.result.knowledge_patch === '', 'a pull request that is open needs no patch proposed');
+    check(say.includes(`Unless exp_root is on a host mount, ${RUN} goes with the task's container: copy it out first, under the same name,`
+      + ' which the branch takes, and give the command\'s three paths as they are in the copy'),
+      `the user is told the run directory may not outlive the container, and what the command needs of a copy: ${say}`);
+    const odd = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '',
+      patch_path: `${RUN}/my runs/it's; echo x.patch`, notes: 'GITHUB_TOKEN is not set' }) });
+    const quoted = (odd.result.next.user || []).find((u) => u.includes('--patch')) || '';
+    check(quoted.endsWith(`--run-dir ${RUN} --body ${RUN}/knowledge_pr.md --patch '${RUN}/my runs/it'\\''s; echo x.patch'`),
+      `a path with a space or a quote is one word of the command the user pastes, and the command's last: ${quoted}`);
+    const refused = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates, pr_url: '', patch_path: '',
+      notes: 'exit 3: knowledge/known_issues.md line 12 names a local path' }) });
+    const left = (refused.result.next.user || []).find((u) => u.includes('no patch of them was saved')) || '';
+    check(left.includes('exit 3: knowledge/known_issues.md line 12 names a local path') && left.includes(`${INFERPILOT}/knowledge`)
+      && left.includes('goes with the task\'s container') && !refused.result.next.user.some((u) => u.includes('--patch')),
+      `changes neither proposed nor saved reach the user with the curator's reason and where they are: ${left}`);
+    const none = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => ({ updates: [], pr_url: '', patch_path: '', notes: '' }) });
+    check(!(none.result.next.user || []).some((u) => u.includes('knowledge')), 'a curator that changed nothing leaves the user nothing to propose');
+    // No answer is not "changed nothing": the curator may have edited knowledge/ and saved a patch before it.
+    const where = [`${INFERPILOT}/knowledge`, `${RUN}/knowledge.patch`, `${RUN}/knowledge_pr.md`,
+      'the checkout and the run directory go with the task\'s container: copy what is there out'];
+    const silent = await run({ mode: 'feature', task: 't' }, { 'curator:learn': () => null });
+    const unknown = (silent.result.next.user || []).filter((u) => u.includes('knowledge'));
+    check(unknown.length === 1 && unknown[0].startsWith('the curator returned no answer, so what it changed under knowledge/ is not known: look at')
+      && where.every((w) => unknown[0].includes(w)) && !unknown[0].includes('stop it')
+      && silent.result.knowledge_notes === 'the curator returned no answer',
+      `a curator without an answer leaves the user what to look at and keep: ${unknown}`);
+    const late = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, { 'curator:learn': async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { updates, pr_url: '', patch_path: `${RUN}/knowledge.patch`, notes: '' };
+    } });
+    const running = (late.result.next.user || []).filter((u) => u.includes('knowledge'));
+    check(running.length === 1 && running[0].startsWith('the curator timed out, so what it changed under knowledge/ is not known: it may still be'
+      + ' editing or proposing, so stop it first. Then look at') && where.every((w) => running[0].includes(w))
+      && late.result.knowledge_notes === 'the curator timed out' && !late.result.knowledge_patch,
+      `a curator that timed out is stopped first, and its answer, which came late, is not used: ${running}`);
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'curator.md'), 'utf8'), 'learn').replace(/\s+/g, ' ');
+    check(doc.includes('return it as `patch_path`') && doc.includes('only where `RUN_DIR` does, with `exp_root` on a host mount'),
+      'the curator returns the patch, which outlives the container only on a host mount');
+    check(doc.includes('When neither exists') && doc.includes('`notes` says what it refused') && doc.includes('`--dry-run` writes none')
+      && doc.includes('`knowledge.patch.earlier`'), 'the curator says why nothing was saved, and what a refusal does to an earlier patch');
+    check(doc.includes('So does a file of the run named after it (`spinoff/KI-007.md`), in the change and in the description')
+      && doc.includes('The same when it can make no patch of the change and says why (exit 1): a file that is not UTF-8 text, a binary'
+        + ' file, a symbolic link'), 'the curator knows which names keep their number, and that a change no patch is made of is refused');
+  }],
   ['feature: investigation budget is bounded', async () => {
     const r = await run({ mode: 'feature', task: 't', max_investigate_rounds: 2 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
