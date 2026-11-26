@@ -786,6 +786,21 @@ const scenarios = [
     check(await claimOn({ perf_claim: BOUND, perf_cost: true }, ours) === BOUND && await claimOn({ perf_claim: BOUND, perf_cost: true }) === BOUND,
       'a cost the user stated stays the claim, with InferPilot\'s client and with the task\'s own');
     check(NO_SLOWER.test(await claimOn({ perf_claim: BOUND }, ours)), 'a claim not marked as a cost is a gain, never claimed with InferPilot\'s client');
+    // So the answer always says which it is: one that leaves it out is no answer, and is asked for again.
+    const unsaid = (ins) => Object.fromEntries(Object.entries({ ...DEFAULTS['director:resume'](ins), perf_claim: BOUND })
+      .filter(([k]) => k !== 'perf_cost'));
+    const resumeArgs = { mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, ...ours };
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const silent = await run(resumeArgs, { ...rendered, 'director:resume': unsaid });
+    check(silent.result.status === 'blocked' && silent.result.stopped_at === 'Setup' && !silent.keys.includes('verify_engineer:verify')
+      && silent.result.phases.some((p) => p.phase === 'Setup' && p.summary.includes('the director restored nothing from the run directory')),
+      `an answer that does not say whether the claim is a cost restores nothing: ${silent.result.status} at ${silent.result.stopped_at}`);
+    const saidLater = await run(resumeArgs, { ...rendered,
+      'director:resume': (ins, n) => (n === 1 ? unsaid(ins) : { ...unsaid(ins), perf_cost: true }),
+    }, { schemaRetries: 1 });
+    const costClaim = (saidLater.calls.find((c) => c.key === 'perf_engineer:perf_eval') || { ins: {} }).ins.claim;
+    check(saidLater.keys.filter((k) => k === 'director:resume').length === 2 && costClaim === BOUND,
+      `asked again, it says so, and the cost stays the claim: ${costClaim}`);
     const late = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, stop_after: 'Design' });
     check(late.result.status === 'ready_for_review', `a stop before Verify never holds in a run resumed there: ${late.result.status}`);
     const approved = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
@@ -803,6 +818,22 @@ const scenarios = [
     const heldOut = await resumed((ins) => ({ task_definition: { ...ins.task_def, held_out: true } }));
     check(stoppedFor(heldOut, 'would measure otherwise than the one it resumes (held_out not as its run.json has them)'),
       `a held-out check the run had, dropped: ${JSON.stringify(heldOut.result.phases.at(-1))}`);
+    // G3 and G4 are the task's to ask for, and G3's test the task's own: a resume that leaves one out, or names
+    // another test, would be ready with less measured than the run was to measure.
+    const g3 = { long_context: true, long_context_script: '/s/g3.sh' };
+    const had = (fields) => (ins) => ({ task_definition: { ...ins.task_def, ...fields } });
+    const noG3 = await resumed(had(g3));
+    check(stoppedFor(noG3, '(long_context, long_context_script not as its run.json has them)'),
+      `G3, which the run had, left out: ${JSON.stringify(noG3.result.phases.at(-1))}`);
+    const otherG3 = await resumed(had(g3), { long_context: 'true', long_context_script: '/s/other.sh' });
+    check(stoppedFor(otherG3, '(long_context_script not as its run.json has them)'),
+      `G3 on another test than the run's: ${JSON.stringify(otherG3.result.phases.at(-1))}`);
+    const noG4 = await resumed(had({ stability: true }));
+    check(stoppedFor(noG4, '(stability not as its run.json has them)'), `G4, which the run had, left out: ${JSON.stringify(noG4.result.phases.at(-1))}`);
+    const sameGates = await resumed(had({ long_context: true, stability: 'true' }), { ...g3, long_context: 'true', stability: true });
+    const gated = sameGates.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sameGates.result.status === 'ready_for_review' && gated && gated.ins.long_context === true && gated.ins.stability === true
+      && gated.ins.long_context_script === '/s/g3.sh', `the same gates and the same test go on: ${sameGates.result.status}`);
     const workload = { input_len: 8192, output_len: 1024, concurrency: 64 };
     const sameRun = await resumed((ins) => ({ task_definition: { ...ins.task_def, workload: { concurrency: 64, output_len: 1024, input_len: 8192 },
       tune: 'false', apply_prs: '#46329' } }), { workload, client_script: '/s/client.sh', apply_prs: ['#46329'] });
@@ -815,6 +846,8 @@ const scenarios = [
     const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
     check(doc.includes('the commit the run\'s last Verify round ran on') && doc.includes('may be a revert InferPilot made after Implement'),
       'the head a resume holds the branch to is where the last Verify round began, a kernel revert included');
+    check(doc.includes('and the gates the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`'),
+      'the director, who checks the task before its smoke, is told that the gates are held against run.json too');
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('Each round\'s first Run log row, written before anything starts, is the round and the commit it runs on (`git -C <worktree> rev-parse HEAD`, the worktree clean)')
       && doc.includes('each round\'s first row in the ledger\'s Run log'), 'each Verify round records the commit it starts on, where a resume reads it');
@@ -852,9 +885,17 @@ const scenarios = [
     check(stoppedFor(flagOff, '(harness not as its run.json has them)'), `a flag false renders 0, an empty line the default: ${flagOff.result.status}`);
     for (const [why, was, now] of [['a flag false and 0 render the same line', { PREFIX_CACHE: false }, { PREFIX_CACHE: 0 }],
       ['a flag true and 1', { PREFIX_CACHE: true }, '{"PREFIX_CACHE": "1"}'], ['a list and its items', { CONCS: [1, 8] }, { CONCS: '1 8' }],
-      ['an empty line is no setting', { TP: 4, SEED: '' }, { TP: '4' }], ['no harness and an empty one', {}, '']]) {
+      ['a line set to nothing, as "" or as null', { TP: 4, SEED: '' }, { TP: '4', SEED: null }], ['no harness and an empty one', {}, '']]) {
       const same = await resumed('feature', saved({ harness: was }), { harness: now });
       check(same.result.status === 'ready_for_review', `${why}: ${same.result.status}`);
+    }
+    // What the renderer keeps apart stays apart: accuracy.sh sends no reasoning effort for an empty line and its
+    // default for an unset one, and a path's last space is part of the file's name.
+    for (const [why, was, now] of [['a line set to nothing is a setting, and no unset line', { REASONING_EFFORT: '' }, {}],
+      ['also next to other lines', { TP: 4, SEED: '' }, { TP: '4' }],
+      ['a space at the end of a path is part of it', { DATASET_PATH: '/d/prompts.jsonl ' }, { DATASET_PATH: '/d/prompts.jsonl' }]]) {
+      const differs = await resumed('feature', saved({ harness: was }), { harness: now });
+      check(stoppedFor(differs, '(harness not as its run.json has them)'), `${why}: ${differs.result.status} at ${differs.result.stopped_at}`);
     }
     const goal = await resumed('feature', saved({ goal: 'no accuracy loss: also gpqa_diamond' }), { goal: 'quick check' });
     const v = goal.calls.find((c) => c.key === 'verify_engineer:verify');
@@ -870,6 +911,15 @@ const scenarios = [
     const unchanged = await resumed('feature', () => ({}), { goal: 'as before' });
     check(unchanged.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && !p.summary.includes('not the run\'s')),
       'a goal that is the run\'s is not reported as another');
+    // A run that had no goal records none: one named now would have Verify and Performance run data sets and
+    // guards the run never did.
+    const noGoal = await resumed('feature', (ins) => ({ task_definition: Object.fromEntries(Object.entries(ins.task_def).filter(([k]) => k !== 'goal')) }),
+      { goal: 'no accuracy loss: also gpqa_diamond' });
+    const nv = noGoal.calls.find((c) => c.key === 'verify_engineer:verify');
+    const np = noGoal.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(nv && !nv.ins.goal && np && !np.ins.goal, `a run that had no goal is given none: ${nv && JSON.stringify(nv.ins.goal)}`);
+    check(noGoal.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
+      && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it (no goal)')), 'and the run says so');
   }],
   ['setup: a run resumed from Verify stops without the records Verify and Reply read; no package left is a state of its own', async () => {
     const resumed = (mode, extra) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
@@ -902,7 +952,8 @@ const scenarios = [
       && doc.includes('one that timed out was not cancelled, which is why Setup looked for what it left before its smoke')
       && !doc.includes('its servers went with the call'), 'a timed-out Verify is not taken for gone');
     check(doc.includes('`verified_work_packages` is `[]` only when the report says none was left')
-      && doc.includes('The `task` and the `goal` stay the ones `run.json` has') && doc.includes('a flag `false` is `0`, not an unset line')
+      && doc.includes('The `task` and the `goal` stay the ones `run.json` has') && doc.includes('a run that had no goal has none now')
+      && doc.includes('a flag `false` is `0`, not an unset line') && doc.includes('a line set to nothing is not an unset one either')
       && doc.includes('A resume without its triage record, or a `feature` without its spec or its design, stops'),
       'the director is told what each of these restores or stops');
   }],
@@ -973,6 +1024,30 @@ const scenarios = [
       `rerun_with ${JSON.stringify(r.result.next.rerun_with)}`);
     check(r.result.next.say.startsWith('Verify ended without a result: the verify engineer returned nothing'),
       `say names why: ${r.result.next.say}`);
+    check(r.result.next.rerun_with.stop_after === '', `a run with no stop goes on to its end: ${JSON.stringify(r.result.next.rerun_with)}`);
+    // A stop the run was to make at Verify or after it is still ahead of the run that goes on, which keeps it:
+    // without it that run would go on to Performance, hours of measurement the user never asked for.
+    const unfinished = { 'verify_engineer:verify': () => null };
+    for (const [stop, kept] of [['Verify', 'Verify'], ['performance', 'Performance'], ['Review', 'Review']]) {
+      const s = await run({ mode: 'issue', task: 'i', stop_after: stop }, unfinished);
+      check(s.result.stopped_at === 'Verify' && s.result.next.rerun_with.stop_after === kept,
+        `a stop after ${kept} holds for the run that goes on: ${JSON.stringify(s.result.next.rerun_with)}`);
+    }
+    let verifying = false;
+    const named = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:verify': () => { verifying = true; return null; } },
+      { control: () => (verifying ? { stop_after: 'Performance' } : {}) });
+    check(named.result.next.rerun_with.stop_after === 'Performance',
+      `so does one the control file named while Verify ran: ${JSON.stringify(named.result.next.rerun_with)}`);
+    let diagnosed = false;
+    const lifted = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, { ...unfinished,
+      'investigator:diagnose': (ins) => { diagnosed = true; return DEFAULTS['investigator:diagnose'](ins); },
+    }, { control: () => (diagnosed ? { stop_after: '' } : {}) });
+    check(lifted.result.stopped_at === 'Verify' && lifted.result.next.rerun_with.stop_after === '',
+      `a stop before Verify, which the control file lifted, is behind that run: ${lifted.result.stopped_at} ${JSON.stringify(lifted.result.next.rerun_with)}`);
+    const first = await run({ mode: 'issue', task: 'i', stop_after: 'Verify' }, unfinished);
+    const goesOn = await run({ mode: 'issue', task: 'i', stop_after: 'Verify', ...first.result.next.rerun_with });
+    check(goesOn.result.status === 'stopped' && goesOn.result.stopped_at === 'Verify' && !goesOn.keys.includes('perf_engineer:perf_eval'),
+      `and the run that goes on stops where the first was to: ${goesOn.result.status} at ${goesOn.result.stopped_at}`);
     const failed = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
     });
@@ -3007,8 +3082,8 @@ const scenarios = [
         check(again && again.resume_from === 'implement' && again.run_dir === r.run_dir, `${where}: runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'blocked' && r.stopped_at === 'Verify'
         && r.phases.some((p) => p.phase === 'Verify' && p.summary === 'the verify engineer returned nothing')) {
-        check(again && again.resume_from === 'verify' && again.run_dir === r.run_dir && again.stop_after === '',
-          `${where}: a Verify without a result runs again from Verify: ${JSON.stringify(again)}`);
+        check(again && again.resume_from === 'verify' && again.run_dir === r.run_dir && ['', 'Verify', 'Performance', 'Review'].includes(again.stop_after),
+          `${where}: a Verify without a result runs again from Verify, with no stop that is behind it: ${JSON.stringify(again)}`);
       } else if (r.status === 'stopped') {
         check(again && again.stop_after === '', `${where}: runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'busy') {

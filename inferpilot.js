@@ -919,7 +919,8 @@ const K_COLLECT = S({
 // resume_from=verify: what the resumed run had, restored from its run directory. head_ok: the branch head
 // is the commit its last Verify round ran on; the mode's gate command and the claim are the ones its Verify
 // and Performance were given, perf_required whether its Performance was to judge a claim the run stated
-// (perf_cost: a feature's that is a cost the user stated; a feature that states none, and a fix of a problem
+// (perf_cost: a feature's that is a cost the user stated, which the answer always says: a claim not said to be
+// one is a gain, never claimed on InferPilot's client; a feature that states none, and a fix of a problem
 // that is not one of performance, are judged as no slower, which is no claim to restore);
 // known_issues and handoffs as its report wrote them (Verify judges a failure the baseline shares by the
 // first, and reverts an integrated kernel by the second), null when the run directory lost them;
@@ -945,12 +946,13 @@ const RESUMED = S({
   analysis_path: str,
   notes: str,
 }, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'task_definition', 'perf_required', 'perf_claim',
-  'design_auto_approved']);
-// What a resumed run must measure as the run it resumes did; the machine, the task's wording and the
-// operator settings may differ. GIVEN holds them as Setup is given them and records them in run.json:
-// Setup's rendered scripts replace a template's in C later.
+  'perf_cost', 'design_auto_approved']);
+// What a resumed run must measure as the run it resumes did, the gates its task asked for (G3, G4) and the
+// test G3 runs among them; the machine, the task's wording and the operator settings may differ. GIVEN holds
+// them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
+// in C later.
 const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs',
-  'held_out', 'guards', 'sweep', 'tune'];
+  'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
 // One form for a setting however it was written down: JSON as an object or in a string, a flag unset or
 // false, a list of one as that one. Compared as JSON, which keeps the boundaries of every value: a comma
@@ -973,7 +975,10 @@ function plain(v) {
   return String(v);
 }
 // `harness` holds parameter lines, read as scripts/harness.py renders them (value_of): a flag is 1 or 0,
-// so false is a value and not an unset line; a list is its items; a line with nothing is no setting.
+// so false is a value and not an unset line; a list is its items; a line set to nothing is a setting too
+// (REASONING_EFFORT empty sends none, unset its default), and a space is part of a value. What only a line's
+// type decides (a word for a flag, the spaces of a list) stays as written: written another way it stops the
+// resume, which then measures nothing.
 function harnessLines(v) {
   let h = v;
   if (typeof h === 'string' && /^\s*\{/.test(h)) {
@@ -985,8 +990,8 @@ function harnessLines(v) {
   }
   if (!h || typeof h !== 'object' || Array.isArray(h)) return plain(h);
   const line = (x) => (typeof x === 'boolean' ? (x ? '1' : '0')
-    : Array.isArray(x) ? x.map(String).join(' ') : x === null || x === undefined ? '' : String(x).trim());
-  const lines = Object.keys(h).sort().map((k) => [k, line(h[k])]).filter(([, text]) => text !== '');
+    : Array.isArray(x) ? x.map(String).join(' ') : x === null || x === undefined ? '' : String(x));
+  const lines = Object.keys(h).sort().map((k) => [k, line(h[k])]);
   return lines.length ? lines : '';
 }
 const canon = (v, key = '') => JSON.stringify(key === 'harness' ? harnessLines(v) : plain(v));
@@ -1191,7 +1196,11 @@ function nextSteps(status, at) {
   } else if (status === 'blocked' && at === 'Verify' && verifyUnfinished) {
     out.say = `Verify ended without a result: ${last}. Nothing was measured against the change; to verify the same commit `
       + `again, run again from Verify in this run directory, once nothing the round started still runs (Setup checks the GPUs are idle).${report}`;
-    out.rerun_with = { resume_from: 'verify', run_dir: C.run_dir, stop_after: '' };
+    // A stop the run was to make at Verify or after it is still ahead of the run that goes on, which keeps it;
+    // one before Verify is behind it.
+    const stop = liveStopAfter();
+    const ahead = STOP_PHASES[MODE].slice(STOP_PHASES[MODE].indexOf('Verify')).find((p) => p.toLowerCase() === stop);
+    out.rerun_with = { resume_from: 'verify', run_dir: C.run_dir, stop_after: ahead || '' };
   } else if (status === 'busy') {
     out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
       + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
@@ -1941,13 +1950,15 @@ async function resumeVerify(claimOf) {
   // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
-  // Performance ran, and the task the issue or PR its triage, reproduction and reply are about.
-  const own = ['task', 'goal'].filter((k) => k in saved && canon(saved[k]) !== canon(C[k]));
+  // Performance ran, and the task the issue or PR its triage, reproduction and reply are about. A goal
+  // run.json does not have is the run's too: it had none, and this run's would add what it never measured.
+  const own = ['task', 'goal'].filter((k) => (k === 'goal' || k in saved) && canon(saved[k]) !== canon(C[k]));
   for (const k of own) C[k] = typeof saved[k] === 'string' ? saved[k] : saved[k] ? JSON.stringify(saved[k]) : '';
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: `
     + `${done.map((d) => d.wp).join(', ') || 'no work package left, its kernel integration reverted'}`
     + `${own.length ? `; the ${own.join(' and the ')} it was given ${own.length > 1 ? 'are' : 'is'} not the run's, which `
-      + `${own.length > 1 ? 'stay' : 'stays'} as run.json has ${own.length > 1 ? 'them' : 'it'}` : ''}`);
+      + `${own.length > 1 ? 'stay' : 'stays'} as run.json has ${own.length > 1 ? 'them' : 'it'}`
+      + `${own.includes('goal') && !C.goal ? ' (no goal)' : ''}` : ''}`);
   if (MODE === 'feature' && rs.design_auto_approved === true) {
     note('Design', 'auto_approved', 'restored from the run this one resumes: no human approved its design');
   }

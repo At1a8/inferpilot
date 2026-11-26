@@ -272,11 +272,14 @@ on the commit the run's last Verify round ran on. Change nothing.
    directory does not record it.
 3. `task_definition`: the task definition `RUN_DIR/run.json` recorded, as it is there (`null` when there
    is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
-   workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`): a run that
-   would measure otherwise is a run of its own. `harness` is compared as its lines render (a flag `false`
-   is `0`, not an unset line). The `task` and the `goal` stay the ones `run.json` has, whatever this run
-   was given: the goal names data sets and guard workloads the run's Verify and Performance ran, and
-   the task the issue or PR its triage and reply are about.
+   workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`, and the gates
+   the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
+   that would measure otherwise is a run of its own. `harness` is compared as its lines render (a flag
+   `false` is `0`, not an unset line; a line set to nothing is not an unset one either: an empty
+   `REASONING_EFFORT` sends none, an unset one its default). The `task` and the `goal` stay the ones
+   `run.json` has, whatever this run was given, and a run that had no goal has none now: the goal names
+   data sets and guard workloads the run's Verify and Performance ran, and the task the issue or PR its
+   triage and reply are about.
 4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
    that `issue_triage.md` classifies `performance`, a `ci` failure that `ci_triage.md` gives as a
    performance problem, a `feature` whose spec or design states one, a `perf` plan's gain);
@@ -284,10 +287,12 @@ on the commit the run's last Verify round ran on. Change nothing.
    reproduction or the triage states it), empty when there was none or the run directory does not
    record it; `perf_cost` (`feature`): `true` when that claim is a cost the user stated, as
    `RUN_DIR/feature_spec.md` has it, which stays the claim on InferPilot's client, and `false`
-   otherwise. A `feature` that states no claim, and a fix of a problem that is not one of performance,
-   are judged all the same, as no slower than the baseline (`validation_doctrine.md`, *G5 for a
-   feature*, *G5 for a fix*; such a fix when it changes code the server runs, which this run's Verify
-   says again): InferPilot gives that claim, and there is none to restore.
+   otherwise and in the other modes (always say which: a claim not said to be a cost is a gain, which
+   is never claimed on InferPilot's client). A `feature` that states no claim, and a fix of a problem
+   that is not one of performance, are judged all the same, as no slower than the baseline
+   (`validation_doctrine.md`, *G5 for a feature*, *G5 for a fix*; such a fix when it changes code the
+   server runs, which this run's Verify says again): InferPilot gives that claim, and there is none to
+   restore.
 5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
    the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
    on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
