@@ -1992,6 +1992,11 @@ const scenarios = [
     for (const [task, issue] of [['sgl-project/sglang#41299: the accuracy loss', 'sgl-project/sglang#41299'], ['#41299: the crash', '#41299'],
       ['https://github.com/sgl-project/sglang/issues/41299: the crash at 32k', 'https://github.com/sgl-project/sglang/issues/41299'],
       ['https://github.com/sgl-project/sglang/issues/41299', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299/: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299?notification_referrer_id=1: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299#issuecomment-2771: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299#issuecomment-2771', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['sglang#41299: the crash', 'sglang#41299'], ['sglang#41299', 'sglang#41299'],
       ['the crash a customer reported', 'the crash a customer reported']]) {
       const again = await run({ mode: 'issue', task, stop_after: 'Reproduce' }, triaged([{ problem: 'the server hangs on shutdown' }]));
       check(again.result.next.start[0].args.task === `${issue}: the server hangs on shutdown`,
@@ -2005,13 +2010,31 @@ const scenarios = [
       `the operator's settings go with the follow-up: ${JSON.stringify(args)}`);
     check(!('max_work_packages' in r.result.next.start[0].args) && !('exp_root' in r.result.next.start[0].args), 'and none is made up where none was given');
     // A problem on another model takes nothing of what this run measured with: its own is asked for, as of any new task.
-    const elsewhere = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}' },
+    const elsewhere = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}', gpu_ids: '0,1' },
       triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
     const [far, near] = elsewhere.result.next.start;
-    check(far.model === 'DeepSeek-V4.1, --tp-size 8' && ['model_path', 'client_script', 'server_script', 'workload'].every((k) => !(k in far.args))
-      && far.args.framework_dir && far.args.mode === 'issue', `a problem on another model brings its own model and scripts: ${JSON.stringify(far)}`);
-    check(near.args.model_path === '/models/m' && near.args.client_script === '/s/client.sh' && !('model' in near),
+    check(far.model === 'DeepSeek-V4.1, --tp-size 8' && ['model_path', 'client_script', 'server_script', 'workload', 'gpu_ids'].every((k) => !(k in far.args))
+      && far.args.framework_dir && far.args.mode === 'issue', `a problem on another model brings its own model, scripts and GPUs: ${JSON.stringify(far)}`);
+    // Only the arguments start a run: what the report says of the problem's model goes with them, for the Intake.
+    check(far.args.request.startsWith(`${far.args.task}. The report puts this problem on DeepSeek-V4.1, --tp-size 8:`) && !('request' in near.args),
+      `the offered run carries the model the report names, in the words the Intake reads: ${far.args.request}`);
+    check(near.args.model_path === '/models/m' && near.args.client_script === '/s/client.sh' && near.args.gpu_ids === '0,1' && !('model' in near),
       `one on this run's model keeps them: ${JSON.stringify(near.args)}`);
+    // The task itself names a problem on another model than its own: nothing is reproduced or measured on the wrong one.
+    const wrong = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', workload: '{"isl":8192,"osl":1024,"conc":64}', gpu_ids: '0,1' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1, --tp-size 8',
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const again = wrong.result.next.rerun_with || {};
+    check(wrong.result.status === 'needs_input' && wrong.result.stopped_at === 'Triage' && !wrong.keys.includes('issue_triager:reproduce')
+      && (wrong.result.next.ask || [])[0].field === 'model_path' && /DeepSeek-V4\.1, --tp-size 8/.test(wrong.result.next.ask[0].question),
+      `a task that names a problem on another model stops before Reproduce and asks for it: ${wrong.result.status} at ${wrong.result.stopped_at}`);
+    check(again.model_path === '' && again.client_script === '' && again.workload === '' && again.gpu_ids === '' && 'model_path' in again.answers,
+      `the task's own model, scripts and GPUs are cleared for the answer to take their place: ${JSON.stringify(again)}`);
+    // A task without a model (one that stops at Triage) has none to mismatch.
+    const bare = await run({ mode: 'issue', task: 'i', model_path: '', client_script: '', stop_after: 'Triage' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1',
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    check(bare.result.status === 'stopped' && bare.result.stopped_at === 'Triage', `a triage without a model ends as it would: ${bare.result.status}`);
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {

@@ -1485,11 +1485,15 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "Return the others as `other_problems`"),
                            ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
                            ("knowledge/issue_triage.md", "and with the operator's settings this run was given"),
-                           ("knowledge/issue_triage.md", "A problem the report puts on another model or launch configuration is never the one a run on "
-                                                         "this model takes"),
-                           ("roles/issue_triager.md", "The one this run takes is on the task's model and configuration"),
+                           ("knowledge/issue_triage.md", "A run that has a model takes a problem on that model and configuration"),
+                           ("knowledge/issue_triage.md", "where the task itself names such a problem, the run stops before Reproduce and asks for them"),
+                           ("knowledge/issue_triage.md", "A task without a model, one that stops at Triage, takes the most urgent problem of all"),
+                           ("roles/issue_triager.md", "Where the task has a `model_path`, \"the most urgent\" is said of the problems on that model and "
+                                                      "configuration"),
                            ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
-                           ("roles/issue_triager.md", "one with a `model` asks for its own model and scripts instead of taking this run's"),
+                           ("roles/issue_triager.md", "A task without a model (one that stops at Triage) takes the most urgent of all"),
+                           ("roles/issue_triager.md", "take that problem and return `model_mismatch`"),
+                           ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
                            ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
                            ("README.md", "a scan's top tasks, the other problems of an issue's report"),
                            ("README.zh-CN.md", "scan 排在前面的任务，issue 报告里的其他问题"),
@@ -1498,8 +1502,11 @@ class TriageCasesTest(unittest.TestCase):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         for said, why in (
                 ("const issue = issueOf(def.task);", "a follow-up of a follow-up names two problems"),
-                ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task: p.task || `${issue}: ${p.problem}` } };",
-                 "a follow-up loses the operator's settings, or takes the task as it stands"),
+                ("const task = p.task || `${issue}: ${p.problem}`;", "a follow-up takes the task as it stands"),
+                ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
+                 "a follow-up loses the operator's settings, or the model the report names for it"),
+                ("'gpu_ids'];", "a problem on another configuration is pinned to this run's GPUs"),
+                ("if (elsewhere && C.model_path) {", "a problem on another model is reproduced and measured on the task's"),
                 ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",
                  "a problem on another model is measured with this run's model and scripts")):
             self.assertIn(said, src, why)

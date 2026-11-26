@@ -92,9 +92,11 @@ this run showed for the problem it took, and for each of the others its known st
 it, open or merged, or nothing yet) and that this run did not cover it. Each of them starts as a run of
 its own, with the issue and the problem's name as its `task`: the run's result offers those runs
 (`next.start`), each on this run's own definition and with the operator's settings this run was given.
-A problem the report puts on another model or launch configuration is never the one a run on this
-model takes, and its follow-up asks for its own model and scripts: G2 and G5 measure on what the run
-was set up with.
+A run that has a model takes a problem on that model and configuration: G2 and G5 measure on what
+the run was set up with. A problem the report puts on another one is offered as a follow-up that
+asks for its own model, scripts and GPUs; where the task itself names such a problem, the run stops
+before Reproduce and asks for them. A task without a model, one that stops at Triage, takes the most
+urgent problem of all.
 
 ## 5. Reproduction
 

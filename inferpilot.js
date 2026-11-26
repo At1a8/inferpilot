@@ -742,6 +742,8 @@ const TRIAGE = S({
   // a report with several problems: the ones this run does not take, each with the task that starts a run on it
   // model: the model or launch configuration the report gives that problem, when it is not this run's
   other_problems: arr(S({ problem: str, task: str, priority: str, model: str }, ['problem'])),
+  // the problem the task names is on another model or launch configuration than the task's own: which one
+  model_mismatch: str,
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1111,14 +1113,19 @@ const ENDED = { blocked: 'Blocked', handed_off: 'Handed over', triaged: 'Triaged
 // same issue keeps the ones this run was given.
 const OPERATOR_KEYS = ['exp_root', 'max_fix_rounds', 'max_investigate_rounds', 'max_review_rounds', 'max_work_packages',
   'agent_timeout_ms', 'agent_retries', 'review_model'];
-// What a run measures a fix with: a problem on another model brings its own.
-const MEASURED_WITH = ['model_path', 'server_script', 'client_script', 'accuracy_script', 'workload', 'harness', 'long_context_script'];
+// What a run measures a fix with, the GPUs it is pinned to among it (a TP8 problem does not fit a run on two): a
+// problem on another model or launch configuration brings its own.
+const MEASURED_WITH = ['model_path', 'server_script', 'client_script', 'accuracy_script', 'workload', 'harness', 'long_context_script',
+  'gpu_ids'];
 // The issue a task names, without the problem an earlier follow-up added to it ("<issue>: <problem>"): a
-// follow-up of a follow-up names one problem, not two.
+// follow-up of a follow-up names one problem, not two. An issue is named by its URL, with whatever follows its
+// number there (a slash, a query, a comment's fragment), or as <owner>/<repo>#<n>, <repo>#<n> or #<n>.
 function issueOf(task) {
   const s = String(task || '').trim();
-  const m = /^(https?:\/\/\S+?\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)(?=[\s:,;]|$)/.exec(s);
-  return m ? m[1] : s;
+  const url = /^(https?:\/\/\S+?\/issues\/\d+)(?:[/?#]\S*)?(?=[\s:,;]|$)/.exec(s);
+  if (url) return url[1];
+  const ref = /^((?:[\w.-]+(?:\/[\w.-]+)?)?#\d+)(?=[\s:,;]|$)/.exec(s);
+  return ref ? ref[1] : s;
 }
 
 function nextSteps(status, at) {
@@ -1166,7 +1173,10 @@ function nextSteps(status, at) {
     out.ask = R.questions;
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
-    out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    // The task's model is not the problem's: what the task measured with is cleared with it, so that the answer
+    // and the Intake give the problem's own.
+    const others = R.model_mismatch ? Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])) : {};
+    out.rerun_with = { ...partial, ...others, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
   }
   // The other problems of a report with several: each is offered as a run of its own, on this run's definition
   // and with the operator's settings this run was given (where runs are kept, the budgets, the reviewer's model):
@@ -1177,8 +1187,13 @@ function nextSteps(status, at) {
     const issue = issueOf(def.task);
     out.start = R.other_problems.map((p, i) => {
       const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;
+      const task = p.task || `${issue}: ${p.problem}`;
+      // Only the arguments start the run: what the report says of the problem's model goes with them, as the words
+      // the Intake turns into that run's own model, scripts and workload.
+      const words = p.model ? { request: `${task}. The report puts this problem on ${p.model}: the model, the launch and the workload `
+        + 'of this task are that configuration\'s, not those of the run that offered it.' } : {};
       return { rank: i + 1, task: p.problem, ...(p.model ? { model: p.model } : {}),
-        args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task: p.task || `${issue}: ${p.problem}` } };
+        args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };
     });
   }
   const user = [];
@@ -2007,6 +2022,18 @@ async function runIssue() {
   // AMD code, a feature request, and a report of a failure that another open issue already has.
   if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
+  // The problem the task names is on another model or launch configuration than the task's own: reproduced and
+  // measured on the task's, it would show nothing. The run stops before Reproduce and asks for that problem's.
+  const elsewhere = String(tri.model_mismatch || '').trim();
+  if (elsewhere && C.model_path) {
+    R.model_mismatch = elsewhere;
+    const why = `the problem this run takes is on ${elsewhere}, and the task's model is ${C.model_path}: G2 and G5 measure on what the `
+      + 'run is set up with';
+    note('Triage', 'needs_input', why);
+    R.questions = [{ field: 'model_path', question: `Which model on this machine is ${elsewhere} (local path)? The task's scripts and `
+      + 'workload are asked for again with it.', why }];
+    return finish('needs_input', 'Triage');
+  }
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
   // also for an existing fix PR.
