@@ -79,13 +79,18 @@ Notes per gate:
   performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the
   claim. Classify records it (`accuracy_claim`: the set, the model and the value, from the last green
   run or from the threshold the test had when it last passed), and G2 measures it where it showed, with
-  the failing test's own measurement, whatever the fix changes. G2 reads the score, not the assertion:
-  a score below the claim is a blocking failure although the test passes, so a threshold moved in a
-  test restores nothing. It is reported under its own name (`accuracy_claim`), apart from gsm8k against
-  the base, which runs by the fix's files as for any fix and cannot stand in for it. No known issue
-  excuses it: the base scores low as well, and that is the failure being fixed. Where the threshold
-  itself was wrong (a baseline no commit ever met), that is a human's to say: the run stops with the
-  scores of the fix, of the base and of the last green run.
+  the failing test's own measurement, whatever the fix changes. That measurement is the base's: the
+  set, the number of questions, the model and the sampling settings as the test has them before the
+  fix, since a fix can change what is measured as easily as the threshold. G2 reads the score, not the
+  assertion: a score below the claim is a blocking failure although the test passes, so a threshold
+  moved in a test restores nothing, nor do fewer questions or another sampling. It is reported under
+  its own name (`accuracy_claim`), apart from gsm8k against the base, which runs by the fix's files as
+  for any fix and cannot stand in for it. No known issue excuses it: the base scores low as well, and
+  that is the failure being fixed. Where the threshold or the measurement itself was wrong (a baseline
+  no commit ever met, a set the test should not have used), that is a human's to say: the run stops
+  with the scores of the fix, of the base and of the last green run, by the base's measurement and by
+  the fix's. The pull request shows the score that fell and the score restored, whatever the fix
+  changes (`pr_playbook.md` §Description).
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose
@@ -309,7 +314,10 @@ Before instrumenting any failure, reproduce **the same scheduling pattern on bas
 3. Compare the failure taxonomy over repeated runs. Only a difference beyond the noise is attributable
    to the feature; a failure present on baseline goes to `known_issues.md` and the feature is judged on
    the remainder. G4 keeps its verdict even so: a failure the baseline shares does not block the change,
-   and G4 is still reported as failed (*Notes per gate*).
+   and G4 is still reported as failed (*Notes per gate*). One failure is never the baseline's to keep:
+   the one a fix is there to fix (an issue's reproduction, a CI failure's failing test or the score it
+   must restore). The base shows it by definition, and its showing with the fix as well means that the
+   fix does not fix.
 
 Also run the **original upstream code** (an untouched checkout of the framework) when the branch carries
 other people's commits, so a failure can be pinned to "framework", "dependency PR" or "this change".

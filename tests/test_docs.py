@@ -1123,6 +1123,10 @@ class CiAccuracyProblemTest(unittest.TestCase):
                      "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
                      "No known issue excuses it: the base scores low as well",
                      "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "That measurement is the base's: the set, the number of questions, the model and the sampling settings as the test has "
+                     "them before the fix",
+                     "nor do fewer questions or another sampling",
+                     "The pull request shows the score that fell and the score restored, whatever the fix changes",
                      "cannot stand in for it",
                      "that is a human's to say"):
             self.assertIn(said, note[0])
@@ -1133,13 +1137,29 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
                 ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
                 ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
-                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
-                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
-                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
-                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
+                ("roles/verify_engineer.md", "Report the score in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q, as at the base)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above by that measurement"),
+                ("roles/verify_engineer.md", "Never leave the gate out, and never report it `not run`: the run accepts no round without its `pass`"),
+                # the measurement is the base's: a fix can change what is measured as easily as the threshold
+                ("roles/verify_engineer.md", "The measurement is the base's: the set, the number of questions, the model and the sampling settings as the "
+                                             "test has them at `<base>`"),
+                ("roles/verify_engineer.md", "run the base's copy of it against the fix's code"),
+                ("roles/verify_engineer.md", "nor do fewer questions or another sampling"),
+                ("roles/verify_engineer.md", "A fix that says the measurement itself was wrong is a human's to accept"),
+                # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
+                ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
+                ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
+                                          "cannot"),
+                ("roles/investigator.md", "InferPilot stops the run on `baseline_bug` for such a gate, and records no known issue"),
+                ("knowledge/validation_doctrine.md", "One failure is never the baseline's to keep: the one a fix is there to fix"),
+                # the restored score is shown to whoever merges, also for a fix to the test alone
+                ("knowledge/pr_playbook.md", "shows the score that fell and the score it restores, whatever it changes, a fix to the test alone included"),
+                ("templates/validation_report.md", "| accuracy claim (a CI failure on a score its test measures) |"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
-                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "read the score under `accuracy_claim` in `gates` against the claim yourself, not G2's gsm8k against the base"),
+                ("roles/reviewer.md", "check in the diff that the test still measures what it measured"),
                 ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
                 ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
                 ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),

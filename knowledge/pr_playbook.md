@@ -69,7 +69,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   base cannot serve the configuration, next to the last commit that served it, named, or alone,
   saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
   changes no code the server runs, and gives no table; one for a model that answers no text questions
-  says that instead.
+  says that instead. The fix of an accuracy problem in CI (a test that failed on a score it measures)
+  shows the score that fell and the score it restores, whatever it changes, a fix to the test alone
+  included: by the test's own measurement as it stood before the fix (the set, the number of
+  questions, the model, the sampling), with the claim and the command that measures it.
 - **Speed Tests and Profiling:** the baseline against the feature in one scenario (input and output
   lengths, concurrency, hardware, TP), the same harness and runs for both arms, absolute numbers and the
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
