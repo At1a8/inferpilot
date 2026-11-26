@@ -89,7 +89,9 @@ Notes per gate:
   that is the failure being fixed. Where the threshold or the measurement itself was wrong (a baseline
   no commit ever met, a set the test should not have used), that is a human's to say: the run stops
   with the scores of the fix, of the base and of the last green run, by the base's measurement and by
-  the fix's. The pull request shows the score that fell and the score restored, whatever the fix
+  the fix's. Both are measured whenever the fix changes the measurement, whether or not it says that
+  the old one was wrong: a change that meets the claim is still a human's to accept, and is accepted
+  on both scores. The pull request shows the score that fell and the score restored, whatever the fix
   changes (`pr_playbook.md` §Description).
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every

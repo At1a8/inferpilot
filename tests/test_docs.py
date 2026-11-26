@@ -1154,7 +1154,12 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "What is kept from the fix is its framework code and how it launches the server"),
                 ("roles/verify_engineer.md", "run the base's measurement against the fix's server"),
                 ("roles/verify_engineer.md", "nor do fewer questions or another sampling"),
-                ("roles/verify_engineer.md", "A fix that says the measurement itself was wrong is a human's to accept"),
+                ("roles/verify_engineer.md", "A fix that changes the measurement is a human's to accept, whether or not it says that the old "
+                                             "one was wrong"),
+                ("roles/verify_engineer.md", "wherever the fix's measurement differs from the base's (another set, number of questions, model or "
+                                             "sampling), measure both ways and give both scores, in `gates` and in the ledger"),
+                ("knowledge/validation_doctrine.md", "Both are measured whenever the fix changes the measurement, whether or not it says that the old "
+                                                     "one was wrong"),
                 # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
                 ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
                 ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
