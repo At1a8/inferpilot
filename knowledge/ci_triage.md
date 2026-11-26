@@ -66,7 +66,7 @@ from 10-02 to at least 10-25) had no owner.
 - A fix that changes code the server runs is measured on gsm8k as well (G2 for a fix,
   `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent where the
   regression keeps the base from serving. A fix to tests, documentation or CI files alone (a
-  `test_bug`) is not.
+  `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of §1).
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output

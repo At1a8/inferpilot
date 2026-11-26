@@ -555,8 +555,22 @@ class FixAccuracyTest(unittest.TestCase):
             self.assertEqual(re.findall(r"'(\w+)'", listed), phases[:phases.index("implement")],
                              "%s: a run that stops before Implement has no fix, and one that reaches it has" % mode)
         self.assertIn("if (BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop) && !a.model_path) {\n    ask('model_path',", src)
-        self.assertIn("((MODE === 'issue' || MODE === 'ci') && C.model_path)) && !C.accuracy_script", src,
+        self.assertIn("const fix = (MODE === 'issue' || MODE === 'ci') && !!C.model_path;\n"
+                      "  if ((MODE === 'feature' || MODE === 'perf' || fix) && !C.accuracy_script) {", src,
                       "a fix G2 will measure may start without the accuracy script")
+        self.assertIn("if (fix && !C.server_script) {", src, "or without a server script to serve it with")
+
+    def test_no_fix_starts_without_a_model(self):
+        """A stop before the fix lets a run start without one; the route can skip that stop's phase (an existing
+        fix PR has no Diagnose), and the control file can lift it."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("function askModel(at) {", src)
+        for at in ("Reproduce", "Diagnose", "Bisect"):
+            self.assertIn("if (!C.model_path) return askModel('%s');" % at, src, "a fix can start after %s without a model" % at)
+        self.assertRegex(src, r"if \(tri\.action === 'push_existing_pr'\) \{\n(?:\s*//.*\n)*\s*if \(stopHere\('Diagnose'\)\) \{",
+                         "a stop after Diagnose does not hold for an existing fix PR, which has no Diagnose")
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            self.assertRegex(text, r"reaches its fix without\s+one|走到修复却还没有模型", "%s does not list the question" % name)
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
         row = [line for line in fields.splitlines() if line.startswith("| `model_path` |")]
         self.assertEqual(len(row), 1)
@@ -572,13 +586,23 @@ class FixAccuracyTest(unittest.TestCase):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")
         for said in ("when it changes code the server runs", "the fix at most 1 point below the base", "has no G2",
-                     "The reproduction or the failing test runs first", "the last commit that served it",
-                     "the culprit's parent for a CI fix", "it is reported"):
+                     "a model that answers no text questions", "The reproduction or the failing test runs first",
+                     "it is never launched for G2", "the last commit that served the configuration",
+                     "the culprit's parent for a CI fix", "The gate and the pull request name that commit", "it is reported"):
             self.assertIn(said, note[0])
         for path, said in (("roles/verify_engineer.md", "not run: no code the server runs changed"),
+                           ("roles/verify_engineer.md", "not run: the model answers no text questions"),
                            ("roles/verify_engineer.md", "That gate of `extra_gates` runs first"),
+                           ("roles/verify_engineer.md", "launch nothing for G2 until its gate of `extra_gates` has passed"),
+                           ("roles/verify_engineer.md", "never launch it for G2"),
+                           ("roles/verify_engineer.md", "Write that commit in the ledger and in `gates`"),
                            ("roles/verify_engineer.md", "it is reported, not judged"),
                            ("roles/director.md", "the verify engineer measures the base arm"),
+                           ("roles/director.md", "when the task has a `model_path`, render InferPilot's server template"),
+                           ("roles/director.md", "Return the one or the other as `server_script`"),
+                           ("roles/director.md", "without one, skip them as well"),
+                           ("roles/director.md", "for the G2 of a fix whose baseline was measured on another commit"),
+                           ("templates/validation_report.md", "the commit its baseline was measured on when that was not the base"),
                            ("roles/intake.md", "An issue or a ci task needs it too"),
                            ("knowledge/acceptance.md", "required when the fix changes code the server runs"),
                            ("knowledge/issue_triage.md", "A fix that changes code the server runs is measured on gsm8k as well"),

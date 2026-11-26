@@ -993,6 +993,10 @@ function nextSteps(status, at) {
     out.ask = R.questions;
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
+  } else if (status === 'needs_input' && (R.questions || []).some((q) => q.field === 'model_path')) {
+    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give the model, and run the task again: it starts over.${report}`;
+    out.ask = R.questions;
+    out.rerun_with = { answers: { model_path: null } };
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1068,6 +1072,17 @@ function askWorkload(spec) {
   return finish('needs_input', 'Spec');
 }
 
+// G2 measures on gsm8k a fix that changes code the server runs, so a fix needs a model. An issue or a ci run can
+// get this far without one: it named a stop before the fix that its route skipped (an existing fix PR has no
+// Diagnose) or that the control file lifted. It stops here and asks, before any code changes.
+function askModel(at) {
+  const why = 'the run reached a fix without a model, and G2 measures on gsm8k a fix that changes code the server runs';
+  note(at, 'needs_input', why);
+  R.questions = [{ field: 'model_path', question: `Which model should G2 measure the fix on (local path)? ${MODE === 'issue'
+    ? "The reporter's model" : 'The model the failing test serves'}, when it is on this machine.`, why }];
+  return finish('needs_input', at);
+}
+
 // true, false, 'busy' when the machine is not free (another InferPilot task holds it, or, but for a scan,
 // another job holds one of its GPUs), or {ask} when the image check stopped
 // the run (nothing was created in either case).
@@ -1103,8 +1118,16 @@ async function setup(requireBaseline) {
   }
   // G2 runs the same accuracy script for every arm: from the baseline on for a feature or a perf task, in
   // Verify for the fix of an issue or a ci task, which has a model whenever it can reach one.
-  if ((MODE === 'feature' || MODE === 'perf' || ((MODE === 'issue' || MODE === 'ci') && C.model_path)) && !C.accuracy_script) {
+  const fix = (MODE === 'issue' || MODE === 'ci') && !!C.model_path;
+  if ((MODE === 'feature' || MODE === 'perf' || fix) && !C.accuracy_script) {
     note('Setup', 'fail', "no accuracy script: Setup returned neither the task's nor InferPilot's accuracy.sh");
+    return false;
+  }
+  // G2 serves the fix and its baseline with the run's server script: the launch script Setup wrote from the
+  // reporter's or the job's own command, or InferPilot's template where they start no server.
+  if (fix && !C.server_script) {
+    note('Setup', 'fail', 'no server script: Setup returned neither a launch script written from the report or the job, nor '
+      + "InferPilot's server template, and G2 has nothing to serve the fix with");
     return false;
   }
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
@@ -1669,6 +1692,12 @@ async function runIssue() {
 
   const gates = [{ gate: 'issue_repro', cmd: reproCmd, expect: 'fixed' }];
   if (tri.action === 'push_existing_pr') {
+    // An existing fix has no Diagnose phase: a stop named for it still ends the run before the fix is applied.
+    if (stopHere('Diagnose')) {
+      note('Reproduce', 'stopped', 'stop_after=Diagnose: an existing fix PR is applied without a Diagnose phase, so the run stops before applying it');
+      return finish('stopped', 'Reproduce');
+    }
+    if (!C.model_path) return askModel('Reproduce');
     const prs = (tri.existing_prs || []).join(', ');
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [] };
@@ -1686,6 +1715,7 @@ async function runIssue() {
   if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
   if (stopHere('Diagnose')) return finish('stopped', 'Diagnose');
+  if (!C.model_path) return askModel('Diagnose');
 
   return deliver(dg.work_packages, gates, issueClaim, runPerf);
 }
@@ -1720,6 +1750,7 @@ async function runCi() {
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
   if (stopHere('Bisect')) return finish('stopped', 'Bisect');
+  if (!C.model_path) return askModel('Bisect');
 
   return deliver(bi.work_packages, [{ gate: 'failing_test', cmd: failingCmd, expect: 'pass on every lane it failed on' }],
     '', false);

@@ -42,6 +42,9 @@ clock can start before your session does.
    confirmed on the GPUs, `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the
    round's first launch and again after the stop (*Killing*): a GPU idle before and in use after is one
    the round still holds. `summary` names one you cannot stop, and a GPU the round still holds.
+   For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
+   has shown that G2 runs (step 2): the base may be the server that does not start, and the
+   reproduction needs the GPUs. Then launch only the arms G2 measures.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing. A port whose spec gives the
@@ -52,25 +55,34 @@ clock can start before your session does.
    may have changed the path since: measure on the commit this round verifies (the task worktree's
    `HEAD`), and give `gates` each value with the source's, and that commit
    (`"G1": "pass <value> vs the source's <value> (tolerance <t>) at <sha>"`).
-   - **gsm8k (1319) first**, G2's first set, with the run's `accuracy_script` (`<accuracy_script> gsm8k`:
-     the task's own, or InferPilot's `accuracy.sh`, which runs `scripts/eval_accuracy.sh` with the run's
-     settings; the same for both arms): once per arm, at most 1 point below the baseline, with no
-     token-level comparison. A set where a question got no answer has no score.
+   - **gsm8k (1319) first**, G2's first set (after its own gate for a fix: next item), with the run's
+     `accuracy_script` (`<accuracy_script> gsm8k`: the task's own, or InferPilot's `accuracy.sh`, which
+     runs `scripts/eval_accuracy.sh` with the run's settings; the same for both arms): once per arm, at
+     most 1 point below the baseline, with no token-level comparison. A set where a question got no
+     answer has no score.
    - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
      when it changes code the server runs** (`validation_doctrine.md`, *G2 for a fix*). That gate of
-     `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then
-     `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
-     documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the server
-     runs changed"`, and gsm8k is not run. Otherwise run it on the fix and on the base, with the run's
-     launch script and `model_path`. Setup measured no baseline for a fix: measure the base arm
-     yourself, once, in the first round that needs it (a throwaway worktree at `<base>`: an issue or a
-     ci run has no `RUN_DIR/base`), and keep its score in the ledger for the later rounds. Where the
-     base cannot serve the configuration because that is the failure being fixed, measure instead the
-     last commit that served it, in a throwaway worktree: the culprit's parent for a CI fix (the
-     triage record names it), the commit or release the report says worked. Where the run knows no
-     such commit, the fix's score has no baseline: give it in `gates` with that said (`"G2": "0.893
-     (1319 q), no baseline: the base does not start on this configuration"`); it is reported, not
-     judged.
+     `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then decide
+     whether G2 runs, before any server of its own is launched:
+     - `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
+       documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the
+       server runs changed"`.
+     - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
+       model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
+       questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
+     - Otherwise run gsm8k on the fix and on its baseline, with the run's launch script and
+       `model_path`. Setup measured no baseline for a fix: measure the base arm yourself, once, in the
+       first round that needs it (a throwaway worktree at `<base>`: an issue or a ci run has no
+       `RUN_DIR/base`), and keep its score in the ledger for the later rounds.
+     - Where the base cannot serve the configuration because that is the failure being fixed, never
+       launch it for G2: measure instead the last commit that served it, in a throwaway worktree: the
+       culprit's parent for a CI fix (the triage record names it), the commit or release the report
+       says worked. Write that commit in the ledger and in `gates` (`"G2": "pass 0.893 vs 0.895 on
+       1a2b3c4, the culprit's parent (1319 q)"`): the report's *Before pushing* section measures
+       against it again, not against the base.
+     - Where the run knows no such commit, the fix's score has no baseline: give it in `gates` with
+       that said (`"G2": "0.893 (1319 q), no baseline: the base does not start on this
+       configuration"`); it is reported, not judged, and *Before pushing* measures the fix alone.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
      fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates

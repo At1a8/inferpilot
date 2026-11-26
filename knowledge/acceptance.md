@@ -44,7 +44,7 @@ Two rules hold across the dimensions:
 - **A fix** (issue, ci) is measured too when it changes code the server runs, on the task's
   `model_path`: the fix against the base, or against the last commit that served the configuration
   where the base cannot (`validation_doctrine.md`, *G2 for a fix*). One that changes tests,
-  documentation or CI files alone is not.
+  documentation or CI files alone is not, nor one for a model that answers no text questions.
 - **Harness:** evalscope for every set, through `scripts/eval_accuracy.sh`, every run sampled afresh
   (never evalscope's cache). It runs through InferPilot's `accuracy.sh`, with the same settings for
   every arm: the task's, else those the feature's source tests with (thinking off for PARD-2), else

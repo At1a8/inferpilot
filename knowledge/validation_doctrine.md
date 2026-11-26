@@ -58,15 +58,20 @@ Notes per gate:
   ends in a pull request brings its accuracy with it: the framework's PR template asks it of a change
   to outputs, and a fix on the serving path can be one without meaning to. A fix to tests,
   documentation or CI files alone changes nothing the server runs and has no G2: `not run: no code the
-  server runs changed`. The reproduction or the failing test runs first, before gsm8k, the one
+  server runs changed`. Nor has the fix for a model that answers no text questions (a diffusion,
+  speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
+  questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
+  reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
   exception to *gsm8k first*: a fix that does not fix has no accuracy worth measuring. Where the base
   cannot serve the configuration because that is the failure being fixed (a crash, a server that does
-  not start), the baseline is the last commit that served it, measured the same way: the culprit's
-  parent for a CI fix (`ci_triage.md` §3), the commit or release the report says worked for an issue.
-  Where the run knows no such commit there is nothing to judge the fix's score against: it is
-  reported, in the gate and in the pull request, and both say that it has no baseline. An issue that
-  reports an accuracy loss is judged by its reproduction (`issue_repro`: the reported score comes
-  back); G2 runs all the same, and its base arm shows the loss.
+  not start), it is never launched for G2, and the baseline is the last commit that served the
+  configuration, measured the same way: the culprit's parent for a CI fix (`ci_triage.md` §3), the
+  commit or release the report says worked for an issue. The gate and the pull request name that
+  commit, and whoever measures again before the push measures against it. Where the run knows no such
+  commit there is nothing to judge the fix's score against: it is reported, in the gate and in the
+  pull request, and both say that it has no baseline. An issue that reports an accuracy loss is
+  judged by its reproduction (`issue_repro`: the reported score comes back); G2 runs all the same, and
+  its base arm shows the loss.
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose

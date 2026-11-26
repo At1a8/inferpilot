@@ -68,7 +68,7 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   next to the base (`validation_doctrine.md`, *G2 for a fix*); where the base cannot serve the
   configuration, next to the last commit that served it, named, or alone, saying that it has no
   baseline. A fix to tests, documentation or CI files alone says that it changes no code the server
-  runs, and gives no table.
+  runs, and gives no table; one for a model that answers no text questions says that instead.
 - **Speed Tests and Profiling:** the baseline against the feature in one scenario (input and output
   lengths, concurrency, hardware, TP), the same harness and runs for both arms, absolute numbers and the
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
