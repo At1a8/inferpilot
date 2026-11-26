@@ -1030,6 +1030,8 @@ class CiOnMainTest(unittest.TestCase):
                 ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
                 ("if (onMain === 'not_run') {", "a lane this machine cannot be is classified from a run elsewhere"),
                 ("const unchecked = String(cl.unchecked || '').trim();", "a task of which a part was not run is called resolved"),
+                ("inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);",
+                 "the classification is not told its limit, and a large cluster loses its answer to the timeout"),
                 ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
             self.assertIn(said, src, why)
         order = [src.index(x) for x in ("const onMain = ", "if (!handOver && !failingCmd) {", "const perfFailure = ")]
@@ -1053,6 +1055,12 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "**A pass that holds.**"),
                 ("roles/ci_guardian.md", "a failure can depend on the test before it"),
                 ("roles/ci_guardian.md", "`unchecked` naming that part"),
+                ("roles/ci_guardian.md", "run them on main: the commit `origin/main` names after a `git fetch origin`"),
+                ("roles/ci_guardian.md", "That is the task worktree only where its base is that commit"),
+                ("roles/ci_guardian.md", "`scan_ci.py` lists ten tests and three job links of a cluster"),
+                ("roles/ci_guardian.md", "**Within your limit.**"),
+                ("roles/ci_guardian.md", "What you did not reach is `unchecked`, like any part you could not run"),
+                ("knowledge/ci_triage.md", "the commit `origin/main` names now, which the task's worktree is only when the task began there"),
                 ("roles/ci_guardian.md", "leave `failure_class` and `failing_test_cmd` out"),
                 ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
                 ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),

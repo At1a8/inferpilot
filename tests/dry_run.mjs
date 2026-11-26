@@ -2016,6 +2016,10 @@ const scenarios = [
       && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
         && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
       `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // Every test three times can outlast the call: it is told its limit, and what it did not reach is unchecked.
+    const told = stale.calls.find((c) => c.key === 'ci_guardian:classify');
+    check(told.ins.time_limit_min > 0 && !Number.isNaN(Date.parse(told.ins.deadline_utc)),
+      `the classification is told its limit and when it ends: ${told.ins.time_limit_min} min, ${told.ins.deadline_utc}`);
     // A task that only asks whether main still fails stops at Classify, and needs neither a model nor a client.
     const ask = await run({ mode: 'ci', task: 'c', model_path: '', client_script: '', stop_after: 'Classify' },
       classified({ on_main: 'passes', evidence: 'passes on rocm720 of 11-25' }, ['failure_class', 'failing_test_cmd']));

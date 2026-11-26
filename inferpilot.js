@@ -2008,7 +2008,9 @@ async function runCi() {
   if (early) return early;
 
   enter('Classify');
-  const cl = await call('ci_guardian', 'classify', inputs(), CLASSIFY);
+  // Classify runs every test of the task on main, three times each: it is told its limit, so that it runs what
+  // fits and hands the rest over (unchecked) instead of losing its answer to the timeout.
+  const cl = await call('ci_guardian', 'classify', inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);
   if (!cl) {
     note('Classify', 'fail', 'no classification');
     return finish('blocked', 'Classify');

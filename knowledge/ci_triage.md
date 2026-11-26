@@ -27,7 +27,8 @@ fix PR or a handover within a week for anything else.
 ## 2. Classify before fixing
 
 **First: does main still fail, on the lane's own image?** A red job says what one image saw of one
-commit. Run the failing tests on main in the environment of the lane that failed: that lane's newest
+commit. Run the failing tests on main (the commit `origin/main` names now, which the task's worktree
+is only when the task began there) in the environment of the lane that failed: that lane's newest
 image, its GPU model and its node count. The newest image is established, not assumed: the newest tag
 of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
 The answer is for every test of the task on every lane it failed on, and a pass has to hold: each

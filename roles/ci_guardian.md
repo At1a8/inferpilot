@@ -10,22 +10,33 @@ Read: `knowledge/ci_triage.md` (all of it), `knowledge/known_issues.md`, `knowle
 
 ## PHASE=classify
 
-Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
+Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue); `time_limit_min` (minutes
+from this call's start, 0 when there is none) and `deadline_utc`, that moment.
 
 **Main first, on the lane's own image.** Once you have the failing tests (step 3), and before you
-classify anything, run them on main, the task worktree. The run counts only in the environment of the
-lane that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and its node count.
+classify anything, run them on main: the commit `origin/main` names after a `git fetch origin`. That is
+the task worktree only where its base is that commit. A task can begin on an earlier one, and then
+main is a clean throwaway worktree, removed when done:
+`git -C <framework_dir> worktree add --detach RUN_DIR/main origin/main`. `evidence` names the commit.
+The run counts only in the environment of the lane that failed (`ci_triage.md` §2): that lane's newest
+image, its GPU model and its node count.
 
 - **Which image is the newest is established, not assumed.** It is the newest tag of the lane's
   variant (rocm10, rocm720 or rocm724) in the registry, and no older than the one the lane's latest
   run on main pulled, which its log names. `$INFERPILOT_IMAGE` must be that image: one that only
   matches the failed job's can be as old as it, and Setup may have taken an older one (`image_ok`).
 - **Every test of the task, on every lane it failed on.** A tracker cluster holds several tests, and
-  one that passes says nothing of the others.
+  one that passes says nothing of the others. `scan_ci.py` lists ten tests and three job links of a
+  cluster (`n_tests` says how many it has): take the rest from the tracker's own state and from the
+  jobs, and name in `unchecked` whatever part of the task you could not establish.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2). So does one the tracker shows failing only some of its
   runs, whatever one green run here says.
+- **Within your limit.** A large cluster run three times can take longer than this call has. With
+  `time_limit_min` above 0, plan from `deadline_utc`, keep the last 15 minutes for stopping what you
+  started and writing the record, and stop a test that would run past it. What you did not reach is
+  `unchecked`, like any part you could not run: it is handed over, never guessed.
 
 Then:
 
