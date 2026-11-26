@@ -28,6 +28,7 @@
 | culprit | <commit, PR, merge time> |
 | how found | diff reading / `git bisect run` (<steps>) |
 | confirmation | fails at culprit, passes at its parent (artifacts) |
+| defect of an AMD component | none / <the component, how it shows without the framework, and the issue drafted for its repository: `component_issue.md`> |
 
 ## Fix or handover
 

@@ -536,6 +536,70 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("so the task names both", both[0])
 
 
+class ComponentCauseTest(unittest.TestCase):
+    """A root cause in an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm build of PyTorch) is
+    that component's to fix: the issue for its repository is drafted, and the framework gets a workaround only
+    for a P0 issue (knowledge/issue_triage.md §5). A CI failure is fixed as any other, with the draft besides."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_decides_by_the_priority(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said in ("function componentCause(found, said) {",
+                     "C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };",
+                     "if (C.component_issue && C.priority !== 'P0') {",
+                     "const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';",
+                     "file the issue draft in ${R.component_issue.component}'s repository"):
+            self.assertIn(said, src)
+        self.assertIn("const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];", src)
+        self.assertIn("const COMPONENT_CAUSE = { component: { type: 'string', enum: ['', ...COMPONENTS] }, component_issue_path: str };", src,
+                      'any word is taken for a component: "none" would stop a fix of the framework\'s own')
+        self.assertIn("if (!COMPONENTS.includes(component)) return '';", src)
+        # ci: the draft is recorded before the check that ends a run without a fix to make.
+        self.assertLess(src.index("const noDraft = bi && bi.confirmed === true ? componentCause(bi, bi.evidence) : '';"),
+                        src.index("if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {"),
+                        "a defect the lane cannot be fixed for loses its draft")
+        for schema in ("DIAG", "BISECT"):
+            self.assertIn("Object.assign(%s.properties, COMPONENT_CAUSE);" % schema, src, "%s takes no component" % schema)
+
+    def test_the_rule_is_written_where_each_role_reads_it(self):
+        for path, said in (
+                ("knowledge/issue_triage.md", "**A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of PyTorch) is that component's to fix."),
+                ("knowledge/issue_triage.md", "**P0:** a workaround in the framework, HIP-only"),
+                ("knowledge/issue_triage.md", "so G2 and G5 measure it"),
+                ("knowledge/issue_triage.md", "**P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`)"),
+                ("knowledge/issue_triage.md", "A component that changed its interface on purpose has no defect"),
+                ("roles/investigator.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/investigator.md", "for a P0, `work_packages` are the workaround in the framework"),
+                ("roles/investigator.md", "for any other issue return none."),
+                ("roles/investigator.md", "Never change the component: it comes from the image"),
+                ("roles/investigator.md", "Return `component` (`aiter`, `mori`, `rocm` or `pytorch_rocm`, and nothing for any other cause"),
+                ("roles/investigator.md", "Either way `summary` says what the reporter can do meanwhile"),
+                ("roles/issue_triager.md", "as the diagnosis gave it (`component_issue.summary`)"),
+                ("roles/ci_guardian.md", "where you can plan none, return the component and its draft all the same"),
+                ("roles/issue_triager.md", "With `component_issue` the root cause is in an AMD component outside the framework"),
+                ("roles/issue_triager.md", "`<component issue link>` placeholder, since the human files that issue"),
+                ("roles/ci_guardian.md", "and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`)"),
+                ("roles/ci_guardian.md", "The lane is still fixed by the package; where you can plan none"),
+                ("knowledge/ci_triage.md", "**A defect of an AMD component** outside the framework"),
+                ("knowledge/ci_triage.md", "with a pin to the last version that passed where a bump brought it"),
+                ("roles/director.md", "With `component_issue`, name the component the root cause is in"),
+                ("templates/issue_triage.md", "the issue drafted for its repository (`component_issue.md`)"),
+                ("templates/ci_triage.md", "| defect of an AMD component |"),
+                ("README.md", "| `component_issue.md` |"),
+                ("README.zh-CN.md", "| `component_issue.md` |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+    def test_the_components_are_the_ones_the_priority_rubric_calls_the_amd_side(self):
+        # issue_triage.md §2 names the AMD-maintained stacks; the rule is about the same four, wherever it is written.
+        rubric = self.flat("knowledge/issue_triage.md")
+        self.assertIn("AMD-maintained stacks (aiter, MoRI, ROCm, the ROCm build of PyTorch)", rubric)
+        for path in ("knowledge/issue_triage.md", "knowledge/ci_triage.md", "roles/investigator.md", "roles/ci_guardian.md"):
+            self.assertIn("(aiter, MoRI, ROCm, the ROCm build of PyTorch", self.flat(path), path)
+
+
 class FlagsTest(unittest.TestCase):
     def test_bootstrap_flags_the_docs_give_exist_and_every_one_is_documented(self):
         defined = argparse_flags(ROOT / "inferpilot" / "bootstrap.py")

@@ -130,6 +130,22 @@ its own, with the issue and the problem's name as its `task`: the run's result o
   tuned table and may run another kernel. Compare the selected kernel name with the reporter's log
   before calling a reproduction faithful. Record bare metal or VF too: sglang #41299 and #38849 both
   came from VFs.
+- **A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of
+  PyTorch) is that component's to fix. Show it there first: the component's own call fails without the
+  framework, on the shapes and dtypes of the reproduction, or the failure is gone with that call
+  replaced. The investigator then drafts the issue for the component's repository
+  (`RUN_DIR/component_issue.md`): that reproduction, the versions, the GPU, counts and short log
+  excerpts. A human files it. What the framework does meanwhile goes by the priority (§2):
+  - **P0:** a workaround in the framework, HIP-only (`pr_playbook.md`) and the smallest that serves
+    the reported configuration (another kernel, or the reference path, for the shapes that fail). It
+    is a fix that changes code the server runs, so G2 and G5 measure it. Its comment and its pull
+    request name the component's issue, and say what to remove once the component is fixed.
+  - **P1 and P2:** no workaround. The run ends at Diagnose (`diagnosed`), and the reply gives the root
+    cause, the component, and what the reporter can do meanwhile (a version that works, a flag that
+    avoids the path).
+
+  A component that changed its interface on purpose has no defect: following it is the framework's
+  fix, as for any other issue.
 
 ## 6. Auto-close
 

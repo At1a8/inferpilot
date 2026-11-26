@@ -26,7 +26,9 @@
 
 ## Diagnosis
 
-<!-- Root cause with the evidence, or why it is not AMD-side, or what is still unknown. -->
+<!-- Root cause with the evidence, or why it is not AMD-side, or what is still unknown.
+     A root cause in an AMD component outside the framework: the component, how it shows without the
+     framework, and the issue drafted for its repository (`component_issue.md`). -->
 
 ## Fix
 
