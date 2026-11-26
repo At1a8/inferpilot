@@ -893,14 +893,18 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';", "the score to restore is not read"),
                 ("if (!handOver && accFailure && !accClaim) {", "an accuracy failure goes on without the score its fix must restore"),
                 ("if (!handOver && accClaim) C.accuracy_claim = accClaim;", "the claim does not reach the verify engineer"),
-                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length))) {",
-                 "one of the two ways a round is accepted is not held to G2"),
-                ("if (!g2 || /^not run\\b/i.test(g2)) {", "a round that passes without G2 is accepted for an accuracy problem"),
-                ("if (g2Failed(failures) || /^fail\\b/i.test(g2)) {", "a G2 that failed without blocking is accepted"),
-                ("if (C.accuracy_claim && g2Failed(blocking)) {", "the base's low score becomes a known issue, which excuses the next round")):
+                ("const claimGate = String((v.gates || {}).accuracy_claim || '').trim();",
+                 "the score to restore is read from G2, which also holds gsm8k against the base"),
+                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {",
+                 "a round is accepted without the score's pass: both ways a round is accepted are held to it, and only \"pass\" is one"),
+                ("const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];",
+                 "the fix's own gates are not told from the others"),
+                ("const mine = own(blocking).map((f) => f.gate);", "a gate of the fix's own that fails on the base becomes a known issue")):
             self.assertIn(said, src, why)
-        # The check sits before the line that accepts a round, whichever way it is accepted.
+        # The check sits before the line that accepts a round, whichever way it is accepted; and what the task is
+        # there to fix is never recorded as a known issue, which the next round would excuse.
         self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
+        self.assertLess(src.index("const mine = own(blocking).map((f) => f.gate);"), src.index("if (inv.known_issue) R.known_issues.push(inv.known_issue);"))
 
     def test_the_documents_say_what_is_measured(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
@@ -909,6 +913,8 @@ class CiAccuracyProblemTest(unittest.TestCase):
                      "`accuracy_claim`: the set, the model and the value", "with the failing test's own measurement, whatever the fix changes",
                      "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
                      "No known issue excuses it: the base scores low as well",
+                     "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "cannot stand in for it",
                      "that is a human's to say"):
             self.assertIn(said, note[0])
         for path, said in (
@@ -918,7 +924,10 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
                 ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
                 ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
-                ("roles/verify_engineer.md", "Never report G2 as `not run` then"),
+                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
+                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
                 ("roles/reviewer.md", "read G2's score against the claim yourself"),

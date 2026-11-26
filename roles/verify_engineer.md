@@ -91,13 +91,15 @@ clock can start before your session does.
      `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2
      for an accuracy problem in CI*), run the failing test's own measurement on the fix, with its
      set, model and settings as `failing_test_cmd` runs them, and read the score it measures, not
-     whether its assertion passes: `"G2": "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)"`.
-     A score below the claim is a blocking failure of G2 although `failing_test` passes: a threshold
-     moved in the test restores nothing. Never report G2 as `not run` then: the run does not accept
-     the round without it. Step 4 excuses nothing here: the base of an accuracy problem scores low
-     as well, and that is the failure being fixed, so no entry of `known_issues` makes a score below
-     the claim pass, or fail without blocking. gsm8k against the base runs besides, by the fix's
-     files, as for any fix.
+     whether its assertion passes. Report it in `gates` under its own name, apart from G2's gsm8k
+     against the base: `"accuracy_claim": "pass 0.936, the claim is 0.93 (the test's GSM8K, 200
+     q)"`, with `pass` only for a score at the claim or above. A score below it is a blocking failure
+     (`gate: "accuracy_claim"`) although `failing_test` passes: a threshold moved in the test
+     restores nothing. Never leave it out, and never report it `not run`: the run accepts no round
+     without its `pass`. Step 4 excuses nothing here: the base of an accuracy problem scores low as
+     well, and that is the failure being fixed, so no entry of `known_issues` makes a score below
+     the claim pass, or fail without blocking. gsm8k against the base (G2) runs besides, by the
+     fix's files, as for any fix.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
      fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates
