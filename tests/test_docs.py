@@ -688,7 +688,7 @@ class FixAccuracyTest(unittest.TestCase):
         """A stop before the fix lets a run start without one; the route can skip that stop's phase (an existing
         fix PR has no Diagnose), and the control file can lift it."""
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("function askForFix(at) {\n  const lacks = Object.keys(FIX_NEEDS).filter((k) => !C[k]);", src)
+        self.assertIn("function askForFix(at) {\n  const lacks = ['model_path', 'client_script'].filter((k) => !C[k]);", src)
         self.assertRegex(src, r"const FIX_NEEDS = \{ model_path: [^}]*\};", "the model is not among what a fix needs")
         for at in ("Reproduce", "Diagnose", "Bisect"):
             self.assertIn("const lacking = askForFix('%s');\n" % at, src, "a fix can start after %s without a model" % at)
@@ -760,8 +760,19 @@ class FixPerformanceTest(unittest.TestCase):
         self.assertIn("if ((g4 || fixes) && !a.client_script) {\n", src, "a fix G5 will measure may start without a client")
         self.assertIn("if ((g4 || fixes) && gaps.length) {\n    ask('workload',", src,
                       "InferPilot's client would measure a fix on lengths or a concurrency nobody chose")
-        self.assertIn("const FIX_NEEDS = { model_path: 'the model', client_script: 'the client' };", src,
+        self.assertIn("const FIX_NEEDS = { model_path: 'the model', client_script: 'the client', "
+                      "workload: \"the whole workload of InferPilot's client\" };", src,
                       "a run that reaches its fix without a client is not asked for one")
+        # Intake asks nothing about the template's workload of a task that stops before its fix: where that stop
+        # is lifted, the fix must not be measured on what Setup rendered from a part of a workload.
+        self.assertIn("  const gaps = isTemplate(A.client_script) ? templateLoadGaps(A) : [];\n  if (gaps.length) lacks.push('workload');\n",
+                      src, "a fix can start on InferPilot's client with lengths or a concurrency nobody chose")
+        self.assertIn("const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};\n"
+                      "    out.rerun_with = { ...partial, answers:", src,
+                      "the part of a workload the task gave wins over the answer on the next run")
+        self.assertIn("Where the control file lifts that stop, the run asks before any code changes for what the fix lacks: the "
+                      "model, the client, and of a task that names InferPilot's client all the same, what its `workload` leaves out.",
+                      self.flat("templates/task_definition.md"))
         for mode in ("issue", "ci"):
             for table in ("ROUTES", "STOP_PHASES"):
                 body = re.search(r"const %s = \{(.*?)\n\};" % table, src, re.S).group(1)
@@ -807,7 +818,8 @@ class FixPerformanceTest(unittest.TestCase):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
         for said in ("when it changes code the server runs", "no slower than the base beyond the noise band", "One diff decides both gates",
-                     "has no G5 either", "the last commit that served it", "reported and not judged", "names its client as it names its model",
+                     "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
+                     "the one the triage record names", "reported and not judged", "names its client as it names its model",
                      "no template is offered for it", "A performance problem is measured whatever its fix changes",
                      "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
                      "stops the task at Performance for a human, and nothing is rolled back"):
@@ -816,7 +828,11 @@ class FixPerformanceTest(unittest.TestCase):
                            ("roles/verify_engineer.md", "That one diff decides G5 as well"),
                            ("roles/verify_engineer.md", "Read the diff in every round"),
                            ("roles/perf_engineer.md", "**A fix (issue, ci) has no baseline from Setup:** measure both arms yourself"),
-                           ("roles/perf_engineer.md", "the baseline is the commit G2 measured against, which the ledger names"),
+                           ("roles/perf_engineer.md", "the baseline is the last commit that served it, in a throwaway worktree. That "
+                                                      "is the commit G2 measured against, which the ledger names"),
+                           ("roles/perf_engineer.md", "Where G2 measured none, as for a model that answers no text questions, which it "
+                                                      "does not run on, the commit is still known: take it from the triage record"),
+                           ("roles/perf_engineer.md", "Only where the run knows no such commit, measure the fix alone"),
                            ("roles/perf_engineer.md", "return `no_baseline` with the reason"),
                            ("roles/perf_engineer.md", "**A performance problem is measured where it showed:**"),
                            ("roles/perf_engineer.md", "a feature or a fix that is slower does not"),
