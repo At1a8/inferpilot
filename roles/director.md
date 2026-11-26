@@ -111,7 +111,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    you, with the same variables, from the reporter's or the job's own command as given: never with a
    template's or the cookbook's flags. A report or a job that starts no server at all (a unit test, an
    import that fails) leaves nothing to write it from: when the task has a `model_path`, render
-   InferPilot's server template for it (below). Return the one or the other as `server_script`: G2
+   InferPilot's server template for it (below), the one template a run takes without the user's
+   answer, and say so in `notes` for the report. Return the one or the other as `server_script`: G2
    serves the fix and its baseline with it, and with a `model_path` Setup does not pass without one. A
    task without a `model_path` stops before any fix: prepare only what its reproduction needs, and
    render nothing.

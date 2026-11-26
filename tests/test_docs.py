@@ -599,6 +599,10 @@ class FixAccuracyTest(unittest.TestCase):
                            ("roles/verify_engineer.md", "it is reported, not judged"),
                            ("roles/director.md", "the verify engineer measures the base arm"),
                            ("roles/director.md", "when the task has a `model_path`, render InferPilot's server template"),
+                           ("roles/director.md", "the one template a run takes without the user's answer, and say so in `notes`"),
+                           ("templates/task_definition.md", "It is the one case in which a template runs without the user's answer"),
+                           ("templates/task_definition.md", "it is not chosen for the user, but for the server G2 measures a fix on "
+                                                            "when the report or the job starts none"),
                            ("roles/director.md", "Return the one or the other as `server_script`"),
                            ("roles/director.md", "without one, skip them as well"),
                            ("roles/director.md", "for the G2 of a fix whose baseline was measured on another commit"),

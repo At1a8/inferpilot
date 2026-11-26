@@ -42,8 +42,8 @@ when the likely path of the task needs them.
 A task that measures accuracy or performance brings the scripts that run its baseline, so every arm is
 launched and measured the way the user runs the model, not the way an agent guessed. A script the user
 gives runs unchanged, whatever the templates or the feature's source say. A user who has none may take
-InferPilot's template instead (§1.2) by answering `template` when the run asks; it is never chosen for
-the user.
+InferPilot's template instead (§1.2) by answering `template` when the run asks; it is not chosen for
+the user, but for the server G2 measures a fix on when the report or the job starts none (§1.2).
 
 - **`server_script`** starts one server in the foreground. InferPilot runs it with `PORT`,
   `HIP_VISIBLE_DEVICES`, `PYTHONPATH` (the tree under test) and `EXTRA_ARGS` (the feature's flags; empty
@@ -112,7 +112,10 @@ only where the user takes them:
   measures are its arguments, from `goal` (gsm8k when none), never a template parameter.
 
 An issue or a ci task launches its server with the reporter's or the job's own command, as given, never
-with a template's or the cookbook's flags.
+with a template's or the cookbook's flags. Where they start no server at all (a unit test, an import
+that fails), there is no command to follow: G2 then serves the fix of a task that has a `model_path`
+with `server.sh`. It is the one case in which a template runs without the user's answer, and the
+report says so.
 
 Setup renders the templates a run uses into `RUN_DIR/scripts/` with `scripts/harness.py`, which takes
 each parameter from, in this order:
