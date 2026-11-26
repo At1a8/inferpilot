@@ -36,8 +36,9 @@ the fields `inferpilot.js` takes, the same names every role reads. It can be giv
 request in plain words: then an Intake phase runs first and turns the request into a definition,
 checking what it can without changing anything (the checkout, the model on this machine, the GPUs,
 the issue). A definition that still lacks something its mode needs — the issue, the checkout, the
-model for `feature` and `perf`, the fixed workload for `perf` — starts nothing and comes back as
-questions, one per field, each with options or a default. A complete definition skips the Intake.
+model for `feature` and `perf` and for an issue or CI fix, the fixed workload for `perf` — starts
+nothing and comes back as questions, one per field, each with options or a default. A complete
+definition skips the Intake.
 
 Every implementation runs one work package at a time; an independent test engineer re-runs its unit
 test, checks that the test fails without the change, and runs the feature-off check; a package that
@@ -570,7 +571,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `task` | the upstream PR/design, issue URL, CI job/cluster or performance goal (required except `scan`) |
 | `goal` | what done means, measurable when the mode measures; the spec and the performance plan address it |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (for sglang the image's `/sgl-workspace/sglang` by default, which the image installs sglang from) |
-| `model_path` | the model the baseline and the gates run (required for `feature` and `perf`) |
+| `model_path` | the model the baseline and the gates run (required for `feature` and `perf`; for `issue` and `ci` too, unless `stop_after` ends the run before a fix: a fix that changes code the server runs is measured on gsm8k against the base, G2) |
 | `framework`, `platform`, `gpu_ids` | target and environment (`sglang`; empty `gpu_ids` lets Setup pick idle GPUs, which every later role then uses through `HIP_VISIBLE_DEVICES`) |
 | `workload` | the benchmark every measurement uses, e.g. `{"isl":8192,"osl":1024,"conc":64}`; required for `perf`, fixed at Setup |
 | `server_script` | your script that starts the server for `model_path`; InferPilot sets `PORT`, `HIP_VISIBLE_DEVICES`, `PYTHONPATH` and `EXTRA_ARGS` (the feature's flags, empty for the baseline), and the script passes `--port $PORT` and `$EXTRA_ARGS` to the server; required for `feature` and `perf` ([`templates/task_definition.md`](templates/task_definition.md) §1.1). Without one, you may answer `template`: InferPilot's `templates/harness/server.sh`, after the model's recipe in the sglang cookbook |
@@ -594,17 +595,18 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`, default `true`: a design the architect flags, or L3 work, goes on to Implement, and the report says no human approved the design. `false` makes such a design wait at Design for a human (`awaiting_design_review`). `stop_after` still stops |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's own workload and goal, each off by default: `held_out` measures the gain again at a held-out operating point (half the concurrency) and requires it to hold there; `guards` adds guard workloads of InferPilot's choosing to the ones the goal names; `sweep` measures points beyond the workload's own (more concurrencies or lengths) |
 | `tune` | `feature`, default `false`: the feature runs at the configuration of the target PR or design (for FLy, vLLM's window 2, threshold 0.3, top-k 3) and has to work there; `true` adds a work package that chooses its knobs by measurement |
-| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack runs on long prompts); `stability` runs G4, the `client_script` run back to back for more than 48 hours against one server (`scripts/stability.sh`; the task needs a `client_script`), once in a run: a later change to the code is not run through it again, and the report says which commit was. A Verify round with it asks for a limit of about 6 days, used in full only when G4 fails and the baseline runs the same test as its control |
+| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack runs on long prompts); `stability` runs G4, the `client_script` run back to back for more than 48 hours against one server (`scripts/stability.sh`; the task names its `server_script` and its `client_script`, in any mode, and is asked for the one it lacks: G4 takes no template of its own accord), once in a run: a later change to the code is not run through it again, and the report says which commit was. A Verify round with it asks for a limit of about 6 days, used in full only when G4 fails and the baseline runs the same test as its control |
 | `review_model` | the reviewer's model, passed with its agent call (InferPilot's runner gives it to the CLI as `--model`; in Claude Code it depends on the Workflow tool) |
 | `max_fix_rounds`, `max_investigate_rounds`, `max_review_rounds`, `max_work_packages` | budgets |
-| `agent_retries`, `agent_timeout_ms` | an agent call is retried after an error (the retry checks what the failed attempt left), never after a timeout: the timed-out agent may still be running, so it goes on the report's attention list, and its work package gets no further round and no rollback. Default timeout 3 h, 6 h for the verify and performance engineers and the investigator; a Verify round that needs longer says how long and gets it, once, unless `agent_timeout_ms` is given |
+| `agent_retries`, `agent_timeout_ms` | an agent call is retried after an error (the retry checks what the failed attempt left), never after a timeout: the timed-out agent may still be running, so it goes on the report's attention list, and its work package gets no further round and no rollback. Default timeout 3 h, 6 h for the verify and performance engineers, the investigator and an issue's reproduction; a Verify round or a reproduction that needs longer says how long and gets it, once and at most twice its limit, unless `agent_timeout_ms` is given |
 
 Everything but `inferpilot_dir`, `request`, `answers`, `exp_root`, `review_model` and the budgets is the task
 definition; the result of every run that started records the definition it used (`task_def`), where
 each field came from (`provenance`) and the intake's `assumptions`.
 
 Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a port's client does not
-run its source's scenarios; any `stop_after`; with `auto_approve_design`
+run its source's scenarios; the question for a model, when an issue or a ci run reaches its fix without
+one; any `stop_after`; with `auto_approve_design`
 set to `false`, L3 tasks and designs the architect flags stop at Design (`awaiting_design_review`; by
 default they go on, and the report says no human approved the design); a review the reviewer marks `blocked`
 stops before the PR; the PR engineer returns the exact `git push` instead of pushing; issue replies
@@ -624,8 +626,8 @@ frees it at the end of its report. While another task holds it, a new run ends a
 names the holder. Every mode but scan also needs the machine's GPUs free of other jobs
 (`scripts/gpu_status.py --check all`): another job on any of them ends the run at Setup as `busy` too,
 and makes a later performance measurement not run. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
-container) is gone, or which wrote nothing in its run directory for twice its longest agent call (12 h
-by default), is taken over by the next run. A run in another container is
+container) is gone, or which wrote nothing in its run directory for twice its longest agent call, one given
+the most time it can get (24 h by default), is taken over by the next run. A run in another container is
 never taken over for silence, since its run directory is not visible from here; once that run is
 gone, the second command frees the machine, as it frees one a run that died left behind:
 

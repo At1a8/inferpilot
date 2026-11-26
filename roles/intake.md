@@ -23,6 +23,11 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      shallow clone and the mode is `ci` or `scan`, which need history.
    - `model_path`: the model the request or the issue names, found under the usual model directories
      (`/mnt`, `/data`, `$HF_HOME`). A model that is not on the machine is a question, never a download.
+     An issue or a ci task needs it too, unless `stop_after` ends the run before a fix: G2 measures on
+     gsm8k a fix that changes code the server runs (`knowledge/validation_doctrine.md`). It is the
+     reporter's model, or the one the failing test serves; ask when neither is on the machine. Give it
+     also when it answers no text questions (a diffusion model): the run serves it for the fix, and
+     G2 says that gsm8k cannot be put to it.
    - `gpu_ids`: GPUs that exist, by HIP number (`scripts/gpu_status.py`); leave it empty to let Setup
      pick free ones.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
@@ -44,8 +49,11 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      the long-context gate (G3) or for the stability run of more than 48 hours (G4). Both are off by
      default and never follow from the kind of change (`knowledge/validation_doctrine.md`). They are
      fields of their own, so a `goal` the caller gave does not drop what the request asked. G4 keeps
-     the task's performance test running: with `stability` on, a task without a `client_script` is
-     asked for one, as a perf task is.
+     the task's performance test running against one server, and the user who asks for it says what
+     it keeps up: with `stability` on, a task without a `server_script` or without a `client_script`
+     is asked for it, in any mode. Where only G4 needs the script (an issue's or a ci task's, the
+     client of a feature without a workload), the question offers no `template`. A task that names
+     InferPilot's client all the same (`client_script: template`) is asked for the `workload` it runs.
    - feature skills (feature mode): `python3 <inferpilot_dir>/scripts/find_skill.py "<request, task title>"`;
      list each candidate in `assumptions` as `feature skill candidate: <id> (<status>)`. The director
      makes the choice at Spec.
