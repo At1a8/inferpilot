@@ -1875,6 +1875,20 @@ const scenarios = [
     }
     const tpl = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template' });
     check(asks(tpl, 'long_context_script'), `"template" is no answer, since InferPilot has none: ${fields(tpl)}`);
+    // The answer takes the place of the value the task gave, which would otherwise win over it and be asked about again.
+    const again = (tpl.result.next || {}).rerun_with || {};
+    check(again.long_context_script === '' && 'long_context_script' in (again.answers || {}),
+      `the value the run could not use is cleared for the next run: ${JSON.stringify(again)}`);
+    const answered = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template', ...again,
+      answers: { long_context_script: '/s/niah.sh' } });
+    const av = answered.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(answered.result.status !== 'needs_input' && av && av.ins.long_context_script === '/s/niah.sh',
+      `and with the answer the run starts on the script the user named: ${answered.result.status}, ${av && av.ins.long_context_script}`);
+    const blank = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: '   ' });
+    check(asks(blank, 'long_context_script'), `a path of blanks names no script: ${fields(blank)}`);
+    const padded = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: ' /s/niah.sh ' });
+    const pv = padded.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(pv && pv.ins.long_context_script === '/s/niah.sh', `the roles read the path without the blanks around it: ${JSON.stringify(pv && pv.ins.long_context_script)}`);
     const off = await run({ mode: 'feature', task: 't', long_context: false });
     check(off.result.status !== 'needs_input', `with long_context off a task names no test: ${off.result.status}`);
     const unused = await run({ mode: 'feature', task: 't', long_context_script: '/s/niah.sh' });

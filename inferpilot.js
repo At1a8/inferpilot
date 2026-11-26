@@ -248,8 +248,10 @@ function missingFields(a) {
     }
   }
   // G3 runs the task's own long-context test, as G4 keeps up the task's own client: the user asked for the gate
-  // and says what it runs. InferPilot has no template for such a test, and no role writes one in its place.
-  if (mode !== 'scan' && asked(a.long_context) === 'true' && (!a.long_context_script || isTemplate(a.long_context_script))) {
+  // and says what it runs. InferPilot has no template for such a test, and no role writes one in its place. A
+  // path of blanks names no script.
+  const g3script = String(a.long_context_script || '').trim();
+  if (mode !== 'scan' && asked(a.long_context) === 'true' && (!g3script || isTemplate(g3script))) {
     ask('long_context_script', 'Which script runs the long-context test for G3 (absolute path)? It reads PORT, runs its prompts '
       + "against the server and writes each request's result to OUT_DIR. InferPilot has no template for it.",
       'long_context is on: G3 runs this test unchanged on the baseline and on the change');
@@ -333,11 +335,14 @@ async function intakeStage(raw) {
     return stopped('rejected', why, { reason: why, next: { say: `Outside what InferPilot does: ${why}` } });
   }
   if (questions.length) {
+    // A field the caller set wins over an answer. One that is asked about all the same (a value the run cannot
+    // use, or only a part of what it needs) is cleared for the next run, so that the answer takes its place.
+    const rejected = Object.fromEntries(questions.filter((q) => q.field in given).map((q) => [q.field, '']));
     return stopped('needs_input', `missing: ${questions.map((q) => q.field).join(', ')}`, {
       questions,
       // null until the user answers: a run that still has it asks again rather than taking a placeholder
       next: { say: 'InferPilot needs these answers before it starts; nothing ran.', ask: questions,
-        rerun_with: { answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
+        rerun_with: { ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
     });
   }
   return {
@@ -406,7 +411,7 @@ const C = {
   tune: TUNE,
   long_context: LONG_CONTEXT,
   stability: STABILITY,
-  long_context_script: String(A.long_context_script || ''),
+  long_context_script: String(A.long_context_script || '').trim(),
   confirm_leads: CONFIRM_LEADS,
   assumptions: START.assumptions || [],
   kernel_backend: KERNEL_BACKEND,

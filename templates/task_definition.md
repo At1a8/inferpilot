@@ -66,13 +66,13 @@ the user, but for the server G2 measures a fix on when the report or the job sta
   (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none
   (`../knowledge/validation_doctrine.md`, *G2 for a fix*).
 - **`long_context_script`**, with `long_context` on, runs the task's long-context test against `PORT`
-  and writes its results to `OUT_DIR`: for each request, whether it passed, with its output, and the
-  per-token logprobs when the script records them, which lets a failure be classified
-  (`../knowledge/validation_doctrine.md`, *Failure taxonomy*). The test is the user's: its prompts,
-  their lengths, the needles, the seed and the scoring are fixed in it. InferPilot runs it unchanged
-  on every arm, at least 4 times at each of two or more concurrencies (`CONCURRENCY`, one value a run,
-  when the script reads it), flushing the prefix cache between runs. It has no template for one, and
-  writes none.
+  and writes its results to `OUT_DIR`, a directory InferPilot makes for each run before it starts the
+  script: for each request, whether it passed, with its output, and the per-token logprobs when the
+  script records them, which lets a failure be classified (`../knowledge/validation_doctrine.md`,
+  *Failure taxonomy*). The test is the user's: its prompts, their lengths, the needles, the seed and
+  the scoring are fixed in it. InferPilot runs it unchanged on every arm, at least 4 times at each of
+  two or more concurrencies (`CONCURRENCY`, one value a run, when the script reads it), flushing the
+  prefix cache between runs. It has no template for one, and writes none.
 - **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
   as the task's `long_context_script`, G4 as the `client_script` run back to back for more than 48 hours
   against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;

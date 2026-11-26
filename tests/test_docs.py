@@ -301,7 +301,7 @@ class LongContextScriptTest(unittest.TestCase):
         intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
         self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the script")
         self.assertIn("\n  %s: str," % self.FIELD, intake, "the intake cannot return the script")
-        self.assertIn("\n  %s: String(A.%s || '')," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
+        self.assertIn("\n  %s: String(A.%s || '').trim()," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
         self.assertIn("args.%s" % self.FIELD, src, "inferpilot.js's whenToUse does not name the script")
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
         row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
@@ -317,9 +317,9 @@ class LongContextScriptTest(unittest.TestCase):
 
     def test_with_long_context_on_the_task_is_asked_for_its_test_and_nothing_stands_in(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("if (mode !== 'scan' && asked(a.long_context) === 'true' && (!a.long_context_script || "
-                      "isTemplate(a.long_context_script))) {\n    ask('long_context_script',", src,
-                      "long_context is on without a test for G3 to run")
+        self.assertIn("const g3script = String(a.long_context_script || '').trim();\n"
+                      "  if (mode !== 'scan' && asked(a.long_context) === 'true' && (!g3script || isTemplate(g3script))) {\n"
+                      "    ask('long_context_script',", src, "long_context is on without a test for G3 to run: a path of blanks is none")
         question = re.search(r"\n    ask\('long_context_script',(.*?)\);\n", src, re.S)
         self.assertIsNotNone(question)
         self.assertNotIn("TEMPLATE", question.group(1), "the question offers a template InferPilot does not have")
@@ -340,7 +340,10 @@ class LongContextScriptTest(unittest.TestCase):
         self.assertEqual(len(gate), 1)
         self.assertIn("the task's own long-context test (`long_context_script`)", gate[0])
         for path, said in (("roles/verify_engineer.md", "G3 long context is the task's own test, its `long_context_script`"),
+                           ("roles/verify_engineer.md", "each run in a directory of its own that you make first: `mkdir -p "
+                                                        "RUN_DIR/logs/g3_<arm>_c<n>_<run>`"),
                            ("roles/verify_engineer.md", "CONCURRENCY=<n> bash <long_context_script>"),
+                           ("templates/task_definition.md", "a directory InferPilot makes for each run before it starts the script"),
                            ("roles/verify_engineer.md", "at two or more concurrencies, at least 4 runs each"),
                            ("roles/verify_engineer.md", "Never write a long-context test of your own, and never change the task's"),
                            ("roles/verify_engineer.md", "A script that does not read `CONCURRENCY` runs at its own"),

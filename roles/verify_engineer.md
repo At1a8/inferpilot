@@ -92,7 +92,8 @@ clock can start before your session does.
      `not run: not asked` in `gates` (`validation_doctrine.md`). Never run either on your own reading of
      the change or of `goal`.
      - G3 long context is the task's own test, its `long_context_script` (`task_definition.md` §1.1),
-       run unchanged on both arms: `PORT=<port> OUT_DIR=RUN_DIR/logs/g3_<arm>_c<n>_<run>
+       run unchanged on both arms, each run in a directory of its own that you make first: `mkdir -p
+       RUN_DIR/logs/g3_<arm>_c<n>_<run>`, then `PORT=<port> OUT_DIR=RUN_DIR/logs/g3_<arm>_c<n>_<run>
        CONCURRENCY=<n> bash <long_context_script>`, at two or more concurrencies, at least 4 runs each
        (6 when an intermittent failure is being judged), the prefix cache flushed between runs. Never
        write a long-context test of your own, and never change the task's: its prompts, their lengths,
