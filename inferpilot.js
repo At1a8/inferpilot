@@ -723,7 +723,10 @@ const TRIAGE = S({
     type: 'string',
     enum: ['wrong result', 'crash', 'startup or build failure', 'performance', 'feature request', 'CI', 'tool'],
   },
-  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan'] },
+  action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
+  duplicate_of: str, // with duplicate: the open issue that has the failure, the original (#<n>)
+  // a report with several problems: the ones this run does not take, each with the task that starts a run on it
+  other_problems: arr(S({ problem: str, task: str, priority: str }, ['problem'])),
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1128,6 +1131,12 @@ function nextSteps(status, at) {
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+  }
+  // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
+  if ((R.other_problems || []).length && !out.start) {
+    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
+    out.start = R.other_problems.map((p, i) => ({ rank: i + 1, task: p.problem,
+      args: { inferpilot_dir: INFERPILOT, ...def, mode: 'issue', task: p.task || `${def.task}: ${p.problem}` } }));
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1911,6 +1920,15 @@ async function runFeature() {
   return deliver(design.work_packages, [], claimOf(spec.perf_claim, spec.perf_cost), true);
 }
 
+// An issue as a duplicate names it: `#<n>`, `<owner>/<repo>#<n>`, or its URL, which becomes the second form.
+// Anything else ("unknown", "#n") names no issue to follow, and is ''.
+function issueRef(v) {
+  const s = String(v || '').trim();
+  const url = /^https?:\/\/[^\s/]+\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/?$/.exec(s);
+  if (url) return `${url[1]}#${url[2]}`;
+  return /^(?:[\w.-]+\/[\w.-]+)?#\d+$/.test(s) ? s : '';
+}
+
 async function runIssue() {
   const early = await start(false);
   if (early) return early;
@@ -1923,8 +1941,24 @@ async function runIssue() {
   }
   Object.assign(C, { triage_path: tri.triage_path, reply_draft_path: tri.reply_draft_path || '', priority: tri.priority });
   R.priority = tri.priority;
-  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${tri.reason || ''}`);
-  if (['needs_info', 'not_amd', 'plan'].includes(tri.action)) return finish('triaged', 'Triage');
+  // A duplicate ends here, before the Reply phase: without the issue it duplicates, or without the draft written
+  // at Triage, the run would end with no answer and no issue to follow.
+  const duplicateOf = tri.action === 'duplicate' ? issueRef(tri.duplicate_of) : '';
+  if (tri.action === 'duplicate' && (!duplicateOf || !String(tri.reply_draft_path || '').trim())) {
+    note('Triage', 'fail', `a duplicate without ${duplicateOf ? 'a reply draft' : `the issue it duplicates (duplicate_of: #<n>, not `
+      + `${JSON.stringify(tri.duplicate_of || '')})`}: ${tri.reason || ''}`);
+    return finish('blocked', 'Triage');
+  }
+  if (duplicateOf) R.duplicate_of = duplicateOf;
+  // A report with several problems is several tasks: the ones this run does not take are offered as runs of
+  // their own (next.start), each on this run's definition with the issue and the problem's name as its task.
+  const others = (tri.other_problems || []).filter((p) => p && String(p.problem || '').trim())
+    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim() }));
+  if (others.length) R.other_problems = others;
+  note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${duplicateOf ? `duplicate of ${duplicateOf}; ` : ''}${tri.reason || ''}`);
+  // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside
+  // AMD code, a feature request, and a report of a failure that another open issue already has.
+  if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
