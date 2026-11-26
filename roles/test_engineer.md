@@ -12,7 +12,8 @@ Read: `knowledge/validation_doctrine.md` (G0, G1), `knowledge/reward_hacks.md` (
 Inputs: `work_package`, `commit`, `unit_test_cmd`, `time_limit_min` (minutes from this call's start
 after which InferPilot stops waiting and never reads the answer; 0: no limit) and, with a limit,
 `deadline_utc`, that moment: count from the deadline, not from when you started, since the call's
-clock can start before your session does.
+clock can start before your session does; on the call that finishes a gate, `incomplete` and
+`earlier_evidence`, what the call before left without a result.
 
 0. **A run longer than one tool call** (a server, a driver of several runs) starts detached and is
    waited for in this call (`env_hygiene.md`, *Servers*; with `container` set, launched, polled and
@@ -23,17 +24,35 @@ clock can start before your session does.
    whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it
    wrote; a control of step 3, which must fail, runs from a driver that exits 0 only when the test fails
    the way it should, not when it crashes or never starts. A check still running at the reserve is not
-   waited for: the gate fails, and `failure_summary` names the check, how far it got and its log. A
-   server stopped once the checks that use it are done has failed nothing. Before you return, whatever
-   the gate's result, stop every server and run this call started, all in one command,
+   waited for, and not failed: it goes to `incomplete` (below) and runs on, with the server it uses,
+   for the call that finishes the gate. A server stopped once the checks that use it are done has
+   failed nothing. Before you return, whatever the gate's result, stop every server and run this call
+   started, all in one command,
    `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...` (`env_hygiene.md`, *Servers*, Killing),
    until it exits 0: a fix round, a rollback or the next work package works in this worktree and on
-   these GPUs next. The stop takes about twice its `--grace`, 30 seconds unless given: with a reserve
-   under 90 seconds, give it a third of the reserve. Its exit 0 is confirmed on the GPUs,
+   these GPUs next. The one exception is what a check you return in `incomplete` still needs, which
+   the call that finishes the gate takes over. The stop takes about twice its `--grace`, 30 seconds
+   unless given: with a reserve under 90 seconds, give it a third of the reserve. Its exit 0 is
+   confirmed on the GPUs,
    `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the call's first launch
    and again after the stop (*Killing*): a GPU idle before and in use after is one the call still
-   holds. One you cannot stop fails the gate, and so does a GPU the call still holds:
-   `failure_summary` names it.
+   holds, unless a check left running for the call that finishes the gate uses it. One you cannot
+   stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it.
+
+   **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
+   with `incomplete`: each check without a result, why, and for one still running its PID and its
+   `<log>`, where it writes and what stops it; `feature_off_unchanged` or `fails_without_change` is
+   `null` while its check has not run. A check that ran and failed makes the gate fail, whatever else
+   has no result: stop the runs this gate started with `stop_launch.py`, as above, since a fix round
+   or a rollback works in this worktree and on these GPUs next, and return with `incomplete` empty.
+   With `incomplete` given, finish that gate on the same `commit`: read what finished since, wait for
+   what still runs, and judge the whole gate. Steps 1 to 4 run only the checks that never started; the
+   others keep the results the call before recorded (`earlier_evidence`, the ledger). When it says the
+   call before returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger
+   first. This call leaves nothing running: before it returns it stops what the call before left, by
+   the `<log>`s that call gave, with what it started itself, and the GPUs it checks are free of both.
+   No fix round is spent on it; a gate still without a result after this call stops the package for a
+   human, its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
    clean.
 2. Run `unit_test_cmd` in a fresh process. For kernels also run the self-check mode and every template
@@ -89,5 +108,11 @@ Return:
 
 ```json
 {"wp": "WP1", "unit_pass": true, "feature_off_unchanged": true, "fails_without_change": "parent | mutant | no | n/a",
- "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
+ "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
+
+Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
+gate names nothing there, and a check it did not run stays `null`. A gate with checks still without a
+result, none of those that ran having failed, returns `unit_pass` false, `null` for a check not run, and
+says which in `incomplete`, e.g.
+`"DCP8 runs 4-5 and DCP1 not finished: driver pid 4242 writes RUN_DIR/logs/unit_WP1_driver.log"`.

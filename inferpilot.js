@@ -15,7 +15,7 @@ export const meta = {
     { title: 'Bisect', detail: 'ci_guardian: culprit commit, confirmation, fix work packages [ci]; the commit that fixed it, when the reporter\'s code fails and main does not [issue, bisect_fixed]' },
     { title: 'Profile', detail: 'perf_engineer: trace metrics and the opportunity list [perf]' },
     { title: 'Plan', detail: 'architect: performance work packages, kernel hand-offs, PRs to apply [perf]' },
-    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on failure' },
+    { title: 'Implement', detail: 'implementer per work package, independent test_engineer unit + feature-off gate, rollback on a measured failure' },
     { title: 'Kernel', detail: 'kernel_liaison: kernel hand-offs to args.kernel_backend (none records them; geak runs the kernel lane of a GEAK checkout as an outside program; command runs a kernel agent CLI); gains integrated as work packages' },
     { title: 'Verify', detail: 'verify_engineer: G0 and G2 against the same-pattern baseline, G3 and G4 when the task asks, plus mode gates; investigator loop on failure' },
     { title: 'Investigate', detail: 'investigator: controls first, hypothesis ledger, fix or baseline bug' },
@@ -85,9 +85,9 @@ const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
 // rounded up can put the reserve's start before the call's.
 const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100) : 0);
-// The unit and Verify gates are not asked again by the engine, under what is left of the same limit: an
-// answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
-// told to check first what the one before left.
+// A Verify round is not asked again by the engine, under what is left of the same limit: an answer of
+// its that cannot be used goes to call()'s next attempt, which has a limit of its own and is told to
+// check first what the one before left. A unit gate goes to the call that finishes it (UNIT_ONCE).
 const ONE_SESSION = { schemaRetries: 0 };
 // More time for a call (callWithTime) is at most this many times its limit.
 const MAX_GRANT = 2;
@@ -587,9 +587,10 @@ function withTimeout(p, ms) {
 }
 
 // One agent call; resolves null (never throws) so every caller decides what a missing answer means
-// for its gate. A failed attempt is retried and the retry is told to check what it left behind. A
-// timeout is not retried: the timed-out agent cannot be cancelled and may still be running, so a
-// retry would run the role twice at once.
+// for its gate. A failed attempt is retried and the retry is told to check what it left behind, unless
+// the caller takes over (opts.attempts; opts.schemaRetries for the engine's asking again with the same
+// prompt). A timeout is not retried: the timed-out agent cannot be cancelled and may still be running,
+// so a retry would run the role twice at once.
 // Every role that works on the task may hand on what it meets that is not the task's; Spinoff checks it.
 const LEAD = S({ title: str, observed: str, where: str, evidence: str, reproduce: str }, ['title', 'observed']);
 // a function, not a const: the Intake calls in before MODE and the consts below exist. Spinoff and what
@@ -606,13 +607,14 @@ async function call(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
   const ms = timeoutFor(role, sub);
   const leads = takesLeads(role, sub);
-  for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
+  const { attempts = AGENT_RETRIES, ...agentOpts } = opts || {};
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
     const told = ins.time_limit_min > 0 && ms > 0
       ? { ...ins, deadline_utc: new Date(Date.now() + ms).toISOString() } : ins;
     try {
       const r = await withTimeout(agent(rolePrompt(role, sub, told, attempt, leads),
-        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...(opts || {}) }), ms);
+        { label: lbl, phase: PHASE, schema: leads ? withLeads(schema) : schema, ...agentOpts }), ms);
       if (r === TIMED_OUT) {
         const min = Math.round(ms / 60000);
         log(`  [inferpilot] ${lbl} timed out after ${min} min; not retried`);
@@ -626,9 +628,9 @@ async function call(role, sub, ins, schema, label, opts) {
         }
         return r;
       }
-      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${AGENT_RETRIES})`);
+      log(`  [inferpilot] ${lbl} returned nothing (attempt ${attempt}/${attempts})`);
     } catch (e) {
-      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${AGENT_RETRIES}): ` +
+      log(`  [inferpilot] ${lbl} failed (attempt ${attempt}/${attempts}): ` +
         String(e && e.message ? e.message : e).slice(0, 200));
     }
   }
@@ -796,14 +798,18 @@ const IMPL = S({
   kernel_handoff: { type: ['object', 'null'] },
   notes: str,
 }, ['wp', 'status']);
+// incomplete: the checks that have no result yet, none of those that ran having failed, and where the
+// runs still going write; '' when every check has a result. A gate without a result is not a failed one.
+// null: a check not run yet, which only a gate without a result has.
 const UNIT = S({
   wp: str,
   unit_pass: bool,
-  feature_off_unchanged: bool,
-  fails_without_change: { type: 'string', enum: ['parent', 'mutant', 'no', 'n/a'] },
+  feature_off_unchanged: { type: ['boolean', 'null'] },
+  fails_without_change: { type: ['string', 'null'], enum: ['parent', 'mutant', 'no', 'n/a', null] },
+  incomplete: str,
   failure_summary: str,
   evidence: str,
-}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change']);
+}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete']);
 const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean']);
 const VERIFY = S({
   all_pass: bool,
@@ -1260,7 +1266,8 @@ async function setup(requireBaseline) {
 
 // One work package at a time: implement, then an independent unit + feature-off
 // gate; failed rounds feed the test engineer's findings back; after the last round
-// the package is rolled back to the last verified commit and the task stops.
+// the package is rolled back to the last verified commit and the task stops. A gate
+// that has no result is no failure: it costs no round and rolls nothing back.
 // A call that timed out may still be running in the worktree and on the GPUs: no other agent starts on
 // its work package, not another round and not a rollback; it is on the attention list for a human.
 // Both it and a gate without a result are `held`: the commit stays where it is, and the run stops for a human.
@@ -1268,16 +1275,41 @@ function stalled(wp, label, commit = '') {
   note('Implement', 'fail', `${wp.id}: ${label} timed out; no further round or rollback, since it may still be running`);
   return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} timed out` };
 }
+// What a unit answer leaves without a result: what it says in `incomplete`, or, when it says nothing
+// there and no check failed, the checks it gives as null. A check that ran and failed is a failure,
+// whatever else did not run.
+function leftOpen(ut) {
+  const said = String((ut && ut.incomplete) || '').trim();
+  if (!ut || said) return said;
+  if (ut.unit_pass === false || ut.feature_off_unchanged === false || ut.fails_without_change === 'no') return '';
+  const open = [ut.feature_off_unchanged === null && 'the feature-off check',
+    ut.fails_without_change === null && 'the check that the test can fail'].filter(Boolean);
+  return open.length ? `${open.join(' and ')} did not run (null in the answer, which named nothing in incomplete)` : '';
+}
+// A unit gate with checks that have no result, none of those that ran having failed.
+const unfinished = (ut) => leftOpen(ut) !== '';
+// A unit call is never asked again blind: a retry without what the first one left going could start the
+// same tests on the same GPUs. An answer it cannot use, or none, goes to the call that finishes the gate.
+const UNIT_ONCE = { attempts: 1, schemaRetries: 0 };
+// A unit call that timed out may still be running: the human who cleans up gets the commit and what the
+// gate had left going.
+function gateTimedOut(wp, label, commit, left = '') {
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `${label} timed out: commit ${commit} stays in the worktree, `
+    + `unverified${left ? `; what the gate had left without a result before it: ${left}` : ''}` });
+  return stalled(wp, label, commit);
+}
 // Gates and rounds that ended without a result and may have left detached runs on the GPUs.
 const leftRunning = [];
-// A unit gate whose every attempt ended without an answer may have left the runs it started going, as a
-// call that timed out may: no further round and no rollback either, and a human stops what it left.
-function noAnswer(wp, label, commit) {
-  ATTENTION.push({ wp: wp.id, worktree: C.worktree, issue: `${label} returned no answer: commit ${commit} stays in the `
-    + 'worktree, unverified; stop what the gate left running before reusing its GPUs' });
+// Still without a result after the call that was to finish it: nothing measured went against the change,
+// so it is not rolled back; the package stops with its commit, on the attention list for a human.
+function noResult(wp, commit, what) {
+  const missing = String(what || '').trim() || 'the test engineer returned nothing';
+  R.attention.push({ wp: wp.id, worktree: C.worktree, issue: `the unit gate of ${wp.id} has no result (${missing}): `
+    + `commit ${commit} stays in the worktree, unverified; stop what the gate left running before reusing its GPUs` });
+  note('Implement', 'incomplete', `${wp.id}: the unit gate has no result after the call that was to finish it `
+    + `(${missing}); not rolled back`);
   leftRunning.push(`the unit gate of ${wp.id} may have left runs going`);
-  note('Implement', 'fail', `${wp.id}: ${label} returned no answer; no further round or rollback, since what it started may still be running`);
-  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `${label} returned no answer` };
+  return { ok: false, held: true, failed_wp: wp.id, commit, reason: `the unit gate of ${wp.id} has no result` };
 }
 
 async function implementAll(wps) {
@@ -1317,11 +1349,23 @@ async function implementAll(wps) {
         R.handoffs.push({ id: `K-${wp.id}`, wp: wp.id, owner: 'kernel_workflow', source: 'implement', ...im.kernel_handoff });
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
-      const ut = await call('test_engineer', 'unit', inputs({ work_package: wp, commit: im.commit,
-        unit_test_cmd: im.unit_test_cmd || wp.test, time_limit_min: exactMinutes(timeoutFor('test_engineer')) }), UNIT, utLabel,
-        ONE_SESSION);
-      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return stalled(wp, utLabel, im.commit);
-      if (!ut) return noAnswer(wp, utLabel, im.commit);
+      const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test,
+        time_limit_min: exactMinutes(timeoutFor('test_engineer')) };
+      let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel, UNIT_ONCE);
+      if (!ut && TIMED_OUT_CALLS.has(utLabel)) return gateTimedOut(wp, utLabel, im.commit);
+      // A gate without its result, checks still to give one or no answer at all, is finished by one more
+      // call, which spends no fix round and reads the runs the first one left going.
+      if (!ut || unfinished(ut)) {
+        const left = ut ? leftOpen(ut) : 'every check: the test engineer returned no answer';
+        const finLabel = `${utLabel}+finish`;
+        const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
+          earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel, UNIT_ONCE);
+        if (!fin && TIMED_OUT_CALLS.has(finLabel)) return gateTimedOut(wp, finLabel, im.commit, left);
+        if (!fin || unfinished(fin)) {
+          return noResult(wp, im.commit, fin ? leftOpen(fin) : `the call to finish it returned no answer; before it: ${left}`);
+        }
+        ut = fin;
+      }
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
@@ -1372,6 +1416,7 @@ async function verifyLoop(extraGates) {
     });
     if (t.needs) {
       note('Verify', 'fail', `the round needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+      leftRunning.push(`Verify round ${round} stopped for time and may have left its servers running`);
       return { ok: false, reason: `out of time: the round needs ${t.needs} min` };
     }
     const v = t.r;

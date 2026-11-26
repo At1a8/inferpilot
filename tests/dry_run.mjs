@@ -116,8 +116,8 @@ const scenarios = [
   ['feature: unit gate fails once, feedback reaches the second round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => (n === 1
-        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'case 7 mismatches the reference' }
-        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent' }),
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'case 7 mismatches the reference' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const second = r.calls.filter((c) => c.key === 'implementer:implement')[1];
@@ -126,7 +126,7 @@ const scenarios = [
   ['implement: a unit test that passes without the change is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true,
-        fails_without_change: n === 1 ? 'no' : 'mutant', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
+        fails_without_change: n === 1 ? 'no' : 'mutant', incomplete: '', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const rounds = r.calls.filter((c) => c.key === 'implementer:implement');
@@ -134,7 +134,7 @@ const scenarios = [
       && rounds[1].ins.feedback.includes('never calls the new path'), `feedback: ${rounds[1] && rounds[1].ins.feedback}`);
   }],
   ['implement: only a docs package may have nothing to fail', async () => {
-    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a' });
+    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a', incomplete: '' });
     const docs = await run({ mode: 'feature', task: 't' }, {
       'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('D1', { kind: 'docs' })], gate_ok: true, perf_claim: '' }),
       'test_engineer:unit': asNa,
@@ -419,7 +419,7 @@ const scenarios = [
     check(big.keys.filter((k) => k === 'verify_engineer:verify').length === 1 && big.result.phases.some((p) => p.phase === 'Verify'
       && /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)), 'a round gets at most twice its limit');
   }],
-  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
+  ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt, a unit gate\'s to the call that finishes it, with a limit of its own, told what the first left', async () => {
     // The first answer of each, 300 ms late, is one InferPilot cannot use.
     const once = (key) => async (ins, n) => {
       if (n > 1) return DEFAULTS[key](ins, n);
@@ -431,9 +431,13 @@ const scenarios = [
       Object.fromEntries(keys.map((k) => [k, once(k)])), { schemaRetries: 1 });
     for (const key of keys.slice(0, 2)) {
       const [first, again] = r.calls.filter((c) => c.key === key);
-      check(first && again && !first.prompt.includes('This is attempt') && again.prompt.includes('This is attempt 2: an earlier attempt '
-        + 'of this call failed and may have left work behind') && !again.prompt.includes('An earlier session of this same request'),
-        `${key}: not asked again by the engine but by the call's next attempt, which checks first what the one before left`);
+      // A unit gate is not asked again blind either: its answer goes to the call that finishes the gate.
+      const unit = key === 'test_engineer:unit';
+      check(first && again && !first.prompt.includes('This is attempt') && !again.prompt.includes('An earlier session of this same request')
+        && (unit ? !again.prompt.includes('This is attempt') && String(again.ins.incomplete || '').includes('returned no answer')
+          : again.prompt.includes('This is attempt 2: an earlier attempt of this call failed and may have left work behind')),
+        `${key}: not asked again by the engine but by ${unit ? 'the call that finishes the gate, told the first returned no answer'
+          : 'the call\'s next attempt, which checks first what the one before left'}`);
       check(first && again && again.ins.time_limit_min === 120
         && Date.parse(again.ins.deadline_utc) - Date.parse(first.ins.deadline_utc) >= 250,
         `${key}: with a limit of its own: ${first && first.ins.deadline_utc} then ${again && again.ins.deadline_utc}`);
@@ -455,8 +459,10 @@ const scenarios = [
       `a unit gate with no answer gets no further round and no rollback: ${impl}`);
     const usp = unit.calls.find((c) => c.key === 'issue_triager:spinoff');
     check(usp && usp.ins.confirm_leads === false && (usp.ins.confirm_skipped || []).includes('the unit gate of WP1 may have left runs going')
-      && (unit.result.next.user || []).some((u) => u.includes('returned no answer: commit c_WP1 stays in the worktree')),
+      && (unit.result.next.user || []).some((u) => u.includes('the unit gate of WP1 has no result')
+        && u.includes('returned no answer') && u.includes('commit c_WP1 stays in the worktree')),
       `no lead is checked on its GPUs, and a human is told to stop what it left: ${JSON.stringify(usp && usp.ins.confirm_skipped)}`);
+    check(unit.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'the gate went to the call that finishes it first, and no further');
     const ver = await run({ mode: 'feature', task: 't', confirm_leads: true },
       { 'implementer:implement': leading, 'verify_engineer:verify': () => ({}) });
     const vsp = ver.calls.find((c) => c.key === 'issue_triager:spinoff');
@@ -568,8 +574,9 @@ const scenarios = [
       'no limit, no deadline');
     const unitDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
     check(unitDoc.includes('a quarter of `time_limit_min`, at most 15 minutes, before `deadline_utc`')
-      && unitDoc.includes('the gate fails, and `failure_summary` names the check, how far it got and its log'),
-      'the reserve fits a short limit, and a check still running when it starts is named, not waited for');
+      && unitDoc.includes('A check still running at the reserve is not waited for, and not failed: it goes to `incomplete` (below) '
+        + 'and runs on, with the server it uses, for the call that finishes the gate'),
+      'the reserve fits a short limit, and a check still running when it starts is left to the call that finishes the gate, not waited for');
     check(unitDoc.includes('poll each server until it is up, each run that ends by itself (a suite, a driver) until it has its exit '
       + 'status (`<log>.exit`), and every check until it has its result')
       && unitDoc.includes('A run whose status is not 0, or whose wrapper is gone without one, fails its check, whatever results it wrote'),
@@ -767,7 +774,7 @@ const scenarios = [
       const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
         [role]: slow(role === 'implementer:implement'
           ? (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py' })
-          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent' })),
+          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' })),
       });
       check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `${role}: status ${r.result.status}`);
       check(r.keys.filter((k) => k === 'implementer:implement').length === 1, `${role}: the work package gets no second round`);
@@ -1035,12 +1042,284 @@ const scenarios = [
   }],
   ['feature: a work package that never passes is rolled back', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'still wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'still wrong' }),
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
     check(r.keys.filter((k) => k === 'implementer:implement').length === 2, 'max_fix_rounds + 1 attempts');
     check(r.keys.includes('implementer:rollback'), 'rollback called');
     check(!r.keys.includes('verify_engineer:verify'), 'no verification of a failed package');
+  }],
+  ['implement: a unit gate with checks still running is finished by one more call, which spends no fix round', async () => {
+    const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'runs 1-5 pass' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const units = r.calls.filter((c) => c.key === 'test_engineer:unit');
+    check(units.length === 3, `WP1 twice, WP2 once: ${units.length}`);
+    check(units[1] && units[1].ins.commit === 'c_WP1' && String(units[1].ins.incomplete).includes('pid 4242')
+      && units[1].ins.earlier_evidence === 'runs 1-3 pass', 'the second call finishes the same commit, told what is left');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 2 && !r.keys.includes('implementer:rollback'),
+      'no fix round and no rollback for a gate without a result');
+  }],
+  ['implement: a unit gate still without a result stops the package for a human: not rolled back, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'DCP1 never started: the GPUs were taken' }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
+    check(r.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'one call to finish it, no more');
+    check(r.keys.filter((k) => k === 'implementer:implement').length === 1, 'no fix round');
+    check(!r.keys.includes('implementer:rollback'), 'nothing measured went against the change: no rollback');
+    const imp = r.result.phases.find((p) => p.phase === 'Implement');
+    check(imp && imp.verdict === 'incomplete' && imp.summary.includes('DCP1 never started'), `the stop says why: ${imp && imp.summary}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('unverified')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+    const nothing = await run({ mode: 'feature', task: 't' }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: 'run 3 still going' } : null),
+    });
+    check(nothing.result.stopped_at === 'Implement' && !nothing.keys.includes('implementer:rollback')
+      && nothing.result.attention.some((a) => a.wp === 'WP1'), 'a finishing call that returns nothing leaves the gate without a result too');
+    const failed = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: '', failure_summary: 'run 2 diverged' }),
+    });
+    check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
+      'a check that failed is a failure: rolled back as before');
+  }],
+  ['implement: a unit call with no answer at all is finished by one more call, not a fix round or a rollback', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_retries: 1, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? null
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
+    });
+    check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
+    const fin = r.calls.filter((c) => c.key === 'test_engineer:unit')[1];
+    check(fin && fin.ins.commit === 'c_WP1' && String(fin.ins.incomplete).includes('returned no answer'),
+      `the second call finishes the same commit, told the first gave no answer: ${fin && fin.ins.incomplete}`);
+    check(!r.keys.includes('implementer:rollback') && r.keys.filter((k) => k === 'implementer:implement').length === 2, 'no fix round, no rollback');
+    const none = await run({ mode: 'feature', task: 't', agent_retries: 1 }, { 'test_engineer:unit': () => null });
+    check(none.result.stopped_at === 'Implement' && !none.keys.includes('implementer:rollback'), `no answer twice: held, not rolled back: ${none.result.status}`);
+    const imp = none.result.phases.find((p) => p.phase === 'Implement' && p.verdict === 'incomplete');
+    check(imp && imp.summary.includes('the call to finish it returned no answer'), `the stop names the missing finishing answer: ${imp && imp.summary}`);
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    const leads = await run({ mode: 'feature', task: 't', agent_retries: 1, confirm_leads: true }, {
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+      'test_engineer:unit': () => null,
+    });
+    const sp = leads.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(sp && sp.ins.confirm_leads === false && (sp.ins.confirm_skipped || []).some((x) => x.includes('unit gate of WP1')),
+      `no lead runs on GPUs a gate without a result may still use: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+  }],
+  ['implement: a unit answer is never asked for again blind, and one with checks not run says so with null', async () => {
+    const finishing = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit')[1] || { ins: {} };
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent',
+      incomplete: '', evidence: 'ok' });
+    const unusable = await run({ mode: 'feature', task: 't', agent_retries: 2, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false } : good(ins)),
+    }, { schemaRetries: 1 });
+    check(String(finishing(unusable).ins.incomplete).includes('returned no answer') && unusable.result.status === 'ready_for_review',
+      `an unusable answer goes to the call that finishes the gate, not to the same prompt again: ${finishing(unusable).ins.incomplete}`);
+    const thrown = await run({ mode: 'feature', task: 't', agent_retries: 2, max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => {
+        if (n === 1) throw new Error('the backend died');
+        return good(ins);
+      },
+    });
+    check(String(finishing(thrown).ins.incomplete).includes('returned no answer'), 'nor is a unit call that failed retried blind');
+    const silent = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
+        fails_without_change: 'parent', failure_summary: 'the driver still runs' } : good(ins)),
+    });
+    check((CONTRACTS.get('test_engineer:unit') || []).includes('incomplete') && !silent.keys.includes('implementer:rollback')
+      && silent.keys.filter((k) => k === 'implementer:implement').length === 2,
+      'an answer without incomplete is not a failed gate: no fix round and no rollback');
+    const unrun = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: null,
+        fails_without_change: null, incomplete: 'feature off and T1 not started: driver pid 4242 writes logs/unit_WP1.log' } : good(ins)),
+    });
+    check(String(finishing(unrun).ins.incomplete).includes('pid 4242') && unrun.result.status === 'ready_for_review',
+      `checks not run are null, and the gate reaches its finishing call as it was: ${finishing(unrun).ins.incomplete}`);
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(doc.includes('stop the runs this gate started with `stop_launch.py`, as above'), 'a failed gate stops its runs before it returns');
+    const hygiene = readFileSync(path.join(INFERPILOT, 'knowledge', 'env_hygiene.md'), 'utf8').replace(/\s+/g, ' ');
+    check(doc.includes('The one exception is what a check you return in `incomplete` still needs, which the call that finishes the gate takes over')
+      && doc.includes('This call leaves nothing running: before it returns it stops what the call before left, by the `<log>`s that call gave')
+      && hygiene.includes('A role returns before that only when its answer says what still runs and where it writes, for the call that takes it '
+        + 'over and stops it (`incomplete`, `roles/test_engineer.md`)'),
+      'what a gate without a result leaves running is the finishing call\'s to stop, and nothing else outlives the call that started it');
+    check(doc.includes('Steps 1 to 4 run only the checks that never started'), 'the finishing call runs only what is missing');
+  }],
+  ['implement: a check given as null with nothing in incomplete is a gate without a result, not a failed one', async () => {
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' });
+    const open = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: null, fails_without_change: null, incomplete: '' });
+    const units = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit');
+    const implements_ = (r) => r.keys.filter((k) => k === 'implementer:implement').length;
+    const finished = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins, n) => (n === 1 ? open(ins) : good(ins)) });
+    check(finished.result.status === 'ready_for_review' && implements_(finished) === 2 && !finished.keys.includes('implementer:rollback'),
+      `finished by one more call, no fix round and no rollback: ${finished.result.status}`);
+    check(units(finished).length === 3 && units(finished)[1].ins.commit === 'c_WP1'
+      && /the feature-off check and the check that the test can fail did not run/.test(units(finished)[1].ins.incomplete),
+      `the finishing call is told which checks: ${units(finished)[1] && units(finished)[1].ins.incomplete}`);
+    const one = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
+      'test_engineer:unit': (ins, n) => (n === 1 ? { ...good(ins), fails_without_change: null } : good(ins)) });
+    check(units(one)[1] && /^the check that the test can fail did not run/.test(units(one)[1].ins.incomplete),
+      `only the check that is null is named: ${units(one)[1] && units(one)[1].ins.incomplete}`);
+    const never = await run({ mode: 'feature', task: 't' }, { 'test_engineer:unit': open });
+    check(never.result.status === 'blocked' && never.result.stopped_at === 'Implement' && units(never).length === 2
+      && implements_(never) === 1 && !never.keys.includes('implementer:rollback'),
+      `still null after the finishing call: the package stops, its commit kept: ${never.result.status} at ${never.result.stopped_at}`);
+    check(never.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('the feature-off check')),
+      `attention: ${JSON.stringify(never.result.attention)}`);
+    for (const [why, bad] of [['the unit test failed', { unit_pass: false }], ['the feature-off run changed', { feature_off_unchanged: false }],
+      ['the test cannot fail', { fails_without_change: 'no' }]]) {
+      const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins) => ({ ...open(ins), ...bad }) });
+      check(r.keys.includes('implementer:rollback') && units(r).length === 1,
+        `${why}, whatever else did not run: a failure as before, rolled back with no finishing call`);
+    }
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'test_engineer.md'), 'utf8'), 'unit').replace(/\s+/g, ' ');
+    check(doc.includes('Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed gate names '
+      + 'nothing there, and a check it did not run stays `null`')
+      && doc.includes('A gate with checks still without a result, none of those that ran having failed, returns `unit_pass` false'),
+      'what the answer holds says the same as step 0: a failed gate leaves incomplete empty');
+  }],
+  ['kernel: a held integration whose implementer timed out has a commit not reported, which the report does not take for none', async () => {
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100, ...CMD }, {
+      'implementer:implement': async (ins) => {
+        if (ins.work_package.id === 'K-K-WP1') await new Promise((resolve) => setTimeout(resolve, 400));
+        return implement(ins);
+      },
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === '',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+    const director = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
+    check(director.includes('An empty `commit` is one not reported, not one not made: the implementer\'s call timed out, and may have '
+      + 'committed or still be running, so say that the branch is to be inspected once that call has stopped')
+      && !director.includes('empty when the implementer made none'),
+      'the director is told what an empty commit means');
+  }],
+  ['implement: a call finishing a unit gate that times out leaves the human its commit and what was still going', async () => {
+    const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
+      'test_engineer:unit': async (ins, n) => {
+        if (n > 1) await new Promise((resolve) => setTimeout(resolve, 400));
+        return { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
+          incomplete: 'DCP8 runs 4-5: driver pid 4242 writes logs/unit_WP1_driver.log' };
+      },
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement' && !r.keys.includes('implementer:rollback'),
+      `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(r.result.attention.some((a) => a.wp === 'WP1' && a.issue.includes('c_WP1') && a.issue.includes('pid 4242')),
+      `attention: ${JSON.stringify(r.result.attention)}`);
+  }],
+  ['spinoff: no lead runs on GPUs a Verify round that stopped for time may still use', async () => {
+    const lead = { title: 'warning', observed: 'x', where: 'y', evidence: 'z', reproduce: 'python -c 1' };
+    for (const [why, args] of [['a limit the user gave', { agent_timeout_ms: 7200000 }], ['the limit it asked for', {}]]) {
+      const r = await run({ mode: 'feature', task: 't', confirm_leads: true, ...args }, {
+        'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`,
+          unit_test_cmd: 'pytest -q t.py', leads: [lead] }),
+        'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 500 }),
+      });
+      const sp = r.calls.find((c) => c.key === 'issue_triager:spinoff');
+      check(r.result.stopped_at === 'Verify' && sp && sp.ins.confirm_leads === false
+        && (sp.ins.confirm_skipped || []).some((x) => x.includes('Verify round 0 stopped for time')),
+        `${why}: ${JSON.stringify(sp && sp.ins.confirm_skipped)}`);
+    }
+  }],
+  ['kernel: an integration whose unit gate has no result stops the run before Verify, its commit kept', async () => {
+    const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-K-WP1', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
+    check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
+      `handoff ${JSON.stringify(r.result.handoffs[0])}`);
+  }],
+  ['kernel: the hand-offs after one whose integration is held are recorded, not left without a status', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O2', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O2' ? 'the kernel suite still runs' : '' }) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integration_held' && byId.O4 === 'recorded', `statuses ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 1, 'the back end is not run on a hand-off after the held one');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase says so: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: a hand-off an integration raised is recorded too when one is held, not only those the stage began with', async () => {
+    const plan = { 'architect:perf_plan': () => ({ work_packages: [], handoffs: [
+      { id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O2/op_spec.md` },
+      { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
+    const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
+      'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+        kernel_handoff: { op_spec_path: `${RUN}/handoffs/K-${ins.work_package.id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O4', feature_off_unchanged: true,
+        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O4' ? 'the kernel suite still runs' : '' }) });
+    const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
+    check(byId.O2 === 'integrated' && byId.O4 === 'integration_held', `statuses ${JSON.stringify(byId)}`);
+    check(byId['K-K-O2'] === 'recorded' && byId['K-K-O4'] === 'recorded',
+      `the one an earlier integration raised and the held one's own: ${JSON.stringify(byId)}`);
+    check(r.result.handoffs.every((h) => h.status), `none is left without a status: ${JSON.stringify(byId)}`);
+    check(r.keys.filter((k) => k === 'kernel_liaison:package').length === 2, 'the back end is not run on them');
+    check(r.result.phases.some((p) => p.phase === 'Kernel' && /K-K-O2, K-K-O4 recorded, not run/.test(p.summary)),
+      `the Kernel phase names them: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Kernel'))}`);
+  }],
+  ['kernel: an integration without a unit result stops the run also from a Verify fix, a review change or a kernel retry', async () => {
+    const heldFor = (id) => (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== id, feature_off_unchanged: true,
+      fails_without_change: 'parent', incomplete: ins.work_package.id === id ? 'the kernel suite still runs' : '' });
+    const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
+      kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
+    const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
+    const fix = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(fix.result.status === 'blocked' && verifies(fix) === 1 && !fix.keys.includes('implementer:rollback')
+      && fix.result.handoffs[0].status === 'integration_held', `a Verify fix's kernel: Verify ran ${verifies(fix)} time(s), ${JSON.stringify(fix.result.handoffs)}`);
+    check(fix.result.stopped_at === 'Kernel' && fix.result.next.say.includes(' at Kernel'),
+      `a Verify fix's kernel stops the run at Kernel: ${fix.result.stopped_at}; ${fix.result.next.say}`);
+    const review = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('RV1'),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }], work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }
+        : { verdict: 'approve', findings: [], review_path: `${RUN}/review.md` }),
+      'test_engineer:unit': heldFor('K-K-RV1'),
+    });
+    check(review.result.status === 'blocked' && review.result.stopped_at === 'Kernel' && verifies(review) === 1,
+      `a review change's kernel: ${review.result.status} at ${review.result.stopped_at}, Verify ran ${verifies(review)} time(s)`);
+    const afterReview = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': handoffFrom('FIX1'),
+      'reviewer:review': () => ({ verdict: 'changes_requested', findings: [{ severity: 'major', where: 'x.py:1', issue: 'slow' }],
+        work_packages: [WP('RV1')], review_path: `${RUN}/review.md` }),
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: true, failures: [] } : { all_pass: false, failures: [{ gate: 'G2' }] }),
+      'test_engineer:unit': heldFor('K-K-FIX1'),
+    });
+    check(afterReview.result.status === 'blocked' && afterReview.result.stopped_at === 'Kernel' && verifies(afterReview) === 2,
+      `the kernel of a Verify fix after a review change: ${afterReview.result.status} at ${afterReview.result.stopped_at}, Verify ran ${verifies(afterReview)} time(s)`);
+    let kernelGates = 0;
+    let kernelCommits = 0;
+    const implement = withKernelHandoff('decode hot path')['implementer:implement'];
+    const retry = await run({ mode: 'feature', task: 't', ...CMD }, {
+      'implementer:implement': (ins) => ({ ...implement(ins),
+        ...(ins.work_package.id === 'K-K-WP1' && ++kernelCommits > 1 ? { commit: 'c_K-K-WP1_retry' } : {}) }),
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G3' }] }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle' }),
+      'test_engineer:unit': (ins) => heldFor(ins.work_package.id === 'K-K-WP1' && ++kernelGates > 1 ? 'K-K-WP1' : '')(ins),
+    });
+    check(retry.result.status === 'blocked' && verifies(retry) === 1 && retry.result.handoffs[0].status === 'integration_held'
+      && retry.keys.filter((k) => k === 'implementer:rollback').length === 1,
+      `a kernel handed back: Verify ran ${verifies(retry)} time(s), ${JSON.stringify(retry.result.handoffs[0])}`);
+    check(retry.result.handoffs[0].commit === 'c_K-K-WP1_retry',
+      `the held hand-off names the commit left on the branch, not the reverted one: ${retry.result.handoffs[0].commit}`);
+    check(retry.result.stopped_at === 'Kernel', `a kernel handed back stops the run at Kernel: ${retry.result.stopped_at}`);
   }],
   ['feature: baseline that does not reproduce blocks at Setup', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
@@ -1130,7 +1409,7 @@ const scenarios = [
   }],
   ['rollback: an unclean rollback goes on the attention list of the report', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
       'implementer:rollback': () => ({ wp: 'WP1', reset_to: 'base', clean: false }),
     });
     check(r.result.status === 'blocked' && r.result.attention.length === 1 && r.result.attention[0].wp === 'WP1',
@@ -1138,7 +1417,7 @@ const scenarios = [
     const rep = r.calls.find((c) => c.key === 'director:report');
     check(rep && Array.isArray(rep.ins.attention) && rep.ins.attention.length === 1, 'the report sees what a human must clean up');
     const clean = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
     });
     check(clean.result.attention.length === 0, 'a clean rollback needs no attention');
   }],
