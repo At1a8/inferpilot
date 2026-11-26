@@ -30,7 +30,8 @@ of it.
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
 | `tune` | default `false`: the feature runs at the configuration of the target PR or design; `true`: a work package chooses its knobs by measurement | optional | | | | |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's workload and goal, each off by default: a held-out operating point the gain must also hold at, guard workloads of InferPilot's choosing, points beyond the workload's own | optional | optional | | optional | |
-| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack on long prompts), `stability` runs G4 (the `client_script` run back to back for more than 48 hours against the server `server_script` starts, so the task names both) | optional | optional | | optional | |
+| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (the task's `long_context_script`: needle-in-a-haystack on long prompts), `stability` runs G4 (the `client_script` run back to back for more than 48 hours against the server `server_script` starts, so the task names both) | optional | optional | optional | optional | |
+| `long_context_script` | the user's script that runs the long-context test against that server, which G3 runs unchanged on every arm (§1.1); InferPilot has no template for it | with `long_context` on | with `long_context` on | with `long_context` on | with `long_context` on | — |
 | `kernel_backend` with `kernel_backend_dir` or `kernel_backend_command` | where kernel hand-offs go | optional | optional | optional | optional | |
 
 `inferpilot.js` checks the required fields (and a back end's own field) for every definition; one that
@@ -67,19 +68,28 @@ the user, but for the server G2 measures a fix on when the report or the job sta
   server runs, which is why those tasks name a `model_path`; one that stops before its fix
   (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none
   (`../knowledge/validation_doctrine.md`, *G2 for a fix*).
+- **`long_context_script`**, with `long_context` on, runs the task's long-context test against `PORT`
+  and writes its results to `OUT_DIR`, a directory InferPilot makes for each run before it starts the
+  script: for each request, whether it passed, with its output, and the per-token logprobs when the
+  script records them, which lets a failure be classified (`../knowledge/validation_doctrine.md`,
+  *Failure taxonomy*). The test is the user's: its prompts, their lengths, the needles, the seed and
+  the scoring are fixed in it. InferPilot runs it unchanged on every arm, at least 4 times at each of
+  two or more concurrencies (`CONCURRENCY`, one value a run, when the script reads it), flushing the
+  prefix cache between runs. It has no template for one, and writes none.
 - **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
-  on needle-in-a-haystack prompts, G4 as the `client_script` run back to back for more than 48 hours
+  as the task's `long_context_script`, G4 as the `client_script` run back to back for more than 48 hours
   against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;
-  `scripts/stability.sh` runs it). The user asked for G4 and says what it keeps up: a task with
-  `stability` on names its `server_script` and its `client_script`, whatever its mode, and is asked for
-  the one it lacks. No template is offered for either on G4's account. A task that sets `client_script:
-  template` all the same gives the `workload` it runs, and is asked for that: the template's own lengths
-  and concurrency are a load nobody chose. The workload to keep up is long prompts at high concurrency.
-  `goal` does not turn the gates on; from a request in plain words, the intake sets them. A task that
-  sets neither is reported with both as `not run: not asked`. G4 runs once in a run: after a later
-  change to the code, a review's for one, it is not run again, and the report says which commit it ran
-  on. With `stability` on, a Verify round asks for a limit of about 6 days, and uses it in full only
-  when G4 fails and the baseline runs the same test as its control.
+  `scripts/stability.sh` runs it). The user asked for the gate and says what it runs: a task with
+  `long_context` on names its `long_context_script`, and a task with `stability` on names its
+  `server_script` and its `client_script`, whatever its mode, and is asked for the one it lacks. No
+  template is offered for either on G4's account, and InferPilot has none for G3. A task that sets
+  `client_script: template` all the same gives the `workload` it runs, and is asked for that: the
+  template's own lengths and concurrency are a load nobody chose. The workload to keep up is long
+  prompts at high concurrency. `goal` does not turn the gates on; from a request in plain words, the
+  intake sets them. A task that sets neither is reported with both as `not run: not asked`. G4 runs
+  once in a run: after a later change to the code, a review's for one, it is not run again, and the
+  report says which commit it ran on. With `stability` on, a Verify round asks for a limit of about 6
+  days, and uses it in full only when G4 fails and the baseline runs the same test as its control.
 
 ```bash
 # server.sh

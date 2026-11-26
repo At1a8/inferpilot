@@ -1493,11 +1493,14 @@ const scenarios = [
     check(off.length >= 3 && off.every((c) => c.ins.long_context === false && c.ins.stability === false),
       `off for every role: ${JSON.stringify(off.map((c) => [c.key, c.ins.long_context, c.ins.stability]))}`);
     check(!('long_context' in plain.result.task_def) && !('stability' in plain.result.task_def), 'and not in the definition the run records');
-    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh' });
+    const asked = await run({ mode: 'feature', task: 't', long_context: true, stability: 'true', client_script: '/s/client.sh',
+      long_context_script: '/s/niah.sh' });
     const sp = asked.calls.find((c) => c.key === 'director:spec');
     const ve = asked.calls.find((c) => c.key === 'verify_engineer:verify');
     check(sp && sp.ins.long_context === true && sp.ins.stability === true, 'on for the spec when the task sets them');
     check(ve && ve.ins.long_context === true && ve.ins.stability === true, 'on for the verify engineer, which runs G3 and G4 only then');
+    check(sp && sp.ins.long_context_script === '/s/niah.sh' && ve && ve.ins.long_context_script === '/s/niah.sh',
+      `and both read the script G3 runs: ${JSON.stringify(ve && ve.ins.long_context_script)}`);
     const one = await run({ mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' });
     const ov = one.calls.find((c) => c.key === 'verify_engineer:verify');
     check(ov && ov.ins.stability === true && ov.ins.long_context === false, 'each on its own');
@@ -1970,6 +1973,55 @@ const scenarios = [
       `with its workload the run starts, on the task's server and the rendered client: ${load.result.status} ${ve && ve.ins.client_script}`);
     const plain = await run({ mode: 'issue', task: 't', client_script: 'template' }, rendered);
     check(plain.result.status !== 'needs_input', `without stability nothing more is asked of a task that names the template: ${plain.result.status}`);
+  }],
+  ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    for (const mode of ['feature', 'issue', 'ci', 'perf']) {
+      const none = await run({ mode, task: 't', long_context: true });
+      const q = (none.result.questions || []).find((x) => x.field === 'long_context_script') || {};
+      check(asks(none, 'long_context_script') && eqList(fields(none), ['long_context_script']),
+        `${mode}: with long_context on and no test of its own, the task is asked for it, and for nothing else: ${fields(none)}`);
+      check(!(q.options || []).length && /InferPilot has no template for it/.test(q.question || ''),
+        `${mode}: the question offers nothing in its place: ${JSON.stringify(q)}`);
+    }
+    const tpl = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template' });
+    check(asks(tpl, 'long_context_script'), `"template" is no answer, since InferPilot has none: ${fields(tpl)}`);
+    // The answer takes the place of the value the task gave, which would otherwise win over it and be asked about again.
+    const again = (tpl.result.next || {}).rerun_with || {};
+    check(again.long_context_script === '' && 'long_context_script' in (again.answers || {}),
+      `the value the run could not use is cleared for the next run: ${JSON.stringify(again)}`);
+    const answered = await run({ mode: 'feature', task: 't', long_context: 'true', long_context_script: 'template', ...again,
+      answers: { long_context_script: '/s/niah.sh' } });
+    const av = answered.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(answered.result.status !== 'needs_input' && av && av.ins.long_context_script === '/s/niah.sh',
+      `and with the answer the run starts on the script the user named: ${answered.result.status}, ${av && av.ins.long_context_script}`);
+    const blank = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: '   ' });
+    check(asks(blank, 'long_context_script'), `a path of blanks names no script: ${fields(blank)}`);
+    const padded = await run({ mode: 'feature', task: 't', long_context: true, long_context_script: ' /s/niah.sh ' });
+    const pv = padded.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(pv && pv.ins.long_context_script === '/s/niah.sh', `the roles read the path without the blanks around it: ${JSON.stringify(pv && pv.ins.long_context_script)}`);
+    const off = await run({ mode: 'feature', task: 't', long_context: false });
+    check(off.result.status !== 'needs_input', `with long_context off a task names no test: ${off.result.status}`);
+    const unused = await run({ mode: 'feature', task: 't', long_context_script: '/s/niah.sh' });
+    const uv = unused.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(unused.result.status !== 'needs_input' && uv && uv.ins.long_context === false,
+      `a test the task names does not turn the gate on: ${unused.result.status}, long_context ${uv && uv.ins.long_context}`);
+    const ready = await run({ mode: 'issue', task: 't', long_context: true, long_context_script: '/s/niah.sh' });
+    const ve = ready.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ready.result.status !== 'needs_input' && ve && ve.ins.long_context === true && ve.ins.long_context_script === '/s/niah.sh',
+      `with its test the run starts, and the verify engineer reads which one G3 runs: ${ready.result.status}, ${ve && ve.ins.long_context_script}`);
+    check(ready.result.task_def.long_context_script === '/s/niah.sh', 'the definition the run records names it');
+    // From a request in plain words the intake sets the gate and the script; the same check then applies.
+    const said = await run({ request: 'port this PR and run the long-context test with /s/niah.sh', mode: 'feature', task: 't' }, {
+      'intake:define': () => ({ status: 'ready', questions: [],
+        task_def: { mode: 'feature', task: 't', long_context: true, long_context_script: '/s/niah.sh' } }),
+    });
+    const sv = said.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sv && sv.ins.long_context === true && sv.ins.long_context_script === '/s/niah.sh', 'the intake turns the request into both fields');
+    const half = await run({ request: 'port this PR and run the long-context gate', mode: 'feature', task: 't' }, {
+      'intake:define': () => ({ status: 'ready', questions: [], task_def: { mode: 'feature', task: 't', long_context: true } }),
+    });
+    check(asks(half, 'long_context_script'), `a definition the intake calls ready, with the gate on and no test, is still asked: ${fields(half)}`);
   }],
   ['intake: a complete definition starts without it', async () => {
     const r = await run({ mode: 'issue', task: 'i' });

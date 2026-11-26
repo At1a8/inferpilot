@@ -15,7 +15,7 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 | G0 feature off | the change is inert when disabled | baseline suites on the feature branch with the switch off |
 | G1 unit / oracle | each new kernel or data structure does what it claims, and a port's own metric agrees with its source's | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1); for a port with a value to compare with, the feature's own metric (accept length for speculative decoding) against the source's, on the source's prompts and settings |
 | G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
-| G3 long context | the feature's own data path is exercised and correct | when the task asks (`long_context`): needle-in-a-haystack, single and multi-needle |
+| G3 long context | the feature's own data path is exercised and correct | when the task asks (`long_context`): the task's own long-context test (`long_context_script`), needle-in-a-haystack, single and multi-needle |
 | G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks (`stability`): the task's performance test at high concurrency on long prompts, run back to back for more than 48 hours (`scripts/stability.sh`) |
 | G5 performance | the claimed benefit exists on the task's workload, and a change that claims none is no slower there; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
 
@@ -90,6 +90,14 @@ Notes per gate:
   fields of the task definition that are off by default (`templates/task_definition.md`). The intake
   sets one when the user's request asks for that gate; no role infers it from the kind of change, and
   `goal` does not turn a gate on. A gate the task did not ask for is reported `not run: not asked`.
+- **G3 is the task's own long-context test.** The user who asks for G3 says what it runs: the task's
+  `long_context_script`, needle-in-a-haystack prompts, single and multi-needle, long enough for the
+  feature's path (next notes). It runs unchanged on the baseline and on the change, in the same
+  pattern. A task with `long_context` on that names none is asked for it, in any mode: InferPilot has
+  no template for a long-context test, and no role writes one in its place or changes the task's. Its
+  prompts, their lengths, the needles and the scoring are the user's, as a client's workload is.
+  Where the feature does not engage on them, the report says that G3 showed the server's
+  long-context path, not the feature's.
 - **G4 is the task's performance test, run back to back for more than 48 hours.** One server, not
   restarted, under the run's performance client (the task's `client_script`, or InferPilot's `perf.sh` on
   the task's workload), one pass after another, at the highest concurrency of the task's workload:

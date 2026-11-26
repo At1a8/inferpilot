@@ -117,9 +117,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    task without a `model_path` stops before any fix: prepare only what its reproduction needs, and
    render nothing.
    - **InferPilot's templates** (`task_definition.md` §1.2). The scripts the task brings
-     (`server_script`, `client_script`, `accuracy_script`) run as given. From `templates/harness/` into
-     `RUN_DIR/scripts/`, render only the server or the client the user answered `template` for, and
-     `accuracy.sh` unless the task brings an `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
+     (`server_script`, `client_script`, `accuracy_script`, and `long_context_script`, for which there is
+     no template) run as given. From `templates/harness/` into `RUN_DIR/scripts/`, render only the
+     server or the client the user answered `template` for, and `accuracy.sh` unless the task brings an
+     `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts <those> --set MODEL_PATH=<model_path> --set TP=<the number of
      GPUs in the set> --task '<harness>' --workload '<workload, when a JSON object; else its lengths and
      concurrency as --set ISL=, OSL=, CONCURRENCY=>' [--feature RUN_DIR/feature_params.json] [--cookbook
@@ -292,11 +293,13 @@ Return:
    most twice and judged on the median. The feature's knobs take the values of the target PR or design;
    only with `tune` on are they chosen by measurement (`perf_evaluation.md` §3).
 6. Long context and stability: G3 is a criterion only with `long_context` on, G4 only with `stability`
-   on (`validation_doctrine.md`: G3's needle runs; G4, the run's `client_script` run back to back for
-   more than 48 hours). With its field off, a gate's row says `not run: not asked` and is no criterion;
-   never add one from the kind of change, nor from `goal`. G4's row names the workload it keeps up, the
-   task's at its highest concurrency, and says so when the feature does not engage on it: G4 then shows
-   the server's stability, not the feature path's.
+   on (`validation_doctrine.md`: G3, the task's `long_context_script`; G4, the run's `client_script` run
+   back to back for more than 48 hours). With its field off, a gate's row says `not run: not asked` and
+   is no criterion; never add one from the kind of change, nor from `goal`. G3's row names the task's
+   script and the concurrencies it runs at, two or more, and says so when the feature does not engage
+   on its prompts: G3 then shows the server's long-context path, not the feature's. G4's row names the
+   workload it keeps up, the task's at its highest concurrency, and says so when the feature does not
+   engage on it: G4 then shows the server's stability, not the feature path's.
 
 Return:
 
