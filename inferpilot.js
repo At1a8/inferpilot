@@ -2152,11 +2152,11 @@ async function runCi() {
     note('Classify', 'fail', 'main fails on the lane, and the failure has no class');
     return finish('blocked', 'Classify');
   }
-  // What fails is fixed. The part of the task that was not run stays unknown: the fix does not answer for it,
-  // and the run record and the result say so.
+  // What fails is fixed, or handed over. The part of the task that was not run stays unknown: nothing this run
+  // does answers for it, and the run record and the result say so.
   if (unchecked) {
     C.unchecked = R.unchecked = unchecked;
-    note('Classify', 'unchecked', `part of the task was not run here, and the fix does not answer for it: ${unchecked}`);
+    note('Classify', 'unchecked', `part of the task was not run here, and nothing this run does answers for it: ${unchecked}`);
   }
   if (!handOver && !failingCmd) {
     note('Classify', 'fail', `${cl.failure_class} without a failing_test_cmd; the failing_test gate needs one`);
