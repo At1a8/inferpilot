@@ -597,7 +597,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack runs on long prompts); `stability` runs G4, the `client_script` run back to back for more than 48 hours against one server (`scripts/stability.sh`; the task names its `server_script` and its `client_script`, in any mode, and is asked for the one it lacks: G4 takes no template of its own accord), once in a run: a later change to the code is not run through it again, and the report says which commit was. A Verify round with it asks for a limit of about 6 days, used in full only when G4 fails and the baseline runs the same test as its control |
 | `review_model` | the reviewer's model, passed with its agent call (InferPilot's runner gives it to the CLI as `--model`; in Claude Code it depends on the Workflow tool) |
 | `max_fix_rounds`, `max_investigate_rounds`, `max_review_rounds`, `max_work_packages` | budgets |
-| `agent_retries`, `agent_timeout_ms` | an agent call is retried after an error (the retry checks what the failed attempt left), never after a timeout: the timed-out agent may still be running, so it goes on the report's attention list, and its work package gets no further round and no rollback. Default timeout 3 h, 6 h for the verify and performance engineers and the investigator; a Verify round that needs longer says how long and gets it, once, unless `agent_timeout_ms` is given |
+| `agent_retries`, `agent_timeout_ms` | an agent call is retried after an error (the retry checks what the failed attempt left), never after a timeout: the timed-out agent may still be running, so it goes on the report's attention list, and its work package gets no further round and no rollback. Default timeout 3 h, 6 h for the verify and performance engineers, the investigator and an issue's reproduction; a Verify round or a reproduction that needs longer says how long and gets it, once and at most twice its limit, unless `agent_timeout_ms` is given |
 
 Everything but `inferpilot_dir`, `request`, `answers`, `exp_root`, `review_model` and the budgets is the task
 definition; the result of every run that started records the definition it used (`task_def`), where
@@ -625,8 +625,8 @@ frees it at the end of its report. While another task holds it, a new run ends a
 names the holder. Every mode but scan also needs the machine's GPUs free of other jobs
 (`scripts/gpu_status.py --check all`): another job on any of them ends the run at Setup as `busy` too,
 and makes a later performance measurement not run. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
-container) is gone, or which wrote nothing in its run directory for twice its longest agent call (12 h
-by default), is taken over by the next run. A run in another container is
+container) is gone, or which wrote nothing in its run directory for twice its longest agent call, one given
+the most time it can get (24 h by default), is taken over by the next run. A run in another container is
 never taken over for silence, since its run directory is not visible from here; once that run is
 gone, the second command frees the machine, as it frees one a run that died left behind:
 

@@ -358,6 +358,9 @@ const scenarios = [
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }], needs_min: 500 }),
     });
     check(failing.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'a blocking failure is no reason to ask for time');
+    const big = await run({ mode: 'feature', task: 't' }, { 'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 800 }) });
+    check(big.keys.filter((k) => k === 'verify_engineer:verify').length === 1 && big.result.phases.some((p) => p.phase === 'Verify'
+      && /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)), 'a round gets at most twice its limit');
   }],
   ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
     // The first answer of each, 300 ms late, is one InferPilot cannot use.
@@ -690,7 +693,7 @@ const scenarios = [
     });
     check(scan.result.status === 'busy' && eqList(scan.keys, ['scout:collect']), `scan: ${scan.result.status}`);
     const setup = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'director:setup');
-    check(String(setup.ins.lock_idle_hours) === '12', `idle hours for the lock: ${setup.ins.lock_idle_hours}`);
+    check(String(setup.ins.lock_idle_hours) === '24', `idle hours for the lock, twice the longest call with its most time: ${setup.ins.lock_idle_hours}`);
   }],
   ['image: a task on an image other than the newest daily one stops at Setup to ask; image_ok=true goes on', async () => {
     const older = (ins) => (ins.image_ok ? undefined : {
@@ -1023,6 +1026,65 @@ const scenarios = [
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('issue_repro'), 'issue_repro gate passed to verify');
     check(r.result.priority === 'P0', 'priority recorded');
+  }],
+  ['issue: a reproduction has a long call\'s limit; one whose arms would not fit says what it needs and runs again with it, once', async () => {
+    const left = { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'arm 1 of 3 clean', needs_min: 500 };
+    const r = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1 ? left : { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 3 failed' }),
+    });
+    const limits = r.calls.filter((c) => c.key === 'issue_triager:reproduce').map((c) => c.ins.time_limit_min);
+    check(eqList(limits, [360, 500]), `the long default, then the limit asked for: ${limits}`);
+    check(r.result.phases.some((p) => p.phase === 'Reproduce' && p.verdict === 'more_time'
+      && /the reproduction needs 500 min and had 360: run again with a 500-min limit/.test(p.summary)), 'the extension is in the report');
+    check(r.keys.includes('investigator:diagnose') && r.result.status === 'ready_for_review', `goes on once reproduced: ${r.result.status}`);
+    const short = await run({ mode: 'issue', task: 't' }, { 'issue_triager:reproduce': () => left });
+    check(short.keys.filter((k) => k === 'issue_triager:reproduce').length === 2 && !short.keys.includes('investigator:diagnose'),
+      'more time once only');
+    check(short.result.status === 'blocked' && short.result.stopped_at === 'Reproduce' && short.result.phases.some((p) => p.phase === 'Reproduce'
+      && /needs 500 min; its limit is 500 min \(the limit it asked for\)/.test(p.summary)), `still short is not "not reproduced": ${short.result.status}`);
+    const done = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 1 failed', needs_min: 500 }),
+    });
+    check(done.keys.filter((k) => k === 'issue_triager:reproduce').length === 1, 'a reproduction that showed the bug needs no more time');
+    // the reporter's arm failed before the time ran out; the call with more time ran only main's and left it out
+    const split = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1
+        ? { reproduced: false, reproduced_on_reporter: true, repro_cmd: 'bash repro.sh', evidence: 'reporter arm failed', needs_min: 500 }
+        : { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'main arm clean' }),
+    });
+    const second = split.calls.filter((c) => c.key === 'issue_triager:reproduce')[1];
+    check(second && second.ins.earlier_answer && second.ins.earlier_answer.reproduced_on_reporter === true,
+      'the call with more time gets the earlier answer');
+    check(split.result.status === 'fixed_on_main', `the earlier call's reporter arm still counts: ${split.result.status}`);
+    const repPhases = split.result.phases.filter((p) => p.phase === 'Reproduce');
+    check(repPhases.some((p) => p.verdict === 'reproduced_on_reporter' && /reporter arm failed/.test(p.summary))
+      && repPhases.some((p) => /main arm clean/.test(p.summary)), 'each call\'s evidence is an entry of its own');
+    const again = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1
+        ? { reproduced: false, reproduced_on_reporter: true, repro_cmd: 'bash repro.sh', evidence: 'reporter arm failed', needs_min: 500 }
+        : { reproduced: false, reproduced_on_reporter: false, repro_cmd: 'bash repro.sh', evidence: 'reporter and main arms clean' }),
+    });
+    check(again.result.status === 'fixed_on_main', `a reporter arm that failed once has shown it: ${again.result.status}`);
+    // the call with more time may leave out what the earlier one gave: no schema retry, the earlier's repro_cmd stands
+    const terse = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1 ? { ...left, reproduced_on_reporter: true } : { reproduced: false }),
+    });
+    check(terse.keys.filter((k) => k === 'issue_triager:reproduce').length === 2 && terse.result.status === 'fixed_on_main',
+      `a continuation that names only its result is taken: ${terse.result.status}`);
+    // stopped for time: the arms both calls ran stay in the result, and the closing calls get the repro_cmd
+    const kept = short.result.phases.filter((p) => p.phase === 'Reproduce' && p.verdict === 'partial');
+    check(kept.length === 2 && kept.every((p) => /arm 1 of 3 clean/.test(p.summary)), `partial answers kept: ${kept.length}`);
+    const reply = short.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.repro_cmd === 'bash repro.sh', `the reply knows the reproduction: ${reply && reply.ins.repro_cmd}`);
+    // asking for more than twice its limit: no extension the run lock would not cover; a human gives a timeout
+    const big = await run({ mode: 'issue', task: 't' }, { 'issue_triager:reproduce': () => ({ ...left, needs_min: 800 }) });
+    check(big.keys.filter((k) => k === 'issue_triager:reproduce').length === 1 && big.result.status === 'blocked'
+      && big.result.phases.some((p) => /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)),
+    'more time is at most twice the limit');
+    const given = await run({ mode: 'issue', task: 't', agent_timeout_ms: 7200000 }, { 'issue_triager:reproduce': () => left });
+    const rep = given.calls.filter((c) => c.key === 'issue_triager:reproduce');
+    check(rep.length === 1 && rep[0].ins.time_limit_min === 120 && given.result.status === 'blocked' && given.result.phases.some((p) =>
+      p.phase === 'Reproduce' && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), 'a timeout the user gave stays the limit');
   }],
   ['issue: the reply draft is rewritten from how the run ended, before the report', async () => {
     const r = await run({ mode: 'issue', task: 'i' });
