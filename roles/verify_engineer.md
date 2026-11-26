@@ -133,7 +133,10 @@ clock can start before your session does.
        with that last commit, and where the run knows none, keep the fix's outputs and report them
        (`"G2": "16 images written to RUN_DIR/outputs/fix, no baseline: the base's are the black
        images the issue reports"`). Write both commands in the ledger, where the report's *Before
-       pushing* section finds them.
+       pushing* section finds them. What the model is shows on its server: where one Setup took
+       for such a model answers text questions all the same (the server has chat completions, and
+       answers one), run gsm8k as for any other fix, leave the task's script unrun, and say so in
+       `gates`.
      - With no `output_script` there is nothing to compare the outputs of such a model with, and
        gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
        `"G2": "not run: the model answers no text questions, and the task names no output_script"`

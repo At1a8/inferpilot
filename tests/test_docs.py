@@ -1018,6 +1018,7 @@ class OutputComparisonTest(unittest.TestCase):
                            ("roles/verify_engineer.md", "Never write such a test yourself, and never change the task's"),
                            ("roles/verify_engineer.md", "never a pass on its exit status alone"),
                            ("roles/verify_engineer.md", "Where the failure being fixed is in these outputs"),
+                           ("roles/verify_engineer.md", "where one Setup took for such a model answers text questions all the same"),
                            ("roles/verify_engineer.md", 'Say `"text_model": false` in your answer'),
                            ("roles/verify_engineer.md", "not run: the model answers no text questions, and the task names no output_script"),
                            ("roles/verify_engineer.md", "Never pass G2 for such a fix on the reproduction or the failing test alone"),
