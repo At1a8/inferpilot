@@ -194,8 +194,9 @@ Notes per gate:
   the noise band, by the median of its rounds. One diff decides both gates: a fix to tests,
   documentation or CI files alone has no G5 either, `not run: no code the server runs changed`. Where
   the base cannot serve the configuration because that is the failure being fixed, the fix is compared
-  with the last commit that served it, the one G2 measured against; where the run knows no such
-  commit, its numbers are reported and not judged, and the pull request says that they have no
+  with the last commit that served it: the one G2 measured against, or, where G2 did not run (a model
+  that answers no text questions), the one the triage record names. Only where the run knows no such
+  commit are its numbers reported and not judged, and the pull request says that they have no
   baseline. So an issue or a ci task that can reach a fix names its client as it names its model, and
   one that names none is asked for it (`templates/task_definition.md` §1.1); no template is offered
   for it.

@@ -610,7 +610,8 @@ each field came from (`provenance`) and the intake's `assumptions`.
 
 Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a port's client does not
 run its source's scenarios; the question for a model or a client, when an issue or a ci run reaches its
-fix without one; any `stop_after`; with `auto_approve_design`
+fix without one, or with InferPilot's client and only a part of its `workload`; any `stop_after`; with
+`auto_approve_design`
 set to `false`, L3 tasks and designs the architect flags stop at Design (`awaiting_design_review`; by
 default they go on, and the report says no human approved the design); a review the reviewer marks `blocked`
 stops before the PR; the PR engineer returns the exact `git push` instead of pushing; issue replies
