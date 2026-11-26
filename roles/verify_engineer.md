@@ -67,15 +67,15 @@ clock can start before your session does.
      most 1 point below the baseline, with no token-level comparison. A set where a question got no
      answer has no score.
    - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
-     when it changes anything but tests and documentation** (`validation_doctrine.md`, *G2 for a
-     fix*). That gate of
+     when it changes anything but tests, documentation and CI files** (`validation_doctrine.md`, *G2
+     for a fix*). That gate of
      `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then decide
      whether G2 runs, before any server of its own is launched:
      - `git -C <worktree> diff --name-only <base>...HEAD` decides G2 and G5, each by its own line
        (`validation_doctrine.md`, *What a fix changes decides its gates*).
-       G2 runs unless every file it names is a test or a documentation file: then `gates` says
-       `"G2": "not run: only tests or documentation changed"`. Never judge whether the server runs a
-       file: a fix to a CI file, a Dockerfile, a benchmark or tool script or a dependency file is
+       G2 runs unless every file it names is a test, a documentation file or a CI file: then `gates`
+       says `"G2": "not run: no code the server runs changed"`. Never judge whether the server runs
+       any other file: a fix to a Dockerfile, a benchmark or tool script or a dependency file is
        measured like one to a model file. Where its change is not in this container (a Dockerfile,
        a dependency declaration), say so next to the score: `"G2": "pass 0.893 vs 0.895 (1319 q);
        the Dockerfile change is not in effect in this container"`.

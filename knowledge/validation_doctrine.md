@@ -53,14 +53,14 @@ Notes per gate:
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
   below) or the subject of a determinism task, never the accuracy gate.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
-  report was about, when it changes anything but tests and documentation: gsm8k (1319) on the fix and
-  on the base, each once, with the run's launch script and model, the fix at most 1 point below the
-  base. Every task that ends in a pull request brings its accuracy with it: the framework's PR
-  template asks it of a change to outputs, and a fix on the serving path can be one without meaning
-  to. Nobody judges whether the server runs the file a fix changes: that judgement can be wrong, and
-  measuring is the safe side (*What a fix changes decides its gates*). A fix to tests or
-  documentation alone has no G2: `not run: only tests or documentation changed`. Nor has the fix for
-  a model that answers no text questions (a diffusion,
+  report was about, when it changes anything but tests, documentation and CI files: gsm8k (1319) on
+  the fix and on the base, each once, with the run's launch script and model, the fix at most 1 point
+  below the base. Every task that ends in a pull request brings its accuracy with it: the framework's
+  PR template asks it of a change to outputs, and a fix on the serving path can be one without
+  meaning to. A fix to tests, documentation or CI files alone changes nothing the server runs and has
+  no G2: `not run: no code the server runs changed`. Of any other file nobody judges whether the
+  server runs it: that judgement can be wrong, and measuring is the safe side (*What a fix changes
+  decides its gates*). Nor has the fix for a model that answers no text questions (a diffusion,
   speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
   questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
   reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
@@ -212,18 +212,19 @@ Notes per gate:
   human, and nothing is rolled back: what a correct fix may cost is not a role's to decide.
 - **What a fix changes decides its gates.** The fix's diff is read for G2 and for G5, each by a line
   of its own, drawn by file.
-  G2 runs for every fix that changes a file other than tests and documentation (sglang: `test/`;
-  `docs/`, `*.md`). Whether the server runs that file is nobody's to judge: a module under `python/`
-  can be taken for a tool, a script can be one the launch path imports, and an accuracy loss let
-  through on such a reading is the costly mistake. So a fix to a CI file, a Dockerfile, a benchmark
-  or tool script or a dependency file is measured on gsm8k like a fix to a model file.
-  G5 runs when the fix changes code the server runs. These are not: tests, documentation, CI files
-  (`.github/`, `scripts/ci/`), Dockerfiles, benchmark and tool scripts (`benchmark/`, `tools/`,
-  `examples/`), and a dependency declaration that moves no version (one that was missing, a
-  package's metadata). A fix that changes only such files has no G5: `not run: no code the server
-  runs changed`. A pull request that changes one of them and a line of code changes code. The
-  framework's own fixes measure less than either line: of the 32 fix pull requests merged from
-  2026-05-26 to 2026-11-26 that changed no code, none measured the server's accuracy or speed.
+  G2 runs for every fix that changes a file other than tests, documentation and CI files (sglang:
+  `test/`; `docs/`, `*.md`; `.github/`, `scripts/ci/`). Whether the server runs any other file is
+  nobody's to judge: a module under `python/` can be taken for a tool, a script can be one the launch
+  path imports, and an accuracy loss let through on such a reading is the costly mistake. So a fix to
+  a Dockerfile, a benchmark or tool script or a dependency file is measured on gsm8k like a fix to a
+  model file.
+  G5 runs when the fix changes code the server runs. Besides those three, these are not: Dockerfiles,
+  benchmark and tool scripts (`benchmark/`, `tools/`, `examples/`), and a dependency declaration that
+  moves no version (one that was missing, a package's metadata). A fix that changes only such files
+  has no G5: `not run: no code the server runs changed`. A pull request that changes one of them and
+  a line of code changes code. The framework's own fixes measure less than either line: of the 32 fix
+  pull requests merged from 2026-05-26 to 2026-11-26 that changed no code, none measured the server's
+  accuracy or speed.
   One change to those files is a change to code all the same: a new version of a package the
   server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned. No line of the framework
   changes, and every kernel may. The fix arm is measured with that version installed and the base

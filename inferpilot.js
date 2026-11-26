@@ -1556,7 +1556,7 @@ const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the no
 // a performance problem, whose number must come back whatever its fix changes), 'fix' when the fix changes code
 // the server runs. The verify engineer reads that from the fix's diff: a fix that changes no code the server runs
 // is not measured for speed. G2's line is wider, and the verify engineer's own: it runs for every fix but one to
-// tests or documentation alone. A fix whose last Verify round did not say so is measured.
+// tests, documentation or CI files alone. A fix whose last Verify round did not say so is measured.
 const NOT_MEASURED = 'not run: no code the server runs changed';
 const unmeasured = (when) => when === 'fix' && C.server_code_changed === false;
 // The claim the reviewer reads: none where G5 did not run.

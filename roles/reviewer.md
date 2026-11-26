@@ -47,7 +47,7 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
    both arms and enough runs, and, with `held_out` on, held at the held-out operating point; nothing was re-run until it
    passed without saying so. For a fix (issue, ci), check both gates against the diff of step 1
    (`validation_doctrine.md`, *What a fix changes decides its gates*). G2 is missing only for a fix
-   to tests or documentation alone: any other file among the changed ones, and no G2, is a
+   to tests, documentation or CI files alone: any other file among the changed ones, and no G2, is a
    `blocker` finding. `server_code_changed` false means the run did not measure the fix's speed, and
    `claim` is empty: a file the server runs among the changed ones is a `blocker` finding as well.
    Either way the verdict is `blocked`: the evidence was not produced, and no work package produces
