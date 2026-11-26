@@ -1344,6 +1344,12 @@ class CiOnMainTest(unittest.TestCase):
                 # a green rerun here does not make a failure of the CI's own go away
                 ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
                 ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),
+                # the lane's own runs of one commit on one image are evidence of an intermittent failure; three passes here are not its end
+                ("roles/ci_guardian.md", "So a test that passes all three times here fails all the same where the lane's own runs of that commit on "
+                                         "that image show it failing in some and passing in others"),
+                ("roles/ci_guardian.md", 'It is `on_main: "fails"` with `failure_class: "flaky"`, and `evidence` names those runs and their rate'),
+                ("knowledge/ci_triage.md", "So is one that passes all three here while the lane's own runs of that commit on that image show it "
+                                           "failing in some and passing in others"),
                 ("knowledge/ci_triage.md", "A failure that was the CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over"),
                 # intermittent is said of one commit, lane and image, not of the tracker's counts
                 ("roles/ci_guardian.md", "intermittent means some runs fail and some pass on one commit, one lane and one image"),

@@ -57,9 +57,12 @@ image, its GPU model and its node count. The newest image is established, not as
 of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
 The answer is for every test of the task on every lane it failed on, and a pass has to hold: each
 test run as the job ran it, in the job's order, three times. One that fails some of those runs is
-`flaky`, not passing. Intermittent is said of one commit, one lane and one image: the tracker's
-counts span commits and images, and prove nothing of the kind. A failure that was the CI's own (a
-runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the tests do here.
+`flaky`, not passing. So is one that passes all three here while the lane's own runs of that commit
+on that image show it failing in some and passing in others: three passes do not undo an
+intermittence the lane has shown. Intermittent is said of one commit, one lane and one image: the
+tracker's counts span commits and images, and prove nothing of the kind. A failure that was the
+CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the
+tests do here.
 
 - All of it passes: there is nothing to fix in the framework, and the run ends with no fix and no
   reply. The job ran an image older than the lane's newest, or a fix has merged since. Most of two

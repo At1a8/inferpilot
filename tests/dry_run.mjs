@@ -2287,6 +2287,15 @@ const scenarios = [
           `${cls} with main "${verdict}" is handed over with its class and evidence, not ended as nothing to fix: ${ended(own)}`);
       }
     }
+    // Three passes here do not undo an intermittence the lane itself has shown on that commit and image: Classify
+    // answers "fails" with the class flaky, its command and the lane's runs, and the run hands that over. It is
+    // neither ended as nothing to fix nor bisected and fixed.
+    const lane = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', failure_class: 'flaky',
+      evidence: 'passes 3 of 3 here; the lane ran commit 4f1c2aa on rocm720 of 11-25 five times: 2 failed, 3 passed' }));
+    check(lane.result.status === 'handed_off' && lane.result.stopped_at === 'Classify' && !lane.keys.includes('ci_guardian:bisect')
+      && !lane.keys.includes('implementer:implement')
+      && lane.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'flaky' && p.summary.includes('2 failed, 3 passed')),
+      `a test that passes here and is intermittent in the lane's own runs is handed over as flaky: ${ended(lane)}`);
     // The part not run is kept whole in the result however the run ends: a note keeps 600 characters of it.
     const long = `the tests on rocm724: ${'test_x, '.repeat(120)}and more`;
     for (const out of [{ on_main: 'passes' }, { on_main: 'not_run' }, { on_main: 'fails' }]) {

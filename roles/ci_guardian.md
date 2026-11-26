@@ -35,9 +35,13 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one
-  commit, one lane and one image, in your repeats or in the lane's runs of that commit. The tracker's
-  counts are no such evidence: they span commits and images, so "failed 3 of 31 runs" can be a
-  regression three runs old, or a failure fixed since.
+  commit, one lane and one image, in your repeats or in the lane's runs of that commit. So a test
+  that passes all three times here fails all the same where the lane's own runs of that commit on
+  that image show it failing in some and passing in others: three passes do not undo an
+  intermittence the lane has shown. It is `on_main: "fails"` with `failure_class: "flaky"`, and
+  `evidence` names those runs and their rate. The tracker's counts are no such evidence: they span
+  commits and images, so "failed 3 of 31 runs" can be a regression three runs old, or a failure
+  fixed since.
 - **A failure that is the CI's own is handed over, whatever the test does here.** A runner that was
   lost, an image that did not pull, a full disk, a job that never reached a test: the class is
   `infrastructure` (step 2), with the job's evidence, and no rerun of a test on this machine answers
