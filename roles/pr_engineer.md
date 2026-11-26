@@ -115,8 +115,10 @@ Return:
 
 ## PHASE=recheck (issue, ci: before the pull request)
 
-Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command),
-`time_limit_min` (minutes from this call's start, 0 when there is none) and `deadline_utc`, that moment.
+Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command), `claim` (the
+number the fix of a performance problem must restore; empty for any other fix), `accuracy_claim` (the
+score, for a CI failure on one), `time_limit_min` (minutes from this call's start, 0 when there is
+none) and `deadline_utc`, that moment.
 
 The run verified the fix against the commit it began on, and main has moved since. A failure that main
 no longer shows needs no pull request: this call finds out, and changes nothing. Its answer can drop a
@@ -125,6 +127,9 @@ request is prepared.
 
 1. `git fetch origin`, then a throwaway worktree of the latest main, without the fix
    (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`). `main` is its commit.
+   A `RUN_DIR/recheck` an earlier call left behind is removed first (`git -C <framework_dir> worktree
+   remove --force RUN_DIR/recheck`, or the directory itself where git no longer knows it): it is a
+   tree of main and holds nothing of the task.
 2. Point the gate at that tree, and at nothing else. Its command was written for the task worktree,
    which has the fix: set `TREE` to the recheck worktree (an issue's reproduction script reads it),
    put that tree first on `PYTHONPATH` (`env_hygiene.md`, *The code under test*), and replace every
@@ -136,14 +141,15 @@ request is prepared.
    many times as the base needed to show the failure (the ledger has the counts), at least 6 for a
    failure that did not show on every run there (`validation_doctrine.md`, *Noise characterization*):
    one clean run after an intermittent failure is not evidence. With `time_limit_min` above 0, plan
-   from `deadline_utc` and keep the last 15 minutes for step 5; runs that do not fit are not run.
+   from `deadline_utc` and keep a quarter of the time to it, at most 15 minutes, for step 5; runs
+   that do not fit are not run.
 4. The answer, `on_main`:
    - `fails`: it fails as before, the same error, the same test, the number still short of the claim.
    - `passes`: every run passed, and each exercised what failed. The failing test was collected and
      ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
-     step that failed. A number or a score reaches the claim the triage record names, not a threshold
-     main has lowered since. `fixed_by` names the pull request or the commit that fixed it, when the
-     log of main since `<base>` shows one.
+     step that failed. A number reaches `claim` and a score `accuracy_claim`, as the run established
+     them, not a threshold main has lowered since. `fixed_by` names the pull request or the commit
+     that fixed it, when the log of main since `<base>` shows one.
    - `inconclusive`: anything else. A run that fails another way (an import error, a server that
      stops for another reason); fewer runs than step 3 asks for, or some of them failing; a test
      main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
@@ -151,8 +157,11 @@ request is prepared.
 
    `evidence` gives the runs and their counts, the logs, and for `inconclusive` what kept the check
    from deciding.
-5. Stop what you started (`env_hygiene.md`, *Servers*), remove the worktree, and give `.git` back
-   (`scripts/restore_owner.sh`).
+5. Stop what you started (`env_hygiene.md`, *Servers*), and confirm it on the GPUs
+   (`python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before your first launch and
+   after the stop). What you could not stop goes in `left_running`, whatever the answer; empty when
+   all of it stopped. InferPilot prepares no pull request next to it. Then remove the worktree, and
+   give `.git` back (`scripts/restore_owner.sh`).
 
 Return:
 
@@ -160,5 +169,6 @@ Return:
 {"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>",
  "main_import": "/abs/RUN_DIR/recheck/python/sglang/__init__.py",
  "fixed_by": "<#n or sha, when main passes because of it>",
- "evidence": "<the runs and their counts, the logs, and what they show>"}
+ "evidence": "<the runs and their counts, the logs, and what they show>",
+ "left_running": "<what you started and could not stop; empty when all of it stopped>"}
 ```

@@ -386,8 +386,12 @@ class RecheckOnMainTest(unittest.TestCase):
         for said, why in (
                 ("const RECHECK = S({ on_main: { type: 'string', enum: ['fails', 'passes', 'inconclusive'] }, main: str, main_import: str,",
                  "the check cannot say that it decided nothing"),
-                ("inputs({ extra_gates: extraGates, time_limit_min: minutes(timeoutFor('pr_engineer', 'recheck')) }), RECHECK, label);",
-                 "the check is not given the fix's gate, or not its limit"),
+                ("inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('pr_engineer', 'recheck')) }), RECHECK, label);",
+                 "the check is not given the fix's gate, the number to restore or its limit"),
+                ("const rc = await recheckOnMain(extraGates, runPerf === true ? perfClaim : '');", "main is not held to the number a performance problem must restore"),
+                ("const granted = Math.max(GRANTED_MS['issue_triager:reproduce'] || 0, GRANTED_MS.verify_engineer || 0);",
+                 "a reproduction that was granted more time is run again with less"),
+                ("const left = String(rc.left_running || '').trim();", "the pull request is prepared next to what the check could not stop"),
                 ("const LONG_CALLS = new Set(['issue_triager:reproduce', 'pr_engineer:recheck']);", "the check has less time than the reproduction it runs again"),
                 ("const onMain = imp.startsWith(`${C.run_dir}/recheck/`) && !/(^|\\/)\\.\\.(\\/|$)/.test(imp);",
                  "a gate that ran the fixed tree passes for main"),
@@ -399,7 +403,7 @@ class RecheckOnMainTest(unittest.TestCase):
                 ("if (rc.stop) return finish('blocked', 'PR');", "the run goes on next to a check that may hold the GPUs"),
                 ("if (PHASE !== 'PR') enter('PR');", "the PR phase is entered twice")):
             self.assertIn(said, src, why)
-        self.assertLess(src.index("const rc = await recheckOnMain(extraGates);"), src.index("const pr = await preparePR(round);"),
+        self.assertLess(src.index("const rc = await recheckOnMain(extraGates, "), src.index("const pr = await preparePR(round);"),
                         "the check comes after the first pull request round")
 
     def test_the_documents_say_it(self):
@@ -409,6 +413,10 @@ class RecheckOnMainTest(unittest.TestCase):
         for said in ("A failure that main no longer shows needs no pull request", "changes nothing",
                      "so `passes` is said only on proof; anything short of it is `inconclusive`",
                      "a throwaway worktree of the latest main, without the fix",
+                     "A `RUN_DIR/recheck` an earlier call left behind is removed first",
+                     "A number reaches `claim` and a score `accuracy_claim`, as the run established them",
+                     "keep a quarter of the time to it, at most 15 minutes, for step 5",
+                     "What you could not stop goes in `left_running`, whatever the answer",
                      # the gate was written for the task worktree, which has the fix
                      "Point the gate at that tree, and at nothing else",
                      "set `TREE` to the recheck worktree", "replace every path of the task worktree in the command itself",
@@ -420,6 +428,7 @@ class RecheckOnMainTest(unittest.TestCase):
                      # a failure that main hides is not fixed
                      "The failing test was collected and ran, not skipped, deselected or marked as expected to fail",
                      "not a threshold main has lowered since",
+                     '"left_running": "<what you started and could not stop; empty when all of it stopped>"',
                      "a test main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed",
                      "A run that fails another way (an import error, a server that stops for another reason)",
                      '"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>"'):

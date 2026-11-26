@@ -919,9 +919,10 @@ const PR = S({
 // A fix (issue, ci), before its pull request: its gate run again on the latest main without the fix. on_main:
 // fails (as when the run began), passes (main has fixed the failure since: fixed_by names the pull request or
 // commit, when one shows), inconclusive (the runs decided nothing). main is the commit it ran on, main_import
-// where the framework was imported from in those runs, evidence the runs and what they show.
+// where the framework was imported from in those runs, evidence the runs and what they show, left_running what
+// the check started and could not stop ('' when all of it is stopped).
 const RECHECK = S({ on_main: { type: 'string', enum: ['fails', 'passes', 'inconclusive'] }, main: str, main_import: str,
-  fixed_by: str, evidence: str }, ['on_main']);
+  fixed_by: str, evidence: str, left_running: str }, ['on_main']);
 const K_PACKAGE = S({
   task_dir: str,
   mode: { type: 'string', enum: ['optimize', 'author'] },
@@ -1746,11 +1747,16 @@ function stoppedUnmeasured() {
 // imported from that commit's worktree: a gate written for the task worktree can run the fixed tree and pass.
 // Anything less prepares the pull request, and the run record says what the check showed.
 // Returns { fixed: true } (no pull request), { stop: reason } (the check may still hold the GPUs), or {}.
-async function recheckOnMain(extraGates) {
+// claim: the number a performance problem's fix must restore, which main has to reach as well.
+async function recheckOnMain(extraGates, claim) {
   enter('PR');
   const label = 'pr_engineer:recheck';
+  // The check runs the fix's gate again: it has at least the time the run granted the reproduction or a Verify
+  // round (never past a timeout the user gave, under which nothing is granted).
+  const granted = Math.max(GRANTED_MS['issue_triager:reproduce'] || 0, GRANTED_MS.verify_engineer || 0);
+  if (granted > timeoutFor('pr_engineer', 'recheck')) GRANTED_MS[label] = granted;
   const rc = await call('pr_engineer', 'recheck',
-    inputs({ extra_gates: extraGates, time_limit_min: minutes(timeoutFor('pr_engineer', 'recheck')) }), RECHECK, label);
+    inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('pr_engineer', 'recheck')) }), RECHECK, label);
   if (!rc) {
     // A call that timed out is not cancelled and may launch again: nothing else is started next to it. One that
     // ended without an answer may have left its servers: they are stopped and the GPUs checked before the PR
@@ -1775,6 +1781,16 @@ async function recheckOnMain(extraGates) {
     note('PR', 'recheck', 'the gate was not run again on the latest main: the PR engineer returned nothing; what it left was stopped'
       + `${inUse ? `, and another job uses a pinned GPU: ${inUse}` : ''}`);
     return {};
+  }
+  // What the check started and could not stop is still on the GPUs: the PR phase starts nothing next to it.
+  const left = String(rc.left_running || '').trim();
+  if (left) {
+    const why = `the check on the latest main could not stop what it started (${left}): no pull request is prepared next to it. `
+      + `The fix is verified and on ${C.branch || 'its branch'}; stop it, then run the task again`;
+    note('PR', 'fail', why);
+    leftRunning.push(`the check on the latest main left running: ${left}`);
+    ATTENTION.push({ call: label, issue: `could not stop what it started: ${left}. Stop it before reusing its GPUs` });
+    return { stop: why };
   }
   const sha = String(rc.main || '').trim();
   const at = sha ? `main at ${sha}` : 'the latest main';
@@ -1921,7 +1937,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   if (stopHere('Review')) return finish('stopped', 'Review');
 
   if (BEFORE_A_FIX[MODE] && (extraGates || []).length) {
-    const rc = await recheckOnMain(extraGates);
+    const rc = await recheckOnMain(extraGates, runPerf === true ? perfClaim : '');
     if (rc.fixed) return finish('fixed_on_main', 'PR');
     if (rc.stop) return finish('blocked', 'PR');
   }

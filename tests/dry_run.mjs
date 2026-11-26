@@ -925,6 +925,32 @@ const scenarios = [
         && prPhase(unknown).some((p) => p.verdict === 'fail' && /The fix is verified and on /.test(p.summary)),
         `${mode}: where what it left cannot be stopped or checked, no pull request is prepared next to it: ${ended(unknown)}`);
     }
+    // What the check started and could not stop is still on the GPUs, whatever it found: nothing is prepared next to it.
+    for (const verdict of ['fails', 'inconclusive', 'passes']) {
+      const held = await run({ mode: 'issue', task: 'i' }, { 'pr_engineer:recheck': () => ({ ...passes, on_main: verdict,
+        left_running: 'the server of run 4, pid 4242, on GPU 0-7' }) });
+      check(held.result.status === 'blocked' && held.result.stopped_at === 'PR' && !held.keys.includes('pr_engineer:pr') && !held.result.fixed_by
+        && held.result.attention.some((a) => a.call === 'pr_engineer:recheck' && a.issue.includes('pid 4242'))
+        && prPhase(held).some((p) => p.verdict === 'fail' && /could not stop what it started \(the server of run 4/.test(p.summary)),
+        `a check (${verdict}) that could not stop what it started stops the run before the pull request: ${ended(held)}`);
+    }
+    // The number a performance problem's fix must restore is the reproduction's to state: the check gets it, and main has to reach it.
+    const perfIssue = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'performance', action: 'reproduce', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash repro.sh', perf_claim: 'decode tok/s back to 2400 at c32', evidence: '1900 tok/s' }) });
+    const told = perfIssue.calls.find((c) => c.key === 'pr_engineer:recheck');
+    check(told && told.ins.claim === 'decode tok/s back to 2400 at c32', `the check is given the number to restore: ${told && told.ins.claim}`);
+    const plainIssue = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'pr_engineer:recheck');
+    check(!plainIssue.ins.claim, `any other fix has no number for main to reach: ${JSON.stringify(plainIssue.ins.claim)}`);
+    // A reproduction that was granted more time is run again with as much.
+    const soak = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1 ? { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'arm 1 of 3 clean', needs_min: 500 }
+        : { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 3 failed' }) });
+    const soaked = soak.calls.find((c) => c.key === 'pr_engineer:recheck');
+    check(soak.result.status === 'ready_for_review' && soaked.ins.time_limit_min === 500,
+      `the check has the time the reproduction was granted: ${soaked.ins.time_limit_min} min`);
+    const usual = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'pr_engineer:recheck');
+    check(usual.ins.time_limit_min === 360, `and the reproduction's own limit otherwise: ${usual.ins.time_limit_min} min`);
     // A check that timed out is not cancelled and may launch again: the run stops, and starts nothing next to it.
     const slow = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'pr_engineer:recheck': async () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
