@@ -10,11 +10,12 @@ read from the task worktree.
 
 ## PHASE=gpus (before every Verify round)
 
-Inputs: `round`. Stop what this run left running on its GPUs (the servers its records name: a test
-engineer's, an earlier round's), then `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`,
-where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses, with its VRAM%, GPU% and
-pids, in `in_use`, empty when they are idle: InferPilot warns the user before the round starts, and the
-round goes on. Start nothing.
+Inputs: `round` (`recheck` when it follows a check on the latest main that left no answer:
+`pr_engineer.md`, PHASE=recheck). Stop what this run left running on its GPUs (the servers its records
+name: a test engineer's, an earlier round's), then `python3 <inferpilot_dir>/scripts/gpu_status.py
+--check <gpu_ids>`, where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses,
+with its VRAM%, GPU% and pids, in `in_use`, empty when they are idle: InferPilot warns the user before
+the round starts, and the round goes on. Start nothing.
 
 Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
 

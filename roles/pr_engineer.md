@@ -110,27 +110,50 @@ Return:
 
 ## PHASE=recheck (issue, ci: before the pull request)
 
-Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command).
+Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command),
+`time_limit_min` (minutes from this call's start, 0 when there is none) and `deadline_utc`, that moment.
 
 The run verified the fix against the commit it began on, and main has moved since. A failure that main
-no longer shows needs no pull request: this call finds out, and changes nothing.
+no longer shows needs no pull request: this call finds out, and changes nothing. Its answer can drop a
+verified fix, so `passes` is said only on proof; anything short of it is `inconclusive`, and the pull
+request is prepared.
 
 1. `git fetch origin`, then a throwaway worktree of the latest main, without the fix
-   (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`).
-2. Run the gate's command there as Verify ran it on the base: that tree first on `PYTHONPATH` and its
-   import checked (`env_hygiene.md`, *The code under test*), the same model and settings, on the GPUs in
-   `gpu_ids`, as many times as the failure needed to show (the ledger has the counts).
-3. `still_fails: true` when it fails as before: the same error, the same test, the number still short
-   of the claim. `still_fails: false` when it no longer fails; `fixed_by` then names the pull request
-   or the commit that fixed it, when the log of main since `<base>` shows one. A run that fails another
-   way (an import error, a server that stops for another reason) decides nothing: `still_fails: true`,
-   and `evidence` says what it showed. `main` is the commit it ran on.
-4. Stop what you started (`env_hygiene.md`, *Servers*), remove the worktree, and give `.git` back
+   (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`). `main` is its commit.
+2. Point the gate at that tree, and at nothing else. Its command was written for the task worktree,
+   which has the fix: set `TREE` to the recheck worktree (an issue's reproduction script reads it),
+   put that tree first on `PYTHONPATH` (`env_hygiene.md`, *The code under test*), and replace every
+   path of the task worktree in the command itself (`cd /abs/wt && ...`). The first log of each run
+   prints `sglang.__file__`, and for a test the file it was collected from: return the import's path
+   as `main_import`. InferPilot counts `passes` only when it lies in `RUN_DIR/recheck`. A command you
+   cannot point at that tree decides nothing.
+3. Run it as Verify ran it on the base: the same model and settings, on the GPUs in `gpu_ids`, and as
+   many times as the base needed to show the failure (the ledger has the counts), at least 6 for a
+   failure that did not show on every run there (`validation_doctrine.md`, *Noise characterization*):
+   one clean run after an intermittent failure is not evidence. With `time_limit_min` above 0, plan
+   from `deadline_utc` and keep the last 15 minutes for step 5; runs that do not fit are not run.
+4. The answer, `on_main`:
+   - `fails`: it fails as before, the same error, the same test, the number still short of the claim.
+   - `passes`: every run passed, and each exercised what failed. The failing test was collected and
+     ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
+     step that failed. A number or a score reaches the claim the triage record names, not a threshold
+     main has lowered since. `fixed_by` names the pull request or the commit that fixed it, when the
+     log of main since `<base>` shows one.
+   - `inconclusive`: anything else. A run that fails another way (an import error, a server that
+     stops for another reason); fewer runs than step 3 asks for, or some of them failing; a test
+     main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
+     (`issue_triage.md` §3); a command that could not be pointed at the recheck worktree.
+
+   `evidence` gives the runs and their counts, the logs, and for `inconclusive` what kept the check
+   from deciding.
+5. Stop what you started (`env_hygiene.md`, *Servers*), remove the worktree, and give `.git` back
    (`scripts/restore_owner.sh`).
 
 Return:
 
 ```json
-{"still_fails": true, "main": "<sha of the main it ran on>", "fixed_by": "<#n or sha, when main no longer fails>",
- "evidence": "<the log, and what it shows>"}
+{"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>",
+ "main_import": "/abs/RUN_DIR/recheck/python/sglang/__init__.py",
+ "fixed_by": "<#n or sha, when main passes because of it>",
+ "evidence": "<the runs and their counts, the logs, and what they show>"}
 ```
