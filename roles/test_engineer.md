@@ -77,6 +77,11 @@ clock can start before your session does; on the call that finishes a gate, `inc
    `fails_without_change`: `parent` or `mutant` by the check that failed, `no` when the test passed
    where it should have failed (the package fails; say in `failure_summary` what the test misses),
    `n/a` only for a `docs` package.
+   A package whose change takes effect outside the worktree (what a dependency declaration names, a
+   package or an environment variable a Dockerfile sets; `validation_doctrine.md`, *What a fix
+   changes decides its gates*) is tested where it takes effect: step 2 with the change put into
+   effect and checked, this control on the parent in the image's environment, one after the other,
+   and the image's environment back before you return. Both in one environment show nothing.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
    the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a

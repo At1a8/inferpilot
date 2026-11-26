@@ -373,7 +373,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   commit, that commit, as the ledger names it, and the fix alone where it had no baseline: the base is
   the server that does not start), runs every command of an arm (server, tests, reproduction, benchmark
   client) with that tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under
-  test*), measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
+  test*), gives an arm whose change takes effect outside its tree (a package's version, an
+  environment variable) that setup before its commands and the image's environment back after them,
+  measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
   arm, the same rounds in the same order) and gives the numbers to compare with, with the run's spread.
   Then it removes the worktrees, releases the lock, and gives the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,

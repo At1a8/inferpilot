@@ -88,7 +88,9 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    as written except that a model id points at this machine's copy of that model (the local weights the
    run used; never a download): the server starts, answers one request and its log shows the feature
    on; the failing test passes; the reproduction no longer fails (`launch_checked`; false, with the
-   error, is a work package).
+   error, is a work package). A change that takes effect outside the worktree (a package's version,
+   an environment variable a Dockerfile sets) is put into effect for that run and taken back after
+   it, and the body gives the setup with the command: the command alone shows the image's behaviour.
 6. **Push command:** the exact `git push` the human should run from the worktree, in the container. Do
    not run it. Also write the branch's commits to `RUN_DIR/patches` (`git -C <worktree> format-patch
    <base>..inferpilot/<slug> -o RUN_DIR/patches`), so the change leaves the container with the run directory:

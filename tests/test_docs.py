@@ -681,13 +681,24 @@ class FixGatesByFileTest(unittest.TestCase):
                      "an accuracy or a speed loss let through on such a reading is the costly mistake",
                      "a fix to a Dockerfile, a benchmark or tool script or a dependency file is measured like a fix to a model file, "
                      "on gsm8k and on the task's client",
-                     "A fix that moves the version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
-                     "The fix arm is measured with that version installed and the base arm with the image's, for both gates",
-                     "cannot be installed in this image",
-                     "each gate says next to its numbers that the change was not in effect",
-                     "A fix is shown to work where its change takes effect",
-                     "the same gate in the unchanged environment shows nothing"):
+                     "A change outside the framework's code takes effect only once it is put into effect",
+                     "an environment variable it sets, such as `SGLANG_USE_AITER`",
+                     "Every run of the fix is made with the change in effect, and every run of the base without it",
+                     "the unit test and its control at Implement, `issue_repro` or `failing_test`, both arms of G2 and of G5, "
+                     "and the command the pull request gives",
+                     "The same run in the unchanged environment shows nothing",
+                     "a new version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
+                     "The arms then run one after the other, never side by side in one container",
+                     "the report's commands carry the setup",
+                     "Install what the change names and nothing else: never the framework again",
+                     "Only what this run's platform uses counts",
+                     "`python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`",
+                     "a version moved only in the CUDA declaration changes nothing in this run",
+                     "cannot be installed in this image"):
             self.assertIn(said, note[0])
+        # A change that is not in effect is not measured as if it were: the note no longer lets a gate run both arms
+        # in one environment and say so.
+        self.assertNotIn("the change was not in effect", note[0])
         # No second, narrower line for G5: what the server is judged not to run is measured all the same.
         for gone in ("G5 runs when the fix changes code the server runs", "has no G5: `not run", "each by a line of its own"):
             self.assertNotIn(gone, note[0], "G5 still has a line of its own")
@@ -713,21 +724,34 @@ class FixGatesByFileTest(unittest.TestCase):
                      "The line is drawn by the file's path, and by nothing else",
                      "Never judge whether the server runs a file that is none of the three",
                      "a fix to a Dockerfile, a benchmark or tool script or a dependency file is measured like one to a model file",
-                     "the Dockerfile change is not in effect in this container",
-                     "A fix that moves the version of a package the server runs",
-                     "Measure the base arm on the image's version first",
-                     "never measure the fix arm on the image's version and call it the fix",
-                     "Run that gate where the fix takes effect",
+                     "which the ROCm image does not install",
+                     "A fix whose change takes effect outside the worktree",
+                     "a package or an environment variable a Dockerfile sets",
+                     "the base arm in the image's environment first",
+                     "never measure the fix arm in the image's environment and call it the fix",
+                     "Run that gate, and every arm after it, where the fix takes effect",
+                     "no server is started ahead, and no two arms run side by side",
+                     "the reproduction that put the change into effect is stopped, and the image's environment back, before the base arm of G2 starts",
+                     "Install what the change names and nothing else, never the framework again",
                      "`false` only when every file the fix changes is a test, a documentation file or a CI file"):
             self.assertIn(said, role, "roles/verify_engineer.md does not say it")
         self.assertNotIn("G5 has the narrower line", role, "the verify engineer still judges what the server runs for G5")
         perf = self.flat("roles/perf_engineer.md")
         for said in ("**A fix is measured whatever file it changes,** tests, documentation and CI files apart",
                      "never judge whether the server runs it",
-                     "the fix arm with the fix's installed in the container",
-                     "never measure the fix arm on the image's version and call it the fix",
-                     "measure all the same and say so in `summary`"):
+                     "is measured with the change in effect on the fix arm and without it on the base arm, as Verify measured it",
+                     "Set the arm's environment and check it before every measurement, the warm-up, each round, the held-out point and the guards alike",
+                     "arms that are interleaved switch the environment at each switch",
+                     "never measure the fix arm in the image's environment and call it the fix",
+                     "is measured as it is, and `summary` says so"):
             self.assertIn(said, perf, "roles/perf_engineer.md does not say it")
+        # Every role that runs a fix runs it where its change takes effect, not Verify alone.
+        for path, said in (("roles/test_engineer.md", "is tested where it takes effect"),
+                           ("roles/test_engineer.md", "Both in one environment show nothing"),
+                           ("roles/pr_engineer.md", "is put into effect for that run and taken back after it, and the body gives the setup with the command"),
+                           ("roles/director.md", "gives an arm whose change takes effect outside its tree"),
+                           ("templates/validation_report.md", "the setup that puts it into effect before the arm's commands")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
         review = self.flat("roles/reviewer.md")
         for said in ("`server_code_changed` false means the run measured neither its accuracy nor its speed",
                      "A changed file that is not a test, a documentation file or a CI file is a `blocker` finding",

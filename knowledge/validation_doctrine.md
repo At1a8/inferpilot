@@ -220,18 +220,28 @@ Notes per gate:
   measured like a fix to a model file, on gsm8k and on the task's client. On the three kinds left out
   the framework's own fixes agree: of the 23 fix pull requests merged from 2026-05-26 to 2026-11-26
   that changed only tests, documentation or CI files, none measured the server's accuracy or speed.
-  A fix that moves the version of a package the server runs (aiter, PyTorch, Triton, flashinfer),
-  bumped or pinned, changes no line of the framework, and every kernel may change. The fix arm is
-  measured with that version installed and the base arm with the image's, for both gates, and the
-  image's version is put back when the round ends. Where the version cannot be installed in the
-  run's image, G2 and G5 are a blocking failure, `<package> <version> cannot be installed in this
-  image`: the fix was not measured, and a human decides.
-  A fix whose change is otherwise not in the run's container (a Dockerfile, a dependency declaration
-  that moves no version) is measured there all the same, and each gate says next to its numbers that
-  the change was not in effect: both arms then ran one environment, and the numbers show only that.
-  A fix is shown to work where its change takes effect. Its `issue_repro` or `failing_test` runs
-  with the declaration installed, in the image built from the Dockerfile, or by running the tool:
-  the same gate in the unchanged environment shows nothing.
+  A change outside the framework's code takes effect only once it is put into effect: a dependency
+  declaration when what it names is installed, a Dockerfile when its image is built or the steps it
+  changes are run in the container (a package it installs, an environment variable it sets, such as
+  `SGLANG_USE_AITER`), a tool when it runs. Every run of the fix is made with the change in effect,
+  and every run of the base without it: the unit test and its control at Implement, `issue_repro` or
+  `failing_test`, both arms of G2 and of G5, and the command the pull request gives. The same run in
+  the unchanged environment shows nothing. The commonest such change is a new version of a package
+  the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned: no line of the framework
+  changes, and every kernel may.
+  The arms then run one after the other, never side by side in one container: stop every server,
+  set the arm's environment, check it (the version the package reports, the variable in the server's
+  environment), launch, measure, stop. The image's environment is put back when the round ends, and
+  the report's commands carry the setup, so that whoever measures again measures the same thing.
+  Install what the change names and nothing else: never the framework again (`env_hygiene.md`, *The
+  code under test*), never a package the change does not name.
+  Only what this run's platform uses counts. A ROCm image is built from its own files (sglang:
+  `python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`): a version
+  moved only in the CUDA declaration changes nothing in this run, which measures as it is and says so
+  next to its numbers.
+  Where the change cannot be put into effect on this machine, the gate is a blocking failure that
+  says so, `<package> <version> cannot be installed in this image`: the fix was not measured, and a
+  human decides.
 
 ## Failure taxonomy — classify before counting
 
