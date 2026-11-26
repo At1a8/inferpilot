@@ -1173,10 +1173,10 @@ function nextSteps(status, at) {
     out.ask = R.questions;
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
+    out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
     // The task's model is not the problem's: what the task measured with is cleared with it, so that the answer
     // and the Intake give the problem's own.
-    const others = R.model_mismatch ? Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])) : {};
-    out.rerun_with = { ...partial, ...others, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    if (R.model_mismatch) Object.assign(out.rerun_with, Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])));
   }
   // The other problems of a report with several: each is offered as a run of its own, on this run's definition
   // and with the operator's settings this run was given (where runs are kept, the budgets, the reviewer's model):
