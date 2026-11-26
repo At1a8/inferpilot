@@ -10,7 +10,7 @@ export const WP = (id, extra) => ({ id, goal: `goal of ${id}`, kind: 'framework'
 export const DEFAULTS = {
   'intake:define': (ins) => ({ status: 'ready', task_def: ins.given || {}, provenance: {}, assumptions: [], questions: [], summary: 'as given' }),
   'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
-    accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+    server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
   'director:resume': (ins) => ({ head_ok: true, head: 'c_WP2', verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1', evidence: 'ok' }, { wp: 'WP2', commit: 'c_WP2', evidence: 'ok' }],
     known_issues: [], handoffs: [], task_definition: ins.task_def || {}, design_auto_approved: false,
     repro_cmd: ins.mode === 'issue' ? 'bash repro.sh' : '', failing_test_cmd: ins.mode === 'ci' ? 'pytest test_x.py' : '',
@@ -85,6 +85,8 @@ export function parseInputs(prompt) {
 
 // What a task of each mode needs besides its definition, so that the intake has nothing to ask.
 export const MODE_DEFAULTS = {
+  issue: { model_path: '/models/m' },
+  ci: { model_path: '/models/m' },
   feature: { model_path: '/models/m', server_script: '/s/server.sh' },
   perf: { model_path: '/models/m', workload: '{"isl":8192,"osl":1024,"conc":64}', server_script: '/s/server.sh', client_script: '/s/client.sh' },
 };

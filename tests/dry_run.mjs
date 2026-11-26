@@ -358,6 +358,9 @@ const scenarios = [
       'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'G2' }], needs_min: 500 }),
     });
     check(failing.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'a blocking failure is no reason to ask for time');
+    const big = await run({ mode: 'feature', task: 't' }, { 'verify_engineer:verify': () => ({ all_pass: false, failures: [], needs_min: 800 }) });
+    check(big.keys.filter((k) => k === 'verify_engineer:verify').length === 1 && big.result.phases.some((p) => p.phase === 'Verify'
+      && /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)), 'a round gets at most twice its limit');
   }],
   ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt with a limit of its own, told to check what the first left', async () => {
     // The first answer of each, 300 ms late, is one InferPilot cannot use.
@@ -708,7 +711,7 @@ const scenarios = [
       `Verify and Performance get the goal the run had, with the data sets it names: ${v && v.ins.goal}`);
     check(goal.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
       && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it')), 'and the run says so');
-    const other = await resumed('issue', () => ({ task_definition: { mode: 'issue', task: 'sglang#1: wrong logprobs' } }), { task: 'sglang#2: a crash' });
+    const other = await resumed('issue', saved({ task: 'sglang#1: wrong logprobs' }), { task: 'sglang#2: a crash' });
     const reply = other.calls.find((c) => c.key === 'issue_triager:reply');
     check(other.calls.find((c) => c.key === 'verify_engineer:verify').ins.task === 'sglang#1: wrong logprobs'
       && reply && reply.ins.task === 'sglang#1: wrong logprobs', `the issue stays the one the run directory is about: ${reply && reply.ins.task}`);
@@ -906,7 +909,7 @@ const scenarios = [
     });
     check(scan.result.status === 'busy' && eqList(scan.keys, ['scout:collect']), `scan: ${scan.result.status}`);
     const setup = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'director:setup');
-    check(String(setup.ins.lock_idle_hours) === '12', `idle hours for the lock: ${setup.ins.lock_idle_hours}`);
+    check(String(setup.ins.lock_idle_hours) === '24', `idle hours for the lock, twice the longest call with its most time: ${setup.ins.lock_idle_hours}`);
   }],
   ['image: a task on an image other than the newest daily one stops at Setup to ask; image_ok=true goes on', async () => {
     const older = (ins) => (ins.image_ok ? undefined : {
@@ -1138,13 +1141,74 @@ const scenarios = [
     check(r.keys.includes('director:report'), 'blocked runs still get a report');
   }],
   ['setup: a skipped baseline is enough only where none is required', async () => {
-    const skip = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0' }) };
+    const skip = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0',
+      server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }) };
     const feature = await run({ mode: 'feature', task: 't' }, skip);
     check(feature.result.status === 'blocked' && feature.result.stopped_at === 'Setup', `feature with skip: ${feature.result.status}`);
     const issue = await run({ mode: 'issue', task: 'i' }, skip);
     check(issue.result.status === 'ready_for_review', `issue with skip: ${issue.result.status}`);
     const prose = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ run_dir: RUN, baseline: 'PASS - 3/3' }) });
     check(prose.result.status === 'blocked' && prose.result.stopped_at === 'Setup', 'a baseline in prose without baseline_status is rejected');
+  }],
+  ['issue and ci: a task that can reach a fix names the model G2 measures it on; one that stops before the fix needs none', async () => {
+    check(asks(await run({ mode: 'issue', task: 'i', model_path: '' }), 'model_path'), 'an issue without a model asked');
+    check(asks(await run({ mode: 'ci', task: 'c', model_path: '' }), 'model_path'), 'a ci task without a model asked');
+    check(asks(await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Implement' }), 'model_path'),
+      'a run that stops after Implement has a fix: asked');
+    for (const [mode, stop] of [['issue', 'Triage'], ['issue', 'Reproduce'], ['issue', 'Diagnose'], ['ci', 'Classify'], ['ci', 'Bisect']]) {
+      const r = await run({ mode, task: 't', model_path: '', stop_after: stop });
+      check(r.result.status === 'stopped' && r.result.stopped_at === stop && !r.keys.includes('intake:define'),
+        `${mode} stopping after ${stop} has no fix to measure and starts without a model: ${r.result.status} at ${r.result.stopped_at}`);
+    }
+    const bare = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip', baseline: 'not needed yet', gpu_ids: '0' }) };
+    const noAccuracy = await run({ mode: 'ci', task: 'c' }, bare);
+    check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
+      && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)),
+      `a fix that G2 will measure needs the accuracy script from Setup on: ${noAccuracy.result.status} at ${noAccuracy.result.stopped_at}`);
+    const early = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Classify' }, bare);
+    check(early.result.status === 'stopped' && early.result.stopped_at === 'Classify', `a run with no fix needs none: ${early.result.status}`);
+    const noServer = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'skip',
+      gpu_ids: '0', accuracy_script: `${RUN}/scripts/accuracy.sh` }) });
+    check(noServer.result.status === 'blocked' && noServer.result.stopped_at === 'Setup'
+      && /no server script/.test(JSON.stringify(noServer.result.phases)),
+      `and the server script G2 serves it with: ${noServer.result.status} at ${noServer.result.stopped_at}`);
+    for (const mode of ['issue', 'ci']) {
+      const ve = (await run({ mode, task: 't' })).calls.find((c) => c.key === 'verify_engineer:verify');
+      check(ve && ve.ins.model_path === '/models/m' && ve.ins.accuracy_script === `${RUN}/scripts/accuracy.sh`
+        && ve.ins.server_script === `${RUN}/scripts/server.sh`,
+        `${mode}: the model, the server script and the accuracy script reach the verify engineer, who measures the fix`);
+    }
+  }],
+  ['issue and ci: no fix starts without a model, also when the stop before it was on a phase the route skips or the control file lifted it', async () => {
+    const existing = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+      triage_path: `${RUN}/t.md` }) };
+    const skipped = await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Diagnose' }, existing);
+    check(skipped.result.status === 'stopped' && skipped.result.stopped_at === 'Reproduce' && !skipped.keys.includes('implementer:implement'),
+      `an existing fix has no Diagnose: a stop named for it holds before the fix is applied (${skipped.result.status} at ${skipped.result.stopped_at})`);
+    const applied = await run({ mode: 'issue', task: 'i', stop_after: 'Verify' }, existing);
+    check(applied.result.status === 'stopped' && applied.result.stopped_at === 'Verify' && applied.keys.includes('implementer:implement'),
+      `with a model and a later stop, the existing fix is applied as before: ${applied.result.status} at ${applied.result.stopped_at}`);
+    const asked = (r) => (((r.result.next || {}).ask || [])[0] || {}).field === 'model_path'
+      && 'model_path' in ((((r.result.next || {}).rerun_with || {}).answers) || {});
+    let reproduced = false;
+    const issue = await run({ mode: 'issue', task: 'i', model_path: '', stop_after: 'Diagnose' }, {
+      'issue_triager:reproduce': () => {
+        reproduced = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (reproduced ? { stop_after: '' } : {}) });
+    check(issue.result.status === 'needs_input' && issue.result.stopped_at === 'Diagnose' && asked(issue)
+      && !issue.keys.includes('implementer:implement') && issue.keys.includes('director:report'),
+      `issue: a stop the control file lifts starts no fix without a model; the run asks for it and reports: ${issue.result.status} at ${issue.result.stopped_at}`);
+    let classified = false;
+    const ci = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect' }, {
+      'ci_guardian:classify': () => {
+        classified = true;
+        return { failure_class: 'code_regression', failing_test_cmd: 'pytest test_x.py', window: 'a..b', evidence: 'new regression', triage_path: `${RUN}/ci_triage.md` };
+      },
+    }, { control: () => (classified ? { stop_after: '' } : {}) });
+    check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci) && !ci.keys.includes('implementer:implement'),
+      `ci: the same, after Bisect: ${ci.result.status} at ${ci.result.stopped_at}`);
   }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
@@ -1178,6 +1242,65 @@ const scenarios = [
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('issue_repro'), 'issue_repro gate passed to verify');
     check(r.result.priority === 'P0', 'priority recorded');
+  }],
+  ['issue: a reproduction has a long call\'s limit; one whose arms would not fit says what it needs and runs again with it, once', async () => {
+    const left = { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'arm 1 of 3 clean', needs_min: 500 };
+    const r = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1 ? left : { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 3 failed' }),
+    });
+    const limits = r.calls.filter((c) => c.key === 'issue_triager:reproduce').map((c) => c.ins.time_limit_min);
+    check(eqList(limits, [360, 500]), `the long default, then the limit asked for: ${limits}`);
+    check(r.result.phases.some((p) => p.phase === 'Reproduce' && p.verdict === 'more_time'
+      && /the reproduction needs 500 min and had 360: run again with a 500-min limit/.test(p.summary)), 'the extension is in the report');
+    check(r.keys.includes('investigator:diagnose') && r.result.status === 'ready_for_review', `goes on once reproduced: ${r.result.status}`);
+    const short = await run({ mode: 'issue', task: 't' }, { 'issue_triager:reproduce': () => left });
+    check(short.keys.filter((k) => k === 'issue_triager:reproduce').length === 2 && !short.keys.includes('investigator:diagnose'),
+      'more time once only');
+    check(short.result.status === 'blocked' && short.result.stopped_at === 'Reproduce' && short.result.phases.some((p) => p.phase === 'Reproduce'
+      && /needs 500 min; its limit is 500 min \(the limit it asked for\)/.test(p.summary)), `still short is not "not reproduced": ${short.result.status}`);
+    const done = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 1 failed', needs_min: 500 }),
+    });
+    check(done.keys.filter((k) => k === 'issue_triager:reproduce').length === 1, 'a reproduction that showed the bug needs no more time');
+    // the reporter's arm failed before the time ran out; the call with more time ran only main's and left it out
+    const split = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1
+        ? { reproduced: false, reproduced_on_reporter: true, repro_cmd: 'bash repro.sh', evidence: 'reporter arm failed', needs_min: 500 }
+        : { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'main arm clean' }),
+    });
+    const second = split.calls.filter((c) => c.key === 'issue_triager:reproduce')[1];
+    check(second && second.ins.earlier_answer && second.ins.earlier_answer.reproduced_on_reporter === true,
+      'the call with more time gets the earlier answer');
+    check(split.result.status === 'fixed_on_main', `the earlier call's reporter arm still counts: ${split.result.status}`);
+    const repPhases = split.result.phases.filter((p) => p.phase === 'Reproduce');
+    check(repPhases.some((p) => p.verdict === 'reproduced_on_reporter' && /reporter arm failed/.test(p.summary))
+      && repPhases.some((p) => /main arm clean/.test(p.summary)), 'each call\'s evidence is an entry of its own');
+    const again = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1
+        ? { reproduced: false, reproduced_on_reporter: true, repro_cmd: 'bash repro.sh', evidence: 'reporter arm failed', needs_min: 500 }
+        : { reproduced: false, reproduced_on_reporter: false, repro_cmd: 'bash repro.sh', evidence: 'reporter and main arms clean' }),
+    });
+    check(again.result.status === 'fixed_on_main', `a reporter arm that failed once has shown it: ${again.result.status}`);
+    // the call with more time may leave out what the earlier one gave: no schema retry, the earlier's repro_cmd stands
+    const terse = await run({ mode: 'issue', task: 't' }, {
+      'issue_triager:reproduce': (ins, n) => (n === 1 ? { ...left, reproduced_on_reporter: true } : { reproduced: false }),
+    });
+    check(terse.keys.filter((k) => k === 'issue_triager:reproduce').length === 2 && terse.result.status === 'fixed_on_main',
+      `a continuation that names only its result is taken: ${terse.result.status}`);
+    // stopped for time: the arms both calls ran stay in the result, and the closing calls get the repro_cmd
+    const kept = short.result.phases.filter((p) => p.phase === 'Reproduce' && p.verdict === 'partial');
+    check(kept.length === 2 && kept.every((p) => /arm 1 of 3 clean/.test(p.summary)), `partial answers kept: ${kept.length}`);
+    const reply = short.calls.find((c) => c.key === 'issue_triager:reply');
+    check(reply && reply.ins.repro_cmd === 'bash repro.sh', `the reply knows the reproduction: ${reply && reply.ins.repro_cmd}`);
+    // asking for more than twice its limit: no extension the run lock would not cover; a human gives a timeout
+    const big = await run({ mode: 'issue', task: 't' }, { 'issue_triager:reproduce': () => ({ ...left, needs_min: 800 }) });
+    check(big.keys.filter((k) => k === 'issue_triager:reproduce').length === 1 && big.result.status === 'blocked'
+      && big.result.phases.some((p) => /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)),
+    'more time is at most twice the limit');
+    const given = await run({ mode: 'issue', task: 't', agent_timeout_ms: 7200000 }, { 'issue_triager:reproduce': () => left });
+    const rep = given.calls.filter((c) => c.key === 'issue_triager:reproduce');
+    check(rep.length === 1 && rep[0].ins.time_limit_min === 120 && given.result.status === 'blocked' && given.result.phases.some((p) =>
+      p.phase === 'Reproduce' && /needs 500 min; its limit is 120 min \(agent_timeout_ms\)/.test(p.summary)), 'a timeout the user gave stays the limit');
   }],
   ['issue: the reply draft is rewritten from how the run ended, before the report', async () => {
     const r = await run({ mode: 'issue', task: 'i' });
@@ -1908,10 +2031,9 @@ const scenarios = [
     check(asks(await run({ mode: 'issue', task: 't', client_script: '/s/client.sh', stability: 'yes' }), 'stability'),
       'a gate field that is neither true nor false is asked about, not read as off');
     check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
-    check(asks(await run({ mode: 'issue', task: 't', stability: true }), 'client_script'), 'G4 without the client it runs asked');
     const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
-    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
-    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });
+    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'G4 without the client it runs: asked once where the mode asks too');
+    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, server_script: '/s/server.sh', client_script: '/s/client.sh' });
     const g4verify = g4.calls.find((c) => c.key === 'verify_engineer:verify');
     check(g4.result.status !== 'needs_input' && g4verify && g4verify.ins.stability === true && g4verify.ins.long_context === false,
       `true and false as words or values start the run: ${g4.result.status}`);
@@ -1924,6 +2046,37 @@ const scenarios = [
     let msg = '';
     try { await run({ mode: 'issue', task: 't', inferpilot_dir: '' }); } catch (e) { msg = e.message; }
     check(msg.includes('args.inferpilot_dir is required'), `no InferPilot checkout is still an error: ${msg}`);
+  }],
+  ['arguments: with stability on the task names the server and the client G4 keeps up, and no template is offered for either', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    const offers = (r) => (r.result.questions || []).filter((q) => (q.options || []).includes('template') || /template/i.test(q.question));
+    const none = await run({ mode: 'issue', task: 't', stability: true });
+    check(asks(none, 'server_script') && asks(none, 'client_script') && fields(none).length === 2,
+      `an issue with neither is asked for both, and for nothing else: ${fields(none)}`);
+    check(offers(none).length === 0, `neither question offers a template: ${JSON.stringify(offers(none).map((q) => q.field))}`);
+    const ci = await run({ mode: 'ci', task: 'c', stability: 'true', client_script: '/s/client.sh' });
+    check(asks(ci, 'server_script') && eqList(fields(ci), ['server_script']), `a ci task is asked for the one it lacks: ${fields(ci)}`);
+    const feature = await run({ mode: 'feature', task: 't', stability: true });
+    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 0,
+      `a feature without a workload, whose server the mode asked for, is asked for its client, with no template: ${fields(feature)}`);
+    const noServer = await run({ mode: 'feature', task: 't', stability: true, server_script: '', client_script: '/s/client.sh' });
+    check(fields(noServer).filter((f) => f === 'server_script').length === 1, `the server is asked once where the mode asks too: ${fields(noServer)}`);
+    const off = await run({ mode: 'issue', task: 't', stability: false });
+    check(off.result.status !== 'needs_input', `with stability off an issue names neither: ${off.result.status}`);
+    // InferPilot's client, named by the task all the same, runs the task's workload: never lengths and a concurrency of its own.
+    const tpl = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template' });
+    check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
+    const tplFeature = await run({ mode: 'feature', task: 't', stability: true, client_script: 'Template' });
+    check(asks(tplFeature, 'workload'), 'the same for a feature');
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const load = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template',
+      workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);
+    const ve = load.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(load.result.status !== 'needs_input' && ve && ve.ins.stability === true && ve.ins.client_script === `${RUN}/scripts/perf.sh`
+      && ve.ins.server_script === '/s/server.sh',
+      `with its workload the run starts, on the task's server and the rendered client: ${load.result.status} ${ve && ve.ins.client_script}`);
+    const plain = await run({ mode: 'issue', task: 't', client_script: 'template' }, rendered);
+    check(plain.result.status !== 'needs_input', `without stability nothing more is asked of a task that names the template: ${plain.result.status}`);
   }],
   ['intake: a complete definition starts without it', async () => {
     const r = await run({ mode: 'issue', task: 'i' });

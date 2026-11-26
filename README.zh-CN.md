@@ -20,7 +20,7 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 
 括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel；issue 模式下只有被分诊为 `performance` 的 issue 才跑 Performance。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
 
-任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
+任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 以及 issue、CI 修复需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
 
 实现阶段一次只处理一个工作包；独立的测试工程师会重新运行它的单元测试，检查这个测试在没有该改动时会失败，并做关闭特性时的检查；一直通不过的工作包会被回滚。验证失败交给排查者：它先做对照实验，再考虑加插桩，最后给出修复、证明该失败在基线上本就存在，或者给出无法定论的结论并停止任务。在 PR 之前，审阅者像维护者一样阅读 diff 和证据，并以一份已知 reward hack 目录为起点——也就是让数字变好、却违背了它本来含义的改动（[`knowledge/reward_hacks.md`](knowledge/reward_hacks.md)）；要求的修改，以及为每个确认的 hack 写的测试，都会变成工作包，重新经过 Implement 和 Verify。性能数据只有在 Setup 时固定的负载上、在任务所针对的服务路径上测得才算数，任务要求时（`held_out`），收益还必须在与负载一起固定下来的 held-out 工作点上同样成立（[`knowledge/perf_evaluation.md`](knowledge/perf_evaluation.md) §3）。
 
@@ -321,7 +321,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `task` | 上游 PR / 设计、issue URL、CI job / 簇，或性能目标（`scan` 以外必填） |
 | `goal` | 什么算完成；可以测量的模式要写成可测量的；spec 和性能计划都要回应它 |
 | `framework_dir` | 每个任务在其中工作的框架 checkout，任务从当前的 main 开自己的分支（sglang 默认用镜像里的 `/sgl-workspace/sglang`，镜像就是从这里安装 sglang 的） |
-| `model_path` | 基线和各项门禁运行的模型（`feature` 和 `perf` 必填） |
+| `model_path` | 基线和各项门禁运行的模型（`feature` 和 `perf` 必填；`issue` 和 `ci` 也必填，除非 `stop_after` 让运行在修复之前停下：修复改了 server 会运行的代码时，要对照 base 测 gsm8k，即 G2） |
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
 | `workload` | 每次测量都使用的基准负载，例如 `{"isl":8192,"osl":1024,"conc":64}`；`perf` 必填，在 Setup 时固定 |
 | `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1）。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/server.sh`，按模型在 sglang cookbook 里的配方启动 |
@@ -345,18 +345,18 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
-| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任务需要有 `client_script`），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
+| `long_context`、`stability` | 默认门禁之外的正确性门禁，默认都不开启：`long_context` 运行 G3（在长 prompt 上做 needle-in-a-haystack 测试）；`stability` 运行 G4，即对同一个 server 把 `client_script` 一遍接一遍地连续运行 48 小时以上（`scripts/stability.sh`；任何模式下任务都要给出自己的 `server_script` 和 `client_script`，缺哪个就问哪个：G4 不会自行改用模板），一次运行里只跑一次：之后代码再有改动不会重跑，报告会写明它跑在哪个 commit 上。带它的一轮 Verify 会申请约 6 天的时间上限，只有 G4 失败、基线要跑同样的测试作对照时才会用满 |
 | `review_model` | reviewer 使用的模型，随它的 agent 调用一起传入（InferPilot 的 runner 把它作为命令行工具的 `--model` 传入；在 Claude Code 里取决于它的 Workflow 工具） |
 | `max_fix_rounds`、`max_investigate_rounds`、`max_review_rounds`、`max_work_packages` | 预算 |
-| `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer 和 investigator 为 6 小时；Verify 一轮需要更长时间时，会说明需要多久并获得一次延长，除非给了 `agent_timeout_ms` |
+| `agent_retries`、`agent_timeout_ms` | agent 调用出错时会重试（重试前先检查失败的那次留下了什么），超时则不重试：超时的 agent 可能还在运行，会被记入报告里的待人工处理清单，它所在的工作包也不再开新一轮、不做 rollback。默认超时 3 小时，verify engineer、performance engineer、investigator 和 issue 的复现为 6 小时；Verify 一轮或一次复现需要更长时间时，会说明需要多久并获得一次延长，最多到上限的 2 倍，除非给了 `agent_timeout_ms` |
 
 除 `inferpilot_dir`、`request`、`answers`、`exp_root`、`review_model` 和各项预算外，其余参数都属于任务定义；每次已启动的运行，其结果都会记录所用的任务定义（`task_def`）、每个字段的来源（`provenance`）以及 intake 的假设（`assumptions`）。
 
-人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
+人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型时，会先问要用哪个模型；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
 每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 
-**一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用的时间里（默认 12 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
+**一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用（按它能拿到的最长加时算）的时间里（默认 24 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
 
 ```bash
 python3 scripts/run_lock.py status            # 谁占着这台机器

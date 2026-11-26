@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), or "verify" with args.run_dir (every mode but scan: Verify and what follows again, on the commit Implement verified, in a run whose Verify ended without a result), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: G2 measures on gsm8k a fix that changes code the server runs; with stop_after at a phase before the fix it needs none), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), or "verify" with args.run_dir (every mode but scan: Verify and what follows again, on the commit Implement verified, in a run whose Verify ended without a result), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -72,12 +72,14 @@ const int = (v, d) => {
 const AGENT_RETRIES = Math.max(1, int(RAW.agent_retries, 3));
 const TIMEOUT_GIVEN = RAW.agent_timeout_ms != null && String(RAW.agent_timeout_ms).trim() !== '';
 const AGENT_TIMEOUT_MS = int(RAW.agent_timeout_ms, 3 * 3600 * 1000);
-// Roles that run whole suites or benchmarks get twice the default, unless a timeout is given.
+// Roles that run whole suites or benchmarks, and the issue reproduction (soaks, one arm per commit or
+// configuration), get twice the default, unless a timeout is given.
 const LONG_ROLES = new Set(['verify_engineer', 'perf_engineer', 'investigator']);
-// A longer limit InferPilot gave a role that showed it needs one (verifyLoop); never past a given timeout.
+const LONG_CALLS = new Set(['issue_triager:reproduce']);
+// A longer limit InferPilot gave a call that showed it needs one (callWithTime); never past a given timeout.
 const GRANTED_MS = {};
-const timeoutFor = (role) => GRANTED_MS[role]
-  || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role]
+  || (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`)) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
@@ -87,9 +89,11 @@ const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100
 // answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
 // told to check first what the one before left.
 const ONE_SESSION = { schemaRetries: 0 };
+// More time for a call (callWithTime) is at most this many times its limit.
+const MAX_GRANT = 2;
 // One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
-// its longest agent call has died, and its lock may be taken over.
-const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
+// its longest agent call, one given the most time it can get, has died, and its lock may be taken over.
+const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : MAX_GRANT * 2 * AGENT_TIMEOUT_MS;
 const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;
 const ATTENTION = []; // state a human must clean up before anything else runs there (R.attention)
 const TIMED_OUT = { timedOut: true };
@@ -190,6 +194,12 @@ const STOP_PHASES = {
   perf: ['Setup', 'Profile', 'Plan', 'Implement', 'Kernel', 'Verify', 'Performance', 'Review'],
   scan: ['Collect'],
 };
+// The phases of an issue or a ci task that come before its fix: a run that stops after one of them changes no
+// code, and has no fix for G2 to measure.
+const BEFORE_A_FIX = {
+  issue: ['setup', 'triage', 'reproduce', 'diagnose'],
+  ci: ['setup', 'classify', 'bisect'],
+};
 
 // The answer that takes InferPilot's template (templates/harness/) for a script the user does not have.
 const TEMPLATE = 'template';
@@ -236,12 +246,26 @@ function missingFields(a) {
         `${field} takes true or false, and ${JSON.stringify(a[field])} is neither: the run would leave the gate out`, ['true', 'false']);
     }
   }
-  // G4 keeps the task's performance test up for more than 48 hours: it needs the client that runs it,
-  // also where the mode alone asks for none (asked above for perf, and for a feature with a workload).
-  if (mode !== 'scan' && mode !== 'perf' && !(mode === 'feature' && a.workload) && asked(a.stability) === 'true' && !a.client_script) {
+  // G4 keeps the task's performance test up for more than 48 hours, and the user asked for it: the task names the
+  // server that test runs against and the client that runs it, also where the mode alone asks for neither (the
+  // server is asked above for a feature and a perf task, the client for a perf task and a feature with a workload).
+  // No template is offered on G4's account.
+  const g4 = mode !== 'scan' && asked(a.stability) === 'true';
+  if (g4 && (mode === 'issue' || mode === 'ci') && !a.server_script) {
+    ask('server_script', 'Which script starts the server that G4 keeps up for more than 48 hours (absolute path)? It must pass '
+      + '--port $PORT and $EXTRA_ARGS to the server.',
+      'stability is on: G4 runs its client back to back against one server, which this script starts');
+  }
+  if (g4 && mode !== 'perf' && !(mode === 'feature' && a.workload) && !a.client_script) {
     ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
-      + `writes its logs to OUT_DIR. Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload.`,
-      'stability is on: G4 runs this client back to back against one server', [TEMPLATE]);
+      + 'writes its logs to OUT_DIR.',
+      'stability is on: G4 runs this client back to back against one server');
+  }
+  // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
+  // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
+  if (g4 && mode !== 'perf' && isTemplate(a.client_script) && !a.workload) {
+    ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
+      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task names none`);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {
@@ -271,6 +295,13 @@ function missingFields(a) {
   if (stop && !STOP_PHASES[mode].some((p) => p.toLowerCase() === stop)) {
     ask('stop_after', `After which phase of mode=${mode} should the run stop?`,
       `"${a.stop_after}" is not a phase of this mode; the run would ignore it and go on to the end`, STOP_PHASES[mode]);
+  }
+  // A fix that changes code the server runs is measured on gsm8k against the base (G2), as a feature is: an
+  // issue or a ci task that can reach a fix names the model. One that stops before it (stop_after) needs none.
+  if (BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop) && !a.model_path) {
+    ask('model_path', `Which model should G2 measure the fix on (local path)? ${mode === 'issue' ? "The reporter's model" : 'The model the failing test serves'}, `
+      + 'when it is on this machine.',
+      'a fix that changes code the server runs is measured on gsm8k against the base; with stop_after set to a phase before the fix, no model is needed');
   }
   return qs;
 }
@@ -537,7 +568,7 @@ const withLeads = (schema) => (schema && schema.type === 'object'
 
 async function call(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
-  const ms = timeoutFor(role);
+  const ms = timeoutFor(role, sub);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
     // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
@@ -566,6 +597,29 @@ async function call(role, sub, ins, schema, label, opts) {
     }
   }
   return null;
+}
+
+// A call that stopped before work that would not fit runs again, once, with the limit it asked for, up
+// to MAX_GRANT times its own (needs: its needs_min, 0 when it ended for any other reason); nobody is
+// asked to choose a time. A timeout the user gave stays the limit. ins(limit, earlier) builds the
+// inputs, earlier the answer of the call before more time; schemaAgain, when given, checks that call's
+// answer. Returns the answer, the earlier one, and with needs set, what it still needs.
+async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAgain, ins, needs: needsOf, opts }) {
+  let earlier = null;
+  for (let again = false; ; again = true) {
+    const limit = minutes(timeoutFor(role, sub));
+    const r = await call(role, sub, ins(limit, earlier), again && schemaAgain ? schemaAgain : schema,
+      `${label}${again ? '+time' : ''}`, opts);
+    const needs = limit && r ? Math.ceil(Number(needsOf(r)) || 0) : 0;
+    if (!needs) return { r, earlier };
+    if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
+    // past it, the run lock's idle window (MAX_CALL_MS) no longer covers the call: a human gives a timeout
+    if (needs > MAX_GRANT * limit) return { r, earlier, needs, limit, short: `more than ${MAX_GRANT} times its limit` };
+    const grant = Math.max(needs, limit);
+    GRANTED_MS[grantKey] = grant * 60000;
+    note(PHASE, 'more_time', `${what} needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
+    earlier = r;
+  }
 }
 
 // Schemas of the phases after Intake (the helpers are defined above).
@@ -628,8 +682,11 @@ const TRIAGE = S({
 }, ['priority', 'category', 'action', 'triage_path']);
 // reproduced: on current main, the code a fix would change; reproduced_on_reporter: on the reporter's
 // image or commit, left out when that could not run here.
-const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str },
-  ['reproduced', 'repro_cmd', 'evidence']);
+const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str,
+  needs_min: num, // the arms left would not fit: the limit the call that runs them needs, from its start
+}, ['reproduced', 'repro_cmd', 'evidence']);
+// The call with more time: what it leaves out is the earlier call's.
+const REPRO_MORE = S(REPRO.properties, ['reproduced']);
 const REPLY = S({ reply_draft_path: str, summary: str }, ['reply_draft_path']);
 // The reviewer's check of the reply draft: each claim the run does not bear out, what the run shows
 // instead and where; none when the draft says only what the run showed.
@@ -1064,6 +1121,10 @@ function nextSteps(status, at) {
     out.ask = R.questions;
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
+  } else if (status === 'needs_input' && (R.questions || []).some((q) => q.field === 'model_path')) {
+    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give the model, and run the task again: it starts over.${report}`;
+    out.ask = R.questions;
+    out.rerun_with = { answers: { model_path: null } };
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1139,6 +1200,17 @@ function askWorkload(spec) {
   return finish('needs_input', 'Spec');
 }
 
+// G2 measures on gsm8k a fix that changes code the server runs, so a fix needs a model. An issue or a ci run can
+// get this far without one: it named a stop before the fix that its route skipped (an existing fix PR has no
+// Diagnose) or that the control file lifted. It stops here and asks, before any code changes.
+function askModel(at) {
+  const why = 'the run reached a fix without a model, and G2 measures on gsm8k a fix that changes code the server runs';
+  note(at, 'needs_input', why);
+  R.questions = [{ field: 'model_path', question: `Which model should G2 measure the fix on (local path)? ${MODE === 'issue'
+    ? "The reporter's model" : 'The model the failing test serves'}, when it is on this machine.`, why }];
+  return finish('needs_input', at);
+}
+
 // true, false, 'busy' when the machine is not free (another InferPilot task holds it, or, but for a scan,
 // another job holds one of its GPUs), or {ask} when the image check stopped
 // the run (nothing was created in either case).
@@ -1172,9 +1244,18 @@ async function setup(requireBaseline) {
     note('Setup', 'fail', `${unrendered.join(' and ')}: the user took InferPilot's template, and Setup rendered none`);
     return false;
   }
-  // G2 runs the same accuracy script for every arm, from the baseline on.
-  if ((MODE === 'feature' || MODE === 'perf') && !C.accuracy_script) {
+  // G2 runs the same accuracy script for every arm: from the baseline on for a feature or a perf task, in
+  // Verify for the fix of an issue or a ci task, which has a model whenever it can reach one.
+  const fix = (MODE === 'issue' || MODE === 'ci') && !!C.model_path;
+  if ((MODE === 'feature' || MODE === 'perf' || fix) && !C.accuracy_script) {
     note('Setup', 'fail', "no accuracy script: Setup returned neither the task's nor InferPilot's accuracy.sh");
+    return false;
+  }
+  // G2 serves the fix and its baseline with the run's server script: the launch script Setup wrote from the
+  // reporter's or the job's own command, or InferPilot's template where they start no server.
+  if (fix && !C.server_script) {
+    note('Setup', 'fail', 'no server script: Setup returned neither a launch script written from the report or the job, nor '
+      + "InferPilot's server template, and G2 has nothing to serve the fix with");
     return false;
   }
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
@@ -1291,24 +1372,17 @@ async function verifyLoop(extraGates) {
     } else if (!gpus) {
       log(`  [inferpilot] the pinned GPUs were not checked before Verify round ${round}: the check returned nothing`);
     }
-    // A round that stopped before a suite that would not fit runs again, once, with the limit it asked for;
-    // nobody is asked to choose a time. A timeout the user gave stays the limit.
-    let v = null;
-    for (let again = false; ; again = true) {
-      const limit = minutes(timeoutFor('verify_engineer'));
-      v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
-        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`, ONE_SESSION);
-      const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
-        ? Math.ceil(Number(v.needs_min) || 0) : 0;
-      if (!needs) break;
-      if (again || TIMEOUT_GIVEN) {
-        note('Verify', 'fail', `the round needs ${needs} min; its limit is ${limit} min (${again ? 'the limit it asked for' : 'agent_timeout_ms'})`);
-        return { ok: false, reason: `out of time: the round needs ${needs} min` };
-      }
-      const grant = Math.max(needs, limit);
-      GRANTED_MS.verify_engineer = grant * 60000;
-      note('Verify', 'more_time', `the round needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
+    // A round with more time runs whole again: its suites are judged together.
+    const t = await callWithTime({
+      role: 'verify_engineer', sub: 'verify', grantKey: 'verify_engineer', what: 'the round', label: `verify_engineer#${round}`,
+      schema: VERIFY, opts: ONE_SESSION, ins: (limit) => inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
+      needs: (r) => (r.all_pass !== true && !(r.failures || []).some((f) => f.blocking !== false) ? r.needs_min : 0),
+    });
+    if (t.needs) {
+      note('Verify', 'fail', `the round needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+      return { ok: false, reason: `out of time: the round needs ${t.needs} min` };
     }
+    const v = t.r;
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
       leftRunning.push(`Verify round ${round} may have left its servers running`);
@@ -1769,11 +1843,36 @@ async function runIssue() {
   // also for an existing fix PR.
   enter('Reproduce');
   const expectFixed = tri.action === 'close_fixed';
-  const rep = await call('issue_triager', 'reproduce', inputs({ expect_fixed: expectFixed }), REPRO);
-  if (!rep) {
-    note('Reproduce', 'fail', 'no reproduction result');
+  // A soak or an arm that would not fit returns early with needs_min; the call with more time gets that
+  // answer and goes on from the ledger. Once it has reproduced, nothing is left to need time for.
+  const t = await callWithTime({
+    role: 'issue_triager', sub: 'reproduce', grantKey: 'issue_triager:reproduce', what: 'the reproduction',
+    label: 'issue_triager:reproduce', schema: REPRO, schemaAgain: REPRO_MORE,
+    ins: (limit, earlier) => inputs({ expect_fixed: expectFixed, time_limit_min: limit, ...(earlier ? { earlier_answer: earlier } : {}) }),
+    needs: (r) => (r.reproduced === true ? 0 : r.needs_min),
+  });
+  // Each answer is a phase entry of its own (a summary keeps 600 characters), so the arms a call ran stay
+  // in the result whatever the next one returns, also when the run stops here.
+  const arms = (a) => note('Reproduce', a.reproduced_on_reporter === true ? 'reproduced_on_reporter' : 'partial', a.evidence);
+  if (t.needs || !t.r) {
+    const partial = [t.earlier, t.r].filter(Boolean);
+    C.repro_cmd = partial.map((a) => String(a.repro_cmd || '').trim()).reverse().find(Boolean) || '';
+    for (const a of partial) arms(a);
+    note('Reproduce', 'fail', t.needs ? `the reproduction needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`
+      : t.earlier ? 'no reproduction result from the call with more time' : 'no reproduction result');
     return finish('blocked', 'Reproduce');
   }
+  if (t.earlier) arms(t.earlier);
+  // The answer is for the whole reproduction: what the call with more time leaves out (the reporter's arm
+  // it did not run again) is the earlier call's. An intermittent bug the reporter's code showed once has
+  // shown, even if a later arm there passed.
+  const onReporter = t.earlier ? [t.earlier.reproduced_on_reporter, t.r.reproduced_on_reporter] : [];
+  const rep = t.earlier ? {
+    ...t.r,
+    reproduced_on_reporter: onReporter.includes(true) ? true : onReporter.find((v) => typeof v === 'boolean'),
+    repro_cmd: String(t.r.repro_cmd || '').trim() || t.earlier.repro_cmd,
+    perf_claim: String(t.r.perf_claim || '').trim() || t.earlier.perf_claim,
+  } : t.r;
   const reproCmd = String(rep.repro_cmd || '').trim();
   if (rep.reproduced && !reproCmd) {
     note('Reproduce', 'fail', 'reproduced without a repro_cmd; the issue_repro gate needs one');
@@ -1812,6 +1911,12 @@ async function runIssue() {
 
   const gates = [{ gate: 'issue_repro', cmd: reproCmd, expect: 'fixed' }];
   if (tri.action === 'push_existing_pr') {
+    // An existing fix has no Diagnose phase: a stop named for it still ends the run before the fix is applied.
+    if (stopHere('Diagnose')) {
+      note('Reproduce', 'stopped', 'stop_after=Diagnose: an existing fix PR is applied without a Diagnose phase, so the run stops before applying it');
+      return finish('stopped', 'Reproduce');
+    }
+    if (!C.model_path) return askModel('Reproduce');
     const prs = (tri.existing_prs || []).join(', ');
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [] };
@@ -1829,6 +1934,7 @@ async function runIssue() {
   if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
   if (stopHere('Diagnose')) return finish('stopped', 'Diagnose');
+  if (!C.model_path) return askModel('Diagnose');
 
   return deliver(dg.work_packages, gates, issueClaim, runPerf);
 }
@@ -1864,6 +1970,7 @@ async function runCi() {
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
   if (stopHere('Bisect')) return finish('stopped', 'Bisect');
+  if (!C.model_path) return askModel('Bisect');
 
   return deliver(bi.work_packages, [{ gate: 'failing_test', cmd: failingCmd, expect: 'pass on every lane it failed on' }],
     '', false);

@@ -52,6 +52,26 @@ Notes per gate:
   composition, kernel choice and speculative verification all flip near-ties, and chasing those flips
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
   below) or the subject of a determinism task, never the accuracy gate.
+- **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
+  report was about, when it changes code the server runs: gsm8k (1319) on the fix and on the base, each
+  once, with the run's launch script and model, the fix at most 1 point below the base. Every task that
+  ends in a pull request brings its accuracy with it: the framework's PR template asks it of a change
+  to outputs, and a fix on the serving path can be one without meaning to. A fix to tests,
+  documentation or CI files alone changes nothing the server runs and has no G2: `not run: no code the
+  server runs changed`. Nor has the fix for a model that answers no text questions (a diffusion,
+  speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
+  questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
+  reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
+  exception to *gsm8k first*: a fix that does not fix has no accuracy worth measuring. Where the base
+  cannot serve the configuration because that is the failure being fixed (a crash, a server that does
+  not start), it is never launched for G2, and the baseline is the last commit that served the
+  configuration, measured the same way: the culprit's parent for a CI fix (`ci_triage.md` §3), the
+  commit or release the report says worked for an issue. The gate and the pull request name that
+  commit, and whoever measures again before the push measures against it. Where the run knows no such
+  commit there is nothing to judge the fix's score against: it is reported, in the gate and in the
+  pull request, and both say that it has no baseline. An issue that reports an accuracy loss is
+  judged by its reproduction (`issue_repro`: the reported score comes back); G2 runs all the same, and
+  its base arm shows the loss.
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose
@@ -76,9 +96,13 @@ Notes per gate:
   `scripts/stability.sh` runs it and writes one line per pass, with the client's result and the memory
   in use. It is one run, not repeated and not taken to other concurrencies, after everything else in
   its round. `perf.sh` keeps its concurrency full within a pass; the server is idle only while one pass
-  ends and the next starts, and the lines show how much of the run was under load. The workload is the
-  task's to bring: long prompts at high concurrency, on which the feature engages. Where it does not
-  engage, the report says that G4 showed the server's stability, not the feature path's.
+  ends and the next starts, and the lines show how much of the run was under load. The server, the
+  client and the workload are the task's to bring: the user asked for G4, so a task with `stability` on
+  that lacks its `server_script` or its `client_script` is asked for it, in any mode, and no template is
+  taken for it. InferPilot's client is G4's load only where the task names it and gives the workload
+  it runs, never on lengths and a concurrency of its own. The load that shows most is long prompts at
+  high concurrency, on which the feature engages. Where it does not engage, the report says that G4
+  showed the server's stability, not the feature path's.
 - **G4 passes on what its run shows.** The server neither crashes, hangs nor runs out of memory, no
   request fails, and nothing drifts: not the client's throughput, nor the memory in use on the run's
   GPUs or on the host. Each hour of the run has one value of throughput and one of memory: the median of
