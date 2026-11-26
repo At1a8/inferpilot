@@ -89,9 +89,11 @@ const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100
 // answer of theirs that cannot be used goes to call()'s next attempt, which has a limit of its own and is
 // told to check first what the one before left.
 const ONE_SESSION = { schemaRetries: 0 };
+// More time for a call (callWithTime) is at most this many times its limit.
+const MAX_GRANT = 2;
 // One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
-// its longest agent call has died, and its lock may be taken over.
-const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : 2 * AGENT_TIMEOUT_MS;
+// its longest agent call, one given the most time it can get, has died, and its lock may be taken over.
+const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : MAX_GRANT * 2 * AGENT_TIMEOUT_MS;
 const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;
 const ATTENTION = []; // state a human must clean up before anything else runs there (R.attention)
 const TIMED_OUT = { timedOut: true };
@@ -561,18 +563,22 @@ async function call(role, sub, ins, schema, label, opts) {
   return null;
 }
 
-// A call that stopped before work that would not fit runs again, once, with the limit it asked for
-// (needs: its needs_min, 0 when it ended for any other reason); nobody is asked to choose a time. A
-// timeout the user gave stays the limit. ins(limit, earlier) builds the inputs, earlier the answer of
-// the call before more time. Returns the answer, the earlier one, and with needs set, what it still needs.
-async function callWithTime({ role, sub, grantKey, what, label, schema, ins, needs: needsOf, opts }) {
+// A call that stopped before work that would not fit runs again, once, with the limit it asked for, up
+// to MAX_GRANT times its own (needs: its needs_min, 0 when it ended for any other reason); nobody is
+// asked to choose a time. A timeout the user gave stays the limit. ins(limit, earlier) builds the
+// inputs, earlier the answer of the call before more time; schemaAgain, when given, checks that call's
+// answer. Returns the answer, the earlier one, and with needs set, what it still needs.
+async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAgain, ins, needs: needsOf, opts }) {
   let earlier = null;
   for (let again = false; ; again = true) {
     const limit = minutes(timeoutFor(role, sub));
-    const r = await call(role, sub, ins(limit, earlier), schema, `${label}${again ? '+time' : ''}`, opts);
+    const r = await call(role, sub, ins(limit, earlier), again && schemaAgain ? schemaAgain : schema,
+      `${label}${again ? '+time' : ''}`, opts);
     const needs = limit && r ? Math.ceil(Number(needsOf(r)) || 0) : 0;
     if (!needs) return { r, earlier };
     if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
+    // past it, the run lock's idle window (MAX_CALL_MS) no longer covers the call: a human gives a timeout
+    if (needs > MAX_GRANT * limit) return { r, earlier, needs, limit, short: `more than ${MAX_GRANT} times its limit` };
     const grant = Math.max(needs, limit);
     GRANTED_MS[grantKey] = grant * 60000;
     note(PHASE, 'more_time', `${what} needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
@@ -643,6 +649,8 @@ const TRIAGE = S({
 const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str,
   needs_min: num, // the arms left would not fit: the limit the call that runs them needs, from its start
 }, ['reproduced', 'repro_cmd', 'evidence']);
+// The call with more time: what it leaves out is the earlier call's.
+const REPRO_MORE = S(REPRO.properties, ['reproduced']);
 const REPLY = S({ reply_draft_path: str, summary: str }, ['reply_draft_path']);
 // The reviewer's check of the reply draft: each claim the run does not bear out, what the run shows
 // instead and where; none when the draft says only what the run showed.
@@ -1631,29 +1639,32 @@ async function runIssue() {
   // answer and goes on from the ledger. Once it has reproduced, nothing is left to need time for.
   const t = await callWithTime({
     role: 'issue_triager', sub: 'reproduce', grantKey: 'issue_triager:reproduce', what: 'the reproduction',
-    label: 'issue_triager:reproduce', schema: REPRO,
+    label: 'issue_triager:reproduce', schema: REPRO, schemaAgain: REPRO_MORE,
     ins: (limit, earlier) => inputs({ expect_fixed: expectFixed, time_limit_min: limit, ...(earlier ? { earlier_answer: earlier } : {}) }),
     needs: (r) => (r.reproduced === true ? 0 : r.needs_min),
   });
-  if (t.needs) {
-    note('Reproduce', 'fail', `the reproduction needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+  // Each answer is a phase entry of its own (a summary keeps 600 characters), so the arms a call ran stay
+  // in the result whatever the next one returns, also when the run stops here.
+  const arms = (a) => note('Reproduce', a.reproduced_on_reporter === true ? 'reproduced_on_reporter' : 'partial', a.evidence);
+  if (t.needs || !t.r) {
+    const partial = [t.earlier, t.r].filter(Boolean);
+    C.repro_cmd = partial.map((a) => String(a.repro_cmd || '').trim()).reverse().find(Boolean) || '';
+    for (const a of partial) arms(a);
+    note('Reproduce', 'fail', t.needs ? `the reproduction needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`
+      : t.earlier ? 'no reproduction result from the call with more time' : 'no reproduction result');
     return finish('blocked', 'Reproduce');
   }
+  if (t.earlier) arms(t.earlier);
   // The answer is for the whole reproduction: what the call with more time leaves out (the reporter's arm
-  // it did not run again) is the earlier call's, and the evidence keeps both. An intermittent bug the
-  // reporter's code showed once has shown, even if a later arm there passed.
-  const onReporter = t.earlier ? [t.earlier.reproduced_on_reporter, t.r && t.r.reproduced_on_reporter] : [];
-  const rep = t.r && t.earlier ? {
+  // it did not run again) is the earlier call's. An intermittent bug the reporter's code showed once has
+  // shown, even if a later arm there passed.
+  const onReporter = t.earlier ? [t.earlier.reproduced_on_reporter, t.r.reproduced_on_reporter] : [];
+  const rep = t.earlier ? {
     ...t.r,
     reproduced_on_reporter: onReporter.includes(true) ? true : onReporter.find((v) => typeof v === 'boolean'),
     repro_cmd: String(t.r.repro_cmd || '').trim() || t.earlier.repro_cmd,
     perf_claim: String(t.r.perf_claim || '').trim() || t.earlier.perf_claim,
-    evidence: [t.earlier.evidence, t.r.evidence].filter(Boolean).join('; then, with more time: '),
   } : t.r;
-  if (!rep) {
-    note('Reproduce', 'fail', 'no reproduction result');
-    return finish('blocked', 'Reproduce');
-  }
   const reproCmd = String(rep.repro_cmd || '').trim();
   if (rep.reproduced && !reproCmd) {
     note('Reproduce', 'fail', 'reproduced without a repro_cmd; the issue_repro gate needs one');
