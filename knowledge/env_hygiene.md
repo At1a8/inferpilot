@@ -73,19 +73,72 @@ belongs to a host user, and the rules below are about those.
 
 ## Servers
 
-- One launch script with a mode switch and a tag; one log per launch, `RUN_DIR/logs/<tag>_<time>.log`
-  with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container logs are often UTC, the host may be another
-  zone; the Z says which).
+- One launch script with a mode switch and a tag; one log per launch, made by
+  `mktemp RUN_DIR/logs/<tag>_<time>_XXXXXX.log` with `<time>` from `date -u +%Y%m%d-%H%M%SZ` (container
+  logs are often UTC, the host may be another zone; the Z says which): a launch in the same second as
+  another, a retry's among them, still gets a log of its own, and its own `<log>.pid` and `<log>.exit`.
+- A server, or any run longer than one tool call (a benchmark, a driver of several runs), starts detached
+  from the agent's shell. It runs a bash script, the script's own arguments after it (`gsm8k` for
+  `<accuracy_script> gsm8k`): the launch script, or one written for the run with a quoted heredoc
+  (`cat > <script> <<'EOF'`, which keeps the command's own quotes) when the command is not a bash script
+  or needs more than arguments (a Python suite, its environment). The wrapper writes its own PID, and the
+  script's exit status when it ends:
+  `INFERPILOT_LAUNCH="$(realpath <log>)" setsid nohup bash -c 'log=$1; shift; echo $$ > "$log.pid"; bash "$@" > "$log" 2>&1; echo $? > "$log.exit"' _ <log> <script> [<arg>...] > /dev/null 2>&1 < /dev/null &`.
+  `INFERPILOT_LAUNCH`, the log's full path, goes to the wrapper and to every process the run starts,
+  and is how the stop finds them (Killing, below). The run's PID is the one in `<log>.pid`, once the
+  file has it, not `$!`: in a shell with job control `setsid` forks, and `$!` is then a parent that is
+  gone at once. The wrapper leads its own process group. The script runs in a shell of its own, so an `exit`, an `exec` or `set -e` in it ends that
+  shell and the status is still written. An agent CLI may stop the background jobs of its shell when a
+  tool call or the agent's call ends, and a server stopped that way leaves a log that ends in the middle
+  of startup with no error. Wait for it in the same call: poll its health endpoint, its log or result
+  file and whether the wrapper still runs, `grep -qs '^State:[[:space:]]*[^ZX[:space:]]' /proc/<pid>/status`,
+  each poll a short tool call, until it is up or done. Not `kill -0 <pid>`: it succeeds for a wrapper
+  that has exited and that nobody has reaped, which a container without an init keeps as a zombie. A
+  run is done when `<log>.exit` has its status, and passed only when that is 0: a later tool shell
+  cannot `wait` for it, and a run can write its results and still fail (`templates/harness/perf.sh`
+  can). A wrapper that is gone with no status in `<log>.exit`, read once it is gone, was stopped with
+  its run (its group killed, or every process of the container): the run did not pass. A server has no
+  status until it is stopped: it is waited for until it is up, and stopping it once the checks that use
+  it are done fails nothing. Before the call that started it returns, stop it with
+  `scripts/stop_launch.py` (Killing, below), until that exits 0: the next call works on these GPUs and
+  in this worktree. A role returns before that only when its answer says what still runs and where it
+  writes, for the call that takes it over and stops it (`incomplete`, `roles/test_engineer.md`).
 - Poll the health endpoint before using a server; read the effective configuration from the
   `server_args=` log line.
 - Know the process name you are looking for: `sglang serve ...` and `python -m sglang.launch_server`
   differ. Probe the health endpoint rather than trusting a `pgrep` miss.
 - Killing: `pkill -f` patterns inside `bash -lc "..."` match the shell itself; use `'[s]glang serve'`
-  style patterns. Better, record the server's identity at launch (its PID, and whether it leads its
-  own process group) and kill from that record: the PID and its descendants (`setsid` workers keep
-  VRAM otherwise), the whole group only when the launch proved the group is the server's. Never look
-  the group up at kill time: a recycled PID belongs to a stranger, and a teardown that did this once
-  TERMed a container's PID 1.
+  style patterns. Better, record the server's identity at launch (its PID, `<log>.pid` for one started
+  detached, and whether it leads its own process group) and kill from that record: the PID and its
+  descendants (`setsid` workers keep VRAM otherwise), the whole group only when the launch proved the
+  group is the server's. Never look the group up at kill time: a recycled PID belongs to a stranger,
+  and a teardown that did this once TERMed a container's PID 1. A detached launch is killed with
+  `python3 <inferpilot_dir>/scripts/stop_launch.py <log>...`, by what the launch gave its processes and
+  not by a PID read later: every process whose environment holds `INFERPILOT_LAUNCH` with one of these
+  logs, whatever became of its parent, its session or the wrapper, and what those started. It SIGTERMs
+  them, looks again for ones started meanwhile, SIGKILLs those still there after `--grace` seconds (30
+  unless given), and exits 0 once none is left; 1, naming them, when one is still there as long again
+  after SIGKILL; 2 for a log that does not exist, another path than the launch's. All the launches of
+  a call go in one command, which takes little more than twice the grace however many they are: where
+  less time is left, give a smaller `--grace`.
+- Its exit 0 says the processes it could find are gone, not that the GPUs are free: a process that
+  emptied its environment and left its parent is out of its reach. The GPUs say the rest:
+  `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`, where the servers run, before the
+  call's first launch and again once the stop exits 0. A GPU idle at the first and in use at the second
+  is held by something the call started and the stop did not reach: the call has not stopped what it
+  started, and reports that GPU, its VRAM%, GPU% and pids as it reports a launch it cannot stop. A GPU
+  in use at both is somebody's work (below) and decides nothing; neither does a check that cannot run
+  (exit 2).
+- With `container` set (InferPilot on the host), servers and runs are in that container, and so are
+  their launch, every poll and the stop: `docker exec -e INFERPILOT_RUN_TAG <container> bash -c '...'`
+  for the launch (the tag lets the runner stop it when the run is stopped), `docker exec <container> ...`
+  for a poll, and `docker exec -i <container> python3 - <log>... < <inferpilot_dir>/scripts/stop_launch.py`
+  for the stop, which needs no InferPilot checkout there. The PID in `<log>.pid` is the container's: on
+  the host `/proc/<pid>` is another process or none, and a poll or a stop run there finds nothing and
+  takes the run for gone while it holds the GPUs. `<log>` is a path in the container, made there by
+  the same `mktemp`, under RUN_DIR when the container sees RUN_DIR at that path and under its `/tmp`
+  otherwise; `<log>.exit` is read there too, and a log made outside RUN_DIR is copied to
+  `RUN_DIR/logs/` when its run is over.
 - Every server, test and benchmark runs with `HIP_VISIBLE_DEVICES=<gpu_ids>`, the set Setup pinned;
   without it, tensor-parallel ranks land on GPUs 0..N-1 whoever is using them.
 - Keep one server per GPU set; a previous server still holding the GPUs looks like an out-of-memory bug.

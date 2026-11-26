@@ -29,6 +29,7 @@ export const DEFAULTS = {
     { id: 'O1', kind: 'host_sync', where: 'aiter_backend.py', evidence: 'trace', upper_bound_pct: 4, owner: 'inferpilot' },
     { id: 'O2', kind: 'kernel', where: 'moe', evidence: 'trace', upper_bound_pct: 9, owner: 'kernel_workflow' }] }),
   'reviewer:review': () => ({ verdict: 'approve', findings: [{ severity: 'minor', where: 'x.py:1', issue: 'a name' }], review_path: `${RUN}/review.md`, summary: 'one minor' }),
+  'reviewer:reply': () => ({ findings: [], check_path: `${RUN}/reply_check.md`, summary: 'says only what the run showed' }),
   'pr_engineer:pr': () => ({ branch: 'inferpilot/task', title: '[Fix] [AMD] scope: thing', commits: ['c_WP1'], lint_pass: true, feature_off_final: true, content_unchanged: true, merges_cleanly: true, leak_scan_findings: [], launch_checked: true, pr_body_path: `${RUN}/pr_body.md`, push_command: 'git push origin inferpilot/task' }),
   'curator:learn': () => ({ updates: [{ file: 'knowledge/known_issues.md', change: 'none' }], skill_status: 'draft' }),
   'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'default config crash', existing_prs: [], triage_path: `${RUN}/issue_triage.md`, reply_draft_path: `${RUN}/reply.md` }),

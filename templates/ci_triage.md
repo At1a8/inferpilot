@@ -29,7 +29,8 @@
 
 ## Fix or handover
 
-<!-- Fix PR: commits, the failing test now passing on every lane, G0. Handover: who, what evidence. -->
+<!-- Fix PR: commits, the failing test now passing on every lane, the tests of the module the fix touches
+     (G0 when the fix is behind a feature's switch). Handover: who, what evidence. -->
 
 ## Dates
 

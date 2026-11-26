@@ -90,6 +90,10 @@ return { a, b, par, nested, n: args.n, budget: budget.remaining() };`);
     const rt = createRuntime({ backend, log: (m) => logs.push(m) });
     const r = await rt.runScript(script, { n: 7 });
     check(r.a.ok === true && calls.filter((c) => c.label === 'a').length === 2, 'the schema answer, after one retry');
+    const [asked, again] = calls.filter((c) => c.label === 'a').map((c) => c.prompt);
+    check(!asked.includes('An earlier session') && again.startsWith(asked) && again.includes('could not be used (the reply holds no JSON object)')
+      && again.includes('It may have left work behind') && again.includes('never start a second server'),
+      'the session asked again is told why, and that the one before may have left work behind');
     check(calls[0].prompt.includes('## Output contract') && calls[0].prompt.includes('"required"'), 'the schema reaches the prompt');
     check(r.b === 'text-b' && calls.find((c) => c.label === 'b').model === 'm2', 'a plain call returns text; the model reaches the backend');
     check(r.par[0] === 'text-p1' && r.par[1] === null, 'parallel: a failing thunk is null');

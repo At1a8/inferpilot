@@ -8,6 +8,12 @@ import { readFile } from 'node:fs/promises';
 import { extractJson, outputContract, validate } from './schema.mjs';
 
 const MAX_AGENTS = 1000; // a backstop for a script that loops on agent()
+// What a session asked again after an unusable answer is told: why, and that the session before it may
+// have left work behind, which it must not start or make a second time.
+const askedAgain = (e) => `\n\nAn earlier session of this same request answered, but its answer could not be used `
+  + `(${String(e && e.message ? e.message : e).slice(0, 300)}). It may have left work behind: servers or runs it `
+  + 'started, commits, files. Check first, then continue from that state or clean it up; never start a second '
+  + 'server or commit the same change twice.';
 
 class Slots {
   constructor(n) {
@@ -119,7 +125,8 @@ export function createRuntime({
     const id = state.agents;
     const label = opts.label || 'agent';
     const where = opts.phase || current;
-    const full = opts.schema ? prompt + outputContract(opts.schema) : prompt;
+    const request = opts.schema ? prompt + outputContract(opts.schema) : prompt;
+    let full = request;
     await ready;
     await slots.take();
     const started = Date.now();
@@ -184,6 +191,7 @@ export function createRuntime({
           last = e;
           state.schemaFailures++;
           log(`  !! [${where}] ${label}: unusable answer (attempt ${attempt}): ${e.message}`);
+          full = request + askedAgain(e);
         }
       }
       throw last;

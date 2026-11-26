@@ -31,7 +31,10 @@ comes back as questions rather than guesses.
    on baseline (see `validation_doctrine.md` → *Same-pattern baseline control*).
 3. **Feature off means untouched.** With the feature disabled the framework must behave exactly as
    before: every hook is gated on the feature's own switch, and unsupported configurations are rejected
-   at startup, not discovered at runtime.
+   at startup, not discovered at runtime. A change without a switch (most fixes, a performance change
+   that is always on) takes effect only in the case it is for; its feature-off check is that the
+   existing tests of the modules it touches still pass, judged against the tree without the change
+   (`validation_doctrine.md`, G0).
 4. **Evidence over belief.** A claim without an artifact (log, result file, commit) does not go into the
    report. Intermittent behaviour is described with counts over repeated runs, never with one run.
 5. **Smallest diff that satisfies the spec.** Keep the change inside the subsystems the design names;
@@ -84,7 +87,8 @@ practice. Artifacts live in the run's working directory; the templates are in `.
 - Memory budget: extra bytes per token / per request and how the pool sizing accounts for them.
 - **Artifact:** `design.md`.
 - **Gate:** every WP has a test; every invariant has an enforcement point; unsupported configs have a
-  startup rejection.
+  startup rejection; for a port whose spec gives the feature's own metric a tolerance, one WP's test
+  judges it against the source's (`validation_doctrine.md`, G1).
 
 ### 4. Implement — one work package at a time
 
@@ -98,8 +102,9 @@ practice. Artifacts live in the run's working directory; the templates are in `.
 
 ### 5. Integrate & verify
 
-- Run the suites in `validation_doctrine.md`: accuracy, long-context retrieval, stability under capacity
-  pressure, each at several concurrencies, each against baseline in the same pattern.
+- Run the suites in `validation_doctrine.md` against baseline in the same pattern: accuracy, and, when
+  the task asks for them (`long_context`, `stability`), long-context retrieval at several concurrencies
+  (G3) and the stability run of more than 48 hours (G4).
 - Any failure enters the **investigate loop** (`debugging_playbook.md`): classify, run controls, keep a
   hypothesis ledger. Fixes come back here.
 - **Artifact:** validation section of `experiment_ledger.md`.

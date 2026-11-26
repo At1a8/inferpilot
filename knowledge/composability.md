@@ -28,7 +28,7 @@ On top of G0–G5 in `validation_doctrine.md`:
 
 | Dimension in play | Gate |
 |---|---|
-| speculative decoding | acceptance length per draft depth must not drop against the same model without the other features (sglang #28520 fixed one such regression for DeepSeek-V4 MTP); output parity at temperature 0 |
+| speculative decoding | acceptance length per draft depth must not drop against the same model without the other features (sglang #28520 fixed one such regression for DeepSeek-V4 MTP); accuracy (G2) at most 1 point below the same model without them, by score and not token by token (`validation_doctrine.md`) |
 | FP8 / MXFP4 KV cache or attention | a stated accuracy bound plus long-context retrieval (needle-in-a-haystack) per dtype |
 | PD disaggregation | the decode side reads exactly what the prefill side wrote (kv canary hash checks, first-token parity) |
 | graphs + any feature | the feature path runs under capture (engagement counters stay non-zero with graphs on) |

@@ -80,7 +80,10 @@ human decision.
   for long-running crashes (e.g. a segfault after about a million served tokens) define the soak test
   and its length up front.
 - "Not reproduced" is a result: state the environment, the duration and the counts.
-- A reproduction becomes an extra verification gate for the fix (`issue_repro`).
+- A reproduction becomes an extra verification gate for the fix (`issue_repro`). Besides it, the
+  existing tests of the modules the fix touches still pass. G0 (`validation_doctrine.md`) only when the
+  fix is behind a feature's switch: most fixes have none, and on the reported configuration main fails,
+  so there is nothing to turn off and no baseline to compare with.
 - **Match the load before concluding.** A crash the reporter saw on one request can need queued load
   elsewhere: sglang #41299, reported on an MI350X VF for a single 32k prompt, on the reporter's commit
   and bare metal passed 6 sequential 32k prompts and crashed 3 of 3 times with 32 of them at concurrency
