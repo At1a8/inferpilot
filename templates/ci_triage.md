@@ -17,6 +17,7 @@
 | Class | Evidence |
 |---|---|
 | code regression / dependency bump / test bug / flaky / infrastructure | |
+| accuracy problem: yes / no | <the score the test measures: its threshold when it last passed, the last green run's score, the failing run's> |
 | performance problem: yes / no | <the number the test measures: its threshold, the last green run's value, the failing run's> |
 
 ## Culprit (code regression or dependency bump)

@@ -87,6 +87,14 @@ clock can start before your session does.
      - Where the run knows no such commit, the fix's score has no baseline: give it in `gates` with
        that said (`"G2": "0.893 (1319 q), no baseline: the base does not start on this
        configuration"`); it is reported, not judged, and *Before pushing* measures the fix alone.
+   - **An accuracy problem is measured where it showed, whatever the fix changes.** With
+     `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2
+     for an accuracy problem in CI*), run the failing test's own measurement on the fix, with its
+     set, model and settings as `failing_test_cmd` runs them, and read the score it measures, not
+     whether its assertion passes: `"G2": "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)"`.
+     A score below the claim is a blocking failure of G2 although `failing_test` passes: a threshold
+     moved in the test restores nothing. Never report G2 as `not run` then: the run does not accept
+     the round without it. gsm8k against the base runs besides, by the fix's files, as for any fix.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
      fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates

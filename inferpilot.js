@@ -772,6 +772,10 @@ const CLASSIFY = S({
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
   performance: bool,
   perf_claim: str,
+  // the same for a score the test measures (an accuracy threshold): accuracy_claim is the score the fix must
+  // restore, the set, the model and the value
+  accuracy: bool,
+  accuracy_claim: str,
   evidence: str,
   triage_path: str,
 }, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
@@ -1473,6 +1477,13 @@ async function verifyLoop(extraGates) {
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
+    // An accuracy problem is fixed when its score comes back, and only G2 measures that: a round that passes
+    // without it (the fix changed a test alone, say its threshold) has shown nothing.
+    const g2 = String((v.gates || {}).G2 || '').trim();
+    if (C.accuracy_claim && v.all_pass === true && (!g2 || /^not run\b/i.test(g2))) {
+      note('Verify', 'fail', `the failure is an accuracy problem, and the round passed without G2: nothing measured "${C.accuracy_claim}"`);
+      return { ok: false, reason: 'G2 was not run for an accuracy problem' };
+    }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
       note('Verify', 'pass', `${v.summary || 'all blocking gates pass'}${missed ? `; missed without blocking: ${missed}` : ''}`);
@@ -2022,7 +2033,17 @@ async function runCi() {
     note('Classify', 'fail', 'a performance failure classified without a perf_claim: the number the fix must restore');
     return finish('blocked', 'Classify');
   }
-  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${cl.evidence}`);
+  // A failure on a score the test measures is an accuracy problem, fixed when that score comes back: G2
+  // measures it whatever the fix changes, so that a threshold moved in the test passes for nothing
+  // (validation_doctrine.md, G2 for an accuracy problem in CI). The verify engineer reads the claim.
+  const accFailure = cl.accuracy === true;
+  const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';
+  if (!handOver && accFailure && !accClaim) {
+    note('Classify', 'fail', 'an accuracy failure classified without an accuracy_claim: the score the fix must restore');
+    return finish('blocked', 'Classify');
+  }
+  if (!handOver && accClaim) C.accuracy_claim = accClaim;
+  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${accFailure ? 'accuracy: ' : ''}${cl.evidence}`);
   if (handOver) return finish('handed_off', 'Classify');
   if (stopHere('Classify')) return finish('stopped', 'Classify');
 

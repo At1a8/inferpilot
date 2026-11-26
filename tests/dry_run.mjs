@@ -1635,6 +1635,43 @@ const scenarios = [
     const flaky = await run({ mode: 'ci', task: 'c' }, classified({ performance: true, failure_class: 'flaky', failing_test_cmd: '' }));
     check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no number asked of it: ${flaky.result.status}`);
   }],
+  ['ci: a failure on a score the test measures is an accuracy problem: G2 measures it whatever the fix changes, and a round without G2 is not accepted', async () => {
+    const claim = 'GSM8K back to 0.93 on GLM-5.3-Flash in test_gsm8k (0.94 in the last green run)';
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const verified = (out) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), ...out }) });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const unmeasured = { gates: { G2: 'not run: no code the server runs changed' }, server_code_changed: false };
+    const ok = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      ...verified({ gates: { G2: "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)" } }) });
+    const ve = ok.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ok.result.status === 'ready_for_review' && ve && ve.ins.accuracy_claim === claim,
+      `the score the fix must restore reaches the verify engineer: ${ended(ok)}, ${ve && ve.ins.accuracy_claim}`);
+    check(ok.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('accuracy: ')), 'and the run record names it an accuracy failure');
+    // A threshold moved in the test: the failing test passes, the fix changes a test alone, and G2 would not run.
+    const moved = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified(unmeasured) });
+    check(moved.result.status === 'blocked' && moved.result.stopped_at === 'Verify' && !moved.keys.includes('reviewer:review')
+      && !moved.keys.includes('investigator:investigate') && /passed without G2/.test(JSON.stringify(moved.result.phases)),
+      `a round that passes without G2 is not accepted, and nothing goes on to review: ${ended(moved)}`);
+    const silent = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }), ...verified({ gates: {} }) });
+    check(silent.result.status === 'blocked' && silent.result.stopped_at === 'Verify', `nor one that says nothing of G2: ${ended(silent)}`);
+    const plain = await run({ mode: 'ci', task: 'c' }, { ...classified({ failure_class: 'test_bug' }), ...verified(unmeasured) });
+    const pv = plain.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(plain.result.status === 'ready_for_review' && pv && !pv.ins.accuracy_claim,
+      `any other fix to a test alone goes without G2 as before: ${ended(plain)}`);
+    const noScore = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true }));
+    check(noScore.result.status === 'blocked' && noScore.result.stopped_at === 'Classify' && !noScore.keys.includes('ci_guardian:bisect')
+      && /without an accuracy_claim/.test(JSON.stringify(noScore.result.phases)),
+      `an accuracy failure without the score to restore stops before the bisect: ${ended(noScore)}`);
+    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true, failure_class: 'flaky', failing_test_cmd: '' }));
+    check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no score asked of it: ${ended(flaky)}`);
+    const both = await run({ mode: 'ci', task: 'c' }, classified({ accuracy: true, accuracy_claim: claim, performance: true,
+      perf_claim: 'output throughput back above 1100 tok/s' }));
+    const pe = both.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(both.result.status === 'ready_for_review' && pe && pe.ins.claim === 'output throughput back above 1100 tok/s'
+      && both.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('performance: accuracy: ')),
+      `a test that measures a speed and a score has both to restore: ${ended(both)}`);
+  }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
       'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: '', unit_test_cmd: 'pytest -q t.py' }),

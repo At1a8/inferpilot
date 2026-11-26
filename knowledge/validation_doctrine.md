@@ -72,6 +72,16 @@ Notes per gate:
   pull request, and both say that it has no baseline. An issue that reports an accuracy loss is
   judged by its reproduction (`issue_repro`: the reported score comes back); G2 runs all the same, and
   its base arm shows the loss.
+- **G2 for an accuracy problem in CI.** A CI failure on a score its test measures (a GSM8K threshold,
+  an MMMU score), not on an error, is an accuracy problem, as a failure on a speed number is a
+  performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the
+  claim. Classify records it (`accuracy_claim`: the set, the model and the value, from the last green
+  run or from the threshold the test had when it last passed), and G2 measures it where it showed,
+  with the failing test's own measurement, whatever the fix changes. G2 reads the score, not the
+  assertion: a score below the claim is a blocking failure although the test passes, so a threshold
+  moved in a test restores nothing. Where the threshold itself was wrong (a baseline no commit ever
+  met), that is a human's to say: the run stops with the scores of the fix, of the base and of the
+  last green run.
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose

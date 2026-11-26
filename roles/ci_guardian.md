@@ -23,6 +23,12 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
      default case, 1180 in the last green run"). G5 measures it whatever the fix changes
      (`validation_doctrine.md`, *G5 for a fix*). Without one the task stops here: a fix cannot be
      judged against it.
+   - `accuracy`: true when the test fails on a score it measures (an accuracy threshold), not on an
+     error, whatever its class. Then `accuracy_claim` is the score the fix must restore — set, model
+     and value, from the last green run's log or from the threshold the test had when it last passed
+     (e.g. "GSM8K back to 0.93 on GLM-5.3-Flash in `test_gsm8k`, 0.94 in the last green run"). G2
+     measures it whatever the fix changes (`validation_doctrine.md`, *G2 for an accuracy problem in
+     CI*). Without one the task stops here.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
 4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
@@ -35,6 +41,7 @@ Return:
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
+ "accuracy": false, "accuracy_claim": "<accuracy failures only>",
  "triage_path": "/abs/RUN_DIR/ci_triage.md"}
 ```
 
