@@ -45,7 +45,11 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
 5. **Evidence.** Every number in the ledger points at an artifact; the gates ran against the
    same-pattern baseline; a performance claim was measured on the fixed workload with the same flags on
    both arms and enough runs, and, with `held_out` on, held at the held-out operating point; nothing was re-run until it
-   passed without saying so.
+   passed without saying so. For a fix (issue, ci), `server_code_changed` false means the run
+   measured neither its accuracy nor its speed (`validation_doctrine.md`, *G2 for a fix*, *G5 for a
+   fix*), and `claim` is empty: check it against the diff of step 1. A file the server runs among
+   the changed ones is a `blocker` finding and the verdict is `blocked`: the evidence was not
+   produced, and no work package produces it.
 6. **Reward hacks.** Start from `reward_hacks.md`: for every entry that applies to this diff and its
    evidence, check its tell, and check each hack the performance engineer suspected. A confirmed hack
    is a `blocker` finding with `hack` set to its id (`new` when the list lacks it, described well

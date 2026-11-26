@@ -66,7 +66,11 @@ clock can start before your session does.
      whether G2 runs, before any server of its own is launched:
      - `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
        documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the
-       server runs changed"`.
+       server runs changed"`, and the answer `"server_code_changed": false`. With any other file
+       among them the answer says `true`. That one diff decides G5 as well (`validation_doctrine.md`,
+       *G5 for a fix*): on `false` the run measures the fix's speed no more than its accuracy, and
+       without the field it measures it. Read the diff in every round: a repair, or a change the
+       review asked for, can add a file the server runs, or take the last one away.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
        questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
@@ -182,6 +186,9 @@ Return:
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
 did not run are `not run`.
+
+A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
+`false` only when every file the fix changes is a test, a documentation file or a CI file.
 
 A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the

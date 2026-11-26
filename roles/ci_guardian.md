@@ -16,6 +16,13 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
    for tracker clusters (tests, lanes, statuses, since dates), plus the job logs.
 2. Classify it with `ci_triage.md` §2: `code_regression`, `dependency_bump`, `test_bug`, `flaky`,
    `infrastructure`. For `flaky`, rerun the test enough times to state a rate.
+   - `performance`: true when the test fails on a number it measures (a throughput, a latency, a
+     speed threshold), not on an error, whatever its class (`ci_triage.md` §2). Then `perf_claim` is
+     the number the fix must restore — metric, workload and value, from the test's threshold or the
+     last green run's log (e.g. "output throughput back above 1100 tok/s in the serving benchmark's
+     default case, 1180 in the last green run"). G5 measures it whatever the fix changes
+     (`validation_doctrine.md`, *G5 for a fix*). Without one the task stops here: a fix cannot be
+     judged against it.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
 4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
@@ -27,6 +34,7 @@ Return:
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
+ "performance": false, "perf_claim": "<performance failures only>",
  "triage_path": "/abs/RUN_DIR/ci_triage.md"}
 ```
 

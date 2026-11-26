@@ -13,9 +13,9 @@ of it.
 | `task` | the source of truth: upstream PR or design URL, issue URL, CI job or tracker cluster, performance goal | required | required | required | required | — |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
 | `model_path` | the model the baseline and the gates run | required | required unless `stop_after` ends the run before a fix: the reporter's model, which G2 measures the fix on | required unless `stop_after` ends the run before a fix: the model G2 measures the fix on, the one the failing test serves when it serves one | required | — |
-| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task measures a workload of its own; required with `client_script: template` | for a performance issue | — | required | — |
-| `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended; required with `stability` on | — | required | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; on it a feature is judged as no slower than the baseline, never on its source's gain (§1.2) | required: G5 measures every feature | for a performance issue, or with `stability` on | — | required | — |
+| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task measures a workload of its own; required with `client_script: template` | required with `client_script: template` | required with `client_script: template` | required | — |
+| `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended; required with `stability` on | required with `stability` on | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; on it a feature is judged as no slower than the baseline, never on its source's gain (§1.2) | required: G5 measures every feature | required unless `stop_after` ends the run before a fix: G5 measures the fix on it; with `stability` on, required either way | as for an issue | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -44,7 +44,8 @@ A task that measures accuracy or performance brings the scripts that run its bas
 launched and measured the way the user runs the model, not the way an agent guessed. A script the user
 gives runs unchanged, whatever the templates or the feature's source say. A user who has none may take
 InferPilot's template instead (§1.2) by answering `template` when the run asks; it is not chosen for
-the user, but for the server G2 measures a fix on when the report or the job starts none (§1.2).
+the user, but for the server a fix is measured on (G2, G5) when the report or the job starts none
+(§1.2).
 
 - **`server_script`** starts one server in the foreground. InferPilot runs it with `PORT`,
   `HIP_VISIBLE_DEVICES`, `PYTHONPATH` (the tree under test) and `EXTRA_ARGS` (the feature's flags; empty
@@ -55,7 +56,11 @@ the user, but for the server G2 measures a fix on when the report or the job sta
   space-separated list), the held-out point (`held_out`) can be measured at half the concurrency.
   A feature names one as a perf task does: G5 measures every feature against the baseline with it,
   the gain it claims or, where it claims none, that it is no slower
-  (`../knowledge/validation_doctrine.md`, *G5 for a feature*).
+  (`../knowledge/validation_doctrine.md`, *G5 for a feature*). So does an issue or a ci task that can
+  reach a fix: G5 measures on it a fix that changes code the server runs, the fix against the base,
+  and the fix is no slower (*G5 for a fix*). It is the benchmark the report or the failing test runs,
+  when there is one. A task that names none is asked for it, and no template is offered; one that
+  stops before its fix (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none.
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,
@@ -132,9 +137,9 @@ only where the user takes them:
 
 An issue or a ci task launches its server with the reporter's or the job's own command, as given, never
 with a template's or the cookbook's flags. Where they start no server at all (a unit test, an import
-that fails), there is no command to follow: G2 then serves the fix of a task that has a `model_path`
-with `server.sh`. It is the one case in which a template runs without the user's answer, and the
-report says so.
+that fails), there is no command to follow: G2 and G5 then serve the fix of a task that has a
+`model_path` with `server.sh`. It is the one case in which a template runs without the user's answer,
+and the report says so.
 
 Setup renders the templates a run uses into `RUN_DIR/scripts/` with `scripts/harness.py`, which takes
 each parameter from, in this order:
@@ -181,7 +186,8 @@ server's context leaves beside a question.
 
 ```json
 {"mode": "ci", "task": "Failure Tracker #<n>, cluster <signature>",
- "model_path": "/mnt/models/<the model the failing test serves>"}
+ "model_path": "/mnt/models/<the model the failing test serves>",
+ "client_script": "/workspace/scripts/client.sh"}
 ```
 
 ```json

@@ -187,6 +187,25 @@ Notes per gate:
   A feature that is slower stops the task at Performance for a human, and nothing is rolled back. So
   a feature task names its client as it names its server, and one that names none is asked for it
   (`templates/task_definition.md` §1.1).
+- **G5 for a fix.** The fix of an issue or of a CI failure is measured for speed as it is for
+  accuracy (*G2 for a fix*), and on the same condition: when it changes code the server runs. Whoever
+  merges a fix on the serving path asks what it costs, so its pull request shows the fix next to the
+  base on the task's client, with the run's launch script and model: no slower than the base beyond
+  the noise band, by the median of its rounds. One diff decides both gates: a fix to tests,
+  documentation or CI files alone has no G5 either, `not run: no code the server runs changed`. Where
+  the base cannot serve the configuration because that is the failure being fixed, the fix is compared
+  with the last commit that served it, the one G2 measured against; where the run knows no such
+  commit, its numbers are reported and not judged, and the pull request says that they have no
+  baseline. So an issue or a ci task that can reach a fix names its client as it names its model, and
+  one that names none is asked for it (`templates/task_definition.md` §1.1); no template is offered
+  for it.
+  A performance problem is measured whatever its fix changes: an issue triaged `performance`, or a
+  CI failure on a number its test measures (a throughput, a latency, a speed threshold). It is fixed
+  when that number comes back, so the number is the claim: the reproduction states it for an issue,
+  Classify for a CI failure (`perf_claim`), and G5 measures it where it showed, on the reproduction
+  or the failing test. A threshold moved in a test restores nothing, and G5 says so.
+  A fix that is slower, or a number that does not come back, stops the task at Performance for a
+  human, and nothing is rolled back: what a correct fix may cost is not a role's to decide.
 
 ## Failure taxonomy — classify before counting
 

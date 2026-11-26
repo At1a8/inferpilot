@@ -34,6 +34,13 @@ fix PR or a handover within a week for anything else.
 | flaky | passes on rerun; `flaky` status; failure rate below the noise you measured | rerun N times, report the rate, propose quarantine only with numbers |
 | infrastructure | `Self-hosted runner lost communication`, interface errors (`UCX ERROR failed to get interface index ... errno 19`), image pull or disk failures | hand over to CI maintainers with the evidence |
 
+**A failure on a number is a performance problem,** whatever its class: the test measures a
+throughput, a latency or a speed threshold and fails because the number fell, not on an error (a
+serving benchmark below its threshold on one lane). Record the number the fix must restore: the
+metric, the workload and the value, from the test's threshold or the last green run's log. The fix is
+judged on that number (§4), so a threshold moved in the test fixes nothing by itself
+(`reward_hacks.md` C1).
+
 ## 3. Code regressions: find the culprit
 
 1. **Window:** from the last green run to the first red one (or the tracker's `since` date). Pull the
@@ -67,6 +74,11 @@ from 10-02 to at least 10-25) had no owner.
   `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent where the
   regression keeps the base from serving. A fix to tests, documentation or CI files alone (a
   `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of §1).
+- Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
+  `client_script`: no slower than the base beyond the noise band, or than the culprit's parent where
+  the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
+  unless the failure is a performance problem (§2): G5 then measures the number the fix must restore,
+  whatever the fix changes.
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output
