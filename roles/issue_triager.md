@@ -38,11 +38,24 @@ Return:
 
 ## PHASE=reproduce
 
-Inputs: the triage record, `expect_fixed` (true when the triage concluded the fix is merged).
+Inputs: the triage record, `expect_fixed` (true when the triage concluded the fix is merged),
+`time_limit_min` (minutes from this call's start after which InferPilot stops waiting and never reads
+the answer; 0: no limit), `earlier_answer` (on a call with more time: what the call before it
+returned).
 
 1. Reproduce on the reporter's image, commit and command first (`issue_triage.md` §5); then on current
    main. One change at a time, one log each.
 2. For a long-running failure, define the soak test (duration, load) before starting and say so.
+   - **The reproduction fits in `time_limit_min`, or says what it needs.** With `time_limit_min` above
+     0, end 30 minutes before it, which leaves time for the ledger and the answer. Before each arm (a
+     commit, a configuration, a soak), estimate it from the times so far, server start and weight
+     loading included. When the arms left do not fit, start nothing more and return what the finished
+     ones showed, with `needs_min`: the limit, in minutes from its start, that a call running the arms
+     left needs (the estimate and half as much again). Write each finished arm to the ledger as it
+     ends: a call with more time reads the ledger and `earlier_answer` and runs only the arms left.
+     It answers for the whole reproduction: `reproduced_on_reporter`, the counts and the evidence
+     include the arms the earlier call ran. Once an arm reproduced on main, return; nothing is left to
+     need time for.
 3. Write the minimal reproduction as `RUN_DIR/repro.sh` (it exits non-zero while the bug is present);
    it becomes the `issue_repro` gate. It takes the tree to test from `TREE` (default: the task
    worktree), so the same script runs on another commit.
@@ -62,7 +75,8 @@ Return:
 
 ```json
 {"reproduced": true, "reproduced_on_reporter": true, "repro_cmd": "bash /abs/RUN_DIR/repro.sh",
- "perf_claim": "<performance issues only>", "evidence": "<counts, logs, environment>"}
+ "perf_claim": "<performance issues only>", "evidence": "<counts, logs, environment>",
+ "needs_min": 0}
 ```
 
 ## PHASE=spinoff (any mode, before the report, when the run has `known_issues` or `leads`)

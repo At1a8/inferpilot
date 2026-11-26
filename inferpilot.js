@@ -72,12 +72,14 @@ const int = (v, d) => {
 const AGENT_RETRIES = Math.max(1, int(RAW.agent_retries, 3));
 const TIMEOUT_GIVEN = RAW.agent_timeout_ms != null && String(RAW.agent_timeout_ms).trim() !== '';
 const AGENT_TIMEOUT_MS = int(RAW.agent_timeout_ms, 3 * 3600 * 1000);
-// Roles that run whole suites or benchmarks get twice the default, unless a timeout is given.
+// Roles that run whole suites or benchmarks, and the issue reproduction (soaks, one arm per commit or
+// configuration), get twice the default, unless a timeout is given.
 const LONG_ROLES = new Set(['verify_engineer', 'perf_engineer', 'investigator']);
-// A longer limit InferPilot gave a role that showed it needs one (verifyLoop); never past a given timeout.
+const LONG_CALLS = new Set(['issue_triager:reproduce']);
+// A longer limit InferPilot gave a call that showed it needs one (callWithTime); never past a given timeout.
 const GRANTED_MS = {};
-const timeoutFor = (role) => GRANTED_MS[role]
-  || (!TIMEOUT_GIVEN && LONG_ROLES.has(role) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role]
+  || (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`)) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
@@ -528,7 +530,7 @@ const withLeads = (schema) => (schema && schema.type === 'object'
 
 async function call(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
-  const ms = timeoutFor(role);
+  const ms = timeoutFor(role, sub);
   const leads = takesLeads(role, sub);
   for (let attempt = 1; attempt <= AGENT_RETRIES; attempt++) {
     // Each attempt has a timeout of its own, and a role told its limit gets the moment it ends.
@@ -557,6 +559,25 @@ async function call(role, sub, ins, schema, label, opts) {
     }
   }
   return null;
+}
+
+// A call that stopped before work that would not fit runs again, once, with the limit it asked for
+// (needs: its needs_min, 0 when it ended for any other reason); nobody is asked to choose a time. A
+// timeout the user gave stays the limit. ins(limit, earlier) builds the inputs, earlier the answer of
+// the call before more time. Returns the answer, the earlier one, and with needs set, what it still needs.
+async function callWithTime({ role, sub, grantKey, what, label, schema, ins, needs: needsOf, opts }) {
+  let earlier = null;
+  for (let again = false; ; again = true) {
+    const limit = minutes(timeoutFor(role, sub));
+    const r = await call(role, sub, ins(limit, earlier), schema, `${label}${again ? '+time' : ''}`, opts);
+    const needs = limit && r ? Math.ceil(Number(needsOf(r)) || 0) : 0;
+    if (!needs) return { r, earlier };
+    if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
+    const grant = Math.max(needs, limit);
+    GRANTED_MS[grantKey] = grant * 60000;
+    note(PHASE, 'more_time', `${what} needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
+    earlier = r;
+  }
 }
 
 // Schemas of the phases after Intake (the helpers are defined above).
@@ -619,8 +640,9 @@ const TRIAGE = S({
 }, ['priority', 'category', 'action', 'triage_path']);
 // reproduced: on current main, the code a fix would change; reproduced_on_reporter: on the reporter's
 // image or commit, left out when that could not run here.
-const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str },
-  ['reproduced', 'repro_cmd', 'evidence']);
+const REPRO = S({ reproduced: bool, reproduced_on_reporter: bool, repro_cmd: str, perf_claim: str, evidence: str,
+  needs_min: num, // the arms left would not fit: the limit the call that runs them needs, from its start
+}, ['reproduced', 'repro_cmd', 'evidence']);
 const REPLY = S({ reply_draft_path: str, summary: str }, ['reply_draft_path']);
 // The reviewer's check of the reply draft: each claim the run does not bear out, what the run shows
 // instead and where; none when the draft says only what the run showed.
@@ -1205,24 +1227,17 @@ async function verifyLoop(extraGates) {
     } else if (!gpus) {
       log(`  [inferpilot] the pinned GPUs were not checked before Verify round ${round}: the check returned nothing`);
     }
-    // A round that stopped before a suite that would not fit runs again, once, with the limit it asked for;
-    // nobody is asked to choose a time. A timeout the user gave stays the limit.
-    let v = null;
-    for (let again = false; ; again = true) {
-      const limit = minutes(timeoutFor('verify_engineer'));
-      v = await call('verify_engineer', 'verify', inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
-        VERIFY, `verify_engineer#${round}${again ? '+time' : ''}`, ONE_SESSION);
-      const needs = limit && v && v.all_pass !== true && !(v.failures || []).some((f) => f.blocking !== false)
-        ? Math.ceil(Number(v.needs_min) || 0) : 0;
-      if (!needs) break;
-      if (again || TIMEOUT_GIVEN) {
-        note('Verify', 'fail', `the round needs ${needs} min; its limit is ${limit} min (${again ? 'the limit it asked for' : 'agent_timeout_ms'})`);
-        return { ok: false, reason: `out of time: the round needs ${needs} min` };
-      }
-      const grant = Math.max(needs, limit);
-      GRANTED_MS.verify_engineer = grant * 60000;
-      note('Verify', 'more_time', `the round needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
+    // A round with more time runs whole again: its suites are judged together.
+    const t = await callWithTime({
+      role: 'verify_engineer', sub: 'verify', grantKey: 'verify_engineer', what: 'the round', label: `verify_engineer#${round}`,
+      schema: VERIFY, opts: ONE_SESSION, ins: (limit) => inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
+      needs: (r) => (r.all_pass !== true && !(r.failures || []).some((f) => f.blocking !== false) ? r.needs_min : 0),
+    });
+    if (t.needs) {
+      note('Verify', 'fail', `the round needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+      return { ok: false, reason: `out of time: the round needs ${t.needs} min` };
     }
+    const v = t.r;
     if (!v) {
       note('Verify', 'fail', 'the verify engineer returned nothing');
       leftRunning.push(`Verify round ${round} may have left its servers running`);
@@ -1612,7 +1627,29 @@ async function runIssue() {
   // also for an existing fix PR.
   enter('Reproduce');
   const expectFixed = tri.action === 'close_fixed';
-  const rep = await call('issue_triager', 'reproduce', inputs({ expect_fixed: expectFixed }), REPRO);
+  // A soak or an arm that would not fit returns early with needs_min; the call with more time gets that
+  // answer and goes on from the ledger. Once it has reproduced, nothing is left to need time for.
+  const t = await callWithTime({
+    role: 'issue_triager', sub: 'reproduce', grantKey: 'issue_triager:reproduce', what: 'the reproduction',
+    label: 'issue_triager:reproduce', schema: REPRO,
+    ins: (limit, earlier) => inputs({ expect_fixed: expectFixed, time_limit_min: limit, ...(earlier ? { earlier_answer: earlier } : {}) }),
+    needs: (r) => (r.reproduced === true ? 0 : r.needs_min),
+  });
+  if (t.needs) {
+    note('Reproduce', 'fail', `the reproduction needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
+    return finish('blocked', 'Reproduce');
+  }
+  // The answer is for the whole reproduction: what the call with more time leaves out (the reporter's arm
+  // it did not run again) is the earlier call's, and the evidence keeps both. An intermittent bug the
+  // reporter's code showed once has shown, even if a later arm there passed.
+  const onReporter = t.earlier ? [t.earlier.reproduced_on_reporter, t.r && t.r.reproduced_on_reporter] : [];
+  const rep = t.r && t.earlier ? {
+    ...t.r,
+    reproduced_on_reporter: onReporter.includes(true) ? true : onReporter.find((v) => typeof v === 'boolean'),
+    repro_cmd: String(t.r.repro_cmd || '').trim() || t.earlier.repro_cmd,
+    perf_claim: String(t.r.perf_claim || '').trim() || t.earlier.perf_claim,
+    evidence: [t.earlier.evidence, t.r.evidence].filter(Boolean).join('; then, with more time: '),
+  } : t.r;
   if (!rep) {
     note('Reproduce', 'fail', 'no reproduction result');
     return finish('blocked', 'Reproduce');
