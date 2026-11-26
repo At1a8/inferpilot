@@ -207,6 +207,24 @@ Notes per gate:
   or the failing test. A threshold moved in a test restores nothing, and G5 says so.
   A fix that is slower, or a number that does not come back, stops the task at Performance for a
   human, and nothing is rolled back: what a correct fix may cost is not a role's to decide.
+- **What counts as code the server runs.** G2 and G5 measure a fix by what its pull request changes,
+  and the line is drawn by file. These are not code the server runs: tests (sglang: `test/`),
+  documentation, CI files (`.github/`, `scripts/ci/`), Dockerfiles, benchmark and tool scripts
+  (`benchmark/`, `tools/`, `examples/`), and a dependency declaration that moves no version (one that
+  was missing, a package's metadata). A fix that changes only such files has neither gate: `not run:
+  no code the server runs changed`. A pull request that changes one of them and a line of code
+  changes code. The framework's own fixes draw the same line: of the 32 fix pull requests merged
+  from 2026-05-26 to 2026-11-26 that changed only such files, none measured the server's accuracy or
+  speed, and its CI runs no server suite for a change to `docs/`, `benchmark/`, `tools/` or `docker/`.
+  One change to those files is a change to code all the same: a new version of a package the
+  server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned. No line of the framework
+  changes, and every kernel may. The fix arm is measured with that version installed and the base
+  arm with the image's, and the image's version is put back when the round ends. Where the version
+  cannot be installed in the run's image, G2 and G5 are a blocking failure, `<package> <version>
+  cannot be installed in this image`: the fix was not measured, and a human decides.
+  A fix that changes no code the server runs is still shown to work where its change takes effect.
+  Its `issue_repro` or `failing_test` runs with the declaration installed, in the image built from
+  the Dockerfile, or by running the tool: the same gate in the unchanged environment shows nothing.
 
 ## Failure taxonomy — classify before counting
 

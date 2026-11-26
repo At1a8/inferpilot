@@ -659,6 +659,45 @@ class FeatureOffTest(unittest.TestCase):
             self.assertIn("without a switch", item, "the playbook runs G0 again after a fix, switch or no switch")
 
 
+class ServerCodeTest(unittest.TestCase):
+    """G2 and G5 measure a fix by what its pull request changes, and the line is drawn by file
+    (knowledge/validation_doctrine.md, What counts as code the server runs). Tests, documentation, CI files,
+    Dockerfiles, benchmark and tool scripts and dependency declarations that move no version are not code the
+    server runs; a new version of a package the server runs is. A fix that changes no code is shown to work
+    where its change takes effect."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_doctrine_draws_the_line_by_file(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **What counts as code the server runs.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say what counts as code the server runs")
+        for said in ("the line is drawn by file", "tests (sglang: `test/`)", "documentation", "CI files (`.github/`, `scripts/ci/`)",
+                     "Dockerfiles", "benchmark and tool scripts", "a dependency declaration that moves no version",
+                     "`not run: no code the server runs changed`", "A pull request that changes one of them and a line of code changes code",
+                     "a new version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
+                     "The fix arm is measured with that version installed and the base arm with the image's",
+                     "the image's version is put back when the round ends", "cannot be installed in this image",
+                     "is still shown to work where its change takes effect",
+                     "the same gate in the unchanged environment shows nothing"):
+            self.assertIn(said, note[0])
+
+    def test_the_verify_engineer_reads_the_diff_by_that_line(self):
+        role = self.flat("roles/verify_engineer.md")
+        for said in ("when no file it names is code the server runs (`validation_doctrine.md`, *What counts as code the server runs*",
+                     "a Dockerfile, a benchmark or tool script, or a dependency declaration that moves no version",
+                     "A fix that moves the version of a package the server runs",
+                     "Measure the base arm on the image's version first",
+                     "put the image's version back before the round ends",
+                     "never measure the fix arm on the image's version and call it the fix",
+                     "Run that gate where the fix takes effect",
+                     "`false` only when no file the fix changes is code the server runs"):
+            self.assertIn(said, role, "roles/verify_engineer.md does not say it")
+        self.assertNotIn("is a test, a documentation file or a CI file of the repository", role,
+                         "the verify engineer still measures a fix to a Dockerfile or a tool")
+
+
 class FixAccuracyTest(unittest.TestCase):
     """The fix of an issue or of a CI failure is measured on gsm8k as a feature is, when it changes code the
     server runs (knowledge/validation_doctrine.md, G2 for a fix). Such a task names its model unless it stops

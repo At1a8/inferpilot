@@ -45,6 +45,12 @@ clock can start before your session does.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
+   Run that gate where the fix takes effect. A fix to a dependency declaration is not in the
+   environment until the declaration is installed, one to a Dockerfile until its image is built (or
+   the steps it changes are run in the container), one to a benchmark or a tool until the tool runs:
+   the gate in the unchanged environment shows nothing. Put the environment back when the round
+   ends. Where the change cannot be put into effect on this machine, the gate is a blocking failure
+   that says so.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing. A port whose spec gives the
@@ -64,13 +70,22 @@ clock can start before your session does.
      when it changes code the server runs** (`validation_doctrine.md`, *G2 for a fix*). That gate of
      `extra_gates` runs first: a fix that does not fix has no accuracy worth measuring. Then decide
      whether G2 runs, before any server of its own is launched:
-     - `git -C <worktree> diff --name-only <base>...HEAD`: when every file it names is a test, a
-       documentation file or a CI file of the repository, `gates` says `"G2": "not run: no code the
+     - `git -C <worktree> diff --name-only <base>...HEAD`: when no file it names is code the server
+       runs (`validation_doctrine.md`, *What counts as code the server runs*: every one is a test, a
+       documentation file, a CI file, a Dockerfile, a benchmark or tool script, or a dependency
+       declaration that moves no version), `gates` says `"G2": "not run: no code the
        server runs changed"`, and the answer `"server_code_changed": false`. With any other file
        among them the answer says `true`. That one diff decides G5 as well (`validation_doctrine.md`,
        *G5 for a fix*): on `false` the run measures the fix's speed no more than its accuracy, and
        without the field it measures it. Read the diff in every round: a repair, or a change the
        review asked for, can add a file the server runs, or take the last one away.
+     - A fix that moves the version of a package the server runs (aiter, PyTorch, Triton,
+       flashinfer), in a dependency file or a Dockerfile, changes code the server runs:
+       `"server_code_changed": true`. Measure the base arm on the image's version first; install the
+       fix's version in the container, measure the fix arm, and put the image's version back before
+       the round ends, with both versions in the ledger. A version you cannot install here is a
+       blocking failure of G2, `"<package> <version> cannot be installed in this image"`: never
+       measure the fix arm on the image's version and call it the fix.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
        questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
@@ -188,7 +203,7 @@ A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking 
 did not run are `not run`.
 
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
-`false` only when every file the fix changes is a test, a documentation file or a CI file.
+`false` only when no file the fix changes is code the server runs.
 
 A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the
