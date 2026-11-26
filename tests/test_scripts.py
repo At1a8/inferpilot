@@ -848,6 +848,12 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(rec["parameters"]["OSL"]["value"], "256")
         self.assertIn("fallback_client.json beside it", (self.out / "fallback_client.sh").read_text())
         self.assertFalse((self.out / "perf.sh").exists())
+        # So the report reads the fallback client's lengths and concurrency from its own record, not from Setup's.
+        self.assertNotIn("OSL", json.loads(before)["parameters"], "Setup's record holds a client it did not render")
+        report = " ".join((SCRIPTS.parent / "roles" / "director.md").read_text(encoding="utf-8").split())
+        self.assertIn("`harness.json` holds only what Setup rendered", report)
+        self.assertIn("has its own record beside it, `fallback_client.json`: give the lengths and the concurrency it measured "
+                      "with from there", report, "the report would list Setup's values for a client Spec rendered")
         for args in (["--scripts", "perf,accuracy", "--name", "x"], ["--scripts", "perf", "--name", "harness"],
                      ["--scripts", "perf", "--name", "server"], ["--scripts", "perf", "--name", "../x"]):
             rc, msg = self.render(*args)

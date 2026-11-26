@@ -550,7 +550,7 @@ const scenarios = [
     check(quick && quick.ins.time_limit_min === 0.17,
       `a unit limit under a minute is told as it is, so that its reserve starts within it: ${quick && quick.ins.time_limit_min}`);
   }],
-  ['feature: a client the user brought that does not run the source\'s scenarios stops the run at Spec with a question; with none of the user\'s, InferPilot\'s runs them', async () => {
+  ['feature: when the task\'s client does not run the source\'s scenarios, the run stops at Spec and asks; nothing is built', async () => {
     const gap = "vLLM's PR measured 256-token answers at concurrency 1; the task's client runs 8k in / 1k out.";
     const fallback = `${RUN}/scripts/fallback_client.sh`;
     const spec = (extra) => () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s', workload_gap: gap, ...extra });
@@ -568,21 +568,6 @@ const scenarios = [
     const perf = taken.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(taken.result.status === 'ready_for_review' && perf && !perf.ins.claim,
       `InferPilot's own client, once taken, is measured and reported, never claimed: ${taken.result.status}, claim ${perf && perf.ins.claim}`);
-    // A task with no client of the user's: the same client is taken at Spec, with no question.
-    const bare = await run({ mode: 'feature', task: 't' }, { 'director:spec': spec({ fallback_client: fallback }) });
-    const barePerf = bare.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    const specNote = bare.result.phases.find((p) => p.phase === 'Spec') || {};
-    check(bare.result.status === 'ready_for_review' && barePerf && barePerf.ins.client_script === fallback && !barePerf.ins.claim,
-      `with no client of the user's, InferPilot's runs the source's scenarios and claims nothing: ${bare.result.status}, `
-      + `client ${barePerf && barePerf.ins.client_script}, claim ${barePerf && barePerf.ins.claim}`);
-    check(bare.result.provenance.client_script === 'default' && bare.result.assumptions.some((a) => a.includes(fallback))
-      && String(specNote.summary).includes('The task brought no client of its own'),
-      `the run records that it took it: ${JSON.stringify(bare.result.assumptions)} | ${specNote.summary}`);
-    const reportIns = (bare.calls.find((c) => c.key === 'director:report') || {}).ins || {};
-    check((reportIns.assumptions || []).some((a) => a.includes(fallback)), 'and the report is told');
-    const stuck = await run({ mode: 'feature', task: 't' }, { 'director:spec': spec({}) });
-    check(stuck.result.status === 'needs_input' && stuck.result.stopped_at === 'Spec',
-      `with no client for the source's scenarios to take, the run still asks: ${stuck.result.status}`);
   }],
   ['feature: with auto_approve_design false, L3 waits for a human-approved design', async () => {
     const r = await run({ mode: 'feature', task: 't', auto_approve_design: false }, {
@@ -1548,45 +1533,28 @@ const scenarios = [
     check(reviews.length === 1 && reviews.every((c) => c.model === 'another-model'), `reviewer model: ${reviews.map((c) => c.model)}`);
     check(r.calls.filter((c) => c.key !== 'reviewer:review').every((c) => !c.model), 'the other roles keep the session model');
   }],
-  ['perf: a model is required; the scripts and the workload a task does not bring are InferPilot\'s, and nothing is asked', async () => {
+  ['perf: a workload and a model are required', async () => {
+    check(asks(await run({ mode: 'perf', task: 'p', workload: '' }), 'workload'), 'perf without a workload asked');
     check(asks(await run({ mode: 'perf', task: 'p', model_path: '' }), 'model_path'), 'perf without a model asked');
     check(asks(await run({ mode: 'feature', task: 't', model_path: '' }), 'model_path'), 'feature without a model asked');
-    const setup = { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
-      worktree: `${RUN}/wt`, gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
-      accuracy_script: `${RUN}/scripts/accuracy.sh` }) };
-    const bare = await run({ mode: 'perf', task: 'p', workload: '', server_script: '', client_script: '' }, setup);
-    const ins = (bare.calls.find((c) => c.key === 'director:setup') || {}).ins || {};
-    check(bare.result.status === 'ready_for_review' && !bare.keys.includes('intake:define'),
-      `a perf task with a model and nothing else starts, with no question: ${bare.result.status}`);
-    check(ins.server_script === 'template' && ins.client_script === 'template'
-      && eqList([(ins.workload || {}).isl, (ins.workload || {}).osl, (ins.workload || {}).conc], [8192, 1024, 32]),
-      `Setup is told to render both templates, the client on its own workload: ${JSON.stringify([ins.server_script, ins.client_script, ins.workload])}`);
-    check(['server_script', 'client_script', 'workload'].every((f) => bare.result.provenance[f] === 'default')
-      && bare.result.assumptions.length === 3 && bare.result.assumptions.every((a) => /the task gave none/.test(a))
-      && (ins.assumptions || []).length === 3,
-      `the run records what it took as InferPilot's, for the roles and the report: ${JSON.stringify(bare.result.assumptions)}`);
-    const perf = bare.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(perf && perf.ins.client_script === `${RUN}/scripts/perf.sh` && perf.ins.claim, 'a perf task\'s numbers on InferPilot\'s client count');
-    const ownClient = await run({ mode: 'perf', task: 'p', workload: '' });
-    check(ownClient.result.status === 'ready_for_review' && !ownClient.result.task_def.workload && ownClient.result.assumptions.length === 0,
-      `a perf task with a client of its own is asked for no workload, and none is made up: the client is the benchmark (${ownClient.result.status})`);
+    check(asks(await run({ mode: 'feature', task: 't', server_script: '' }), 'server_script'), 'feature without a server script asked');
+    check(asks(await run({ mode: 'perf', task: 'p', client_script: '' }), 'client_script'), 'perf without a client script asked');
+    check(asks(await run({ mode: 'feature', task: 't', workload: '{"isl":8000}' }), 'client_script'), 'a feature with a workload but no client script asked');
     const plain = await run({ mode: 'feature', task: 't' });
-    check(plain.result.status === 'ready_for_review' && !plain.result.task_def.client_script, 'a feature without a workload takes no client');
+    check(!asks(plain, 'client_script'), 'a feature without a workload needs no client script');
     const setupIns = plain.calls.find((c) => c.key === 'director:setup');
     check(setupIns && setupIns.ins.server_script === '/s/server.sh', 'the server script reaches the roles');
   }],
-  ['feature: InferPilot\'s templates run where the task brings no script of its own, and its client\'s numbers are reported, never claimed', async () => {
+  ['feature: InferPilot\'s templates run only where the user took them, and its client\'s numbers are reported, never claimed', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' });
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template']) && /never a claim/.test(question(none, 'client_script').question),
+      `the questions offer the templates, the client's as reported only: ${JSON.stringify(none.result.questions)}`);
     const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
       worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
-    const none = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: '', client_script: '' }, setup(rendered));
-    const noneIns = (none.calls.find((c) => c.key === 'director:setup') || {}).ins || {};
-    const nonePerf = none.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(none.result.status === 'ready_for_review' && noneIns.server_script === 'template' && noneIns.client_script === 'template'
-      && nonePerf && !nonePerf.ins.claim && none.result.assumptions.some((a) => /^client_script: .*never a claim/.test(a)),
-      `without scripts of its own a feature runs the templates with no question, and its client claims nothing: ${none.result.status}, `
-      + `${JSON.stringify(none.result.assumptions)}`);
     const took = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', server_script: 'template', client_script: 'template',
       harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
     const setupIns = took.calls.find((c) => c.key === 'director:setup');
@@ -1607,22 +1575,21 @@ const scenarios = [
     const noAccuracy = await run({ mode: 'feature', task: 't' }, setup({}));
     check(noAccuracy.result.status === 'blocked' && noAccuracy.result.stopped_at === 'Setup'
       && /no accuracy script/.test(JSON.stringify(noAccuracy.result.phases)), `no accuracy script stops the run at Setup: ${noAccuracy.result.status}`);
-    const gapSpec = (extra) => ({ 'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
-      workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in.", ...extra }) });
-    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, { ...setup(rendered), ...gapSpec({}) });
+    const gap = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' }, {
+      ...setup(rendered),
+      'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+30% output tok/s',
+        workload_gap: "vLLM's PR measured 256-token answers at concurrency 1; the task's workload is 8k in." }),
+    });
     check(gap.result.status === 'needs_input' && gap.result.stopped_at === 'Spec' && !gap.keys.includes('analyst:recon'),
-      `InferPilot's client on the task's workload does not run the source's scenarios, and with no client for them the run asks: `
-      + `${gap.result.status} at ${gap.result.stopped_at}`);
-    const fallback = `${RUN}/scripts/fallback_client.sh`;
-    const switched = await run({ mode: 'feature', task: 't', workload: '{"isl":8000}', client_script: 'template' },
-      { ...setup(rendered), ...gapSpec({ fallback_client: fallback }) });
-    const switchedPerf = switched.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(switched.result.status === 'ready_for_review' && switchedPerf && switchedPerf.ins.client_script === fallback && !switchedPerf.ins.claim
-      && switched.result.assumptions.some((a) => /source's scenarios/.test(a)) && switched.result.provenance.client_script === 'default',
-      `given InferPilot's client for the source's scenarios, the run takes it with no question and claims nothing: ${switched.result.status}, `
-      + `client ${switchedPerf && switchedPerf.ins.client_script}, claim ${switchedPerf && switchedPerf.ins.claim}`);
+      `InferPilot's client on the task's workload still asks for the source's scenarios: ${gap.result.status} at ${gap.result.stopped_at}`);
   }],
-  ['perf: a perf task that names InferPilot\'s templates runs them, and its numbers on them count', async () => {
+  ['perf: a perf task may take InferPilot\'s templates, and its numbers on them count', async () => {
+    const question = (r, field) => (r.result.questions || []).find((q) => q.field === field) || {};
+    const none = await run({ mode: 'perf', task: 'p', server_script: '', client_script: '' });
+    check(asks(none, 'server_script') && eqList(question(none, 'server_script').options, ['template'])
+      && eqList(question(none, 'client_script').options, ['template'])
+      && !/never a claim/.test(question(none, 'client_script').question),
+      `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
     const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
         gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
@@ -1727,9 +1694,7 @@ const scenarios = [
     check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
     check(asks(await run({ mode: 'issue', task: 't', stability: true }), 'client_script'), 'G4 without the client it runs asked');
     const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
-    check(!(perfClient.result.questions || []).some((q) => q.field === 'client_script')
-      && perfClient.calls.find((c) => c.key === 'director:setup').ins.client_script === 'template',
-      'but not where the mode takes InferPilot\'s client template: a perf task is asked for none');
+    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
     const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });
     const g4verify = g4.calls.find((c) => c.key === 'verify_engineer:verify');
     check(g4.result.status !== 'needs_input' && g4verify && g4verify.ins.stability === true && g4verify.ins.long_context === false,
@@ -1783,19 +1748,9 @@ const scenarios = [
   }],
   ['intake: the code still checks a definition the intake calls ready', async () => {
     const r = await run({ request: 'speed up decode' }, {
-      'intake:define': () => ({ status: 'ready', task_def: { mode: 'perf', task: 'p', framework_dir: '/tmp/sglang' }, questions: [] }),
+      'intake:define': () => ({ status: 'ready', task_def: { mode: 'perf', task: 'p', framework_dir: '/tmp/sglang', model_path: '/models/m' }, questions: [] }),
     });
-    check(asks(r, 'model_path'), `a ready definition without a model: ${r.result.status}`);
-    // What InferPilot's templates stand in for is no question, even when the intake asks it.
-    const fussy = await run({ request: 'speed up decode' }, {
-      'intake:define': () => ({ status: 'needs_input', task_def: { mode: 'perf', task: 'p', framework_dir: '/tmp/sglang', model_path: '/models/m' },
-        questions: [{ field: 'server_script', question: 'Which script starts the server?', why: 'the baseline' },
-          { field: 'workload', question: 'Which workload?', why: 'fixed before profiling' }] }),
-    });
-    const fussySetup = fussy.calls.find((c) => c.key === 'director:setup');
-    check(fussy.result.status !== 'needs_input' && fussySetup && fussySetup.ins.server_script === 'template'
-      && fussySetup.ins.workload.conc === 32,
-      `a script or a workload the task did not bring is InferPilot's, not a question: ${fussy.result.status}`);
+    check(asks(r, 'workload'), `a ready definition without a workload: ${r.result.status}`);
   }],
   ['intake: fields the caller set win over what the intake inferred', async () => {
     const r = await run({ request: 'look at 38849', mode: 'issue', task: 'https://github.com/sgl-project/sglang/issues/38849' }, {

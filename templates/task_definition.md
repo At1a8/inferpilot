@@ -13,9 +13,9 @@ of it.
 | `task` | the source of truth: upstream PR or design URL, issue URL, CI job or tracker cluster, performance goal | required | required | required | required | — |
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
 | `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
-| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | optional: on InferPilot's client, the client template's own when none is given (§1.2) | — |
-| `server_script` | the user's script that starts one server for `model_path` (§1.1); without one, or as `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | optional: InferPilot's when none is given | recommended | — | optional: InferPilot's when none is given | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1); without one, or as `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | optional: InferPilot's when a workload is given and no client; needed with `stability` on | for a performance issue, or with `stability` on | — | optional: InferPilot's when none is given | — |
+| `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
+| `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -35,18 +35,15 @@ of it.
 
 `inferpilot.js` checks the required fields (and a back end's own field) for every definition; one that
 lacks something returns `needs_input` and starts nothing. The intake asks for the recommended fields
-when the likely path of the task needs them. No one asks for a server script, a client script or a perf
-task's workload: what the task does not bring is InferPilot's (§1.1).
+when the likely path of the task needs them.
 
 ### 1.1 Server and client scripts
 
 A task that measures accuracy or performance brings the scripts that run its baseline, so every arm is
 launched and measured the way the user runs the model, not the way an agent guessed. A script the user
-gives runs unchanged, whatever the templates or the feature's source say. Where the task brings none,
-InferPilot's template runs instead (§1.2), and nothing is asked: the run takes the server template, the
-client template and, for a perf task on that client, the template's own workload, records each as
-InferPilot's (`assumptions`, and `default` in `provenance`), and the report says so. `template` as a
-field's value names the template outright.
+gives runs unchanged, whatever the templates or the feature's source say. A user who has none may take
+InferPilot's template instead (§1.2) by answering `template` when the run asks; it is never chosen for
+the user.
 
 - **`server_script`** starts one server in the foreground. InferPilot runs it with `PORT`,
   `HIP_VISIBLE_DEVICES`, `PYTHONPATH` (the tree under test) and `EXTRA_ARGS` (the feature's flags; empty
@@ -93,21 +90,19 @@ done
 ### 1.2 InferPilot's templates
 
 InferPilot's templates are in `templates/harness/`. The server and the client stand in for the user's
-where the task brings none (or names `template`):
+only where the user takes them:
 
 - `server.sh`: one sglang server after the model's recipe in the sglang cookbook (the framework
   checkout's `docs/cookbook/`, published at docs.sglang.io/cookbook) for the run's GPU and checkpoint.
-  A feature or perf task without a `server_script` of its own runs it.
+  A feature or perf task runs it when the user answers `server_script: template`.
 - `perf.sh`: sglang's serving benchmark on random prompts: one run per concurrency, with 4 prompts and
   2 warm-up requests per concurrent request after a flush of the prefix cache, as the client above. A
-  perf task, and a feature with a workload, without a `client_script` of its own runs it on the task's
-  workload; a perf task that gives no workload either runs it on the template's own: 8192 tokens in,
-  1024 out, concurrency 32.
-  A perf task's numbers on it count as on any client: there is no source to reproduce. A feature's are
-  reported, never a claim: it need not reproduce the source's numbers, and the same holds when a
-  feature takes it as Spec's fallback client for the source's scenarios, which a feature with no client
-  of the user's does without a question (`../roles/director.md`, PHASE=spec). A workload its parameters
-  cannot express needs the user's own client.
+  feature or perf task runs it on the task's workload when the user answers `client_script: template`.
+  A perf task's numbers on it count as on any client: the workload is the user's, and there is no
+  source to reproduce. A feature's are reported, never a claim: it need not reproduce the source's
+  numbers, and the same holds when a feature takes it as Spec's fallback client for the source's
+  scenarios (`../roles/director.md`, PHASE=spec). A workload its parameters cannot express needs the
+  user's own client.
 - `accuracy.sh`: `scripts/eval_accuracy.sh` with the run's settings for every arm. It runs unless the
   task brings an `accuracy_script`. Its defaults are `eval_accuracy.sh`'s (thinking on, 32768 tokens
   per answer); only the task or the feature's source changes them (PARD-2: thinking off). The sets it
@@ -181,13 +176,13 @@ The run starts nothing and returns:
 ```json
 {"status": "needs_input", "stopped_at": "Intake",
  "task_def": {"mode": "perf", "task": "DeepSeek-V4.1 decode throughput on MI355X"},
- "questions": [{"field": "model_path", "question": "Which model should the baseline run (local path)?",
-                "why": "Setup runs the baseline and the gates on it",
-                "options": ["/mnt/models/DeepSeek-V4.1-Flash"]}],
+ "questions": [{"field": "workload", "question": "Which fixed workload should every measurement use?",
+                "why": "performance numbers count only on a workload fixed before any profile is read",
+                "options": [], "default": "{\"isl\": 8192, \"osl\": 1024, \"conc\": 64}"}],
  "next": "answer the questions, then run inferpilot.js again with the same arguments plus answers={...}"}
 ```
 
-Answer, then run again with the same arguments plus `answers` (`{"model_path": "/mnt/models/..."}`), or
+Answer, then run again with the same arguments plus `answers` (`{"workload": {"isl": 8192, ...}}`), or
 with the fields set directly. Fields set in the call win over answers, answers over what the intake
 inferred. `rejected` carries a `reason` and what to do instead. A run that started records the
 definition it used (`task_def`) and the intake's `assumptions` in its result and report.

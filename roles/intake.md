@@ -27,16 +27,14 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      pick free ones.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
    - `workload` and any target number: only what the request states or the user answers; never invent
-     numbers. A workload the request does not state is no question: leave the field out, and a perf
-     task on InferPilot's client runs the client template's own (`task_definition.md` §1.2).
-   - `server_script` and `client_script` (`task_definition.md` §1.1): the user's own scripts, when the
-     request gives them. Check that each exists and is readable, and that the server script passes
-     `$PORT` and `$EXTRA_ARGS` to the server; say what is missing. Never write them for the user: a
-     script you wrote is not the user's baseline. Never ask for one either: leave out what the request
-     does not give, and the run takes InferPilot's template for it (`task_definition.md` §1.2): the
+     numbers.
+   - `server_script` and `client_script` (`task_definition.md` §1.1): the user's own scripts. Check that
+     each exists and is readable, and that the server script passes `$PORT` and `$EXTRA_ARGS` to the
+     server; say what is missing. Never write them for the user: a script you wrote is not the user's
+     baseline. A question for one offers `template`, InferPilot's (`task_definition.md` §1.2): the
      server after the model's sglang cookbook recipe, and the client, sglang's serving benchmark on the
-     workload, whose numbers count for a perf task and are reported, never a claim, for a feature. The
-     run records what it took, and the report says so.
+     workload, whose numbers count for a perf task and are reported, never a claim, for a feature. Only
+     the user takes it; never answer `template` yourself.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
@@ -56,9 +54,8 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
    when InferPilot runs inside the container, the scout's default `sources` and `since` for a scan.
 4. **Ask instead of guessing** when the mode is ambiguous; the source of truth (`task`) is missing; a
    field the mode requires is missing; a value would cost something to obtain (downloading weights,
-   GPUs or containers nobody gave); what you found contradicts what was given or answered; or a target
-   that defines the task is not stated. A script or a workload the task does not bring is never a
-   question (step 2). Every question names its `field`, says `why`
+   GPUs or containers nobody gave); what you found contradicts what was given or answered; or a number
+   that defines the task (workload, target) is not stated. Every question names its `field`, says `why`
    the run needs it, and offers `options` or a `default` when one is sensible, so the user can answer in
    one word.
 5. **`goal`:** one line saying what done means — measurable when the mode measures (perf: metric,

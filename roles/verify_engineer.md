@@ -27,8 +27,7 @@ after which InferPilot stops waiting and never reads the answer; 0: no limit) an
 clock can start before your session does.
 
 1. Launch the feature build and the baseline with the run's `server_script` as Setup did (the task's,
-   InferPilot's template where a feature or perf task brings none, or the run's own launch script for
-   an issue or a ci task; the
+   InferPilot's template the user took, or the run's own launch script when the task has none; the
    feature arm's flags in `EXTRA_ARGS`, each arm's tree on `PYTHONPATH`; for accuracy on the template
    server, the `accuracy_server_env` of `RUN_DIR/scripts/harness.json` on top); confirm the effective
    flags from the `server_args=` line of each log. Start each server and each long suite detached and

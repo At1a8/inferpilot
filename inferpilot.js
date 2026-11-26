@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (the fixed benchmark every measurement uses; a perf task that gives neither it nor a client runs the client template\'s own: 8192 tokens in, 1024 out, concurrency 32), args.server_script (feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; without one, or as "template", InferPilot\'s templates/harness/server.sh runs, after the model\'s sglang cookbook recipe) and args.client_script (perf, and a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; without one, or as "template", InferPilot\'s templates/harness/perf.sh runs on the workload; a feature\'s numbers on it are reported, never a claim; none of the three is asked for, and the report says which the run took as InferPilot\'s), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, needle-in-a-haystack runs on long prompts, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -191,40 +191,9 @@ const STOP_PHASES = {
   scan: ['Collect'],
 };
 
-// InferPilot's template (templates/harness/) for a script the task does not bring: the value the field takes,
-// named by the user or taken by default (templateDefaults).
+// The answer that takes InferPilot's template (templates/harness/) for a script the user does not have.
 const TEMPLATE = 'template';
 const isTemplate = (v) => String(v || '').trim().toLowerCase() === TEMPLATE;
-// The workload the client template runs when the task gives none: templates/harness/perf.sh's own ISL, OSL and
-// CONCURRENCY.
-const TEMPLATE_WORKLOAD = { isl: 8192, osl: 1024, conc: 32 };
-
-// What a task that measures does not bring is InferPilot's, and nothing is asked: the server template (after the
-// model's sglang cookbook recipe), the client template (sglang's serving benchmark) and, for a perf task on that
-// client, its own workload. The run records what it took (assumptions, provenance), and the report says so.
-function templateDefaults(a) {
-  const mode = String(a.mode || '').trim().toLowerCase();
-  const def = { ...a };
-  const took = [];
-  const take = (field, value, what) => {
-    def[field] = value;
-    took.push({ field, what });
-  };
-  if ((mode === 'feature' || mode === 'perf') && !def.server_script) {
-    take('server_script', TEMPLATE, "server_script: the task gave none, so InferPilot's template runs, after the model's sglang cookbook recipe");
-  }
-  // A feature is measured on its source's scenarios, which InferPilot's client need not reproduce; a perf
-  // task's workload is its own, which it runs.
-  if ((mode === 'perf' || (mode === 'feature' && def.workload)) && !def.client_script) {
-    take('client_script', TEMPLATE, "client_script: the task gave none, so InferPilot's template runs, sglang's serving benchmark"
-      + (mode === 'feature' ? '; a feature\'s numbers on it are reported, never a claim' : ''));
-  }
-  if (mode === 'perf' && !def.workload && isTemplate(def.client_script)) {
-    take('workload', { ...TEMPLATE_WORKLOAD }, `workload: the task gave none, so the client template runs its own: ${TEMPLATE_WORKLOAD.isl} tokens in, `
-      + `${TEMPLATE_WORKLOAD.osl} out, concurrency ${TEMPLATE_WORKLOAD.conc}`);
-  }
-  return { def, took };
-}
 
 // What a definition still lacks before its mode can start; every gap is a question for the user.
 function missingFields(a) {
@@ -243,8 +212,22 @@ function missingFields(a) {
   if ((mode === 'feature' || mode === 'perf') && !a.model_path) {
     ask('model_path', 'Which model should the baseline and the gates run (local path)?', 'Setup runs the baseline on it');
   }
-  // The server and client scripts and a perf task's workload are never asked for: what the task does not bring
-  // is InferPilot's template (templateDefaults).
+  if (mode === 'perf' && !a.workload) {
+    ask('workload', 'Which fixed workload should every measurement use (input/output lengths, concurrency, dataset)?',
+      'performance numbers count only on a workload fixed before any profile is read');
+  }
+  if ((mode === 'feature' || mode === 'perf') && !a.server_script) {
+    ask('server_script', 'Which script starts the server for the baseline (absolute path)? It must pass --port $PORT and $EXTRA_ARGS '
+      + `to the server. Or ${TEMPLATE}: InferPilot's, after the model's sglang cookbook recipe.`,
+      'every arm, baseline and feature, is launched with it: the feature arm adds its flags through EXTRA_ARGS', [TEMPLATE]);
+  }
+  // A feature is measured on its source's scenarios, which InferPilot's client need not reproduce; a perf
+  // task's workload is the user's own, which it runs.
+  if ((mode === 'perf' || (mode === 'feature' && a.workload)) && !a.client_script) {
+    ask('client_script', 'Which script runs the workload against the server (absolute path)? It reads PORT and writes its logs to OUT_DIR. '
+      + `Or ${TEMPLATE}: InferPilot's sglang serving benchmark on the workload${mode === 'feature' ? ', whose numbers are reported, never a claim' : ''}.`,
+      'it is the benchmark: every performance measurement runs it unchanged', [TEMPLATE]);
+  }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
   for (const [field, gate] of [['long_context', 'G3, the long-context gate'], ['stability', 'G4, the stability run of more than 48 hours']]) {
@@ -292,18 +275,14 @@ async function intakeStage(raw) {
   const request = String(raw.request || '').trim();
   const given = pick(raw, TASK_KEYS);
   const answers = pick(asObject(raw.answers), TASK_KEYS);
-  // What the run took as InferPilot's own goes where a human checks it: the assumptions and each field's provenance.
-  const tookOf = (took) => ({ provenance: Object.fromEntries(took.map((t) => [t.field, 'default'])), assumptions: took.map((t) => t.what) });
-  const direct = templateDefaults({ ...answers, ...given });
-  if (!request && missingFields(direct.def).length === 0) return { args: { ...raw, ...direct.def }, ...tookOf(direct.took) };
+  if (!request && missingFields({ ...answers, ...given }).length === 0) return { args: { ...raw, ...answers, ...given } };
   enter('Intake');
   const res = await call('intake', 'define', { request, given, answers, inferpilot_dir: INFERPILOT }, INTAKE, 'intake');
-  const { def: merged, took } = templateDefaults({ ...(res && res.task_def ? pick(res.task_def, TASK_KEYS) : {}), ...answers, ...given });
-  // A field the run fills with InferPilot's own is no question, whoever asks it.
-  const asked = (res && res.status === 'needs_input' ? (res.questions || []) : []).filter((q) => !took.some((t) => t.field === q.field));
+  const merged = { ...(res && res.task_def ? pick(res.task_def, TASK_KEYS) : {}), ...answers, ...given };
+  const asked = res && res.status === 'needs_input' ? (res.questions || []) : [];
   const questions = [...asked, ...missingFields(merged).filter((q) => !asked.some((a) => a.field === q.field))];
-  const provenance = { ...((res && res.provenance) || {}), ...tookOf(took).provenance };
-  const assumptions = [...((res && res.assumptions) || []), ...tookOf(took).assumptions];
+  const provenance = (res && res.provenance) || {};
+  const assumptions = (res && res.assumptions) || [];
   const stopped = (status, summary, extra) => {
     log(`[inferpilot] intake: ${status} — ${summary}`);
     return { record: { mode: String(merged.mode || ''), status, stopped_at: 'Intake', run_dir: '', report_path: '',
@@ -1065,9 +1044,8 @@ function askImage(img) {
   return R;
 }
 
-// A port is measured on its source's scenarios. When a client the user brought does not run them, the run stops
-// at Spec and asks, before anything is built on a workload nobody gave; a task with no client of the user's takes
-// InferPilot's for those scenarios instead (runFeature).
+// A port is measured on its source's scenarios with the user's own server and client: when the task's
+// client does not run them, the run stops at Spec and asks, before anything is built on a workload nobody gave.
 function askWorkload(spec) {
   const gap = String(spec.workload_gap).trim();
   const fallback = String(spec.fallback_client || '').trim();
@@ -1107,7 +1085,7 @@ async function setup(requireBaseline) {
   }
   const unrendered = ['server_script', 'client_script'].filter((k) => isTemplate(A[k]) && !C[k]);
   if (unrendered.length) {
-    note('Setup', 'fail', `${unrendered.join(' and ')}: the run takes InferPilot's template, and Setup rendered none`);
+    note('Setup', 'fail', `${unrendered.join(' and ')}: the user took InferPilot's template, and Setup rendered none`);
     return false;
   }
   // G2 runs the same accuracy script for every arm, from the baseline on.
@@ -1546,12 +1524,10 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
 async function runFeature() {
   const early = await start(true);
   if (early) return early;
-  // Spec's fallback client for the source's scenarios: the one the user named, or the one taken at Spec below.
-  let fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
-  // A client of the user's own: not InferPilot's template, and not that fallback.
-  const ownClient = !!C.client_script && !isTemplate(A.client_script) && !fallback;
-  // InferPilot's client, that fallback or its template on the task's workload, need not reproduce the
-  // source's numbers: what it measures is reported, never a claim.
+  // Spec's fallback client, which the user took for the source's scenarios.
+  const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
+  // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
+  // reproduce the source's numbers: what it measures is reported, never a claim.
   const claimOf = (c) => (fallback || isTemplate(A.client_script) ? '' : c || '');
 
   // Resume after a human approved design.md (a run that stopped at Design).
@@ -1577,23 +1553,9 @@ async function runFeature() {
     return finish('blocked', 'Spec');
   }
   C.spec_path = spec.spec_path;
-  // Only the fallback runs the source's scenarios; the template runs the task's workload. A client the user
-  // brought that runs other scenarios is a question; without one, InferPilot's client for the source's
-  // scenarios is taken, and the report says so.
-  const gap = String(spec.workload_gap || '').trim();
-  const fallbackClient = String(spec.fallback_client || '').trim();
-  let tookFallback = '';
-  if (!fallback && gap) {
-    if (ownClient || !fallbackClient) return askWorkload(spec);
-    C.client_script = fallbackClient;
-    fallback = true;
-    tookFallback = `; ${gap} The task brought no client of its own, so InferPilot's runs the source's scenarios (${fallbackClient}): `
-      + 'its numbers are reported, never a claim';
-    R.assumptions.push(`client_script: the task gave none for the source's scenarios, so InferPilot's client runs them (${fallbackClient}); `
-      + 'its numbers are reported, never a claim');
-    R.provenance.client_script = 'default';
-  }
-  note('Spec', 'pass', `${spec.spec_path}${spec.skill ? `; skill ${spec.skill}` : ''}${tookFallback}`);
+  // Only the fallback runs the source's scenarios; the template taken at Intake runs the task's workload.
+  if (!fallback && String(spec.workload_gap || '').trim()) return askWorkload(spec);
+  note('Spec', 'pass', `${spec.spec_path}${spec.skill ? `; skill ${spec.skill}` : ''}`);
   if (stopHere('Spec')) return finish('stopped', 'Spec');
 
   enter('Recon');

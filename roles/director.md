@@ -102,9 +102,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server is started from the
    run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts
-   to `RUN_DIR/scripts/task/` for the record), or InferPilot's template where the task brings none: its
-   field then reaches you as `template`, named by the user or taken by default.
-   `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
+   to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
+   `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
    `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
    *Servers*); poll the health endpoint; read the effective
@@ -113,7 +112,7 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    template's or the cookbook's flags.
    - **InferPilot's templates** (`task_definition.md` §1.2). The scripts the task brings
      (`server_script`, `client_script`, `accuracy_script`) run as given. From `templates/harness/` into
-     `RUN_DIR/scripts/`, render the server or the client only where its field is `template`, and
+     `RUN_DIR/scripts/`, render only the server or the client the user answered `template` for, and
      `accuracy.sh` unless the task brings an `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts <those> --set MODEL_PATH=<model_path> --set TP=<the number of
      GPUs in the set> --task '<harness>' --workload '<workload, when a JSON object; else its lengths and
@@ -222,31 +221,26 @@ Return:
    and output lengths, concurrency, sampling, thinking on or off, hardware and its numbers. Check
    `RUN_DIR/feature_params.json` (Setup) against them: a value it lacks or got wrong is fixed there, and
    what Setup rendered and measured with it is rendered and measured again (Setup steps 3 and 4) before
-   anything else. **A port is measured on the source's own scenarios, with the run's server and
-   client: the user's, or InferPilot's where the task brings none.** Its claim is a gain beyond the
-   noise band there, with the source's numbers beside it for reference: the hardware differs, and so
-   may the size of the gain. The feature's own metric, which the
+   anything else. **A port is measured on the source's own scenarios, with the user's server and
+   client.** Its claim is a gain beyond the noise band there, with the source's numbers beside it for
+   reference: the hardware differs, and so may the size of the gain. The feature's own metric, which the
    hardware does not change (accept length for speculative decoding), stays within a tolerance of the
    source's that the spec names. It is a G1 criterion (`validation_doctrine.md`): the spec gives the
    source's value and the source's prompt set and settings for it, and the test of the work package
    that completes the feature's path judges it there, not G2 on its data sets. With no value to compare
    with (the source reports none, and no reference implementation runs on its prompts), it is no
    criterion: the spec says so and names no tolerance, and the metric is reported.
-   - **The user's client, or InferPilot's.** When the source claims a gain, `goal` neither names the
+   - **The user's workload, or a question.** When the source claims a gain, `goal` neither names the
      task's own workload nor drops the claim, and the task's `client_script` does not run the source's
      scenarios (there is none, or it runs others), return `workload_gap`: what the source measured, what
-     the task's client runs, what is missing. Return with it `fallback_client`, InferPilot's client for
-     the source's scenarios: `perf.sh` at those scenarios (`python3 <inferpilot_dir>/scripts/harness.py
+     the task's client runs, what is missing. The run then stops and asks the user; nothing is built on a
+     workload the user did not give. A client of InferPilot's for the source's scenarios is only a
+     fallback the user may take: `perf.sh` at those scenarios (`python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts perf --name fallback_client --task '<harness>' --feature
      RUN_DIR/feature_params.json` writes `RUN_DIR/scripts/fallback_client.sh`), or, when its parameters
-     cannot express them, one you write there. It need not reproduce the source's numbers, so what it
-     measures is reported, never a claim. A task whose client is the user's own stops here and asks:
-     nothing is built on a workload the user did not give, and the fallback is the user's to take. A
-     task with no client of the user's (none, or the template you rendered at Setup) takes the fallback
-     with no question, and the report says so: Setup measured no baseline on these scenarios, so
-     measure it with the fallback now as Setup step 4 does, and record the fallback in
-     `RUN_DIR/run.json` as the run's `client_script`. Once it is the run's client, there is no gap to
-     return.
+     cannot express them, one you write there. Return it as `fallback_client`. It need not reproduce the
+     source's numbers, so what it measures is reported, never a claim; once the user takes it
+     (`client_script`), there is no gap to return.
    - **Out of scope by default.** A scenario the source did not consider, the task's own workload
      included, is not measured unless `goal` names it; it goes under Non-goals with the reason (the
      PARD-2 port: vLLM's PR measured 256-token answers at concurrency 1 and its drafts were trained on
@@ -317,13 +311,15 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   sharing it.
 - `scan` with `share_daily_report` false (its Dispatch failed or timed out): share nothing, since a daily
   report it left may be partial; say where it is, if there is one, and that it was not shared.
-- List the `assumptions` (defaults the intake chose, values it inferred, and what the run took as
-  InferPilot's because the task brought none: a script, a perf task's workload, Spec's fallback client)
-  so a human can check them, and the scripts: which were the task's and which InferPilot's templates,
-  named by the user or taken by default (a feature's numbers on InferPilot's client are reported,
-  never claimed), the cookbook recipe the template server followed, and each rendered parameter's
-  value and source (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words
-  they came from.
+- List the intake's `assumptions` (defaults it chose, values it inferred) so a human can check them,
+  and the scripts: which were the task's and which were InferPilot's templates the user took (a
+  feature's numbers on InferPilot's client are reported, never claimed), the cookbook recipe the
+  template server followed, and each rendered parameter's value and source
+  (`RUN_DIR/scripts/harness.json`), the feature's and the cookbook's with the words they came from.
+  `harness.json` holds only what Setup rendered. Spec's fallback client, where the user took it (the
+  run's `client_script` is a `fallback_client.sh`), has its own record beside it, `fallback_client.json`:
+  give the lengths and the concurrency it measured with from there, or from the script itself when
+  it was written by hand at Spec.
 - G4 (`stability`): give its verdict with the commit it ran on (the verify engineer's `gates`, the
   ledger). It runs once in a run: when the branch's head is a later commit, say near the top that the
   code handed over has not been through G4, and since which commit. A G4 that failed where the baseline

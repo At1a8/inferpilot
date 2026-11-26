@@ -36,10 +36,8 @@ the fields `inferpilot.js` takes, the same names every role reads. It can be giv
 request in plain words: then an Intake phase runs first and turns the request into a definition,
 checking what it can without changing anything (the checkout, the model on this machine, the GPUs,
 the issue). A definition that still lacks something its mode needs — the issue, the checkout, the
-model for `feature` and `perf` — starts nothing and comes back as questions, one per field, each with
-options or a default. A server script, a client script or a `perf` workload the task does not bring
-is no question: InferPilot's templates run instead, and the report says so. A complete definition
-skips the Intake.
+model for `feature` and `perf`, the fixed workload for `perf` — starts nothing and comes back as
+questions, one per field, each with options or a default. A complete definition skips the Intake.
 
 Every implementation runs one work package at a time; an independent test engineer re-runs its unit
 test, checks that the test fails without the change, and runs the feature-off check; a package that
@@ -88,7 +86,7 @@ the roles:
 
 | Role | Phases | What it does |
 |---|---|---|
-| `intake` | Intake | turns a request in plain words, or a definition with gaps, into the task definition: decides the mode, fills fields with read-only checks, records defaults as assumptions, asks instead of guessing (a missing source of truth or model, anything that would cost something to obtain; never for a script or a workload, which InferPilot's templates stand in for), rejects what InferPilot does not do |
+| `intake` | Intake | turns a request in plain words, or a definition with gaps, into the task definition: decides the mode, fills fields with read-only checks, records defaults as assumptions, asks instead of guessing (a missing source of truth, model or workload, anything that would cost something to obtain), rejects what InferPilot does not do |
 | `director` | Setup, Spec, Report | creates the run directory and the task's branch, pins commit, image and GPUs and runs the baseline; writes the feature spec with measurable acceptance criteria; writes the final report for every outcome, with the next step for a human |
 | `scout` | Collect | gathers candidate tasks with the scripts below |
 | `dispatcher` | Dispatch | sets each candidate's gap type, level, CUDA dependencies with their AMD starting points, effort and priority, and ranks them into a queue |
@@ -365,9 +363,9 @@ use /workspace/inferpilot/inferpilot.js with inferpilot_dir=/workspace/inferpilo
 is slow on MI355X, make it faster"
 ```
 
-When something is missing (here: which model on this machine to run), the run starts
+When something is missing (here: which fixed workload every measurement uses), the run starts
 nothing and returns `status: needs_input` with one question per field. Answer them in the chat;
-Claude Code runs `inferpilot.js` again with the same arguments plus `answers={"model_path": ...}`.
+Claude Code runs `inferpilot.js` again with the same arguments plus `answers={"workload": ...}`.
 [Running it](#running-it) lists all arguments.
 
 **Without a terminal to type in** (an agent's shell, a job scheduler), keep the interactive session and
@@ -573,9 +571,9 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (for sglang the image's `/sgl-workspace/sglang` by default, which the image installs sglang from) |
 | `model_path` | the model the baseline and the gates run (required for `feature` and `perf`) |
 | `framework`, `platform`, `gpu_ids` | target and environment (`sglang`; empty `gpu_ids` lets Setup pick idle GPUs, which every later role then uses through `HIP_VISIBLE_DEVICES`) |
-| `workload` | the benchmark every measurement uses, e.g. `{"isl":8192,"osl":1024,"conc":64}`, fixed at Setup; a `perf` task that gives neither a workload nor a client runs the client template's own: 8192 tokens in, 1024 out, concurrency 32 |
-| `server_script` | your script that starts the server for `model_path`; InferPilot sets `PORT`, `HIP_VISIBLE_DEVICES`, `PYTHONPATH` and `EXTRA_ARGS` (the feature's flags, empty for the baseline), and the script passes `--port $PORT` and `$EXTRA_ARGS` to the server ([`templates/task_definition.md`](templates/task_definition.md) §1.1). A `feature` or `perf` task without one is asked for none: it runs InferPilot's `templates/harness/server.sh`, after the model's recipe in the sglang cookbook, and the report says so; `template` names it outright |
-| `client_script` | your script that runs the workload against `PORT` and writes its logs to `OUT_DIR`: the benchmark, run unchanged. A `perf` task, or a feature with a `workload`, without one is asked for none: it runs InferPilot's `templates/harness/perf.sh` (sglang's serving benchmark) on the `workload`, and the report says so; `template` names it outright; a feature's numbers on it are reported, never claimed |
+| `workload` | the benchmark every measurement uses, e.g. `{"isl":8192,"osl":1024,"conc":64}`; required for `perf`, fixed at Setup |
+| `server_script` | your script that starts the server for `model_path`; InferPilot sets `PORT`, `HIP_VISIBLE_DEVICES`, `PYTHONPATH` and `EXTRA_ARGS` (the feature's flags, empty for the baseline), and the script passes `--port $PORT` and `$EXTRA_ARGS` to the server; required for `feature` and `perf` ([`templates/task_definition.md`](templates/task_definition.md) §1.1). Without one, you may answer `template`: InferPilot's `templates/harness/server.sh`, after the model's recipe in the sglang cookbook |
+| `client_script` | your script that runs the workload against `PORT` and writes its logs to `OUT_DIR`: the benchmark, run unchanged; required for `perf` and for a feature with a `workload`. Without one, you may answer `template`: InferPilot's `templates/harness/perf.sh` (sglang's serving benchmark) on the `workload`; a feature's numbers on it are reported, never claimed |
 | `accuracy_script` | your script that measures accuracy against `API_URL` and writes its results under `RESULT_ROOT`, run unchanged for every arm; optional: without one, InferPilot's `templates/harness/accuracy.sh` (`scripts/eval_accuracy.sh`) |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}` (`python3 scripts/harness.py show` lists them): each parameter takes the task's value, else the one the tests of the feature's source use (vLLM's `--max-model-len 4096` for PARD-2), else for the server the model's sglang cookbook recipe, else the template's default ([`templates/task_definition.md`](templates/task_definition.md) §1.2) |
 | `container` | only when InferPilot runs on the host: the framework's container, reached with `docker exec` |
@@ -604,8 +602,8 @@ Everything but `inferpilot_dir`, `request`, `answers`, `exp_root`, `review_model
 definition; the result of every run that started records the definition it used (`task_def`), where
 each field came from (`provenance`) and the intake's `assumptions`.
 
-Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a client the user
-brought for a port does not run its source's scenarios; any `stop_after`; with `auto_approve_design`
+Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a port's client does not
+run its source's scenarios; any `stop_after`; with `auto_approve_design`
 set to `false`, L3 tasks and designs the architect flags stop at Design (`awaiting_design_review`; by
 default they go on, and the report says no human approved the design); a review the reviewer marks `blocked`
 stops before the PR; the PR engineer returns the exact `git push` instead of pushing; issue replies
@@ -651,7 +649,7 @@ GitHub allows 60 requests an hour and 10 searches a minute per IP address).
 | `scripts/scan_ci.py` | the AMD CI on main from its own runs and logs (each failing job: since when, last passed, failed tests, first errors), and the Failure Trackers' clusters |
 | `scripts/eval_accuracy.sh` | accuracy of a running server through evalscope (the bootstrap installs it), the G2 gate (each set at most 1 point below the baseline): gsm8k on all 1319 questions by default; gpqa_diamond and simple_qa (LLM judge) as well when the task says the change may lose accuracy; other sets by name; every run sampled afresh, never from evalscope's cache; a set where a question got no answer gets no score; keys only from the environment |
 | `scripts/stability.sh` | G4's load, with `stability` on: the run's `client_script` run back to back against one server until `HOURS` have passed (48 for G4; the pass in progress finishes), with one line per pass in `OUT_DIR/stability.jsonl`: the client's exit status and result, and the memory in use on every GPU and on the host. The first pass that fails ends it |
-| `scripts/harness.py` | InferPilot's templates (`templates/harness/`): `show` lists the parameters of the server, performance client and accuracy templates with their defaults; `render` writes the ones a run uses (the server or client of a task that brings no script of its own, the accuracy script unless the task brings one, Spec's fallback client) with the task's values, then those the feature's source tests with, then for the server the model's sglang cookbook recipe (`--cookbook`), then the defaults, and `harness.json`, where each value came from |
+| `scripts/harness.py` | InferPilot's templates (`templates/harness/`): `show` lists the parameters of the server, performance client and accuracy templates with their defaults; `render` writes the ones a run uses (the server or client a user without a script of their own took, the accuracy script unless the task brings one, Spec's fallback client) with the task's values, then those the feature's source tests with, then for the server the model's sglang cookbook recipe (`--cookbook`), then the defaults, and `harness.json`, where each value came from |
 | `scripts/scan_upstream.py` | merged upstream commits: new CUDA gates, CUDA-first features, new models |
 | `scripts/audit_platform_gates.py` | platform gates to re-check on a new architecture (capability checks true on gfx1250, wave32 assumptions) |
 | `scripts/audit_host_syncs.py` | host-device sync and copy candidates on the hot path (leads for a profile) |

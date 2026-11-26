@@ -247,62 +247,6 @@ def flags_in(text, command):
     return out
 
 
-class TemplateDefaultsTest(unittest.TestCase):
-    """A server script, a client script or a perf task's workload that the task does not bring is InferPilot's
-    template, and nothing is asked: inferpilot.js takes it (templateDefaults) and records it, and the task
-    definition, the roles and both READMEs say the same. The workload it takes is the client template's own."""
-
-    STALE = re.compile(r"answer(?:s|ed|ing)? `template`|never chosen for the user|Only the user takes it|the user took|"
-                       r"only where the user takes them")
-
-    @staticmethod
-    def flat(path):
-        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
-
-    def test_the_workload_taken_by_default_is_the_client_templates_own(self):
-        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        taken = re.search(r"const TEMPLATE_WORKLOAD = \{ isl: (\d+), osl: (\d+), conc: (\d+) \};", src)
-        self.assertIsNotNone(taken, "inferpilot.js does not state the workload a perf task without one runs")
-        perf = (ROOT / "templates" / "harness" / "perf.sh").read_text(encoding="utf-8")
-        own = [re.search(r'^%s="\$\{%s:-(\d+)\}"' % (name, name), perf, re.M) for name in ("ISL", "OSL", "CONCURRENCY")]
-        self.assertTrue(all(own), "templates/harness/perf.sh gives ISL, OSL or CONCURRENCY no default")
-        self.assertEqual([m.group(1) for m in own], list(taken.groups()), "not the client template's own workload")
-        said = "%s tokens in, %s out, concurrency %s" % taken.groups()
-        for path in ("inferpilot.js", "templates/task_definition.md", "knowledge/perf_evaluation.md", "README.md"):
-            self.assertIn(said, self.flat(path), "%s does not give the workload a perf task without one runs" % path)
-        self.assertIn("输入 %s 个 token、输出 %s 个、并发 %s" % taken.groups(), ZH)
-
-    def test_no_one_asks_for_a_script_or_a_workload(self):
-        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        missing = re.search(r"\nfunction missingFields\(a\) \{\n(.*?)\n\}\n", src, re.S).group(1)
-        for field in ("workload", "server_script"):
-            self.assertNotIn("ask('%s'" % field, missing, "inferpilot.js still asks for %s" % field)
-        self.assertNotIn("every performance measurement runs it unchanged", missing, "a perf task is still asked for its client")
-        defaults = re.search(r"\nfunction templateDefaults\(a\) \{\n(.*?)\n\}\n", src, re.S)
-        self.assertIsNotNone(defaults, "inferpilot.js takes no template by default")
-        for field in ("server_script", "client_script", "workload"):
-            self.assertIn("take('%s'" % field, defaults.group(1), "%s is not taken by default" % field)
-        for path, said in (("templates/task_definition.md", "and nothing is asked"), ("roles/intake.md", "Never ask for one either"),
-                           ("roles/director.md", "named by the user or taken by default"),
-                           ("knowledge/perf_evaluation.md", "Neither is asked for"), ("README.md", "is asked for none"),
-                           ("README.zh-CN.md", "没给时不会提问")):
-            self.assertIn(said, self.flat(path), "%s does not say that a script the task lacks is no question" % path)
-        stale = ["%s: %s" % (path.relative_to(ROOT), " ".join(m.group(0).split()))
-                 for pattern in ("knowledge/*.md", "roles/*.md", "templates/*.md", "README.md")
-                 for path in sorted(ROOT.glob(pattern)) for m in self.STALE.finditer(" ".join(path.read_text(encoding="utf-8").split()))]
-        self.assertEqual(stale, [], "these still make the template the user's to take")
-
-    def test_what_the_run_took_is_recorded_and_reported(self):
-        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("provenance: Object.fromEntries(took.map((t) => [t.field, 'default']))", src)
-        self.assertIn("assumptions: took.map((t) => t.what)", src)
-        report = self.flat("roles/director.md")
-        self.assertIn("what the run took as InferPilot's because the task brought none", report)
-        # a port with no client of the user's takes InferPilot's client for the source's scenarios at Spec
-        self.assertIn("if (ownClient || !fallbackClient) return askWorkload(spec);", src)
-        self.assertIn("takes the fallback with no question, and the report says so", report)
-
-
 class TokenComparisonTest(unittest.TestCase):
     """G2 compares scores, not tokens: a token comparison is a diagnosis aid or the subject of a determinism
     task (knowledge/validation_doctrine.md). No other document asks a gate for outputs equal to another
