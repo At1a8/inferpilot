@@ -1303,9 +1303,10 @@ class CiOnMainTest(unittest.TestCase):
         for said, why in (
                 ("const onMain = String(cl.on_main || 'fails').trim().toLowerCase();", "an answer without on_main is not a failure of main"),
                 ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
-                ("if (onMain === 'not_run') {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("if (onMain === 'not_run' && !handOver) {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("if (onMain === 'passes' && !handOver) {", "a green rerun here ends a failure of the CI's own as nothing to fix"),
+                ("if (unchecked) C.unchecked = R.unchecked = unchecked;", "an exit before the fix loses the part of the task that was not run"),
                 ("const unchecked = String(cl.unchecked || '').trim();", "a task of which a part was not run is called resolved"),
-                ("C.unchecked = R.unchecked = unchecked;", "a failure that is fixed loses the part of the task that was not run"),
                 ("inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);",
                  "the classification is not told its limit, and a large cluster loses its answer to the timeout"),
                 ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
@@ -1339,7 +1340,21 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "the run fixes what fails, and says that the fix does not answer for the rest"),
                 ("roles/ci_guardian.md", "keep a quarter of the time to it, at most 15 minutes"),
                 ("knowledge/ci_triage.md", "where the rest fails, the run fixes what fails and names what it did not check"),
-                ("roles/director.md", "With `unchecked` (a ci task of which a part was not run on this machine: tests, lanes)"),
+                ("roles/director.md", "With `unchecked` (a ci task of which a part is outside what the run answers for"),
+                # a green rerun here does not make a failure of the CI's own go away
+                ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
+                ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),
+                ("knowledge/ci_triage.md", "A failure that was the CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over"),
+                # intermittent is said of one commit, lane and image, not of the tracker's counts
+                ("roles/ci_guardian.md", "intermittent means some runs fail and some pass on one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "The tracker's counts are no such evidence: they span commits and images"),
+                ("knowledge/ci_triage.md", "Intermittent is said of one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "**A cluster of both.**"),
+                # the image is read where the tests run
+                ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
+                # a lane this machine cannot be is outside what the gate shows
+                ("knowledge/ci_triage.md", "A lane this machine cannot be stays `unchecked`: the gate is judged on the lanes that were run"),
+                ("roles/verify_engineer.md", "passes on every lane it failed on that this machine can run"),
                 ("roles/ci_guardian.md", "`scan_ci.py` lists ten tests and three job links of a cluster"),
                 ("roles/ci_guardian.md", "**Within your limit.**"),
                 ("roles/ci_guardian.md", "What you did not reach is `unchecked`, like any part you could not run"),

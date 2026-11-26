@@ -2277,6 +2277,24 @@ const scenarios = [
       && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
         && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
       `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // A failure of the CI's own, or an intermittent one, is handed over whatever a rerun of the test shows here.
+    for (const cls of ['infrastructure', 'flaky']) {
+      for (const verdict of ['passes', 'not_run', 'fails']) {
+        const own = await run({ mode: 'ci', task: 'c' }, classified({ on_main: verdict, failure_class: cls, failing_test_cmd: '',
+          evidence: 'the runner lost communication at 02:14' }));
+        check(own.result.status === 'handed_off' && own.result.stopped_at === 'Classify' && !own.keys.includes('ci_guardian:bisect')
+          && own.result.phases.some((p) => p.phase === 'Classify' && p.verdict === cls && p.summary.includes('the runner lost communication')),
+          `${cls} with main "${verdict}" is handed over with its class and evidence, not ended as nothing to fix: ${ended(own)}`);
+      }
+    }
+    // The part not run is kept whole in the result however the run ends: a note keeps 600 characters of it.
+    const long = `the tests on rocm724: ${'test_x, '.repeat(120)}and more`;
+    for (const out of [{ on_main: 'passes' }, { on_main: 'not_run' }, { on_main: 'fails' }]) {
+      const kept = await run({ mode: 'ci', task: 'c' }, classified({ ...out, unchecked: long }));
+      const report = kept.calls.find((c) => c.key === 'director:report');
+      check(kept.result.unchecked === long && report && report.ins.unchecked === long,
+        `main "${out.on_main}": the part not run reaches the result and the report whole (${kept.result.unchecked.length} characters): ${ended(kept)}`);
+    }
     // Where part fails and part was not run, what fails is fixed, and the run says what the fix does not answer for.
     const mixed = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', unchecked: 'the two tests on rocm724' }));
     check(mixed.result.status === 'ready_for_review' && mixed.keys.includes('ci_guardian:bisect') && mixed.result.unchecked === 'the two tests on rocm724'

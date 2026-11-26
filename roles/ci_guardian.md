@@ -24,16 +24,27 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
 
 - **Which image is the newest is established, not assumed.** It is the newest tag of the lane's
   variant (rocm10, rocm720 or rocm724) in the registry, and no older than the one the lane's latest
-  run on main pulled, which its log names. `$INFERPILOT_IMAGE` must be that image: one that only
-  matches the failed job's can be as old as it, and Setup may have taken an older one (`image_ok`).
+  run on main pulled, which its log names. The image the tests run in must be that image, read
+  where they run (`$INFERPILOT_IMAGE` in the container, or `docker inspect` from the host: `director.md`,
+  Setup): one that only matches the failed job's can be as old as it, and Setup may have taken an
+  older one (`image_ok`).
 - **Every test of the task, on every lane it failed on.** A tracker cluster holds several tests, and
   one that passes says nothing of the others. `scan_ci.py` lists ten tests and three job links of a
   cluster (`n_tests` says how many it has): take the rest from the tracker's own state and from the
   jobs, and name in `unchecked` whatever part of the task you could not establish.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
-  fails, and its class is `flaky` (step 2). So does one the tracker shows failing only some of its
-  runs, whatever one green run here says.
+  fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one
+  commit, one lane and one image, in your repeats or in the lane's runs of that commit. The tracker's
+  counts are no such evidence: they span commits and images, so "failed 3 of 31 runs" can be a
+  regression three runs old, or a failure fixed since.
+- **A failure that is the CI's own is handed over, whatever the test does here.** A runner that was
+  lost, an image that did not pull, a full disk, a job that never reached a test: the class is
+  `infrastructure` (step 2), with the job's evidence, and no rerun of a test on this machine answers
+  for it. The run hands it over even where the tests pass here.
+- **A cluster of both.** Where some tests fail every time and others only now and then, the class is
+  that of the ones that fail every time, which the run fixes; the intermittent ones go in `unchecked`
+  with their rates, for the handover the report makes.
 - **Within your limit.** A large cluster run three times can take longer than this call has. With
   `time_limit_min` above 0, plan from `deadline_utc`: keep a quarter of the time to it, at most 15
   minutes, for stopping what you started and writing the record, and stop a test that would run into
@@ -45,7 +56,8 @@ Then:
   the lane's newest, or a fix has merged since (then `fixed_by` names that pull request or commit).
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
-  `failing_test_cmd` out.
+  `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is
+  `infrastructure`, and the run hands it over.
 - Any of it fails: `on_main: "fails"`, and the failure is main's, whatever the age of the image:
   classify it (step 2), and list in the triage record what passed. A lane whose Python or PyTorch
   is older than the code or the test needs is such a failure: the lane is supported, and one of the
@@ -94,7 +106,7 @@ Return:
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
  "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
- "unchecked": "<the tests or lanes of the task that were not run here>",
+ "unchecked": "<the tests or lanes of the task that were not run here, or that fail only now and then>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",

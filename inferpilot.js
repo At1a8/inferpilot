@@ -2132,9 +2132,14 @@ async function runCi() {
   // lane does is handed over, since a run in another environment shows nothing either way. Only a failure that
   // main shows there is classified and fixed.
   const onMain = String(cl.on_main || 'fails').trim().toLowerCase();
-  // A cluster is several tests, on one lane or more: what was run says nothing of what was not.
+  // A cluster is several tests, on one lane or more: what was run says nothing of what was not. Kept whole in the
+  // result and for the report, however the run ends: a note keeps 600 characters of it.
   const unchecked = String(cl.unchecked || '').trim();
-  if (onMain === 'passes') {
+  if (unchecked) C.unchecked = R.unchecked = unchecked;
+  // A failure that is the CI's own (a runner lost, an image that did not pull, a full disk) or an intermittent one
+  // is handed over whatever a run of the test on main shows: a green rerun here does not make the job's failure
+  // go away, and its class and evidence go to the CI's maintainers below.
+  if (onMain === 'passes' && !handOver) {
     if (unchecked) {
       note('Classify', 'handed_off', `what was run passes on main, and part of the task was not run: ${unchecked}; ${cl.evidence}`);
       return finish('handed_off', 'Classify');
@@ -2144,19 +2149,20 @@ async function runCi() {
     note('Classify', 'passes_on_main', `${fixedBy ? `fixed by ${fixedBy}: ` : ''}${cl.evidence}`);
     return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');
   }
-  if (onMain === 'not_run') {
-    note('Classify', 'handed_off', `main was not judged where the task needs it (the lane's environment, the task's own tree): ${cl.evidence}`);
+  if (onMain === 'not_run' && !handOver) {
+    note('Classify', 'handed_off', `main was not judged where the task needs it (the lane's environment, the task's own tree): ${cl.evidence}`
+      + `${unchecked ? `; not run: ${unchecked}` : ''}`);
     return finish('handed_off', 'Classify');
   }
   if (!cl.failure_class) {
     note('Classify', 'fail', 'main fails on the lane, and the failure has no class');
     return finish('blocked', 'Classify');
   }
-  // What fails is fixed, or handed over. The part of the task that was not run stays unknown: nothing this run
-  // does answers for it, and the run record and the result say so.
+  // What fails is fixed, or handed over. The part of the task that was not run, or that fails only now and then
+  // next to tests that fail every time, stays outside it: nothing this run does answers for it, and the run
+  // record and the result say so.
   if (unchecked) {
-    C.unchecked = R.unchecked = unchecked;
-    note('Classify', 'unchecked', `part of the task was not run here, and nothing this run does answers for it: ${unchecked}`);
+    note('Classify', 'unchecked', `part of the task is outside what this run answers for (not run here, or intermittent): ${unchecked}`);
   }
   if (!handOver && !failingCmd) {
     note('Classify', 'fail', `${cl.failure_class} without a failing_test_cmd; the failing_test gate needs one`);

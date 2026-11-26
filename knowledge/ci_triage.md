@@ -56,8 +56,10 @@ is only when the task began there) in the environment of the lane that failed: t
 image, its GPU model and its node count. The newest image is established, not assumed: the newest tag
 of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
 The answer is for every test of the task on every lane it failed on, and a pass has to hold: each
-test run as the job ran it, in the job's order, three times. One that fails some of those runs, or
-that the tracker shows failing only some of its runs, is `flaky`, not passing.
+test run as the job ran it, in the job's order, three times. One that fails some of those runs is
+`flaky`, not passing. Intermittent is said of one commit, one lane and one image: the tracker's
+counts span commits and images, and prove nothing of the kind. A failure that was the CI's own (a
+runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the tests do here.
 
 - All of it passes: there is nothing to fix in the framework, and the run ends with no fix and no
   reply. The job ran an image older than the lane's newest, or a fix has merged since. Most of two
@@ -83,7 +85,7 @@ client, which a task that can reach a fix is asked for before it starts.
 | code regression | `status` says `new regression (since DATE)`; many tests share one cluster; one lane or all lanes start failing on the same day | find the culprit commit, fix forward |
 | dependency bump | started with a library or image bump (e.g. Mooncake v0.3.14 broke a PD test on ROCm images) | pin or adapt, report upstream to the library |
 | test bug | `never-passed` on a lane, order dependence (`world group is not initialized` only when another test ran first), an API newer than the lane's Python (`enterContext` is 3.11+, the rocm720 lane runs 3.10) | fix the test, not the framework |
-| flaky | passes on rerun; `flaky` status; failure rate below the noise you measured | rerun N times, report the rate, propose quarantine only with numbers |
+| flaky | fails some runs and passes others on one commit, lane and image; the tracker's `flaky` is a hint, since its counts span commits and images | rerun N times, report the rate, propose quarantine only with numbers |
 | infrastructure | `Self-hosted runner lost communication`, interface errors (`UCX ERROR failed to get interface index ... errno 19`), image pull or disk failures | hand over to CI maintainers with the evidence |
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
@@ -131,7 +133,9 @@ from 10-02 to at least 10-25) had no owner.
 
 ## 4. Gates for a CI fix
 
-- The failing test passes on the fix, on every lane it failed on (extra gate `failing_test`).
+- The failing test passes on the fix, on every lane it failed on (extra gate `failing_test`). A lane
+  this machine cannot be stays `unchecked`: the gate is judged on the lanes that were run, and the
+  pull request says where the fix was not verified.
 - The existing tests of the module the fix touches still pass, judged against the tree without the
   fix; one the regression kept from running at all (the module did not import) is judged against the
   culprit's parent. G0 (`validation_doctrine.md`) only when the fix is behind a feature's switch: most
