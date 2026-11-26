@@ -767,6 +767,9 @@ const DIAG = S({
 const CLASSIFY = S({
   failure_class: { type: 'string', enum: ['code_regression', 'dependency_bump', 'test_bug', 'flaky', 'infrastructure'] },
   failing_test_cmd: str,
+  // open pull requests of the framework's repository that already fix this failure (#<n>): the run verifies
+  // them in place of finding the culprit and writing a fix of its own
+  existing_prs: strs,
   window: str,
   // the test fails on a number it measures (a throughput, a latency, a speed threshold), not on an error:
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
@@ -2026,6 +2029,32 @@ async function runCi() {
   if (handOver) return finish('handed_off', 'Classify');
   if (stopHere('Classify')) return finish('stopped', 'Classify');
 
+  const gates = [{ gate: 'failing_test', cmd: failingCmd, expect: 'pass on every lane it failed on' }];
+  // An open pull request that already fixes the failure is verified, not written again, as for an issue
+  // (push_existing_pr): no culprit is searched for, the failing test is the gate the pull request must pass, and
+  // the PR phase writes a verification comment for it. One that has merged is not listed: main has its fix.
+  const named = (Array.isArray(cl.existing_prs) ? cl.existing_prs : []).map((p) => String(p || '').trim()).filter(Boolean);
+  // Only a pull request of the framework's own repository can be applied to its tree: #<n>.
+  const existing = named.filter((p) => /^#\d+$/.test(p));
+  if (existing.length < named.length) {
+    note('Classify', 'existing_fix', `${named.filter((p) => !existing.includes(p)).join(', ')}: named as a fix, but not as a pull `
+      + 'request of this repository (#<n>); not applied');
+  }
+  if (existing.length) {
+    // An existing fix has no Bisect phase: a stop named for it still ends the run before the fix is applied.
+    if (stopHere('Bisect')) {
+      note('Classify', 'stopped', 'stop_after=Bisect: an existing fix PR is applied without a Bisect phase, so the run stops before applying it');
+      return finish('stopped', 'Classify');
+    }
+    const lacking = askForFix('Classify');
+    if (lacking) return lacking;
+    C.existing_prs = existing;
+    note('Classify', 'existing_fix', `${existing.join(', ')}: open, and said to fix this failure; verified in place of a fix of the run's own`);
+    const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${existing.join(', ')} and complete what verification needs`,
+      test: 'the failing test passes on every lane it failed on; the PR\'s own tests pass', files: [], depends_on: [] };
+    return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');
+  }
+
   enter('Bisect');
   const bi = await call('ci_guardian', 'bisect', inputs(), BISECT);
   if (!bi || bi.confirmed !== true || !(bi.work_packages || []).length) {
@@ -2038,8 +2067,7 @@ async function runCi() {
   const lacking = askForFix('Bisect');
   if (lacking) return lacking;
 
-  return deliver(bi.work_packages, [{ gate: 'failing_test', cmd: failingCmd, expect: 'pass on every lane it failed on' }],
-    ciClaim, perfFailure ? true : 'fix');
+  return deliver(bi.work_packages, gates, ciClaim, perfFailure ? true : 'fix');
 }
 
 async function runPerf() {

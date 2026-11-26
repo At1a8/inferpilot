@@ -1950,6 +1950,65 @@ const scenarios = [
     check(r.result.status === 'handed_off', `status ${r.result.status}`);
     check(!r.keys.includes('ci_guardian:bisect'), 'no bisect for infrastructure');
   }],
+  ['ci: an open pull request that already fixes the failure is verified, not fixed a second time', async () => {
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const r = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: ['#50220'] }));
+    check(r.result.status === 'ready_for_review' && !r.keys.includes('ci_guardian:bisect'), `no culprit is searched for: ${ended(r)}`);
+    check(eqList(r.phases, ['Setup', 'Classify', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
+    const im = r.calls.find((c) => c.key === 'implementer:implement');
+    check(im && im.ins.work_package.kind === 'apply_pr' && im.ins.work_package.goal.includes('#50220')
+      && /failing test passes on every lane/.test(im.ins.work_package.test), `the pull request is applied, not a fix planned: ${JSON.stringify(im && im.ins.work_package)}`);
+    const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ve && ve.ins.extra_gates.length === 1 && ve.ins.extra_gates[0].gate === 'failing_test' && ve.ins.extra_gates[0].cmd === 'pytest test_x.py',
+      `the failing test is the gate it must pass: ${JSON.stringify(ve && ve.ins.extra_gates)}`);
+    const pe = r.calls.find((c) => c.key === 'pr_engineer:pr');
+    check(pe && eqList(pe.ins.existing_prs, ['#50220']), `the PR engineer knows which pull request the comment is for: ${JSON.stringify(pe && pe.ins.existing_prs)}`);
+    check(/^no gain is claimed: no slower than the baseline/.test(r.calls.find((c) => c.key === 'perf_engineer:perf_eval').ins.claim),
+      'its speed is measured as a fix of the run\'s own is: no slower than the base');
+    check(r.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'existing_fix' && p.summary.startsWith('#50220: open')),
+      `the run record names it: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Classify'))}`);
+    // Several are applied together, as for an issue; one of another repository cannot be applied to this tree.
+    const two = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: ['#50220', ' #50231 ', 'ROCm/aiter#812', ''] }));
+    const im2 = two.calls.find((c) => c.key === 'implementer:implement');
+    check(im2.ins.work_package.goal.includes('#50220, #50231') && !im2.ins.work_package.goal.includes('aiter')
+      && two.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('ROCm/aiter#812: named as a fix, but not as a pull request of this repository')),
+      `only pull requests of this repository are applied: ${im2.ins.work_package.goal}`);
+    const foreign = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: ['ROCm/aiter#812'] }));
+    check(foreign.result.status === 'ready_for_review' && foreign.keys.includes('ci_guardian:bisect')
+      && foreign.calls.find((c) => c.key === 'implementer:implement').ins.work_package.kind !== 'apply_pr',
+      `with none of this repository, the culprit is found and fixed as before: ${ended(foreign)}`);
+    // None named: as before.
+    for (const none of [{}, { existing_prs: [] }]) {
+      const plain = await run({ mode: 'ci', task: 'c' }, classified(none));
+      check(plain.keys.includes('ci_guardian:bisect') && plain.result.status === 'ready_for_review', `no open fix (${JSON.stringify(none)}): the bisect runs`);
+    }
+    // What is handed over is handed over, whatever fix is named for it.
+    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ failure_class: 'flaky', existing_prs: ['#50220'] }));
+    check(flaky.result.status === 'handed_off' && !flaky.keys.includes('implementer:implement'), `a flaky failure is handed over all the same: ${ended(flaky)}`);
+    // A failure on a number: the pull request must restore it.
+    const perf = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: ['#50220'], performance: true,
+      perf_claim: 'output throughput back above 1100 tok/s' }));
+    check(perf.result.status === 'ready_for_review' && perf.calls.find((c) => c.key === 'perf_engineer:perf_eval').ins.claim === 'output throughput back above 1100 tok/s',
+      `a performance failure is judged on its number with the existing fix too: ${ended(perf)}`);
+    // An existing fix has no Bisect: a stop named for it holds before the fix is applied, and no fix starts without a model.
+    const skipped = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect' }, classified({ existing_prs: ['#50220'] }));
+    check(skipped.result.status === 'stopped' && skipped.result.stopped_at === 'Classify' && !skipped.keys.includes('implementer:implement'),
+      `stop_after=Bisect holds before the existing fix is applied: ${ended(skipped)}`);
+    let classifiedOnce = false;
+    const lifted = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect' }, {
+      'ci_guardian:classify': () => {
+        classifiedOnce = true;
+        return { ...DEFAULTS['ci_guardian:classify'](), existing_prs: ['#50220'] };
+      },
+    }, { control: () => (classifiedOnce ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Classify' && !lifted.keys.includes('implementer:implement')
+      && (((lifted.result.next || {}).ask || [])[0] || {}).field === 'model_path',
+      `a stop the control file lifts starts no existing fix without a model: ${ended(lifted)}`);
+    const later = await run({ mode: 'ci', task: 'c', stop_after: 'Verify' }, classified({ existing_prs: ['#50220'] }));
+    check(later.result.status === 'stopped' && later.result.stopped_at === 'Verify' && later.keys.includes('implementer:implement'),
+      `with a later stop the existing fix is applied and verified: ${ended(later)}`);
+  }],
   ['ci: code regression to a fix PR', async () => {
     const r = await run({ mode: 'ci', task: 'tracker cluster _check ImportError' });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);

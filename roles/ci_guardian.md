@@ -25,7 +25,17 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue).
      judged against it.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
-4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
+4. Look for a fix someone has already opened: the pull request the tracker or the CI issue names for
+   this failure, the pull requests linked to the issue or the job, and the open pull requests of the
+   framework's repository that touch the failing test or name its error (the search API with
+   `GITHUB_TOKEN`, GET only). Read the diff of each. It counts only when it addresses this failure, the
+   same error on the same path, not when it only cites it: the fix a tracker names can be wrong. Return
+   those that are open, drafts included, as `existing_prs` (`#<n>`): the run then verifies them on this
+   machine in place of finding the culprit and fixing the failure a second time (`ci_triage.md` §2),
+   and no bisect follows. One that has merged is not listed: main has its fix, and what still fails
+   there it does not fix. One in another repository (a component's) is not listed either: name it in
+   the triage record.
+5. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
    handover note there (who, what evidence).
 
 Return:
@@ -33,6 +43,7 @@ Return:
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
+ "existing_prs": [],
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
  "triage_path": "/abs/RUN_DIR/ci_triage.md"}

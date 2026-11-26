@@ -27,12 +27,13 @@ changes code the server runs (G5: no slower than the base); a fix to tests, docu
 alone skips it, unless the problem is itself one of performance (an issue triaged as `performance`,
 a CI failure on a number its test measures): its number must come back, whatever the fix changes. An
 issue whose reporter's code fails while main passes ends as *fixed on main*; with `bisect_fixed` a
-Bisect phase first finds the commit that fixed it. Spinoff runs when the run found problems that are
-not its own: a failure the base commit shows without the change, or a lead a role met on the way (a
-bug in code it read, a broken test or image). For each failure the base commit shows, it gives the
-upstream issue that tracks it, or an issue draft for you to file. Leads are listed with how to
-reproduce them; with `confirm_leads` it first checks each on the base commit and drafts those that
-show there.
+Bisect phase first finds the commit that fixed it. A CI failure that an open pull request already fixes
+skips Bisect: the run verifies that pull request and drafts a comment for it, as it does for an issue.
+Spinoff runs when the run found problems that are not its own: a failure the base commit shows without
+the change, or a lead a role met on the way (a bug in code it read, a broken test or image). For each
+failure the base commit shows, it gives the upstream issue that tracks it, or an issue draft for you to
+file. Leads are listed with how to reproduce them; with `confirm_leads` it first checks each on the
+base commit and drafts those that show there.
 
 A task starts from a **task definition** ([`templates/task_definition.md`](templates/task_definition.md)):
 the fields `inferpilot.js` takes, the same names every role reads. It can be given as fields, or as a

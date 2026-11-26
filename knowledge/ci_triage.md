@@ -34,6 +34,16 @@ fix PR or a handover within a week for anything else.
 | flaky | passes on rerun; `flaky` status; failure rate below the noise you measured | rerun N times, report the rate, propose quarantine only with numbers |
 | infrastructure | `Self-hosted runner lost communication`, interface errors (`UCX ERROR failed to get interface index ... errno 19`), image pull or disk failures | hand over to CI maintainers with the evidence |
 
+**A failure an open pull request already fixes is verified, not fixed again.** Before a culprit is
+searched for, look for the fix someone has opened: the one the tracker or the CI issue names, the pull
+requests linked to it, the open ones that touch the failing test. Read its diff, since a pull request
+that cites a failure does not always fix it. The run applies it to main and verifies it as it would a
+fix of its own: the failing test is its gate, on every lane it failed on, and its accuracy and speed
+are measured by what it changes (§4). It ends in a verification comment for that pull request, drafted
+for a human to post, with what was run, on which image and hardware, and the results (`pr_playbook.md`
+§Attribution). No second pull request is opened for the same failure. A fix that has merged needs none
+of this: main has it.
+
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a
 serving benchmark below its threshold on one lane). Record the number the fix must restore: the

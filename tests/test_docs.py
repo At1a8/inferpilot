@@ -263,6 +263,59 @@ class TokenComparisonTest(unittest.TestCase):
         self.assertEqual(found, [], "these ask for outputs equal to another run's; G2 compares scores")
 
 
+class CiExistingFixTest(unittest.TestCase):
+    """A CI failure that an open pull request already fixes is verified, not fixed a second time
+    (knowledge/ci_triage.md §2), as an issue with an open fix PR is: the classification names the pull request,
+    the run applies it without a bisect, the failing test is its gate, and the PR phase drafts a verification
+    comment for it."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_applies_the_pull_request_without_a_bisect(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        self.assertIn("existing_prs: strs,", body, "the classification cannot name an open fix")
+        ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
+        for said, why in (
+                ("const existing = named.filter((p) => /^#\\d+$/.test(p));", "a pull request of another repository is applied to this tree"),
+                ("if (stopHere('Bisect')) {", "a stop named for the phase an existing fix skips does not hold"),
+                ("const lacking = askForFix('Classify');", "an existing fix is applied without the model and the client its gates need"),
+                ("C.existing_prs = existing;", "the roles after Classify do not know which pull request is under verification"),
+                ("kind: 'apply_pr', goal: `apply the existing fix ${existing.join(', ')} and complete what verification needs`",
+                 "the pull request is not applied as a work package"),
+                ("return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');", "the existing fix is not held to the failing test and the fix's gates")):
+            self.assertIn(said, ci, why)
+        self.assertLess(ci.index("if (existing.length) {"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
+        self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("if (existing.length) {"),
+                        "a failure that is handed over is fixed all the same")
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure an open pull request already fixes is verified, not fixed again.**"),
+                ("knowledge/ci_triage.md", "a pull request that cites a failure does not always fix it"),
+                ("knowledge/ci_triage.md", "the failing test is its gate, on every lane it failed on, and its accuracy and speed are measured by what it changes"),
+                ("knowledge/ci_triage.md", "It ends in a verification comment for that pull request, drafted for a human to post"),
+                ("knowledge/ci_triage.md", "No second pull request is opened for the same failure"),
+                ("knowledge/ci_triage.md", "A fix that has merged needs none of this: main has it"),
+                ("roles/ci_guardian.md", "4. Look for a fix someone has already opened"),
+                ("roles/ci_guardian.md", "the fix a tracker names can be wrong"),
+                ("roles/ci_guardian.md", "Return those that are open, drafts included, as `existing_prs` (`#<n>`)"),
+                ("roles/ci_guardian.md", "One that has merged is not listed"),
+                ("roles/ci_guardian.md", "One in another repository (a component's) is not listed either"),
+                ("roles/ci_guardian.md", '"existing_prs": [],'),
+                ("roles/pr_engineer.md", "(an issue triaged `push_existing_pr`, a CI failure classified with `existing_prs`)"),
+                ("templates/ci_triage.md", "| open fix PRs |"),
+                ("README.md", "A CI failure that an open pull request already fixes skips Bisect"),
+                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        # The steps of the classification are numbered through: the new one did not leave two fourth steps.
+        role = (ROOT / "roles" / "ci_guardian.md").read_text(encoding="utf-8")
+        classify = role[role.index("## PHASE=classify"):role.index("## PHASE=bisect")]
+        self.assertEqual(re.findall(r"^(\d+)\. ", classify, re.M), ["1", "2", "3", "4", "5"])
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_setup_container_and_runner_variables_are_in_both_readmes(self):
         missing = ["%s reads %s; %s does not say what it does" % (path.relative_to(ROOT), name, readme)

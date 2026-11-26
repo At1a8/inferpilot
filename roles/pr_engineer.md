@@ -79,8 +79,9 @@ Inputs: `round` (1 after the work packages of an earlier round were made).
    one sentence per changed file, HIP-only checked and said, GSM8K 1319 at the defaults, one speed
    scenario against the baseline, the way a person writes) and §Attribution (its line word for word,
    where that section puts it); title in the repository's convention
-   (sglang: `[Type] [Hardware] scope: title`). When the task was to push an existing PR, write the
-   verification comment for that PR instead, at the same path, with no attribution line. Run the leak
+   (sglang: `[Type] [Hardware] scope: title`). When the task was to push an existing PR (an issue
+   triaged `push_existing_pr`, a CI failure classified with `existing_prs`), write the verification
+   comment for that PR instead, at the same path, with no attribution line. Run the leak
    scan again with `--body RUN_DIR/pr_body.md`, and write the body so that it finds nothing there: model
    ids, not local paths. The body gives **the command that shows the change works**: for a feature or a
    performance change the launch command, for a CI fix `failing_test_cmd`, for an issue fix the

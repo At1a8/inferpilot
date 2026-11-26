@@ -11,6 +11,7 @@
 | lanes | rocm720 / rocm724 / rocm10 / ... |
 | error signature | |
 | first red run / last green run | <run links and times> |
+| open fix PRs | none / <#n: what it changes, and whether its diff addresses this failure; the run verifies it in place of a fix of its own> |
 
 ## Classification
 
