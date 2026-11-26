@@ -158,8 +158,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    the Triage draft promised that did not happen, and say what was not covered.
    - `ready_for_review`: what the fix changes and how it was verified; a `<PR link>` placeholder, since
      the human opens the PR.
-   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit when Bisect
-     named one, and a request to confirm on a current image.
+   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit or pull request
+     when the run named one (`fixed_by`), and a request to confirm on a current image. Stopped at PR,
+     main fixed it while the run worked on a fix of its own, which is not offered.
    - `not_reproduced`, `diagnosed`: the environment, duration and counts, or the root cause, and the
      exact information or test that would move it on.
    - `blocked`, `stopped`: what was done so far, without a conclusion.

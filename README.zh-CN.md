@@ -60,7 +60,7 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack；对照 base 测量修复，以及性能问题必须恢复的数值 |
 | `reviewer` | Review、Reply | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；在报告前把 issue 的回复草稿逐条对照运行记录核对；可以换用另一个模型（`review_model`） |
 | `kernel_liaison` | Kernel | 把 kernel hand-off 转成后端的任务，运行 `command` 类后端，依据后端自身的验证评判结果，并把收益作为工作包返回 |
-| `pr_engineer` | PR | 不改任何代码：检查代码整洁、lint 和 CI 注册（缺什么就作为工作包退回），在不改变代码内容的前提下整理成每个工作包一个 commit，试合并 main 只用来报告冲突，在最终 commit 上检查关闭特性时的行为（没有开关的改动，改为检查它涉及的模块已有的测试），写 PR 描述和 push 命令 |
+| `pr_engineer` | PR | 不改任何代码：修复先在最新的 main 上不带修复重跑一次它的 gate，main 上已经不失败的不提 PR；检查代码整洁、lint 和 CI 注册（缺什么就作为工作包退回），在不改变代码内容的前提下整理成每个工作包一个 commit，试合并 main 只用来报告冲突，在最终 commit 上检查关闭特性时的行为（没有开关的改动，改为检查它涉及的模块已有的测试），写 PR 描述和 push 命令 |
 | `curator` | Report | 把这次运行证实的内容写进 `knowledge/`（已知问题、特性 skill、CUDA → AMD 对照条目、新发现的 reward hack、方法经验），每个数字都能追溯到这次运行，并作为 PR 提到 InferPilot 仓库 |
 
 ## 安装

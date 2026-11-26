@@ -853,6 +853,62 @@ const scenarios = [
     check(named.calls.find((c) => c.key === 'director:setup').ins.image === 'rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261021',
       'a named image reaches Setup');
   }],
+  ['pr: a fix is checked on the latest main before its pull request, and one main no longer needs gets none', async () => {
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const prPhase = (r) => r.result.phases.filter((p) => p.phase === 'PR');
+    for (const mode of ['issue', 'ci']) {
+      // Still failing there: the pull request is prepared, and the run record says what the check showed.
+      const still = await run({ mode, task: 't' });
+      const order = still.keys.filter((k) => k.startsWith('pr_engineer:') || k === 'reviewer:review').join();
+      check(still.result.status === 'ready_for_review' && order === 'reviewer:review,pr_engineer:recheck,pr_engineer:pr',
+        `${mode}: the check comes after the review and before the pull request: ${order}`);
+      const rc = still.calls.find((c) => c.key === 'pr_engineer:recheck');
+      check(rc.ins.extra_gates.length === 1 && rc.ins.extra_gates[0].gate === (mode === 'issue' ? 'issue_repro' : 'failing_test')
+        && !!rc.ins.extra_gates[0].cmd, `${mode}: it is given the fix's own gate and its command: ${JSON.stringify(rc.ins.extra_gates)}`);
+      check(prPhase(still).some((p) => p.verdict === 'recheck' && p.summary === 'main at f00dfeed still fails without the fix'),
+        `${mode}: the run record says the latest main still fails: ${JSON.stringify(prPhase(still))}`);
+      check(still.result.phases.filter((p) => p.phase === 'PR' && p.verdict === 'pass').length === 1, `${mode}: and the phase is one phase`);
+      // Main fixed it while the run worked on it: nothing to propose.
+      const gone = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => ({ still_fails: false, main: 'abc1234', fixed_by: '#51234',
+        evidence: 'the reproduction passes 3 of 3' }) });
+      check(gone.result.status === 'fixed_on_main' && gone.result.stopped_at === 'PR' && !gone.keys.includes('pr_engineer:pr')
+        && !gone.result.pr && gone.result.fixed_by === '#51234', `${mode}: a failure main no longer shows gets no pull request: ${ended(gone)}`);
+      check(prPhase(gone).some((p) => p.verdict === 'fixed_on_main'
+        && p.summary.startsWith('main at abc1234 no longer fails without the fix: fixed by #51234; no pull request is prepared. the reproduction passes')),
+        `${mode}: the run record names the commit of main and what fixed it: ${JSON.stringify(prPhase(gone))}`);
+      check(!(gone.result.next.user || []).some((x) => /push/.test(x)), `${mode}: and the user is given nothing to push`);
+      check(gone.keys.includes('director:report') && (mode === 'ci' || gone.keys.includes('issue_triager:reply')),
+        `${mode}: the run still reports${mode === 'issue' ? ', and the issue still gets its reply' : ''}`);
+      const unnamed = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => ({ still_fails: false }) });
+      check(unnamed.result.status === 'fixed_on_main' && !unnamed.result.fixed_by
+        && prPhase(unnamed).some((p) => p.summary === 'the latest main no longer fails without the fix; no pull request is prepared'),
+        `${mode}: with no commit named, the outcome is the same: ${JSON.stringify(prPhase(unnamed))}`);
+      // No answer is not a reason to drop a verified fix.
+      const silent = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => null });
+      check(silent.result.status === 'ready_for_review' && silent.keys.includes('pr_engineer:pr')
+        && prPhase(silent).some((p) => p.verdict === 'recheck' && /was not run again on the latest main/.test(p.summary)),
+        `${mode}: without an answer the pull request is prepared, and the run record says the check did not run: ${ended(silent)}`);
+    }
+    // An existing fix PR that merged while the run verified it is found the same way.
+    const existing = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      'pr_engineer:recheck': () => ({ still_fails: false, main: 'abc1234', fixed_by: '#40872' }) });
+    check(existing.result.status === 'fixed_on_main' && existing.result.fixed_by === '#40872' && !existing.keys.includes('pr_engineer:pr'),
+      `an existing fix PR that merged meanwhile ends the run the same way: ${ended(existing)}`);
+    // A feature or a performance task has no failure for main to have fixed.
+    for (const mode of ['feature', 'perf']) {
+      const r = await run({ mode, task: 't' });
+      check(r.result.status === 'ready_for_review' && !r.keys.includes('pr_engineer:recheck'), `${mode}: no check, as before: ${ended(r)}`);
+    }
+    // A repair round of the PR phase does not check again: the check is made once, before the first.
+    const repaired = await run({ mode: 'issue', task: 'i' }, {
+      'pr_engineer:pr': (ins, n) => (n === 1
+        ? { ...DEFAULTS['pr_engineer:pr'](), lint_pass: false, work_packages: [{ id: 'PR1', goal: 'lint', kind: 'framework', files: [], test: 't', depends_on: [] }] }
+        : DEFAULTS['pr_engineer:pr']()) });
+    check(repaired.result.status === 'ready_for_review' && repaired.keys.filter((k) => k === 'pr_engineer:recheck').length === 1
+      && repaired.keys.filter((k) => k === 'pr_engineer:pr').length === 2, `a repair round does not check again: ${ended(repaired)}`);
+  }],
   ['pr: what the PR engineer finds missing goes back through implement, verify and review', async () => {
     const r = await run({ mode: 'ci', task: 'c' }, {
       'pr_engineer:pr': (ins, n) => (n === 1

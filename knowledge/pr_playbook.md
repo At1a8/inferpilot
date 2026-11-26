@@ -122,6 +122,10 @@ Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; r
 
 ## Keeping up with main
 
+- A fix (issue, ci) is checked against main once more before its PR is prepared: the reproduction or
+  the failing test runs on the latest main without the fix. Where it no longer fails, main has fixed
+  the failure while the run worked on it (another pull request merged, an existing fix PR among them):
+  no PR is prepared, and the run ends as fixed on main, with the reply an issue gets for that.
 - Before the PR exists, InferPilot only trial-merges main to report conflicts; it does not update a
   verified branch. Updating it is the owner's step, and the gates run again on the merged tree.
 - Prefer merging main into the PR branch (no force push, review history kept); maintainers squash at

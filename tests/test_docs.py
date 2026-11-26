@@ -371,6 +371,49 @@ class LongContextScriptTest(unittest.TestCase):
             self.assertIn(said, row[0], "%s: the long_context_script row" % name)
 
 
+class RecheckOnMainTest(unittest.TestCase):
+    """A fix is verified against the commit its run began on, and main moves meanwhile. Before the pull request
+    is prepared, the fix's gate runs once on the latest main without the fix (roles/pr_engineer.md,
+    PHASE=recheck): a failure main no longer shows gets no pull request, and the run ends as fixed on main."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_checks_before_the_first_pr_round_and_ends_without_a_pr(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const RECHECK = S({ still_fails: bool, main: str, fixed_by: str, evidence: str }, ['still_fails']);", "the check has no answer to give"),
+                ("const rc = await call('pr_engineer', 'recheck', inputs({ extra_gates: extraGates }), RECHECK);", "the check is not given the fix's gate"),
+                ("if (rc && rc.still_fails === false) {", "only an answer that main no longer fails ends the run"),
+                ("if (BEFORE_A_FIX[MODE] && (extraGates || []).length && await recheckOnMain(extraGates)) return finish('fixed_on_main', 'PR');",
+                 "a fix main no longer needs still gets a pull request"),
+                ("if (PHASE !== 'PR') enter('PR');", "the PR phase is entered twice")):
+            self.assertIn(said, src, why)
+        self.assertLess(src.index("await recheckOnMain(extraGates)) return finish('fixed_on_main', 'PR');"),
+                        src.index("const pr = await preparePR(round);"), "the check comes after the first pull request round")
+
+    def test_the_documents_say_it(self):
+        role = (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8")
+        self.assertIn("\n## PHASE=recheck (issue, ci: before the pull request)\n", role)
+        phase = " ".join(role[role.index("## PHASE=recheck"):].split())
+        for said in ("A failure that main no longer shows needs no pull request", "changes nothing",
+                     "a throwaway worktree of the latest main, without the fix",
+                     "Run the gate's command there as Verify ran it on the base",
+                     "`still_fails: false` when it no longer fails",
+                     "A run that fails another way (an import error, a server that stops for another reason) decides nothing",
+                     '"still_fails": true, "main": "<sha of the main it ran on>"'):
+            self.assertIn(said, phase)
+        for path, said in (("knowledge/pr_playbook.md", "A fix (issue, ci) is checked against main once more before its PR is prepared"),
+                           ("knowledge/pr_playbook.md", "no PR is prepared, and the run ends as fixed on main"),
+                           ("roles/director.md", "or the check on the latest main before the pull request"),
+                           ("roles/director.md", "say that its branch was not proposed, and where it is"),
+                           ("roles/issue_triager.md", "main fixed it while the run worked on a fix of its own, which is not offered"),
+                           ("README.md", "first runs its gate again on the latest main without the fix"),
+                           ("README.zh-CN.md", "修复先在最新的 main 上不带修复重跑一次它的 gate")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class LongGatesTest(unittest.TestCase):
     """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
     and hands to every role. G4 is the task's performance client run back to back for more than 48 hours

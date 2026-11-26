@@ -107,3 +107,30 @@ Return:
  "work_packages": [],
  "pr_body_path": "/abs/RUN_DIR/pr_body.md", "push_command": "git -C /sgl-workspace/sglang push <remote> inferpilot/<slug>"}
 ```
+
+## PHASE=recheck (issue, ci: before the pull request)
+
+Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command).
+
+The run verified the fix against the commit it began on, and main has moved since. A failure that main
+no longer shows needs no pull request: this call finds out, and changes nothing.
+
+1. `git fetch origin`, then a throwaway worktree of the latest main, without the fix
+   (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`).
+2. Run the gate's command there as Verify ran it on the base: that tree first on `PYTHONPATH` and its
+   import checked (`env_hygiene.md`, *The code under test*), the same model and settings, on the GPUs in
+   `gpu_ids`, as many times as the failure needed to show (the ledger has the counts).
+3. `still_fails: true` when it fails as before: the same error, the same test, the number still short
+   of the claim. `still_fails: false` when it no longer fails; `fixed_by` then names the pull request
+   or the commit that fixed it, when the log of main since `<base>` shows one. A run that fails another
+   way (an import error, a server that stops for another reason) decides nothing: `still_fails: true`,
+   and `evidence` says what it showed. `main` is the commit it ran on.
+4. Stop what you started (`env_hygiene.md`, *Servers*), remove the worktree, and give `.git` back
+   (`scripts/restore_owner.sh`).
+
+Return:
+
+```json
+{"still_fails": true, "main": "<sha of the main it ran on>", "fixed_by": "<#n or sha, when main no longer fails>",
+ "evidence": "<the log, and what it shows>"}
+```

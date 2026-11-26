@@ -888,6 +888,9 @@ const PR = S({
   push_command: str,
   work_packages: WPS, // what the branch still lacks; implemented, verified and reviewed like a finding
 }, ['branch', 'lint_pass', 'feature_off_final', 'content_unchanged', 'pr_body_path', 'leak_scan_findings', 'launch_checked']);
+// A fix (issue, ci), before its pull request: its gate run again on the latest main without the fix. still_fails
+// false: main has fixed the failure since the run began (fixed_by: the pull request or commit, when one shows).
+const RECHECK = S({ still_fails: bool, main: str, fixed_by: str, evidence: str }, ['still_fails']);
 const K_PACKAGE = S({
   task_dir: str,
   mode: { type: 'string', enum: ['optimize', 'author'] },
@@ -1665,10 +1668,29 @@ function stoppedUnmeasured() {
   return { ok: false, stopped: true, at: 'Verify' };
 }
 
+// A fix was verified against the commit the run began on, and main has moved since. Before a pull request is
+// prepared, the fix's gate (the reproduction, the failing test) runs once on the latest main without the fix:
+// where it no longer fails, there is nothing to propose, and the run ends as fixed on main. No answer is not a
+// reason to drop a verified fix: the pull request is prepared, and the run record says the check did not run.
+async function recheckOnMain(extraGates) {
+  enter('PR');
+  const rc = await call('pr_engineer', 'recheck', inputs({ extra_gates: extraGates }), RECHECK);
+  const at = rc && String(rc.main || '').trim() ? `main at ${String(rc.main).trim()}` : 'the latest main';
+  if (rc && rc.still_fails === false) {
+    const by = String(rc.fixed_by || '').trim();
+    if (by) C.fixed_by = R.fixed_by = by;
+    note('PR', 'fixed_on_main', `${at} no longer fails without the fix${by ? `: fixed by ${by}` : ''}; no pull request is prepared`
+      + `${rc.evidence ? `. ${rc.evidence}` : ''}`);
+    return true;
+  }
+  note('PR', 'recheck', rc ? `${at} still fails without the fix` : 'the gate was not run again on the latest main: the PR engineer returned nothing');
+  return false;
+}
+
 // The PR engineer changes no code: the branch it hands over must be the tree Verify and Review passed.
 // What it finds missing comes back as work packages.
 async function preparePR(round) {
-  enter('PR');
+  if (PHASE !== 'PR') enter('PR'); // a fix's phase began with the check on the latest main
   const pr = await call('pr_engineer', 'pr', inputs({ round }), PR, `pr_engineer#${round}`);
   const leaks = (pr && pr.leak_scan_findings) || [];
   const wps = (pr && pr.work_packages) || [];
@@ -1783,6 +1805,8 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   const rev = await reviewLoop(extraGates, perfClaim, runPerf);
   if (!rev.ok) return ended(rev, rev.at);
   if (stopHere('Review')) return finish('stopped', 'Review');
+
+  if (BEFORE_A_FIX[MODE] && (extraGates || []).length && await recheckOnMain(extraGates)) return finish('fixed_on_main', 'PR');
 
   // What the PR engineer finds missing goes back through Implement, Verify and Review, once.
   for (let round = 0; ; round++) {
