@@ -15,16 +15,18 @@ local path, this machine or an internal site stop it, as in scripts/daily_report
 or on any failure, the changes stay where they are. Standard library and git only.
 
 Once the lines it adds and the paths it touches name nothing local, the patch is also written to
-RUN_DIR/knowledge.patch, with the machine's name and the files it was made against ahead of it (git apply
-skips them): --patch proposes it later, from any checkout, a shallow one too (the one that saved it, holding
-just those edits still, is restored as above), and holds the patch and the description against the machine
-that made it as well as its own. --dry-run writes no patch; a change that is refused moves an earlier
+RUN_DIR/knowledge.patch, with the machine's name, the directories it mounts storage on and the files the
+patch was made against ahead of it (git apply skips them): --patch proposes it later, from any checkout, a
+shallow one too (the one that saved it, holding just those edits still, is restored as above), and holds the
+patch and the description against the machine that made it, its name and its local paths, as well as its
+own. --dry-run writes no patch; a change that is refused, or that no patch can be made of, moves an earlier
 knowledge.patch, which lacks its edits, to knowledge.patch.earlier. It outlives the task's container only
 where RUN_DIR does, on a host mount (an exp_root outside the container). A patch that makes a symbolic link
-or holds a binary file is refused, and so is one that edits known_issues.md when neither it nor the checkout
-has the file it was made against (exit 4). Runs started from the same main give their new known issues
-the same next KI- number: a number main has taken since is replaced, in the entry and in every line the
-patch adds, by the next free one on main, and the pull request says which ("renumbered"). New entries
+or holds a binary file or text that is not UTF-8 is refused, and so is one that edits known_issues.md when
+neither it nor the checkout has the file it was made against (exit 4). Runs started from the same main give
+their new known issues the same next KI- number: a number main has taken since is replaced, in the entry
+and in every line the patch adds, by the next free one on main, and the pull request says which
+("renumbered"); a file of the run named after the issue (spinoff/KI-007.md) keeps its name. New entries
 main added are kept beside this run's; an existing entry that main and the patch both changed, on the same
 lines or not, stops it (exit 4) for a human to reconcile.
 """
@@ -46,7 +48,7 @@ import urllib.request
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daily_report import default_repo, leaks, this_host  # noqa: E402
+from daily_report import default_repo, leaks, local_paths, mounted_roots, this_host  # noqa: E402
 
 INFERPILOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MARKER = "<!-- inferpilot:knowledge -->"
@@ -54,9 +56,11 @@ AUTHOR = ["-c", "user.name=InferPilot curator", "-c", "user.email=inferpilot-cur
 KNOWN = "knowledge/known_issues.md"
 KI_HEADING = re.compile(r"^## (KI-(\d+))\b", re.M)
 KI_REF = re.compile(r"\bKI-\d+\b")
-# In a description: not the name of a file of the run (spinoff/KI-007.md), which keeps its number.
-KI_IN_TEXT = re.compile(r"(?<![\w/-])KI-\d+\b(?!\.[A-Za-z0-9]+\b)(?!-\w)")
+# What a known issue is written together with: a path, a file's name, a list of issues.
+WORD = re.compile(r"[\w./-]+")
+KI_LIST = re.compile(r"KI-\d+(?:/KI-\d+)+")
 ORIGIN = re.compile(r"\Aorigin (\S+)\n")
+MOUNTS = re.compile(r"\Amounts (.*)\n")
 HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 BINARY = re.compile(r"^(?:GIT binary patch|Binary files .* differ)$", re.M)
 PREIMAGE = re.compile(r"^preimage ([0-9a-f]{40,64}) ([A-Za-z0-9+/=]+)$", re.M)
@@ -125,23 +129,29 @@ def store_preimages(repo: str, diff: str) -> None:
             raise RuntimeError("the patch's copy of the file it was made against (%s) is damaged" % sha[:12])
 
 
-def added(diff: str) -> str:
-    """The lines the patch adds, read inside its hunks: there a line that begins with ++ is an added line,
-    not a file header."""
-    out, old, new = [], 0, 0
+def hunk_lines(diff: str):
+    """The patch's lines, each with what it is: "+", "-" or " " for a line of a hunk (added, removed, context),
+    "" for any other. Read by the hunks' own counts: inside one, a line that begins with ++ or -- is an added
+    or a removed line, not a file header."""
+    old = new = 0
     for line in diff.split("\n"):
+        kind = ""
         if old <= 0 and new <= 0:
             m = HUNK.match(line)
             if m:
                 old, new = int(m.group(1) or 1), int(m.group(2) or 1)
         elif line.startswith("+"):
-            out.append(line[1:])
-            new -= 1
+            kind, new = "+", new - 1
         elif line.startswith("-"):
-            old -= 1
+            kind, old = "-", old - 1
         elif not line.startswith("\\"):  # not "\ No newline at end of file"
-            old, new = old - 1, new - 1
-    return "\n".join(out)
+            kind, old, new = " ", old - 1, new - 1
+        yield kind, line
+
+
+def added(diff: str) -> str:
+    """The lines the patch adds."""
+    return "\n".join(line[1:] for kind, line in hunk_lines(diff) if kind == "+")
 
 
 def outside_git(args: list, diff: str, files: dict | None = None) -> tuple[subprocess.CompletedProcess, dict]:
@@ -210,13 +220,13 @@ def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
     next free number on main, in every line the patch adds."""
     had, taken = {m[0] for m in KI_HEADING.findall(ours)}, {m[0] for m in KI_HEADING.findall(main)}
     adds, in_known = [], False
-    for line in diff.splitlines():
-        if line.startswith("diff --git "):
+    for kind, line in hunk_lines(diff):
+        if not kind and line.startswith("diff --git "):
             in_known = line.endswith(" b/" + KNOWN)
-        elif in_known and line and line[0] in "+- " and not line.startswith(("+++", "---")):
+        elif kind and in_known:
             m = KI_HEADING.match(line[1:])
             if m:
-                (adds.append if line[0] == "+" else had.add)(m.group(1))
+                (adds.append if kind == "+" else had.add)(m.group(1))
     new = [ki for ki in dict.fromkeys(adds) if ki not in had]
     used = taken | had | set(new)
     nxt = max([int(k[3:]) for k in used] + [0]) + 1
@@ -227,9 +237,19 @@ def renumber(diff: str, ours: str, main: str) -> tuple[str, dict]:
             nxt += 1
     if not mapping:
         return diff, {}
-    out = [KI_REF.sub(lambda m: mapping.get(m.group(0), m.group(0)), l) if l.startswith("+") and not l.startswith("+++") else l
-           for l in diff.splitlines(keepends=True)]
-    return "".join(out), mapping
+    return "\n".join("+" + renumbered(line[1:], mapping) if kind == "+" else line for kind, line in hunk_lines(diff)), mapping
+
+
+def renumbered(text: str, mapping: dict) -> str:
+    """The text with each known issue it names under its new number. A file or a directory of the run that is
+    named after one keeps its name (spinoff/KI-007.md, KI-007-draft.md, logs/KI-007/x.log): what has an
+    extension, or a slash that is not between two issues (KI-006/KI-007)."""
+    def word(m: re.Match) -> str:
+        name = m.group(0).rstrip(".")
+        if "KI-" not in name or re.search(r"\.[A-Za-z0-9]+$", name) or "/" in name and not KI_LIST.fullmatch(name):
+            return m.group(0)
+        return KI_REF.sub(lambda ki: mapping.get(ki.group(0), ki.group(0)), m.group(0))
+    return WORD.sub(word, text)
 
 
 def preimage_sha(diff: str, path: str) -> str:
@@ -291,9 +311,35 @@ def with_renumbering(body: str, mapping: dict) -> str:
     if not mapping:
         return body
     pairs = ", ".join("%s is %s here" % (k, v) for k, v in mapping.items())
-    text = KI_IN_TEXT.sub(lambda m: mapping.get(m.group(0), m.group(0)), body)
-    return text.rstrip() + "\n\nNumbered against main when proposed: %s; the run's own files keep %s.\n" % (
+    return renumbered(body, mapping).rstrip() + "\n\nNumbered against main when proposed: %s; the run's own files keep %s.\n" % (
         pairs, ", ".join(mapping))
+
+
+def roots_of(line: str) -> tuple:
+    """The directories a saved patch says the machine that made it mounts storage on."""
+    try:
+        roots = json.loads(line)
+    except ValueError:
+        roots = None
+    if not isinstance(roots, list) or not all(isinstance(r, str) for r in roots):
+        raise ValueError("the patch's mounts line is not a list of directory names")
+    return tuple(r for r in roots if r)
+
+
+def not_utf8(inferpilot: str, files: list) -> list:
+    """Those of the checkout's files that are there and are not UTF-8 text."""
+    out = []
+    for name in files:
+        path = os.path.join(inferpilot, name)
+        if os.path.isfile(path) and not os.path.islink(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    f.read()
+            except UnicodeDecodeError:
+                out.append(name)
+            except OSError:
+                pass
+    return out
 
 
 def auth_env(token: str) -> dict:
@@ -416,8 +462,11 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     run = os.path.basename(os.path.normpath(a.run_dir))
     branch, title = "inferpilot/knowledge/%s" % run, a.title or "knowledge: what %s learned" % run
-    saved, hosts = a.patch, [this_host()]
+    # What the change and its description are held against: this machine, its name and its local paths, and
+    # for a saved patch the machine that made it.
+    saved, places = a.patch, [(this_host(), None)]
     snapshot = os.path.join(a.run_dir, "knowledge.patch")
+    tracked, untracked = [], []
 
     def retire() -> None:
         """A change that is refused leaves no earlier patch of the run to be taken for it."""
@@ -428,9 +477,11 @@ def main(argv=None) -> int:
     try:
         if a.patch:
             diff = open(a.patch, encoding="utf-8").read()
-            # Where it was made: what named that machine there names it here too.
-            hosts += [h for h in ORIGIN.findall(diff) if h not in hosts]
-            diff = ORIGIN.sub("", diff)
+            # Where it was made: what named that machine there, or a path that is local there, does so here too.
+            origin, diff = ORIGIN.match(diff), ORIGIN.sub("", diff)
+            mounts, diff = MOUNTS.match(diff), MOUNTS.sub("", diff)
+            if origin or mounts:
+                places.append((origin.group(1) if origin else "", local_paths(roots_of(mounts.group(1))) if mounts else None))
             # The checkout that saved it, holding just these edits still, reads main again once they are
             # proposed; any other checkout, or one with more edits, is left as it is.
             mine = changed(a.inferpilot_dir)
@@ -442,11 +493,22 @@ def main(argv=None) -> int:
                     a.patch, ": it touches " + ", ".join(outside) if outside else ""), file=sys.stderr)
                 return 1
         else:
-            tracked, untracked = changed(a.inferpilot_dir)
-            if not tracked and not untracked:
-                print(json.dumps({"action": "none", "reason": "no changes under knowledge/"}))
-                return 0
-            diff = patch(a.inferpilot_dir, tracked, untracked)
+            try:
+                tracked, untracked = changed(a.inferpilot_dir)
+                if not tracked and not untracked:
+                    print(json.dumps({"action": "none", "reason": "no changes under knowledge/"}))
+                    return 0
+                diff = patch(a.inferpilot_dir, tracked, untracked)
+            except (RuntimeError, OSError, ValueError) as e:
+                # No patch can be made of this change: an earlier one is not left to be taken for it.
+                retire()
+                if not isinstance(e, UnicodeDecodeError):
+                    raise
+                odd = not_utf8(a.inferpilot_dir, tracked + untracked)
+                print("propose_knowledge: %s not UTF-8 text, so the change cannot be checked or proposed; knowledge/ is UTF-8 "
+                      "text" % (", ".join(odd) + (" is" if len(odd) == 1 else " are") if odd else "a file of the change, or "
+                                "its name, is"), file=sys.stderr)
+                return 1
             files = tracked + untracked
         if SYMLINK.search(diff):
             print("propose_knowledge: %s makes a symbolic link, which nothing under knowledge/ is" % (a.patch or "the change"),
@@ -460,18 +522,19 @@ def main(argv=None) -> int:
             return 1
 
         def named(text: str) -> list:
-            return list(dict.fromkeys(line for h in hosts for line in leaks(text, h)))
+            return list(dict.fromkeys(line for host, local in places for line in leaks(text, host, local)))
         # The names of the files it adds or renames are published as its lines are.
         bad = named(added(diff)) + ["path %s" % line for line in named("\n".join(files))]
-        # Saved only when it names nothing of this machine, with the machine's name ahead of it (git apply
-        # skips the line): --patch, elsewhere, checks the description against this machine too. A dry run
-        # writes nothing.
+        # Saved only when it names nothing of this machine, with the machine's name and the directories it
+        # mounts storage on ahead of it (git apply skips the lines): --patch, elsewhere, checks the description
+        # against this machine too. A dry run writes nothing.
         if bad:
             retire()
         elif not a.patch and not a.dry_run and os.path.isdir(a.run_dir):
             saved = snapshot
             with open(saved, "w", encoding="utf-8") as f:
-                f.write(("origin %s\n" % this_host() if this_host() else "") + diff)
+                f.write(("origin %s\n" % this_host() if this_host() else "")
+                        + "mounts %s\n" % json.dumps(list(mounted_roots())) + diff)
         body = open(a.body, encoding="utf-8").read()
         bad += named(body)
         if bad:

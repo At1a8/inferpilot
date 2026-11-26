@@ -16,7 +16,8 @@ Inputs: `status`, `report_path`, `phases`, `known_issues`.
    the run re-tested. Other runs started from the same main take the same next number: when main has
    taken it by the time the pull request is opened, `propose_knowledge.py` gives the entry the next free
    one there, in every line of the change, and returns the mapping as `renumbered`; say it in `notes`,
-   since the run's ledger, report and reply draft keep the number they were written with.
+   since the run's ledger, report and reply draft keep the number they were written with. So does a file
+   of the run named after it (`spinoff/KI-007.md`), in the change and in the description.
 2. **Feature skill:** for a feature that passed every gate, create or update
    `knowledge/feature_skills/<id>/SKILL.md` and `index.yaml` from the template, with its `tags` (the
    English words a task about the feature may use; `scripts/find_skill.py` must find it from them), the
@@ -43,7 +44,8 @@ Inputs: `status`, `report_path`, `phases`, `known_issues`.
    mount: the default, `<inferpilot_dir>/exp`, goes with the container and its checkout.
    Exit 3: remove from your edits and the description what it lists (a line, or a file's path), then run
    it again; a `knowledge.patch` from before those edits is `knowledge.patch.earlier` by then, and not
-   this change. Exit 4: the
+   this change. The same when it can make no patch of the change and says why (exit 1): a file that is not
+   UTF-8 text, a binary file, a symbolic link; `knowledge/` holds UTF-8 text only. Exit 4: the
    change does not apply to main as it is now, most often because an existing entry you edited changed
    on main too, on the same lines or not; say what it printed in `notes`, for a human to reconcile. Exit 2
    (no `GITHUB_TOKEN`, or one that cannot write to InferPilot's repository) or any other failure: the edits

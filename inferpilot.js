@@ -95,6 +95,7 @@ const ATTENTION = []; // state a human must clean up before anything else runs t
 const TIMED_OUT = { timedOut: true };
 const TIMED_OUT_CALLS = new Set(); // labels of calls that timed out: their agents may still be running
 let PHASE = '';
+let curatorSilent = false; // the curator gave no answer: what it did to knowledge/ is not known
 const cfg = (o) => Object.entries(o)
   .filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && v.length === 0))
   .map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
@@ -930,6 +931,10 @@ async function finish(status, at) {
       R.knowledge_pr = learn.pr_url || '';
       R.knowledge_notes = learn.notes || '';
       R.knowledge_patch = R.knowledge_pr ? '' : String(learn.patch_path || '').trim();
+    } else {
+      // No answer says nothing of what it did: it may have edited knowledge/ and saved a patch all the same.
+      R.knowledge_notes = TIMED_OUT_CALLS.has('curator:learn') ? 'the curator timed out' : 'the curator returned no answer';
+      curatorSilent = true;
     }
   }
   R.run_dir = C.run_dir;
@@ -1004,14 +1009,26 @@ function nextSteps(status, at) {
   if (R.knowledge_pr) user.push(`review the curator's pull request to InferPilot: ${R.knowledge_pr}`);
   else if (R.knowledge_patch) {
     // The run directory is the task container's own unless exp_root is a host mount, which is not known here.
+    // The command comes last, on a line of its own (indented as the runner's log has its commands), with nothing
+    // after it: it is pasted as it stands.
     user.push(`propose the curator's knowledge changes, which the run did not (${R.knowledge_notes || 'see the curator\'s notes'}),`
-      + ` from an InferPilot checkout: python3 scripts/propose_knowledge.py --run-dir ${shq(C.run_dir)}`
-      + ` --body ${shq(`${C.run_dir}/knowledge_pr.md`)} --patch ${shq(R.knowledge_patch)}`
-      + `. Unless exp_root is on a host mount, ${C.run_dir} goes with the task's container: copy it out first`);
+      + ` from an InferPilot checkout, with the command below. Unless exp_root is on a host mount, ${C.run_dir} goes with the`
+      + ' task\'s container: copy it out first, under the same name, which the branch takes, and give the command\'s three'
+      + ' paths as they are in the copy:\n'
+      + `    python3 scripts/propose_knowledge.py --run-dir ${shq(C.run_dir)}`
+      + ` --body ${shq(`${C.run_dir}/knowledge_pr.md`)} --patch ${shq(R.knowledge_patch)}`);
   } else if ((R.knowledge_updates || []).some((u) => u && /(^|\/)knowledge\//.test(String(u.file || '')))) {
     user.push(`the curator's knowledge changes were not proposed and no patch of them was saved (${R.knowledge_notes || 'the curator gave no reason'}):`
       + ` they are only in ${INFERPILOT}/knowledge (git -C ${shq(INFERPILOT)} status -- knowledge), which goes with the task's container:`
       + ' copy the files out, or clear what the script refused and run it again');
+  } else if (curatorSilent) {
+    // The timeout's own entry (R.attention) speaks of servers and GPUs only.
+    user.push(`${R.knowledge_notes}, so what it changed under knowledge/ is not known`
+      + `${TIMED_OUT_CALLS.has('curator:learn') ? ': it may still be editing or proposing, so stop it first. Then' : ':'}`
+      + ` look at ${INFERPILOT}/knowledge (git -C ${shq(INFERPILOT)} status -- knowledge) and for ${C.run_dir}/knowledge.patch`
+      + ` and ${C.run_dir}/knowledge_pr.md. Unless on a host mount, the checkout and the run directory go with the task's`
+      + ' container: copy what is there out, and propose it from an InferPilot checkout with scripts/propose_knowledge.py'
+      + ' (--patch for a saved patch)');
   }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;

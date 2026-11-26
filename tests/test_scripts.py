@@ -1382,6 +1382,31 @@ class ProposeKnowledgeTest(unittest.TestCase):
             self.assertEqual(rc, 0, err)
         self.assertNotIn("gpu-node-17", self.show("inferpilot/knowledge/" + self.run.name), "the name stays in the run's file")
 
+    def test_a_path_that_is_local_where_the_patch_was_made_is_refused_where_it_is_not(self):
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        saved = self.run / "knowledge.patch"
+        self.body.write_text("KI-001: weights in /fastvault/private-model, dcp 8\n")
+        # the machine the run is on mounts storage on /fastvault
+        with mock.patch.object(propose_knowledge, "mounted_roots", return_value=("fastvault",)), \
+                mock.patch.object(daily_report, "LOCAL", daily_report.local_paths(("fastvault",))):
+            self.assertEqual(self.propose(token="")[0], 3, "the description names a path of the machine")
+        self.assertIn('\nmounts ["fastvault"]\n', "\n" + saved.read_text(), "the clean change is kept, with what is local there")
+        # the machine it is proposed from does not
+        self.assertEqual(daily_report.leaks(self.body.read_text()), [], "the test meant a path that is not local here")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 3, err)
+        self.assertIn("/fastvault/private-model", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        odd = self.run / "odd.patch"
+        odd.write_text(saved.read_text().replace('mounts ["fastvault"]', "mounts fastvault"))
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(odd)])
+        self.assertEqual(rc, 1, "what it cannot read of the patch's machine is not passed over: %s" % err)
+        self.assertIn("mounts line", err)
+        self.body.write_text("KI-001: dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--patch", str(saved)])
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("fastvault", self.show("inferpilot/knowledge/" + self.run.name), "the mounts stay in the run's file")
+
     def test_a_file_of_the_run_named_after_a_known_issue_keeps_its_name_in_the_description(self):
         body = ("KI-001: dcp 8 (KI-001). Proof: spinoff/KI-001.md, [KI-001](spinoff/KI-001.md), KI-001.json,\n"
                 "KI-001-draft.md and notes_KI-001.md. See KI-001.\n")
@@ -1390,6 +1415,22 @@ class ProposeKnowledgeTest(unittest.TestCase):
             "KI-004: dcp 8 (KI-004). Proof: spinoff/KI-001.md, [KI-004](spinoff/KI-001.md), KI-001.json,\n"
             "KI-001-draft.md and notes_KI-001.md. See KI-004.\n"), out)
         self.assertIn("KI-001 is KI-004 here; the run's own files keep KI-001", out)
+
+    def test_in_the_knowledge_lines_a_file_keeps_its_name_and_a_line_of_two_pluses_its_reference(self):
+        self._main_and_checkout_have("# Known issues\n\n## KI-001 — aiter import segfault\nmain\n")
+        (self.inferpilot / "knowledge" / "known_issues.md").write_text(
+            "# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\nReport: [KI-001](spinoff/KI-001.md), logs/KI-001/server.log;"
+            " a KI-001-related hang, as KI-001/KI-001 would be.\n")
+        (self.inferpilot / "knowledge" / "dispatch.md").write_text("++ see KI-001\n-- and KI-001.\ndraft: KI-001-draft.md\n")
+        rc, out, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)["renumbered"], {"KI-001": "KI-002"})
+        branch = "inferpilot/knowledge/" + self.run.name
+        self.assertIn("## KI-002 — GLM-5.3 dcp 8\nReport: [KI-002](spinoff/KI-001.md), logs/KI-001/server.log;"
+                      " a KI-002-related hang, as KI-002/KI-002 would be.\n", self.show(branch + ":knowledge/known_issues.md"),
+                      "the issue takes its new number where it is named, and a file of the run keeps the name it has")
+        self.assertEqual(self.show(branch + ":knowledge/dispatch.md"), "++ see KI-002\n-- and KI-002.\ndraft: KI-001-draft.md\n",
+                         "an added line that begins with ++ is not a file header: its reference follows")
 
     def test_a_patch_without_the_file_it_was_made_against_is_not_applied_where_the_checkout_lacks_it_too(self):
         import subprocess
@@ -1436,6 +1477,26 @@ class ProposeKnowledgeTest(unittest.TestCase):
         self.assertFalse(saved.exists(), "the patch of the earlier change is not this one's")
         self.assertEqual((self.run / "knowledge.patch.earlier").read_text(), first)
         self.assertIn("knowledge.patch.earlier", err)
+
+    def test_a_change_no_patch_can_be_made_of_leaves_no_earlier_patch_as_its_own(self):
+        known = self.inferpilot / "knowledge" / "known_issues.md"
+        saved, earlier = self.run / "knowledge.patch", self.run / "knowledge.patch.earlier"
+        known.write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]), extra=["--push-url", str(self.origin.parent / "no-such-remote.git")])
+        self.assertNotIn(rc, (0, 3, 4), err)
+        first = saved.read_text()
+        self.assertIn("+## KI-001 — GLM-5.3 dcp 8", first, "a clean change whose push failed is kept: it is this change")
+        self.assertFalse(earlier.exists())
+        (self.inferpilot / "knowledge" / "notes.md").write_bytes(b"caf\xe9 at dcp 8\n")
+        rc, _, err = self.propose(api=self.github([]))
+        self.assertEqual(rc, 1, err)
+        self.assertIn("knowledge/notes.md is not UTF-8 text", err)
+        self.assertFalse(saved.exists(), "the patch of the earlier change is not this one's")
+        self.assertEqual(earlier.read_text(), first)
+        self.assertIn("knowledge.patch.earlier", err)
+        self.assertEqual(self.show("inferpilot/knowledge/" + self.run.name), "", "no branch was pushed")
+        self.assertEqual(self.propose(extra=["--dry-run"])[0], 1)
+        self.assertEqual(earlier.read_text(), first, "a dry run moves nothing")
 
     def test_the_command_to_propose_later_is_quoted_and_names_the_script_in_a_checkout(self):
         (self.inferpilot / "knowledge" / "known_issues.md").write_text("# Known issues\n\n## KI-001 — GLM-5.3 dcp 8\n")
