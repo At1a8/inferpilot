@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -616,12 +617,48 @@ class EvalAccuracyTest(unittest.TestCase):
             echo "$*" >> "$CALLS"
             printf '%s\\n' "$@" > "$CALLS.argv"
             [ -n "${FAKE_NO_REPORT:-}" ] && exit 1
+            jm=""
             while [ $# -gt 0 ]; do
-              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; esac
+              case "$1" in --work-dir) wd=$2; shift ;; --datasets) ds=$2; shift ;; --judge-model-args) jm=$2; shift ;; esac
               shift
             done
             echo "work dir $wd"
-            mkdir -p "$wd/run/reports/fake-model"
+            # as evalscope does: its arguments, the judge's among them, in its configs and its log
+            mkdir -p "$wd/configs" "$wd/run/reports/fake-model"
+            echo "judge_model_args: $jm" > "$wd/configs/task_config.yaml"
+            echo "judge_model_args=$jm"
+            [ -n "${FAKE_READONLY:-}" ] && chmod 444 "$wd/configs/task_config.yaml"
+            # a directory of its files that cannot be listed
+            if [ -n "${FAKE_LOCKED_DIR:-}" ]; then
+              mkdir -p "$wd/configs/locked"
+              echo "judge_model_args: $jm" > "$wd/configs/locked/cfg.yaml"
+              chmod 000 "$wd/configs/locked"
+            fi
+            # a directory of its files that can be listed, and its files not looked at
+            if [ -n "${FAKE_NO_SEARCH_DIR:-}" ]; then
+              mkdir -p "$wd/configs/listed"
+              echo "judge_model_args: $jm" > "$wd/configs/listed/cfg.yaml"
+              chmod 444 "$wd/configs/listed"
+            fi
+            # a child that outlives it, holds its output open and writes its arguments later on
+            if [ -n "${FAKE_CHILD:-}" ]; then
+              ( sleep "$FAKE_CHILD"; echo "judge_model_args: $jm" > "$wd/configs/child.yaml" ) &
+              echo $! > "$CALLS.child"
+            fi
+            # the script stopped while evalscope runs (a timeout, the agent's call ending)
+            [ -n "${FAKE_STOPPED:-}" ] && { kill -TERM "$PPID"; exit 143; }
+            # a run that takes a while, and writes its arguments again later on
+            if [ -n "${FAKE_SLOW:-}" ]; then
+              echo $$ > "$CALLS.pid"
+              [ -n "${FAKE_IGNORE_TERM:-}" ] && trap '' TERM
+              # more than a pipe holds
+              if [ -n "${FAKE_FLOOD:-}" ]; then
+                line=$(printf 'x%.0s' $(seq 1024))
+                for _ in $(seq 300); do echo "$line"; sleep 0.01; done
+              fi
+              sleep "$FAKE_SLOW"
+              echo "judge_model_args: $jm" > "$wd/configs/later.yaml"
+            fi
             # every question answered, unless FAKE_NUM says how many were
             case "$ds" in gpqa_diamond) n=198 ;; simple_qa) n=4326 ;; mmlu_pro) n=12032 ;; hle) n=2158 ;; *) n=1319 ;; esac
             echo '{"metrics": [{"name": "mean_acc", "score": 0.97, "num": '"${FAKE_NUM:-$n}"'}]}' > "$wd/run/reports/fake-model/$ds.json"
@@ -699,6 +736,278 @@ class EvalAccuracyTest(unittest.TestCase):
         argv = Path(str(self.calls) + ".argv").read_text().splitlines()
         self.assertEqual(json.loads(argv[argv.index("--dataset-args") + 1])["longbench_v2"]["local_path"], str(data))
         self.assertEqual(argv[argv.index("--limit") + 1], "5")
+
+    def test_the_judge_key_reaches_only_a_judged_set_and_no_result_keeps_it(self):
+        key = "judge-key-for-the-test-7f3a"
+
+        def holding_key():
+            return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                          if p.is_file() and key in p.read_text(errors="replace"))
+        r = self.run_script("gsm8k", JUDGE_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertNotIn("--judge-model-args", argv, "gsm8k is graded by rule: no judge, no key")
+        self.assertEqual(holding_key(), [])
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200")
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        argv = Path(str(self.calls) + ".argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--judge-strategy") + 1], "auto")
+        self.assertIn(key, argv[argv.index("--judge-model-args") + 1], "simple_qa's judge needs the key")
+        self.assertEqual(holding_key(), [], "evalscope's configs and log keep the key")
+        run = next((self.tmp / "results" / "eval_simple_qa").iterdir())
+        self.assertIn("<JUDGE_KEY>", (run / "configs" / "task_config.yaml").read_text())
+        self.assertIn("<JUDGE_KEY>", (run / "evalscope.log").read_text())
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=key, FAKE_JUDGE="200", FAKE_STOPPED="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(holding_key(), [], "a run stopped on its way keeps the key")
+
+    KEY = "judge-key-for-the-test-7f3a"
+
+    def holding_key(self):
+        return sorted(str(p.relative_to(self.tmp)) for p in (self.tmp / "results").rglob("*")
+                      if p.is_file() and self.KEY in p.read_text(errors="replace"))
+
+    def start_slow_run(self, seconds, **env):
+        """simple_qa with a judge, its evalscope running for `seconds`; returns the script and evalscope's pid."""
+        p = subprocess.Popen(["bash", str(self.SCRIPT), "simple_qa"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env={**self.env, "LLM_GATEWAY_KEY": self.KEY, "FAKE_JUDGE": "200",
+                                             "FAKE_SLOW": str(seconds), **env})
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        pidfile = Path(str(self.calls) + ".pid")
+        deadline = time.time() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        pid = int(pidfile.read_text())
+
+        def gone():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(gone)
+        return p, pid
+
+    def test_the_log_shows_no_key_while_evalscope_runs(self):
+        p, _ = self.start_slow_run(3)
+        log = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            logs = list((self.tmp / "results").rglob("evalscope.log"))
+            if logs and "judge_model_args=" in logs[0].read_text(errors="replace"):
+                log = logs[0].read_text(errors="replace")
+                break
+            time.sleep(0.05)
+        self.assertIsNone(p.poll(), "evalscope ended before its log was read")
+        self.assertIsNotNone(log, "evalscope's line never reached its log")
+        self.assertNotIn(self.KEY, log, "an agent reading the log while the run goes sees the key")
+        self.assertIn("judge_model_args=", log)
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err + out)
+        self.assertEqual(self.holding_key(), [])
+
+    def test_a_stopped_run_stops_evalscope_before_it_redacts(self):
+        p, pid = self.start_slow_run(3)
+        p.send_signal(signal.SIGTERM)  # to the script alone, as a timeout of the agent's shell does
+        p.communicate(timeout=60)
+        self.assertNotEqual(p.returncode, 0)
+        with self.assertRaises(ProcessLookupError, msg="evalscope runs on after the script and writes the key again"):
+            os.kill(pid, 0)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipUnless(Path("/proc/self/status").exists(), "reads the ignored signals in /proc")
+    def test_the_redaction_ignores_the_signals_of_the_runners_shutdown(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-" ] && grep SigIgn /proc/self/status >> "$CALLS.sigign"
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200",
+                            PATH="%s:%s" % (wrap, self.env["PATH"]))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        masks = [int(line.split()[1], 16) for line in Path(str(self.calls) + ".sigign").read_text().splitlines()]
+        self.assertTrue(masks, "the redaction did not run")
+        for mask in masks:
+            for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+                self.assertTrue(mask >> (sig - 1) & 1, "%s stops the redaction halfway" % sig.name)
+        self.assertEqual(self.holding_key(), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root writes a read-only file")
+    def test_a_file_the_redaction_cannot_rewrite_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_READONLY="1")
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("task_config.yaml", r.stderr, "no word of the file that keeps the key")
+        self.assertIn("could not be removed", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that still holds the key were read")
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists any directory")
+    def test_a_directory_the_redaction_cannot_list_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_LOCKED_DIR="1")
+        for locked in (self.tmp / "results").rglob("locked"):
+            locked.chmod(0o755)
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("configs/locked", r.stderr, "no word of the directory whose files may keep the key")
+        self.assertIn("could not be removed", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that may still hold the key were read")
+
+    @unittest.skipIf(os.geteuid() == 0, "root looks at any file")
+    def test_a_file_the_redaction_cannot_look_at_stops_the_script(self):
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_NO_SEARCH_DIR="1")
+        for listed in (self.tmp / "results").rglob("listed"):
+            listed.chmod(0o755)
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("configs/listed/cfg.yaml", r.stderr, "no word of the file that may keep the key")
+        self.assertIn("could not be removed", r.stderr)
+        self.assertEqual(self.holding_key(), ["results/eval_simple_qa/%s/configs/listed/cfg.yaml" % run.name
+                                              for run in (self.tmp / "results" / "eval_simple_qa").iterdir()],
+                         "the file the redaction could not look at is the one that keeps the key")
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(),
+                         "the results of a run that may still hold the key were read")
+
+    def test_without_setsid_nothing_starts(self):
+        r = subprocess.run([shutil.which("bash"), str(self.SCRIPT), "gsm8k"], env={**self.env, "PATH": str(self.tmp / "bin")},
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stderr + r.stdout)
+        self.assertIn("setsid", r.stderr)
+        self.assertFalse(self.calls.exists(), "evalscope ran in the script's own process group")
+
+    @staticmethod
+    def running(pid):
+        try:
+            return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except OSError:
+            return False
+
+    def test_an_evalscope_that_ignores_sigterm_is_stopped_in_time_for_the_redaction(self):
+        p, pid = self.start_slow_run(60, FAKE_IGNORE_TERM="1")
+        began = time.time()
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=60)
+        took = time.time() - began
+        self.assertEqual(p.returncode, 143)
+        self.assertLess(took, 9, "the runner SIGKILLs what is left of a run 10 seconds after its SIGTERM: the key would stay")
+        self.assertFalse(self.running(pid), "evalscope runs on after the script")
+        self.assertEqual(self.holding_key(), [])
+
+    def test_a_stop_before_evalscope_leads_its_group_stops_the_launch(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # a setsid that takes its time: one process, which leads no group yet and has started nothing
+        (wrap / "setsid").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            echo $$ > "$CALLS.setsid"
+            exec %s -c 'import os, sys, time; time.sleep(15); os.execv(sys.argv[1], ["setsid"] + sys.argv[2:])' %s "$@"
+            """ % (shlex.quote(sys.executable), shlex.quote(shutil.which("setsid") or "/usr/bin/setsid"))))
+        (wrap / "setsid").chmod(0o755)
+        p = subprocess.Popen(["bash", str(self.SCRIPT), "simple_qa"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env={**self.env, "LLM_GATEWAY_KEY": self.KEY, "FAKE_JUDGE": "200",
+                                             "PATH": "%s:%s" % (wrap, self.env["PATH"])})
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        started = Path(str(self.calls) + ".setsid")
+        deadline = time.time() + 30
+        while not (started.exists() and started.read_text().strip()) and time.time() < deadline:
+            time.sleep(0.05)
+        launch = int(started.read_text())
+        self.addCleanup(lambda: self.running(launch) and os.kill(launch, signal.SIGKILL))
+        began = time.time()
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=60)
+        took = time.time() - began
+        self.assertEqual(p.returncode, 143)
+        self.assertLess(took, 8, "the script waited for a launch it had not stopped: the runner SIGKILLs it first, and the key stays")
+        self.assertFalse(self.running(launch), "the launch runs on after the script")
+        self.assertFalse(self.calls.exists(), "evalscope started after the stop")
+        self.assertEqual(self.holding_key(), [])
+
+    def test_an_evalscope_whose_log_nobody_writes_any_more_is_stopped_not_waited_for(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # the process that masks the key in the log (python3 -u -c ...) fails after the first of what it reads
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-u" ] && { head -c 1000 > /dev/null; exit 1; }
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        # evalscope prints more than a pipe holds, and has a minute to go
+        p, pid = self.start_slow_run(60, FAKE_FLOOD="1", PATH="%s:%s" % (wrap, self.env["PATH"]))
+        try:
+            out, err = p.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            self.fail("the script waits for an evalscope that waits on a pipe nobody reads")
+        self.assertEqual(p.returncode, 1, err + out)
+        self.assertIn("ended before it", err)
+        self.assertIn("its log is not whole", err)
+        self.assertFalse(self.running(pid), "evalscope runs on, with nothing reading what it prints")
+        self.assertEqual(self.holding_key(), [])
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "simple_qa" in summary.read_text(), "a set whose log is not whole was given a score")
+
+    def test_a_child_evalscope_left_is_stopped_before_the_log_ends_and_the_key_is_removed(self):
+        began = time.time()
+        r = self.run_script("simple_qa", LLM_GATEWAY_KEY=self.KEY, FAKE_JUDGE="200", FAKE_CHILD="20")
+        took = time.time() - began
+        child = int(Path(str(self.calls) + ".child").read_text())
+        self.addCleanup(lambda: self.running(child) and os.kill(child, signal.SIGKILL))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        self.assertLess(took, 15, "the script waited for the child to close the log's pipe")
+        self.assertFalse(self.running(child), "a child of evalscope's outlived it, and can write the key after the redaction")
+        self.assertEqual(self.holding_key(), [])
+        self.assertIn("eval simple_qa:", (self.tmp / "results" / "summary.txt").read_text())
+
+    def test_the_log_ends_though_no_writer_opened_its_pipe_and_a_writer_that_stays_does_not_hold_it(self):
+        found = [re.search(r"^%s\(\) \{.*?^\}\n" % name, self.SCRIPT.read_text(), re.S | re.M) for name in ("start_log", "end_log")]
+        self.assertNotIn(None, found, "eval_accuracy.sh has no start_log or end_log")
+        # the script's two functions, with cat for the masker; no writer at all, one that ends, one that stays
+        body = "".join(f.group(0) for f in found) + textwrap.dedent("""\
+            mask_key() { exec cat; }
+            FIFO_DIR=$1
+            mkfifo "$FIFO_DIR/out"
+            start_log "$FIFO_DIR/log"
+            case "$2" in
+                written) echo "a line" > "$FIFO_DIR/out" 3>&- ;;
+                held) sleep 30 > "$FIFO_DIR/out" 2> /dev/null 3>&- &
+                      echo $! > "$FIFO_DIR/writer" ;;
+            esac
+            end_log
+            echo "status $?"
+            """)
+        for case, whole in (("none", True), ("written", True), ("held", False)):
+            d = tempfile.mkdtemp(dir=self.tmp)
+            began = time.time()
+            r = subprocess.run(["bash", "-c", body, "_", d, case], capture_output=True, text=True, timeout=30)
+            took = time.time() - began
+            writer = Path(d) / "writer"
+            if writer.exists():
+                os.kill(int(writer.read_text()), signal.SIGKILL)
+            self.assertLess(took, 8, "%s: the script hangs on a log that never ends" % case)
+            self.assertEqual(r.stdout.split()[-1] == "0", whole, "%s: %s" % (case, r.stdout + r.stderr))
+            self.assertEqual((Path(d) / "log").read_text(), "a line\n" if case == "written" else "", case)
+
+    def test_a_set_whose_log_is_not_whole_has_no_score(self):
+        wrap = self.tmp / "wrap"
+        wrap.mkdir()
+        # the process that masks the key in the log (python3 -u -c ...) reads what it gets and fails
+        (wrap / "python3").write_text(textwrap.dedent("""\
+            #!/bin/bash
+            [ "$1" = "-u" ] && { cat > /dev/null; exit 1; }
+            exec %s "$@"
+            """ % shlex.quote(sys.executable)))
+        (wrap / "python3").chmod(0o755)
+        r = self.run_script("gsm8k", PATH="%s:%s" % (wrap, self.env["PATH"]))
+        self.assertEqual(r.returncode, 1, r.stderr + r.stdout)
+        self.assertIn("its log is not whole", r.stderr)
+        summary = self.tmp / "results" / "summary.txt"
+        self.assertFalse(summary.exists() and "gsm8k" in summary.read_text(), "a set whose log is not whole was given a score")
 
     def test_max_tokens_keeps_room_for_the_question_in_the_servers_context(self):
         def sent():
