@@ -1175,8 +1175,19 @@ function nextSteps(status, at) {
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
     // The task's model is not the problem's: what the task measured with is cleared with it, so that the answer
-    // and the Intake give the problem's own.
-    if (R.model_mismatch) Object.assign(out.rerun_with, Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])));
+    // and the Intake give the problem's own. Cleared wherever the next run would find it: as a field, and as an
+    // answer an earlier run was given, which the next run merges back in. The words the Intake reads are the
+    // problem's configuration, not the request that set the task up for another one; the rest of the definition
+    // goes as it was validated. Not apply_prs, which is the user's word to apply someone else's code: it stays
+    // where the caller gave it, and one the Intake read into the old request is not made the caller's by a rerun.
+    if (R.model_mismatch) {
+      const earlier = asObject(RAW.answers);
+      Object.assign(out.rerun_with, pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),
+        Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])),
+        { request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: the model, the launch and the workload of `
+          + "this task are that configuration's, not those of the run that stopped." });
+      out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), ...out.rerun_with.answers };
+    }
   }
   // The other problems of a report with several: each is offered as a run of its own, on this run's definition
   // and with the operator's settings this run was given (where runs are kept, the budgets, the reviewer's model):
@@ -2022,16 +2033,21 @@ async function runIssue() {
   // AMD code, a feature request, and a report of a failure that another open issue already has.
   if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
-  // The problem the task names is on another model or launch configuration than the task's own: reproduced and
-  // measured on the task's, it would show nothing. The run stops before Reproduce and asks for that problem's.
+  // The problem this run takes is on another model or launch configuration than the task's own: reproduced and
+  // measured on the task's, it would show nothing. The run stops before Reproduce and asks for that problem's,
+  // with a model of its own or without: a task that stops before its fix needs no model, and can still pin two
+  // GPUs for a problem at TP8.
   const elsewhere = String(tri.model_mismatch || '').trim();
-  if (elsewhere && C.model_path) {
+  if (elsewhere) {
     R.model_mismatch = elsewhere;
-    const why = `the problem this run takes is on ${elsewhere}, and the task's model is ${C.model_path}: G2 and G5 measure on what the `
-      + 'run is set up with';
+    const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);
+    const why = C.model_path
+      ? `the problem this run takes is on ${elsewhere}, and the task's model is ${C.model_path}: G2 and G5 measure on what the run is set up with`
+      : `the problem this run takes is on ${elsewhere}, and the task is set up for another configuration${
+        pinned.length ? ` (its ${pinned.join(', ')})` : ''}: reproduced on that, the problem would not show`;
     note('Triage', 'needs_input', why);
-    R.questions = [{ field: 'model_path', question: `Which model on this machine is ${elsewhere} (local path)? The task's scripts and `
-      + 'workload are asked for again with it.', why }];
+    R.questions = [{ field: 'model_path', question: `Which model on this machine is ${elsewhere} (local path)? The task's scripts, `
+      + 'workload and GPUs are set up again for it.', why }];
     return finish('needs_input', 'Triage');
   }
 

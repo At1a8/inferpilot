@@ -95,8 +95,11 @@ its own, with the issue and the problem's name as its `task`: the run's result o
 A run that has a model takes a problem on that model and configuration: G2 and G5 measure on what
 the run was set up with. A problem the report puts on another one is offered as a follow-up that
 asks for its own model, scripts and GPUs; where the task itself names such a problem, the run stops
-before Reproduce and asks for them. A task without a model, one that stops at Triage, takes the most
-urgent problem of all.
+before Reproduce and asks for them. So it does where the task names the issue alone and no problem
+of the report is on the run's model and configuration: the most urgent of all is taken then, and
+the run asks for what that one is on. A task without a model, one that stops before its fix, takes
+the most urgent problem of all; what it pins all the same (its GPUs, its scripts) has to fit that
+problem, or the run stops before Reproduce in the same way.
 
 ## 5. Reproduction
 

@@ -34,9 +34,14 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    names or else the most urgent, and say which in `reason`. Where the task has a `model_path`, "the
    most urgent" is said of the problems on that model and configuration: Setup has rendered the run's
    scripts for it, and G2 and G5 measure on them, so a problem the report puts on another model is one
-   of the others, however urgent. A task without a model (one that stops at Triage) takes the most
-   urgent of all. Where `task` itself names a problem on another model or configuration than the
-   task's, take that problem and return `model_mismatch` (its model and configuration): the run stops
+   of the others, however urgent. A task without a model (one that stops before its fix) takes the
+   most urgent of all. Two cases leave the run on a problem that is not on what the task is set up
+   with, and in both you take that problem and return `model_mismatch` (its model and configuration).
+   `task` itself names a problem on another model or configuration than the task's. Or `task` names
+   the issue alone and none of its problems is on the task's: take the most urgent of all then, since
+   there is no other to take. What a task is set up with is its `model_path` and whatever else it
+   pins (`gpu_ids`, its scripts, its workload): one without a model that pins two GPUs does not fit a
+   problem at TP8 either. On a `model_mismatch` the run stops
    before Reproduce and asks for them. `priority`, `category`, `action` and `existing_prs` are then
    that problem's and no other's: a fix PR for another problem of the report is listed in the triage
    record only, since the run would apply it and check it against this problem's reproduction. Return

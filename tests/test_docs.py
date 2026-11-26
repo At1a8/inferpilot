@@ -1487,12 +1487,20 @@ class TriageCasesTest(unittest.TestCase):
                            ("knowledge/issue_triage.md", "and with the operator's settings this run was given"),
                            ("knowledge/issue_triage.md", "A run that has a model takes a problem on that model and configuration"),
                            ("knowledge/issue_triage.md", "where the task itself names such a problem, the run stops before Reproduce and asks for them"),
-                           ("knowledge/issue_triage.md", "A task without a model, one that stops at Triage, takes the most urgent problem of all"),
+                           ("knowledge/issue_triage.md", "A task without a model, one that stops before its fix, takes the most urgent problem of all"),
                            ("roles/issue_triager.md", "Where the task has a `model_path`, \"the most urgent\" is said of the problems on that model and "
                                                       "configuration"),
                            ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
-                           ("roles/issue_triager.md", "A task without a model (one that stops at Triage) takes the most urgent of all"),
-                           ("roles/issue_triager.md", "take that problem and return `model_mismatch`"),
+                           ("roles/issue_triager.md", "A task without a model (one that stops before its fix) takes the most urgent of all"),
+                           ("roles/issue_triager.md", "in both you take that problem and return `model_mismatch`"),
+                           ("roles/issue_triager.md", "`task` itself names a problem on another model or configuration than the task's"),
+                           # a task that names the issue alone has a problem to take even where none is on its model
+                           ("roles/issue_triager.md", "Or `task` names the issue alone and none of its problems is on the task's: take the most "
+                                                      "urgent of all then"),
+                           ("roles/issue_triager.md", "one without a model that pins two GPUs does not fit a problem at TP8 either"),
+                           ("knowledge/issue_triage.md", "So it does where the task names the issue alone and no problem of the report is on the "
+                                                         "run's model and configuration"),
+                           ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
                            ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
                            ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
                            ("README.md", "a scan's top tasks, the other problems of an issue's report"),
@@ -1506,7 +1514,15 @@ class TriageCasesTest(unittest.TestCase):
                 ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
                  "a follow-up loses the operator's settings, or the model the report names for it"),
                 ("'gpu_ids'];", "a problem on another configuration is pinned to this run's GPUs"),
-                ("if (elsewhere && C.model_path) {", "a problem on another model is reproduced and measured on the task's"),
+                ("const elsewhere = String(tri.model_mismatch || '').trim();\n  if (elsewhere) {",
+                 "a problem on another model or configuration is reproduced on the task's, with a model of its own or without"),
+                # the rerun clears what the task measured with as a field and as an earlier answer, and names the problem's configuration
+                ("Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])),", "the rerun keeps the task's own model, scripts or GPUs"),
+                ("out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), "
+                 "...out.rerun_with.answers };", "an earlier answer brings the old configuration back into the rerun"),
+                ("{ request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: ", "the rerun keeps the request of the old configuration"),
+                ("pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),",
+                 "the rerun loses the rest of the task, or makes an inferred apply_prs the caller's"),
                 ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",
                  "a problem on another model is measured with this run's model and scripts")):
             self.assertIn(said, src, why)
