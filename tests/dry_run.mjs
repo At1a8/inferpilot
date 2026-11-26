@@ -857,14 +857,16 @@ const scenarios = [
     const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
     const prPhase = (r) => r.result.phases.filter((p) => p.phase === 'PR');
     const onMain = `${RUN}/recheck/python/sglang/__init__.py`;
-    const passes = { on_main: 'passes', main: 'abc1234', main_import: onMain, evidence: 'the reproduction passes 6 of 6' };
+    const onMainTest = `${RUN}/recheck/test/registered/amd/test_x.py`;
+    const passes = { on_main: 'passes', main: 'abc1234', main_import: onMain, test_path: onMainTest, evidence: 'the reproduction passes 6 of 6',
+      left_running: '' };
     for (const mode of ['issue', 'ci']) {
       // Still failing there: the pull request is prepared, and the run record says what the check showed.
       const still = await run({ mode, task: 't' });
-      const order = still.keys.filter((k) => k.startsWith('pr_engineer:') || k === 'reviewer:review').join();
-      check(still.result.status === 'ready_for_review' && order === 'reviewer:review,pr_engineer:recheck,pr_engineer:pr',
-        `${mode}: the check comes after the review and before the pull request: ${order}`);
-      const rc = still.calls.find((c) => c.key === 'pr_engineer:recheck');
+      const order = still.keys.filter((k) => k.startsWith('pr_engineer:') || k === 'reviewer:review' || k === 'verify_engineer:recheck').join();
+      check(still.result.status === 'ready_for_review' && order === 'reviewer:review,verify_engineer:recheck,pr_engineer:pr',
+        `${mode}: the check comes after the review and before the pull request, and is the verify engineer's: ${order}`);
+      const rc = still.calls.find((c) => c.key === 'verify_engineer:recheck');
       check(rc.ins.extra_gates.length === 1 && rc.ins.extra_gates[0].gate === (mode === 'issue' ? 'issue_repro' : 'failing_test')
         && !!rc.ins.extra_gates[0].cmd, `${mode}: it is given the fix's own gate and its command: ${JSON.stringify(rc.ins.extra_gates)}`);
       check(rc.ins.time_limit_min > 0 && !Number.isNaN(Date.parse(rc.ins.deadline_utc)),
@@ -874,7 +876,7 @@ const scenarios = [
         `${mode}: the run record says the latest main still fails, and on what runs: ${JSON.stringify(prPhase(still))}`);
       check(still.result.phases.filter((p) => p.phase === 'PR' && p.verdict === 'pass').length === 1, `${mode}: and the phase is one phase`);
       // Main fixed it while the run worked on it: nothing to propose.
-      const gone = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => ({ ...passes, fixed_by: '#51234' }) });
+      const gone = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => ({ ...passes, fixed_by: '#51234' }) });
       check(gone.result.status === 'fixed_on_main' && gone.result.stopped_at === 'PR' && !gone.keys.includes('pr_engineer:pr')
         && !gone.result.pr && gone.result.fixed_by === '#51234', `${mode}: a failure main no longer shows gets no pull request: ${ended(gone)}`);
       check(prPhase(gone).some((p) => p.verdict === 'fixed_on_main'
@@ -883,54 +885,72 @@ const scenarios = [
       check(!(gone.result.next.user || []).some((x) => /push/.test(x)), `${mode}: and the user is given nothing to push`);
       check(gone.keys.includes('director:report') && (mode === 'ci' || gone.keys.includes('issue_triager:reply')),
         `${mode}: the run still reports${mode === 'issue' ? ', and the issue still gets its reply' : ''}`);
-      const unnamed = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => passes });
+      const unnamed = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => passes });
       check(unnamed.result.status === 'fixed_on_main' && !unnamed.result.fixed_by, `${mode}: the fix that did it need not be named: ${ended(unnamed)}`);
       // Dropping a verified fix needs proof: the commit, the runs, and the framework imported from that commit's worktree.
       for (const [lacks, answer] of [
-        ['the commit of main it ran on; the runs it rests on; the framework imported from the worktree', { on_main: 'passes' }],
+        ['the commit of main it ran on; the runs it rests on; the framework imported from the worktree', { on_main: 'passes', left_running: '' }],
         ['the commit of main it ran on', { ...passes, main: '' }],
         ['the runs it rests on', { ...passes, evidence: ' ' }],
         ['it was imported from /wt/python/sglang/__init__.py', { ...passes, main_import: '/wt/python/sglang/__init__.py' }],
         ['the framework imported from the worktree of that commit', { ...passes, main_import: `${RUN}/recheck/../../wt/python/sglang/__init__.py` }],
         ['it was imported from a path the check did not record', { ...passes, main_import: undefined }],
       ]) {
-        const thin = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => answer });
+        const thin = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => answer });
         check(thin.result.status === 'ready_for_review' && thin.keys.includes('pr_engineer:pr') && !thin.result.fixed_by
           && prPhase(thin).some((p) => p.verdict === 'recheck' && p.summary.includes('Not counted: the pull request is prepared')
             && lacks.split('; ').every((x) => p.summary.includes(x))),
           `${mode}: "passes" without ${lacks} drops no fix: ${ended(thin)}, ${JSON.stringify(prPhase(thin).map((p) => p.summary))}`);
       }
+      check(gone.result.recheck.main === 'abc1234' && gone.result.recheck.main_import === onMain && gone.result.recheck.evidence === passes.evidence,
+        `${mode}: the whole answer is kept for the report and the reply to be checked against: ${JSON.stringify(gone.result.recheck)}`);
       // The gate ran the fixed tree, a test main now skips, an import error: nothing is decided, and the run says why.
-      const unsure = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => ({ on_main: 'inconclusive', main: 'abc1234',
-        evidence: 'main now skips the test on rocm720: the failure may be hidden' }) });
+      const unsure = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => ({ on_main: 'inconclusive', main: 'abc1234',
+        evidence: 'main now skips the test on rocm720: the failure may be hidden', left_running: '' }) });
       check(unsure.result.status === 'ready_for_review' && unsure.keys.includes('pr_engineer:pr')
         && prPhase(unsure).some((p) => p.verdict === 'recheck'
           && p.summary === 'the check on main at abc1234 decided nothing: the pull request is prepared. main now skips the test on rocm720: the failure may be hidden'),
         `${mode}: an inconclusive check prepares the pull request and keeps its reason: ${JSON.stringify(prPhase(unsure))}`);
       // No answer is not a reason to drop a verified fix; what the check left on the GPUs is stopped first.
-      const silent = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => null });
+      const silent = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null });
       const stops = silent.calls.filter((c) => c.key === 'verify_engineer:gpus' && c.ins.round === 'recheck');
       check(silent.result.status === 'ready_for_review' && stops.length === 1
         && silent.keys.indexOf('pr_engineer:pr') > silent.keys.lastIndexOf('verify_engineer:gpus')
         && prPhase(silent).some((p) => p.verdict === 'recheck' && /was not run again on the latest main.*what it left was stopped$/.test(p.summary)),
         `${mode}: without an answer the pull request is prepared once what the check left is stopped: ${ended(silent)}`);
-      const busy = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => null,
+      const busy = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
         'verify_engineer:gpus': (ins) => ({ in_use: ins.round === 'recheck' ? 'GPU 1: VRAM 12%, pids 777' : '' }) });
       check(busy.result.status === 'ready_for_review' && prPhase(busy).some((p) => /another job uses a pinned GPU: GPU 1/.test(p.summary)),
         `${mode}: another job on a GPU is said, and stops nothing, as before a Verify round: ${ended(busy)}`);
-      const unknown = await run({ mode, task: 't' }, { 'pr_engineer:recheck': () => null,
+      const unknown = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
         'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? null : { in_use: '' }) });
       check(unknown.result.status === 'blocked' && unknown.result.stopped_at === 'PR' && !unknown.keys.includes('pr_engineer:pr')
-        && unknown.result.attention.some((a) => a.call === 'pr_engineer:recheck' && /may have left its servers running/.test(a.issue))
+        && unknown.result.attention.some((a) => a.call === 'verify_engineer:recheck' && /may have left its servers running/.test(a.issue))
         && prPhase(unknown).some((p) => p.verdict === 'fail' && /The fix is verified and on /.test(p.summary)),
         `${mode}: where what it left cannot be stopped or checked, no pull request is prepared next to it: ${ended(unknown)}`);
     }
+    // A test the fix corrected is still the fixed one when it is collected from the task worktree: for a failing test, the
+    // test file is from main too. An issue's reproduction has no such file.
+    for (const [test, why] of [['/wt/test/registered/amd/test_x.py', 'it was collected from /wt/test/registered/amd/test_x.py'],
+      [undefined, 'it was collected from a path the check did not record']]) {
+      const fixedTest = await run({ mode: 'ci', task: 'c' }, { 'verify_engineer:recheck': () => ({ ...passes, test_path: test }) });
+      check(fixedTest.result.status === 'ready_for_review' && fixedTest.keys.includes('pr_engineer:pr') && fixedTest.result.recheck.on_main === 'inconclusive'
+        && prPhase(fixedTest).some((p) => p.verdict === 'recheck' && p.summary.includes(why)),
+        `ci: "passes" with the test from ${test || 'nowhere it names'} drops no fix: ${ended(fixedTest)}`);
+      const repro = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:recheck': () => ({ ...passes, test_path: test }) });
+      check(repro.result.status === 'fixed_on_main', `issue: a reproduction is not a test file of the tree: ${ended(repro)}`);
+    }
+    // An answer that does not say whether anything is left running is not one that says nothing is: it is no answer.
+    const mute = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:recheck': () => ({ ...passes, left_running: undefined }) });
+    check(mute.result.status === 'ready_for_review' && !mute.result.fixed_by
+      && mute.calls.some((c) => c.key === 'verify_engineer:gpus' && c.ins.round === 'recheck'),
+      `an answer without left_running is not taken, and what the check may have left is stopped first: ${ended(mute)}`);
     // What the check started and could not stop is still on the GPUs, whatever it found: nothing is prepared next to it.
     for (const verdict of ['fails', 'inconclusive', 'passes']) {
-      const held = await run({ mode: 'issue', task: 'i' }, { 'pr_engineer:recheck': () => ({ ...passes, on_main: verdict,
+      const held = await run({ mode: 'issue', task: 'i' }, { 'verify_engineer:recheck': () => ({ ...passes, on_main: verdict,
         left_running: 'the server of run 4, pid 4242, on GPU 0-7' }) });
       check(held.result.status === 'blocked' && held.result.stopped_at === 'PR' && !held.keys.includes('pr_engineer:pr') && !held.result.fixed_by
-        && held.result.attention.some((a) => a.call === 'pr_engineer:recheck' && a.issue.includes('pid 4242'))
+        && held.result.attention.some((a) => a.call === 'verify_engineer:recheck' && a.issue.includes('pid 4242'))
         && prPhase(held).some((p) => p.verdict === 'fail' && /could not stop what it started \(the server of run 4/.test(p.summary)),
         `a check (${verdict}) that could not stop what it started stops the run before the pull request: ${ended(held)}`);
     }
@@ -938,47 +958,47 @@ const scenarios = [
     const perfIssue = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'performance', action: 'reproduce', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
       'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash repro.sh', perf_claim: 'decode tok/s back to 2400 at c32', evidence: '1900 tok/s' }) });
-    const told = perfIssue.calls.find((c) => c.key === 'pr_engineer:recheck');
+    const told = perfIssue.calls.find((c) => c.key === 'verify_engineer:recheck');
     check(told && told.ins.claim === 'decode tok/s back to 2400 at c32', `the check is given the number to restore: ${told && told.ins.claim}`);
-    const plainIssue = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'pr_engineer:recheck');
+    const plainIssue = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'verify_engineer:recheck');
     check(!plainIssue.ins.claim, `any other fix has no number for main to reach: ${JSON.stringify(plainIssue.ins.claim)}`);
     // A reproduction that was granted more time is run again with as much.
     const soak = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:reproduce': (ins, n) => (n === 1 ? { reproduced: false, repro_cmd: 'bash repro.sh', evidence: 'arm 1 of 3 clean', needs_min: 500 }
         : { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'arm 3 failed' }) });
-    const soaked = soak.calls.find((c) => c.key === 'pr_engineer:recheck');
+    const soaked = soak.calls.find((c) => c.key === 'verify_engineer:recheck');
     check(soak.result.status === 'ready_for_review' && soaked.ins.time_limit_min === 500,
       `the check has the time the reproduction was granted: ${soaked.ins.time_limit_min} min`);
-    const usual = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'pr_engineer:recheck');
+    const usual = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'verify_engineer:recheck');
     check(usual.ins.time_limit_min === 360, `and the reproduction's own limit otherwise: ${usual.ins.time_limit_min} min`);
     // A check that timed out is not cancelled and may launch again: the run stops, and starts nothing next to it.
-    const slow = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'pr_engineer:recheck': async () => {
+    const slow = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'verify_engineer:recheck': async () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
       return passes;
     } });
     check(slow.result.status === 'blocked' && slow.result.stopped_at === 'PR' && !slow.keys.includes('pr_engineer:pr')
       && !slow.calls.some((c) => c.key === 'verify_engineer:gpus' && c.ins.round === 'recheck')
-      && slow.result.attention.some((a) => a.call === 'pr_engineer:recheck' && /timed out/.test(a.issue))
+      && slow.result.attention.some((a) => a.call === 'verify_engineer:recheck' && /timed out/.test(a.issue))
       && prPhase(slow).some((p) => p.verdict === 'fail' && /timed out and may still be running on the GPUs/.test(p.summary)),
       `a check that timed out stops the run before the pull request, and its late answer is not used: ${ended(slow)}`);
     // An existing fix PR that merged while the run verified it is found the same way.
     const existing = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
         triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
-      'pr_engineer:recheck': () => ({ ...passes, fixed_by: '#40872' }) });
+      'verify_engineer:recheck': () => ({ ...passes, fixed_by: '#40872' }) });
     check(existing.result.status === 'fixed_on_main' && existing.result.fixed_by === '#40872' && !existing.keys.includes('pr_engineer:pr'),
       `an existing fix PR that merged meanwhile ends the run the same way: ${ended(existing)}`);
     // A feature or a performance task has no failure for main to have fixed.
     for (const mode of ['feature', 'perf']) {
       const r = await run({ mode, task: 't' });
-      check(r.result.status === 'ready_for_review' && !r.keys.includes('pr_engineer:recheck'), `${mode}: no check, as before: ${ended(r)}`);
+      check(r.result.status === 'ready_for_review' && !r.keys.includes('verify_engineer:recheck'), `${mode}: no check, as before: ${ended(r)}`);
     }
     // A repair round of the PR phase does not check again: the check is made once, before the first.
     const repaired = await run({ mode: 'issue', task: 'i' }, {
       'pr_engineer:pr': (ins, n) => (n === 1
         ? { ...DEFAULTS['pr_engineer:pr'](), lint_pass: false, work_packages: [{ id: 'PR1', goal: 'lint', kind: 'framework', files: [], test: 't', depends_on: [] }] }
         : DEFAULTS['pr_engineer:pr']()) });
-    check(repaired.result.status === 'ready_for_review' && repaired.keys.filter((k) => k === 'pr_engineer:recheck').length === 1
+    check(repaired.result.status === 'ready_for_review' && repaired.keys.filter((k) => k === 'verify_engineer:recheck').length === 1
       && repaired.keys.filter((k) => k === 'pr_engineer:pr').length === 2, `a repair round does not check again: ${ended(repaired)}`);
   }],
   ['pr: what the PR engineer finds missing goes back through implement, verify and review', async () => {
