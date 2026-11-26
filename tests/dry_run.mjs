@@ -786,6 +786,12 @@ const scenarios = [
     check(await claimOn({ perf_claim: BOUND, perf_cost: true }, ours) === BOUND && await claimOn({ perf_claim: BOUND, perf_cost: true }) === BOUND,
       'a cost the user stated stays the claim, with InferPilot\'s client and with the task\'s own');
     check(NO_SLOWER.test(await claimOn({ perf_claim: BOUND }, ours)), 'a claim not marked as a cost is a gain, never claimed with InferPilot\'s client');
+    // Spec's fallback client is InferPilot's wherever exp_root is now: it is in the run directory being resumed.
+    for (const root of [path.dirname(RUN), '/another/root']) {
+      const judged = (await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, exp_root: root,
+        client_script: `${RUN}/scripts/fallback_client.sh` })).calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      check(judged && NO_SLOWER.test(judged.ins.claim), `the run's fallback client, exp_root now ${root}: the source's gain is not the claim (${judged && judged.ins.claim})`);
+    }
     // So the answer always says which it is: one that leaves it out is no answer, and is asked for again.
     const unsaid = (ins) => Object.fromEntries(Object.entries({ ...DEFAULTS['director:resume'](ins), perf_claim: BOUND })
       .filter(([k]) => k !== 'perf_cost'));
@@ -897,6 +903,33 @@ const scenarios = [
       const differs = await resumed('feature', saved({ harness: was }), { harness: now });
       check(stoppedFor(differs, '(harness not as its run.json has them)'), `${why}: ${differs.result.status} at ${differs.result.stopped_at}`);
     }
+    // So is any other string: the run takes a model or a script from the path as given, spaces included.
+    for (const [key, was, now] of [['model_path', '/models/m ', '/models/m'], ['client_script', '/s/client.sh', '/s/client.sh '],
+      ['accuracy_script', ' /s/accuracy.sh', '/s/accuracy.sh']]) {
+      const moved = await resumed('feature', saved({ [key]: was }), { [key]: now });
+      check(stoppedFor(moved, `(${key} not as its run.json has them)`), `${key} with a space is another path: ${moved.result.status} at ${moved.result.stopped_at}`);
+    }
+    const inLoad = await resumed('feature', saved({ workload: { ...load, dataset: '/d/a.jsonl ' } }),
+      { workload: { ...load, dataset: '/d/a.jsonl' }, client_script: '/s/client.sh' });
+    check(stoppedFor(inLoad, '(workload not as its run.json has them)'), `nor is a data set's path in a workload trimmed: ${inLoad.result.status}`);
+    // What "false" or a list of one means inside a workload is its client's to say: there a value stays what it is.
+    for (const [why, was, now] of [['"false" is a value, and no empty one', { dataset: 'false' }, { dataset: '' }],
+      ['a list of one is not its item', { concurrencies: [8] }, { concurrencies: 8 }], ['null is no empty string', { dataset: null }, { dataset: '' }]]) {
+      const inside = await resumed('feature', saved({ workload: { ...load, ...was } }), { workload: { ...load, ...now }, client_script: '/s/client.sh' });
+      check(stoppedFor(inside, '(workload not as its run.json has them)'), `inside a workload, ${why}: ${inside.result.status} at ${inside.result.stopped_at}`);
+    }
+    const digits = await resumed('feature', saved({ workload: { ...load, concurrency: '64' } }), { workload: JSON.stringify(load), client_script: '/s/client.sh' });
+    check(digits.result.status === 'ready_for_review', `a number written as its digits, in a workload given as a string, is the same workload: ${digits.result.status}`);
+    // The fields with a meaning of their own keep it: a flag is on or off, and apply_prs a list also for one PR.
+    const ownForms = await resumed('feature', saved({ held_out: 'True', guards: '', apply_prs: '["#46329"]' }), { held_out: true, apply_prs: '#46329' });
+    check(ownForms.result.status === 'ready_for_review', `a flag and a list written another way are the same task: ${ownForms.result.status} at ${ownForms.result.stopped_at}`);
+    // InferPilot's template is one answer however the word was written, and no path.
+    const templated = { workload: '{"isl":8000,"osl":1000,"conc":32}' };
+    const sameTemplate = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, ...templated, client_script: ' Template ' }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), task_definition: { ...ins.task_def, client_script: 'template' } }),
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }),
+    });
+    check(sameTemplate.result.status === 'ready_for_review', `the template taken again is the same client: ${sameTemplate.result.status} at ${sameTemplate.result.stopped_at}`);
     const goal = await resumed('feature', saved({ goal: 'no accuracy loss: also gpqa_diamond' }), { goal: 'quick check' });
     const v = goal.calls.find((c) => c.key === 'verify_engineer:verify');
     const pe = goal.calls.find((c) => c.key === 'perf_engineer:perf_eval');
@@ -929,6 +962,20 @@ const scenarios = [
     check(stoppedFor(await resumed('issue', { triage_path: '' }), 'records no issue_triage.md'), 'an issue without its triage record would skip Reply');
     check(stoppedFor(await resumed('feature', { spec_path: '' }), 'records no feature_spec.md'), 'a feature without its spec has no acceptance matrix');
     check(stoppedFor(await resumed('feature', { design_path: '' }), 'records no design.md'), 'nor, without its design, a test plan');
+    check(stoppedFor(await resumed('perf', { analysis_path: '' }), 'records no perf_analysis.md'),
+      'a perf run without its analysis has no plan for Verify and no path check for Performance');
+    const analysed = (await resumed('perf', {})).calls.find((c) => c.key === 'verify_engineer:verify');
+    check(analysed && analysed.ins.analysis_path === `${RUN}/perf_analysis.md`, `with it, Verify is given the analysis the run had: ${analysed && analysed.ins.analysis_path}`);
+    // A package recorded without its name or its commit is one the run directory lost: left out, Verify and
+    // Review would be given fewer packages than the run verified.
+    const whole = DEFAULTS['director:resume']({ mode: 'feature' }).verified_work_packages;
+    for (const [what, entry] of [['its commit', { wp: 'WP2', commit: '', evidence: 'ok' }], ['its name', { wp: '', commit: 'c_WP2', evidence: 'ok' }]]) {
+      const partial = await resumed('feature', { verified_work_packages: [whole[0], entry] });
+      check(stoppedFor(partial, 'records a verified work package without its name or its commit'),
+        `a package recorded without ${what} is not dropped from the list: ${partial.result.status} at ${partial.result.stopped_at}`);
+    }
+    check(stoppedFor(await resumed('feature', { verified_work_packages: [{ wp: 'WP1', commit: '' }] }), 'records no verified work package'),
+      'and a list with no whole entry records none');
     const rejected = { id: 'O2', owner: 'kernel_workflow', status: 'rejected', retries: 1 };
     const kernelOnly = await resumed('perf', { verified_work_packages: [], handoffs: [rejected], head: 'c_revert' });
     check(kernelOnly.keys.includes('verify_engineer:verify') && kernelOnly.result.stopped_at !== 'Setup',
@@ -946,15 +993,41 @@ const scenarios = [
     check(JSON.stringify(one.ins.apply_prs) === '["#46329"]', 'and the plan the same list');
     const doc = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
     check(doc.includes('first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6)')
-      && doc.includes('its triage record (`issue`, `ci`), its spec and design (`feature`), the claim its Performance was to judge, and `known_issues.json` and `handoffs.json`')
+      && doc.includes('the verified work packages, each with its commit, the mode\'s gate command (`issue`, `ci`), its triage record (`issue`, `ci`), '
+        + 'its spec and design (`feature`), its analysis (`perf`), the claim its Performance was to judge, and `known_issues.json` and `handoffs.json`')
       && doc.includes('run no smoke, so that nothing is measured'), 'Setup checks everything a resume needs before its smoke');
+    // A fix's Setup measures no baseline, since its base may be the server that does not start: nor does its resume.
+    check(doc.includes('An `issue` or a `ci` run whose Setup measured no baseline (step 4; the ledger\'s baseline section says so) runs no smoke on a resume either, '
+      + 'and returns `baseline_status: "skip"` again'), 'the resume of a fix launches no base that its Setup did not');
+    const skip = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), baseline_status: 'skip', baseline: 'no baseline: the base does not start' }) };
+    const fixResumed = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, skip);
+    check(fixResumed.keys.includes('verify_engineer:verify') && fixResumed.result.stopped_at !== 'Setup',
+      `and that answer takes an issue's resume on to Verify: ${fixResumed.result.status} at ${fixResumed.result.stopped_at}`);
+    const featureSkipped = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, skip);
+    check(featureSkipped.result.status === 'blocked' && featureSkipped.result.stopped_at === 'Setup', 'a feature\'s, which measures against its baseline, not');
+    // run.json is what the resume is held against: a Setup that wrote this run's inputs there would compare them with themselves.
+    check(doc.includes('A run resumed from Verify changes nothing in `RUN_DIR/run.json`, at this step or at a later one, and reads its `task` and its `goal` there'),
+      'Setup leaves run.json as the run it resumes wrote it');
+    // A resume stopped at Setup because an earlier call still runs must not take the worktree that call measures on.
+    const report = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'report').replace(/\s+/g, ' ');
+    check(report.includes('A run that reused a run directory (`resume_run_dir`) and stopped at Setup leaves it where it is')
+      && report.includes('a call of the run it resumes that has not ended (Setup, step 1) may be measuring on it still'),
+      'the report of a resume that stopped at Setup leaves the baseline worktree');
+    const stoppedReport = featureSkipped.calls.find((c) => c.key === 'director:report');
+    check(stoppedReport && stoppedReport.ins.resume_run_dir === RUN && stoppedReport.ins.stopped_at === 'Setup',
+      `and is told that it is one: ${stoppedReport && JSON.stringify([stoppedReport.ins.resume_run_dir, stoppedReport.ins.stopped_at])}`);
     check(doc.includes('one that timed out is not cancelled, and its agent may still be running and start more servers, which idle GPUs do not show')
       && doc.includes('one that timed out was not cancelled, which is why Setup looked for what it left before its smoke')
       && !doc.includes('its servers went with the call'), 'a timed-out Verify is not taken for gone');
+    check(doc.includes('run it in the `container` too, when that is set, through `docker exec -e INFERPILOT_RUN_TAG`'),
+      'the scan run in the container is given this run\'s tag, without which its own processes read as another run\'s');
     check(doc.includes('`verified_work_packages` is `[]` only when the report says none was left')
       && doc.includes('The `task` and the `goal` stay the ones `run.json` has') && doc.includes('a run that had no goal has none now')
       && doc.includes('a flag `false` is `0`, not an unset line') && doc.includes('a line set to nothing is not an unset one either')
-      && doc.includes('A resume without its triage record, or a `feature` without its spec or its design, stops'),
+      && doc.includes('A path, like any other string, is compared as written')
+      && doc.includes('`"false"` is no empty value in it, and a list of one is not its item')
+      && doc.includes('A package whose name or commit it does not record is returned with that field empty, never left out')
+      && doc.includes('A resume without its triage record, a `feature` without its spec or its design, or a `perf` run without its analysis, stops'),
       'the director is told what each of these restores or stops');
   }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {

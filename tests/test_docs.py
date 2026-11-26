@@ -487,6 +487,20 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("once in a run", EN)
         self.assertIn("一次运行里只跑一次", ZH)
 
+    def test_each_g4_attempt_has_a_directory_of_its_own(self):
+        """stability.sh adds to the files it finds and counts its passes from 1: a G4 started again in the
+        directory of one that a call without a result left unfinished would be judged with it, across two
+        servers."""
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("Each attempt has a directory of its own", verify)
+        self.assertIn("leave it as it is and give this one `RUN_DIR/logs/g4_<arm>_<n>`, the first `<n>` from 2 not taken", verify)
+        self.assertIn("A G4 with no result in the ledger has not run: one that a call without a result left unfinished "
+                      "(a run resumed from Verify) starts again from its first pass, on a server of its own", verify)
+        self.assertIn("it starts in no directory an attempt wrote to (exit 2)", verify)
+        self.assertIn("and the directory its passes are in", verify)
+        script = (ROOT / "scripts" / "stability.sh").read_text(encoding="utf-8")
+        self.assertIn("this run needs a directory of its own", script, "the script adds to an earlier run's passes")
+
     def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
         doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)

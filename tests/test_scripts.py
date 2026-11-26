@@ -1417,6 +1417,28 @@ class StabilityTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([s["pass"] for s in self.samples()], [1])
 
+    def test_a_directory_an_earlier_run_wrote_to_is_refused(self):
+        """Its lines are added to the files that are there and its passes counted from 1: a G4 started again
+        where one was left unfinished would be read with it, as one run against two servers."""
+        first = self.run_script(str(self.client), HOURS="0")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        names = ("stability.jsonl", "stability.log", "bench.jsonl", "passes")
+        kept = {name: (self.out / name).read_text() for name in names}
+        again = self.run_script(str(self.client), HOURS="0")
+        self.assertEqual(again.returncode, 2, again.stderr)
+        self.assertIn("holds an earlier run's stability.jsonl", again.stderr)
+        self.assertEqual({name: (self.out / name).read_text() for name in names}, kept, "the earlier run's records changed")
+        # a run cut off in its first pass left its log, and no line yet
+        (self.out / "stability.jsonl").unlink()
+        cut = self.run_script(str(self.client), HOURS="0")
+        self.assertEqual(cut.returncode, 2, cut.stderr)
+        self.assertIn("holds an earlier run's stability.log", cut.stderr)
+        self.assertEqual((self.out / "passes").read_text().strip(), "1", "the client ran in the earlier run's directory")
+        fresh = self.tmp / "logs" / "g4_feature_2"
+        r = self.run_script(str(self.client), HOURS="0", OUT_DIR=str(fresh))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([json.loads(line)["pass"] for line in (fresh / "stability.jsonl").read_text().splitlines()], [1])
+
     def test_what_it_cannot_run_is_a_usage_error_and_starts_nothing(self):
         for args, env in (((), {}), ((str(self.tmp / "missing.sh"),), {}), ((str(self.client), "more"), {}),
                           ((str(self.client),), {"PORT": None}), ((str(self.client),), {"OUT_DIR": None}),

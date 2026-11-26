@@ -954,25 +954,25 @@ const RESUMED = S({
 const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs',
   'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
-// One form for a setting however it was written down: JSON as an object or in a string, a flag unset or
-// false, a list of one as that one. Compared as JSON, which keeps the boundaries of every value: a comma
-// or a colon in a path is not a second setting.
+// One form for a setting however it was written down. JSON, given as an object or in a string, is compared as
+// JSON with its keys in order, which keeps the boundaries of every value: a comma or a colon in a path is not a
+// second setting. Its values stay what they are, a number also where it is written as its digits: what "false"
+// or a list of one means inside a workload is its client's to say. Any other string is compared as written:
+// the run uses a path as given, and a space at its end is part of a file's name.
 function plain(v) {
-  if (typeof v === 'string') {
-    const t = v.trim();
-    if (/^[[{]/.test(t)) {
-      try {
-        return plain(JSON.parse(t));
-      } catch (e) {
-        return t;
-      }
+  if (typeof v === 'string' && /^\s*[[{]/.test(v)) {
+    try {
+      return inJson(JSON.parse(v));
+    } catch (e) {
+      return v;
     }
-    return t === 'false' ? '' : t;
   }
-  if (v === undefined || v === null || v === false) return '';
-  if (Array.isArray(v)) return v.length < 2 ? plain(v[0]) : v.map(plain);
-  if (typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, plain(v[k])]));
-  return String(v);
+  return v === undefined || v === null ? '' : inJson(v);
+}
+function inJson(v) {
+  if (Array.isArray(v)) return v.map(inJson);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, inJson(v[k])]));
+  return typeof v === 'number' ? String(v) : v;
 }
 // `harness` holds parameter lines, read as scripts/harness.py renders them (value_of): a flag is 1 or 0,
 // so false is a value and not an unset line; a list is its items; a line set to nothing is a setting too
@@ -988,13 +988,26 @@ function harnessLines(v) {
       return plain(h);
     }
   }
-  if (!h || typeof h !== 'object' || Array.isArray(h)) return plain(h);
+  if (!h) return '';
+  if (typeof h !== 'object' || Array.isArray(h)) return plain(h);
   const line = (x) => (typeof x === 'boolean' ? (x ? '1' : '0')
     : Array.isArray(x) ? x.map(String).join(' ') : x === null || x === undefined ? '' : String(x));
   const lines = Object.keys(h).sort().map((k) => [k, line(h[k])]);
   return lines.length ? lines : '';
 }
-const canon = (v, key = '') => JSON.stringify(key === 'harness' ? harnessLines(v) : plain(v));
+// What a field of its own means is read as the workflow reads it: a flag is on or off (on), `apply_prs` is a
+// list also where one PR is given alone, and a script given as InferPilot's template is that one word however
+// it was written (isTemplate), and no path.
+const FLAGS = ['held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability'];
+const TEMPLATED = ['server_script', 'client_script', 'accuracy_script'];
+const listOf = (v) => {
+  const l = plain(v);
+  return (Array.isArray(l) ? l : l === '' ? [] : [l]).map(String);
+};
+const canon = (v, key = '') => JSON.stringify(key === 'harness' ? harnessLines(v)
+  : FLAGS.includes(key) ? on(v)
+    : key === 'apply_prs' ? listOf(v)
+      : TEMPLATED.includes(key) && isTemplate(v) ? TEMPLATE : plain(v));
 const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
@@ -1914,7 +1927,8 @@ async function resumeVerify(claimOf) {
   const rs = await call('director', 'resume', inputs({ task_def: R.task_def }), RESUMED);
   const cmd = !rs ? '' : String((MODE === 'issue' ? rs.repro_cmd : MODE === 'ci' ? rs.failing_test_cmd : 'none') || '').trim();
   const recorded = !!rs && Array.isArray(rs.verified_work_packages);
-  const done = (recorded ? rs.verified_work_packages : []).filter((d) => d && d.wp && d.commit);
+  const listed = recorded ? rs.verified_work_packages : [];
+  const done = listed.filter((d) => d && d.wp && d.commit);
   // None left is a state only a plan of kernel hand-offs reaches, its integration reverted.
   const noneLeft = recorded && !rs.verified_work_packages.length && MODE === 'perf'
     && Array.isArray(rs.handoffs) && rs.handoffs.some((h) => h && h.owner === 'kernel_workflow');
@@ -1928,13 +1942,19 @@ async function resumeVerify(claimOf) {
     !saved && 'the run directory records no task definition (run.json)',
     changed.length && `this run would measure otherwise than the one it resumes (${changed.join(', ')} not as its run.json has them); `
       + 'a changed task is verified in a run of its own',
-    !done.length && !noneLeft && 'the run directory records no verified work package',
+    // A package without its name or its commit is one the run directory lost, not one to leave out: Verify and
+    // Review would be given fewer packages than the run verified.
+    !done.length && !noneLeft ? 'the run directory records no verified work package'
+      : done.length < listed.length && 'the run directory records a verified work package without its name or its commit: '
+        + 'the packages Verify and Review are given would not be all the run verified',
     !cmd && `the run directory records no ${MODE === 'issue' ? 'reproduction command (issue_repro)' : 'failing test command (failing_test)'}`,
     MODE === 'ci' && !String(rs.triage_path || '').trim() && 'the run directory records no ci_triage.md, which names the lanes the test failed on',
     MODE === 'issue' && !String(rs.triage_path || '').trim()
       && 'the run directory records no issue_triage.md, which holds the issue\'s classification and what Reply answers',
     ...(MODE === 'feature' ? [['spec_path', 'feature_spec.md, whose acceptance matrix Verify measures'],
-      ['design_path', 'design.md, whose test plan Verify runs']] : [])
+      ['design_path', 'design.md, whose test plan Verify runs']]
+      : MODE === 'perf' ? [['analysis_path', 'perf_analysis.md, whose plan names the gates Verify runs and whose path check '
+        + 'Performance holds both arms to']] : [])
       .map(([k, what]) => !String(rs[k] || '').trim() && `the run directory records no ${what}`),
     rs.perf_required === true && !restored && 'the run was to measure a claim its run directory does not record',
     lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
@@ -1980,8 +2000,10 @@ async function resumeVerify(claimOf) {
 async function runFeature() {
   const early = await start(true);
   if (early) return early;
-  // Spec's fallback client, which the user took for the source's scenarios.
-  const fallback = C.client_script.startsWith(`${EXP_ROOT}/`) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
+  // Spec's fallback client, which the user took for the source's scenarios: under exp_root, or in the run
+  // directory this run reuses, wherever exp_root is now.
+  const inRun = (root) => !!root && C.client_script.startsWith(`${String(root).replace(/\/+$/, '')}/`);
+  const fallback = (inRun(EXP_ROOT) || inRun(C.run_dir)) && /\/scripts\/fallback_client\.\w+$/.test(C.client_script);
   // InferPilot's client, that fallback or its template taken at Intake for the task's workload, need not
   // reproduce the source's numbers: the source's gain is never the claim on it. A cost the user stated (cost) is
   // no number of the source's, and stays the claim there. Every feature is judged all the same

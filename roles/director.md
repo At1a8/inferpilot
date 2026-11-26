@@ -40,12 +40,16 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` (restored from its bundle when it does not, step 2) and is checked out
    there (check it out when the checkout is clean), and
-   re-run one baseline smoke to confirm the environment still matches the ledger. With `resume_from:
+   re-run one baseline smoke to confirm the environment still matches the ledger. An `issue` or a `ci`
+   run whose Setup measured no baseline (step 4; the ledger's baseline section says so) runs no smoke on
+   a resume either, and returns `baseline_status: "skip"` again: its base may be the server that does
+   not start, the failure being fixed. With `resume_from:
    verify`, first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6): the
    branch head is the commit the run's last Verify round ran on, the checkout is clean, the task you are
    given measures what the one `run.json` recorded did, and the run directory still records the verified
-   work packages, the mode's gate command (`issue`, `ci`), its triage record (`issue`, `ci`), its spec and
-   design (`feature`), the claim its Performance was to judge, and `known_issues.json` and
+   work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
+   (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
+   was to judge, and `known_issues.json` and
    `handoffs.json`. Check too that the call whose Verify had no result is over: one that timed out is
    not cancelled, and its agent may still be running and start more servers, which idle GPUs do not
    show.
@@ -53,10 +57,14 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    2>/dev/null | grep -m 1 '^INFERPILOT_RUN_TAG=') || continue; [ "$t" =
    "INFERPILOT_RUN_TAG=$INFERPILOT_RUN_TAG" ] || echo "${f%/environ} $t"; done`
    lists the processes a runner other than this run's started, each with its tag (run it in the
-   `container` too, when that is set): one that is the earlier run's agent, or a server or suite of its,
-   has not ended. Stop nothing: it may be writing the run's results. When any of these fails, run no
+   `container` too, when that is set, through `docker exec -e INFERPILOT_RUN_TAG`: without this run's
+   tag there, its own processes are listed as another's): one that is the earlier run's agent, or a
+   server or suite of its, has not ended. Stop nothing: it may be writing the run's results. When any of these fails, run no
    smoke, so that nothing is measured, and return the run directory with `baseline_status: "fail"` and
-   what differs, or what still runs, in `baseline`.
+   what differs, or what still runs, in `baseline`. A run resumed from Verify changes nothing in
+   `RUN_DIR/run.json`, at this step or at a later one, and reads its `task` and its `goal` there: the
+   file holds what the run it resumes was given, which PHASE=resume restores and holds this run's
+   inputs against, and inputs written there would be compared with themselves.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -262,7 +270,9 @@ on the commit the run's last Verify round ran on. Change nothing.
    on (each round's first row in the ledger's Run log; without one, the last commit Implement
    verified). `verified_work_packages` is `[]` only when the report says none was left (a plan of
    kernel hand-offs whose integration was reverted), and `null` when the run directory does not record
-   them, which stops the resume. `head_ok` is true only when the task branch's head in the worktree is
+   them, which stops the resume. A package whose name or commit it does not record is returned with
+   that field empty, never left out: Verify and Review are given all the run verified or nothing, and
+   an incomplete entry stops the resume too. `head_ok` is true only when the task branch's head in the worktree is
    that commit, the worktree is clean, and every verified package's commit is in its history: that head
    may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
    that moved after the round started (a commit, an edit, a reset) is not what the run verified.
@@ -274,7 +284,11 @@ on the commit the run's last Verify round ran on. Change nothing.
    is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
    workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`, and the gates
    the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
-   that would measure otherwise is a run of its own. `harness` is compared as its lines render (a flag
+   that would measure otherwise is a run of its own. A path, like any other string, is compared as
+   written, since the run uses it as given: a space at its end is part of a file's name. What a
+   `workload` holds is compared as it is there, a number also where it is written as its digits:
+   `"false"` is no empty value in it, and a list of one is not its item. `harness` is
+   compared as its lines render (a flag
    `false` is `0`, not an unset line; a line set to nothing is not an unset one either: an empty
    `REASONING_EFFORT` sends none, an unset one its default). The `task` and the `goal` stay the ones
    `run.json` has, whatever this run was given, and a run that had no goal has none now: the goal names
@@ -296,8 +310,10 @@ on the commit the run's last Verify round ran on. Change nothing.
 5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
    the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
    on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
-   `analysis_path` (`perf`). A resume without its triage record, or a `feature` without its spec or its
-   design, stops. The reply draft the run wrote stays in the run directory for the triager;
+   `analysis_path` (`perf`: `perf_analysis.md`, whose plan names the gates Verify runs and whose path
+   check Performance holds both arms to). A resume without its triage record, a `feature` without its
+   spec or its design, or a `perf` run without its analysis, stops. The reply draft the run wrote stays
+   in the run directory for the triager;
    it is not this run's to post until Reply rewrites it.
 6. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
    `RUN_DIR/handoffs.json`: `[]` for a file that holds an empty list, `null` for one that is missing or
@@ -489,7 +505,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   with what would confirm it. A spinoff with `withdrawn_draft` was written as a draft and not counted:
   rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
-  RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
+  RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code. A run that reused
+  a run directory (`resume_run_dir`) and stopped at Setup leaves it where it is: it measured nothing on
+  it, and a call of the run it resumes that has not ended (Setup, step 1) may be measuring on it still.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when
   it is missing): `| start (UTC) | mode | task | status | container | run directory |`, with the run
   directory's name and the task in a few words.

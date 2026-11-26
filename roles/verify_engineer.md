@@ -116,7 +116,13 @@ clock can start before your session does.
        suite (step 1). It writes one line per pass to `OUT_DIR/stability.jsonl` (the client's result, the
        memory in use on every GPU and on the host; the throughput of a client that appends no result to
        `OUT_DIR/bench.jsonl` is read from its own logs), touches `OUT_DIR` after each, which shows the
-       machine lock that the run is alive, and ends at the first pass that fails. G4 starts after
+       machine lock that the run is alive, and ends at the first pass that fails. Each attempt has a
+       directory of its own: where an earlier attempt wrote to `RUN_DIR/logs/g4_<arm>` (a G4 run again
+       on the fix, or one that a call without a result left unfinished), leave it as it is and give
+       this one `RUN_DIR/logs/g4_<arm>_<n>`, the first `<n>` from 2 not taken. The script adds to the
+       files it finds and counts its passes from 1, so two attempts in one directory would be judged
+       as one run, across two servers; it starts in no directory an attempt wrote to (exit 2). G4
+       starts after
        everything else in the round, the other data sets included. Its length is set, so it needs no
        reference run and is never `slow`.
      - G4 passes when the server neither crashes, hangs nor runs out of memory, no request fails, and
@@ -135,10 +141,14 @@ clock can start before your session does.
        investigator with its control, until `known_issues` holds it as the baseline's: from then on
        report it as failed, with that issue, in `failures` with `blocking: false`.
      - **G4 runs once in a run.** Write the commit it ran on with its result in the ledger
-       (`git -C <worktree> rev-parse --short HEAD`). A later round does not run it again, whether it
+       (`git -C <worktree> rev-parse --short HEAD`), and the directory its passes are in. A later round
+       does not run it again, whether it
        passed or `known_issues` holds its failure as the baseline's: report that result with its commit,
        and when this round's commit is another, say in `gates` that this commit has not been through
-       G4. Only a G4 whose failure was the change's is run again, on the fix.
+       G4. Only a G4 whose failure was the change's is run again, on the fix. A G4 with no result in
+       the ledger has not run: one that a call without a result left unfinished (a run resumed from
+       Verify) starts again from its first pass, on a server of its own, and what the unfinished one
+       wrote is no part of its result.
      - **A round with G4 says what it needs first** (`needs_min`, below): it does not fit the default
        limit, and its estimate counts G4 twice, its run and the control a failure would need, since no
        later call has that time.
