@@ -53,12 +53,14 @@ Return:
 A profile the machine was not idle for is `{"analysis_path": "", "path_ok": false, "opportunities": [],
 "not_run": "<each GPU in use, its VRAM%, GPU% and pids>"}`.
 
-## PHASE=perf_eval (G5 in feature and perf; guards in every mode that runs it)
+## PHASE=perf_eval (G5 in every mode that runs it, with its guards)
 
-Inputs: `claim`, what the measurement must show: the gain the task claims; the number an issue's fix
-must restore; a cost the user stated for a feature, as a bound; or, for a feature that claims no gain
-or is measured with InferPilot's client, that it is no slower than the baseline beyond the noise band
-(`validation_doctrine.md`, *G5 for a feature*).
+Inputs: `claim`, what the measurement must show: the gain the task claims; the number the fix of a
+performance problem must restore (an issue triaged `performance`, a CI failure on a number its test
+measures); a cost the user stated for a feature, as a bound; or that the change is no slower than the
+baseline beyond the noise band: a feature that claims no gain or is measured with InferPilot's client
+(`validation_doctrine.md`, *G5 for a feature*), and the fix of an issue or of a CI failure that
+changes code the server runs (*G5 for a fix*).
 
 Before the servers of every round start, this run's earlier ones stopped, the machine idle
 (`gpu_status.py --check all`, `env_hygiene.md`). A GPU another job uses means the measurement is not run:
@@ -71,12 +73,27 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
    flushed; one warm-up, then one A/B round (one timed run per arm), and a round that misses the claim
    is reproduced at most twice and judged on the median (`perf_evaluation.md` §3); interleave arms on
    a shared box.
+   - **A fix (issue, ci) has no baseline from Setup:** measure both arms yourself, after one discarded
+     warm-up (`perf_evaluation.md` §3): the fix on the task worktree and its baseline in a throwaway
+     worktree at `<base>` (an issue or a ci run has no `RUN_DIR/base`), with the run's
+     `server_script`, the one G2 measured the fix on, and the task's `client_script`.
+   - Where the base cannot serve the configuration because that is the failure being fixed, never
+     launch it: the baseline is the commit G2 measured against, which the ledger names (the culprit's
+     parent for a CI fix, the commit or release the report says worked), in a throwaway worktree.
+     Name that commit in `results` and `summary`. Where the ledger names none, measure the fix alone
+     and return `no_baseline` with the reason: `claim_reproduced` is false, its numbers are reported,
+     and nothing is judged on them.
+   - **A performance problem is measured where it showed:** the benchmark is the reproduction
+     (`repro_cmd`) or the failing test (`failing_test_cmd`), on the workload `claim` names, run on the
+     fix and on the base, which shows the number that fell. The claim holds when the fix's median
+     reaches the number, whatever the fix changed: a threshold moved in a test restores nothing.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
-3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf` and in
-   `feature`, where the spec names the same scenarios, the reproduction in `issue` — with no case
-   added, dropped or resized after results were seen. `path_ok`: the path check of the profile phase
-   holds for both arms. Either false means the numbers are not evidence.
+3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, in
+   `feature`, where the spec names the same scenarios, and for a fix, whose client Setup recorded
+   there; the reproduction or the failing test for a performance problem — with no case added,
+   dropped or resized after results were seen. `path_ok`: the path check of the profile phase holds
+   for both arms. Either false means the numbers are not evidence.
 4. **Reward hacks.** Check the P entries of `reward_hacks.md` on both arms: the two `server_args=`
    lines (P3), the budget (P4), output token totals counted from the client's responses (P5), the
    prefix-cache hit rates (P6), every run reported (P9). Put a suspected hack in `results` and
@@ -86,8 +103,9 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
 6. `claim_reproduced`: the median of the rounds meets `claim`. A claimed gain is met by a win beyond
    the noise band, of the size the claim names where it names one. `no slower than the baseline` is met
    when the median lies no further below the baseline than the noise band, so a gain meets it too; a
-   feature that is slower does not, whatever else it brings. A cost the user stated (`at most 5% below
-   the baseline`) is met when the median lies within that bound. `held_out_ok`: with `held_out` on, at
+   feature or a fix that is slower does not, whatever else it brings. A number to restore is met when
+   the median reaches it. A cost the user stated (`at most 5% below the baseline`) is met when the
+   median lies within that bound. `held_out_ok`: with `held_out` on, at
    the held-out operating point (`perf_evaluation.md` §3: the client at half the concurrency through
    `CONCURRENCY`, fixed at Setup), measured the same way, the claim still holds: a gain still beyond
    the noise band, no slowdown still none (true when `held_out` is off, or when the client cannot take
@@ -106,3 +124,7 @@ Return:
 
 A round the machine was not idle for adds `"not_run": "<each GPU in use, its VRAM%, GPU% and pids>"`, and
 nothing it returns is judged.
+
+A fix measured without a baseline (step 1) adds `"no_baseline": "<why no commit serves the
+configuration>"`, with `claim_reproduced` false: its numbers are reported, not judged. No other task
+returns it, and a number that must come back is judged without one.

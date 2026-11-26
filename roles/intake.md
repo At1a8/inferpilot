@@ -43,6 +43,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      never answer `template` yourself. A feature needs its client as a perf task does, whether it
      claims a gain or not (`knowledge/validation_doctrine.md`, *G5 for a feature*), and a task that
      takes the template gives the whole `workload` it runs: both lengths and the concurrency.
+     An issue or a ci task needs a client too, unless `stop_after` ends the run before a fix: G5
+     measures on it a fix that changes code the server runs, against the base (*G5 for a fix*). It is
+     the benchmark the report or the failing test runs, when there is one, else the user's own for
+     that model; ask when the request names none, and offer no `template` for it.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
@@ -54,9 +58,9 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      fields of their own, so a `goal` the caller gave does not drop what the request asked. G4 keeps
      the task's performance test running against one server, and the user who asks for it says what
      it keeps up: with `stability` on, a task without a `server_script` or without a `client_script`
-     is asked for it, in any mode. Where only G4 needs the script (an issue's or a ci task's: a
-     feature and a perf task name both anyway), the question offers no `template`. A task that names
-     InferPilot's client all the same (`client_script: template`) is asked for the `workload` it runs.
+     is asked for it, in any mode. An issue's or a ci task's question offers no `template` (a feature
+     and a perf task name both scripts anyway, by their mode). A task that names InferPilot's client
+     all the same (`client_script: template`) is asked for the `workload` it runs.
    - `long_context_script` (`task_definition.md` §1.1): the user's own long-context test, which G3
      runs. Set it when the request names one, and check that it exists and is readable. Never write
      one for the user, and never answer `template`: InferPilot has no long-context test of its own.

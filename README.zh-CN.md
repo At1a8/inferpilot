@@ -13,12 +13,12 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 | 模式 | 任务 | 阶段 | 产出 |
 |---|---|---|---|
 | `feature` | 把上游 PR 或设计移植到 AMD | Setup → Spec → Recon → Design → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 分支 + PR 描述 + 验证报告 |
-| `issue` | 一个 AMD 用户 issue | Setup → Triage → Reproduce → Diagnose（已有修复 PR 时跳过）→ Implement → (Kernel) → Verify → (Performance) → Review → PR → (Spinoff) → Reply → Report | 修复 PR，或一个结论（已分诊、未复现、main 上已修复、已定位）；总会附一份回复草稿，并在结束时按运行结果重写 |
-| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Review → PR → (Spinoff) → Report | 修复 PR，或把偶发 / 基础设施失败移交出去 |
+| `issue` | 一个 AMD 用户 issue | Setup → Triage → Reproduce → Diagnose（已有修复 PR 时跳过）→ Implement → (Kernel) → Verify → Performance（只改测试、文档或 CI 文件的修复跳过）→ Review → PR → (Spinoff) → Reply → Report | 修复 PR，或一个结论（已分诊、未复现、main 上已修复、已定位）；总会附一份回复草稿，并在结束时按运行结果重写 |
+| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance（跳过的条件同 issue）→ Review → PR → (Spinoff) → Report | 修复 PR，或把偶发 / 基础设施失败移交出去 |
 | `perf` | 针对某个模型和固定负载的系统级性能目标 | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 带实测收益的 PR，或放弃改动；kernel 级的工作交给 kernel 后端 |
 | `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（作为 issue 分享到 InferPilot 仓库，否则是一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
 
-括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel；issue 模式下只有被分诊为 `performance` 的 issue 才跑 Performance。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
+括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel。issue 或 CI failure 的修复改了 server 会运行的代码时，Performance 要测它（G5：不比 base 慢）；只改测试、文档或 CI 文件的修复跳过这一步，除非问题本身就是性能问题（被分诊为 `performance` 的 issue，或某个测试因它测出的数值而失败的 CI failure）：这时无论修复改了什么，掉下去的数值都必须回来。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
 
 任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 以及 issue、CI 修复需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
 
@@ -52,12 +52,12 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `analyst` | Recon | 把特性涉及的每个子系统映射到目标框架中的文件、函数和挂载点，并列表说明源设计的哪些假设在 AMD 上成立；只读不写 |
 | `architect` | Design、Plan | 把 recon 或 profile 的结果拆成可以单独测试的工作包，附上不变量、显存预算、同步方式、启动时的拒绝条件和测试计划；标出必须由人审阅的设计；把每个性能机会分配给 InferPilot、kernel 后端或 Hyperloom |
 | `issue_triager` | Triage、Reproduce、Spinoff、Reply | 根据 issue、评论和关联 PR 确定优先级和处理方式；起草回复；写出作为该 issue 门禁的复现步骤；为运行中发现的、不属于本任务的每个问题找出上游 issue 或起草一个，并列出线索（设置 `confirm_leads` 时先在 base 提交上确认）；结束时按运行结果重写回复 |
-| `ci_guardian` | Classify、Bisect | 给变红的 job 分类（代码回归、依赖升级、测试缺陷、偶发、基础设施），后两类移交出去；找到并确认引入问题的 commit，规划修复；对已在 main 上修复的 issue，设置 `bisect_fixed` 时找出修复它的 commit |
+| `ci_guardian` | Classify、Bisect | 给变红的 job 分类（代码回归、依赖升级、测试缺陷、偶发、基础设施），后两类移交出去；判断它是不是性能问题，是的话给出修复必须恢复的数值；找到并确认引入问题的 commit，规划修复；对已在 main 上修复的 issue，设置 `bisect_fixed` 时找出修复它的 commit |
 | `implementer` | Implement | 一次一个工作包，diff 尽量小，关闭特性时行为不变，只影响 HIP 或放在开关后面，提交时已通过 lint、测试已注册；编写带单元测试的功能性 kernel（调优走 hand-off）；应用现成的 PR 和验证过的 kernel 收益；回滚失败的工作包 |
 | `test_engineer` | Implement | 在每个工作包的 commit 上重新运行它的单元测试，检查这个测试确实可能失败（改变行为的改动在父 commit 上验证，不改变行为的改动在故意改坏的副本上验证），并检查关闭特性时行为不变（没有开关的工作包，改为检查它涉及的模块已有的测试通过，或者和在父 commit 上失败的方式相同） |
 | `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数 |
 | `investigator` | Investigate、Diagnose | 先跑对照实验，再一次只验证一个机制，并维护假设台账；返回修复工作包、基线同样存在的已知问题、无法定论的结论，或者（对 issue 而言）不在 AMD 这一侧的根因；探测代码只放在开关后面 |
-| `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack |
+| `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack；对照 base 测量修复，以及性能问题必须恢复的数值 |
 | `reviewer` | Review、Reply | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；在报告前把 issue 的回复草稿逐条对照运行记录核对；可以换用另一个模型（`review_model`） |
 | `kernel_liaison` | Kernel | 把 kernel hand-off 转成后端的任务，运行 `command` 类后端，依据后端自身的验证评判结果，并把收益作为工作包返回 |
 | `pr_engineer` | PR | 不改任何代码：检查代码整洁、lint 和 CI 注册（缺什么就作为工作包退回），在不改变代码内容的前提下整理成每个工作包一个 commit，试合并 main 只用来报告冲突，在最终 commit 上检查关闭特性时的行为（没有开关的改动，改为检查它涉及的模块已有的测试），写 PR 描述和 push 命令 |
@@ -324,7 +324,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `framework`、`platform`、`gpu_ids` | 目标与环境（`sglang`；`gpu_ids` 为空时由 Setup 挑选空闲的 GPU，之后每个角色都通过 `HIP_VISIBLE_DEVICES` 使用这组 GPU） |
 | `workload` | 每次测量都使用的基准负载，例如 `{"isl":8192,"osl":1024,"conc":64}`；`perf` 必填，在 Setup 时固定 |
 | `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1）。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/server.sh`，按模型在 sglang cookbook 里的配方启动 |
-| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`feature` 和 `perf` 必填：每个 feature 都要和 baseline 比性能（G5），声称了收益就验证这个收益，没有声称就验证没有变慢。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`，feature 选它时要给出这个 `workload`；feature 用它只判定有没有比 baseline 慢，不验证源 PR 的收益 |
+| `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`feature` 和 `perf` 必填：每个 feature 都要和 baseline 比性能（G5），声称了收益就验证这个收益，没有声称就验证没有变慢；`issue` 和 `ci` 也必填，除非 `stop_after` 让运行在修复之前停下：修复改了 server 会运行的代码时，要用它对照 base 测性能，不能变慢（G5）。没有的话，feature 和 perf 任务可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`，选它的任务要给出完整的 `workload`；feature 用它只判定有没有比 baseline 慢，不验证源 PR 的收益 |
 | `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
 | `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
@@ -352,7 +352,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 除 `inferpilot_dir`、`request`、`answers`、`exp_root`、`review_model` 和各项预算外，其余参数都属于任务定义；每次已启动的运行，其结果都会记录所用的任务定义（`task_def`）、每个字段的来源（`provenance`）以及 intake 的假设（`assumptions`）。
 
-人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型时，会先问要用哪个模型；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
+人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型或 client 时，会先问要用哪个；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
 每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 

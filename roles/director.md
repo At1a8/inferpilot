@@ -215,7 +215,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      The fix's accuracy (`validation_doctrine.md`, *G2 for a fix*) needs no baseline from you: nobody
      knows yet whether the fix will change code the server runs, and the verify engineer measures the
      base arm when it does. Return the `accuracy_script` all the same, whenever the task has a
-     `model_path`.
+     `model_path`. Nor does its speed (*G5 for a fix*): the performance engineer measures both arms
+     after Verify. Record the task's `client_script`, with its `workload` when it gives one, in
+     `RUN_DIR/run.json` as the fixed benchmark, as for a feature, and return the client the run uses
+     (the rendered one when the task names `template`): every measurement of the fix runs it
+     unchanged.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 
@@ -360,18 +364,18 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
 
 - `ready_for_review`: write `RUN_DIR/validation_report.md` (`templates/validation_report.md`); every
   number points at an artifact. Its *Before pushing* section is what the human runs before pushing
-  (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes `RUN_DIR/base`,
-  the lock release frees the machine, and the checkout may be on another branch by the time the human
-  runs it. It takes the machine's lock for `RUN_DIR/rerun` and checks every GPU idle before each arm's
-  servers start (`scripts/run_lock.py`, `scripts/gpu_status.py --check all`). For each test and
-  measurement the PR body cites, it makes each arm's tree again from its commit (the base commit and the
-  branch's head; for the G2 of a fix whose baseline was measured on another commit, that commit, as
-  the ledger names it, and the fix alone where it had no baseline: the base is the server that does
-  not start), runs every command of an arm (server, tests, reproduction, benchmark client) with that
-  tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under test*), measures as
-  the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per arm, the same rounds
-  in the same order) and gives the numbers to compare with, with the run's spread. Then it removes the
-  worktrees, releases the lock, and gives the PR body path and the push command.
+  (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes
+  `RUN_DIR/base`, the lock release frees the machine, and the checkout may be on another branch by the
+  time the human runs it. It takes the machine's lock for `RUN_DIR/rerun` and checks every GPU idle
+  before each arm's servers start (`scripts/run_lock.py`, `scripts/gpu_status.py --check all`). For
+  each test and measurement the PR body cites, it makes each arm's tree again from its commit (the base
+  commit and the branch's head; for the G2 and the G5 of a fix whose baseline was measured on another
+  commit, that commit, as the ledger names it, and the fix alone where it had no baseline: the base is
+  the server that does not start), runs every command of an arm (server, tests, reproduction, benchmark
+  client) with that tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under
+  test*), measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
+  arm, the same rounds in the same order) and gives the numbers to compare with, with the run's spread.
+  Then it removes the worktrees, releases the lock, and gives the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
   `fixed_on_main`, `diagnosed`, `handed_off`, `dropped`, `queued`): write `RUN_DIR/run_report.md` with what was
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to

@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: G2 measures on gsm8k a fix that changes code the server runs; with stop_after at a phase before the fix it needs none), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for perf, and for a feature with a workload: runs the fixed workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the workload, only when the user takes it; a feature\'s numbers on it are reported, never a claim), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: a fix that changes code the server runs is measured against the base, G2 on gsm8k and G5 on args.client_script; with stop_after at a phase before the fix it needs neither), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci task that can reach a fix: runs the workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the task\'s workload, only when the user takes it and gives the whole workload; on it a feature is judged only to be no slower than the baseline, never on its source\'s gain), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -39,11 +39,12 @@ const RAW = args || {};
 const MODES = ['feature', 'issue', 'ci', 'perf', 'scan'];
 // The phases a run of each mode passes when nothing stops it early, logged as its route so that the log
 // shows how far a run is (runtime/run.mjs numbers its phases from it). Intake, an issue's Bisect, Kernel,
-// Investigate and Spinoff come on top when needed; an issue about performance logs its route again, with Performance.
+// Investigate and Spinoff come on top when needed; a fix that changes no code the server runs logs its route
+// again, without Performance.
 const ROUTES = {
   feature: ['Setup', 'Spec', 'Recon', 'Design', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report'],
-  issue: ['Setup', 'Triage', 'Reproduce', 'Diagnose', 'Implement', 'Verify', 'Review', 'PR', 'Reply', 'Report'],
-  ci: ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Review', 'PR', 'Report'],
+  issue: ['Setup', 'Triage', 'Reproduce', 'Diagnose', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report'],
+  ci: ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report'],
   perf: ['Setup', 'Profile', 'Plan', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report'],
   scan: ['Collect', 'Dispatch', 'Report'],
 };
@@ -194,12 +195,12 @@ const TASK_PROMPTS = {
 const STOP_PHASES = {
   feature: ['Setup', 'Spec', 'Recon', 'Design', 'Implement', 'Kernel', 'Verify', 'Performance', 'Review'],
   issue: ['Setup', 'Triage', 'Reproduce', 'Diagnose', 'Implement', 'Kernel', 'Verify', 'Performance', 'Review'],
-  ci: ['Setup', 'Classify', 'Bisect', 'Implement', 'Kernel', 'Verify', 'Review'],
+  ci: ['Setup', 'Classify', 'Bisect', 'Implement', 'Kernel', 'Verify', 'Performance', 'Review'],
   perf: ['Setup', 'Profile', 'Plan', 'Implement', 'Kernel', 'Verify', 'Performance', 'Review'],
   scan: ['Collect'],
 };
 // The phases of an issue or a ci task that come before its fix: a run that stops after one of them changes no
-// code, and has no fix for G2 to measure.
+// code, and has no fix for G2 or G5 to measure.
 const BEFORE_A_FIX = {
   issue: ['setup', 'triage', 'reproduce', 'diagnose'],
   ci: ['setup', 'classify', 'bisect'],
@@ -288,25 +289,34 @@ function missingFields(a) {
       + "against the server and writes each request's result to OUT_DIR. InferPilot has no template for it.",
       'long_context is on: G3 runs this test unchanged on the baseline and on the change');
   }
+  // A fix that changes code the server runs is measured against the base as a feature is: G2 on gsm8k, G5 on the
+  // task's client (validation_doctrine.md, G2 for a fix, G5 for a fix). An issue or a ci task that can reach a fix
+  // names the model and the client for it. One that stops before the fix (stop_after) needs neither.
+  const stop = String(a.stop_after || '').trim().toLowerCase();
+  const fixes = !!BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop);
   // G4 keeps the task's performance test up for more than 48 hours, and the user asked for it: the task names the
   // server that test runs against and the client that runs it. A feature and a perf task are asked for both above;
-  // an issue or a ci task, whose mode asks for neither, is asked here. No template is offered on G4's account.
+  // an issue or a ci task is asked here: for the server on G4's account, for the client on G4's or on G5's. No
+  // template is offered for either.
   const g4 = (mode === 'issue' || mode === 'ci') && asked(a.stability) === 'true';
   if (g4 && !a.server_script) {
     ask('server_script', 'Which script starts the server that G4 keeps up for more than 48 hours (absolute path)? It must pass '
       + '--port $PORT and $EXTRA_ARGS to the server.',
       'stability is on: G4 runs its client back to back against one server, which this script starts');
   }
-  if (g4 && !a.client_script) {
-    ask('client_script', 'Which script runs the workload that G4 keeps up for more than 48 hours (absolute path)? It reads PORT and '
-      + 'writes its logs to OUT_DIR.',
-      'stability is on: G4 runs this client back to back against one server');
+  if ((g4 || fixes) && !a.client_script) {
+    const forG4 = 'stability is on: G4 runs this client back to back against one server';
+    ask('client_script', `Which script runs the workload that ${fixes ? 'G5 measures the fix on' : 'G4 keeps up for more than 48 hours'} `
+      + '(absolute path)? It reads PORT and writes its logs to OUT_DIR.',
+      fixes ? 'a fix that changes code the server runs is measured against the base with it: G5 shows that the fix is no slower; with '
+        + `stop_after set to a phase before the fix, no client is needed${g4 ? `; ${forG4}` : ''}` : forG4);
   }
   // A task that names InferPilot's client all the same gives the workload it runs: without one the template would
-  // keep up lengths and a concurrency of its own, which nobody asked for, for two days.
-  if (g4 && gaps.length) {
-    ask('workload', "Which workload should InferPilot's client keep up for G4 (input and output lengths, concurrency)?",
-      `stability is on and client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
+  // run lengths and a concurrency of its own, which nobody asked for: for G5's judgement, or for G4's two days.
+  if ((g4 || fixes) && gaps.length) {
+    ask('workload', `Which workload should InferPilot's client ${fixes ? 'run for the fix' : 'keep up for G4'} (input and output `
+      + 'lengths, concurrency)?',
+      `client_script is ${TEMPLATE}: InferPilot's serving benchmark runs the task's workload, and the task ${lacks}`);
   }
   const kb = String(a.kernel_backend || 'none').trim().toLowerCase();
   if (!KERNEL_BACKENDS.includes(kb)) {
@@ -326,14 +336,11 @@ function missingFields(a) {
       'only an approved feature design can be resumed', ['implement']);
   }
   if (resume && !a.run_dir) ask('run_dir', 'Which run stopped at Design (its run directory)?', 'the resumed run continues in it');
-  const stop = String(a.stop_after || '').trim().toLowerCase();
   if (stop && !STOP_PHASES[mode].some((p) => p.toLowerCase() === stop)) {
     ask('stop_after', `After which phase of mode=${mode} should the run stop?`,
       `"${a.stop_after}" is not a phase of this mode; the run would ignore it and go on to the end`, STOP_PHASES[mode]);
   }
-  // A fix that changes code the server runs is measured on gsm8k against the base (G2), as a feature is: an
-  // issue or a ci task that can reach a fix names the model. One that stops before it (stop_after) needs none.
-  if (BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop) && !a.model_path) {
+  if (fixes && !a.model_path) {
     ask('model_path', `Which model should G2 measure the fix on (local path)? ${mode === 'issue' ? "The reporter's model" : 'The model the failing test serves'}, `
       + 'when it is on this machine.',
       'a fix that changes code the server runs is measured on gsm8k against the base; with stop_after set to a phase before the fix, no model is needed');
@@ -759,6 +766,10 @@ const CLASSIFY = S({
   failure_class: { type: 'string', enum: ['code_regression', 'dependency_bump', 'test_bug', 'flaky', 'infrastructure'] },
   failing_test_cmd: str,
   window: str,
+  // the test fails on a number it measures (a throughput, a latency, a speed threshold), not on an error:
+  // perf_claim is the number the fix must restore, as an issue's reproduction states it
+  performance: bool,
+  perf_claim: str,
   evidence: str,
   triage_path: str,
 }, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
@@ -818,6 +829,9 @@ const VERIFY = S({
   // baseline too (a known issue): reported, and not investigated (again)
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
   needs_min: num, // the round stopped before a suite that would not fit: the limit it needs, from its start
+  // a fix (issue, ci): false when every file it changes is a test, a documentation file or a CI file of the
+  // repository, which G2 and G5 do not measure; left out, the fix counts as one that changes code the server runs
+  server_code_changed: bool,
   ledger_path: str,
   summary: str,
 }, ['all_pass', 'failures']);
@@ -838,6 +852,9 @@ const PERF = S({
   workload_unchanged: bool,
   path_ok: bool,
   not_run: str, // another job held a GPU of the machine: who held which; no number was taken
+  // a fix whose base cannot serve the configuration, in a run that knows no commit that served it: why the
+  // fix's numbers have nothing to be judged against. They are reported.
+  no_baseline: str,
   results: arr(),
   summary: str,
 }, ['claim_reproduced', 'held_out_ok', 'guards_ok', 'workload_unchanged', 'path_ok']);
@@ -1098,10 +1115,11 @@ function nextSteps(status, at) {
     out.ask = R.questions;
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
-  } else if (status === 'needs_input' && (R.questions || []).some((q) => q.field === 'model_path')) {
-    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give the model, and run the task again: it starts over.${report}`;
+  } else if (status === 'needs_input' && (R.questions || []).some((q) => FIX_NEEDS[q.field])) {
+    const what = R.questions.map((q) => FIX_NEEDS[q.field]).filter(Boolean).join(' and ');
+    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over.${report}`;
     out.ask = R.questions;
-    out.rerun_with = { answers: { model_path: null } };
+    out.rerun_with = { answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
   }
   const user = [];
   if (status === 'ready_for_review' && R.pr) user.push(R.pr.push_command || `push ${R.pr.branch}: the report has the command`);
@@ -1200,14 +1218,24 @@ function askWorkload(spec) {
   return finish('needs_input', 'Spec');
 }
 
-// G2 measures on gsm8k a fix that changes code the server runs, so a fix needs a model. An issue or a ci run can
-// get this far without one: it named a stop before the fix that its route skipped (an existing fix PR has no
-// Diagnose) or that the control file lifted. It stops here and asks, before any code changes.
-function askModel(at) {
-  const why = 'the run reached a fix without a model, and G2 measures on gsm8k a fix that changes code the server runs';
+// A fix that changes code the server runs is measured against the base: G2 on gsm8k, G5 on the task's client. So
+// a fix needs a model and a client. An issue or a ci run can get this far without them: it named a stop before
+// the fix that its route skipped (an existing fix PR has no Diagnose) or that the control file lifted. It stops
+// here and asks, before any code changes; null when it has both.
+const FIX_NEEDS = { model_path: 'the model', client_script: 'the client' };
+function askForFix(at) {
+  const lacks = Object.keys(FIX_NEEDS).filter((k) => !C[k]);
+  if (!lacks.length) return null;
+  const gate = { model_path: 'G2 on gsm8k', client_script: "G5 on the task's client" };
+  const why = `the run reached a fix without ${lacks.map((k) => FIX_NEEDS[k].replace('the ', 'a ')).join(' and ')}, and a fix that changes `
+    + `code the server runs is measured against the base: ${lacks.map((k) => gate[k]).join(', ')}`;
   note(at, 'needs_input', why);
-  R.questions = [{ field: 'model_path', question: `Which model should G2 measure the fix on (local path)? ${MODE === 'issue'
-    ? "The reporter's model" : 'The model the failing test serves'}, when it is on this machine.`, why }];
+  const ask = {
+    model_path: `Which model should G2 measure the fix on (local path)? ${MODE === 'issue' ? "The reporter's model"
+      : 'The model the failing test serves'}, when it is on this machine.`,
+    client_script: 'Which script runs the workload that G5 measures the fix on (absolute path)? It reads PORT and writes its logs to OUT_DIR.',
+  };
+  R.questions = lacks.map((k) => ({ field: k, question: ask[k], why }));
   return finish('needs_input', at);
 }
 
@@ -1428,6 +1456,9 @@ async function verifyLoop(extraGates) {
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
+    // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
+    // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
+    if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
     if (v.all_pass === true || (failures.length && !blocking.length)) {
@@ -1505,9 +1536,34 @@ async function rejectKernels(ids, counterexample) {
   return ks.held ? { ok: false, at: 'Kernel', reason: ks.held } : { ok: true };
 }
 
-// What G5 judges where no gain is claimed (validation_doctrine.md, G5 for a feature): the change is measured all
-// the same, and the measurement shows that it costs no speed.
+// What G5 judges where no gain is claimed (validation_doctrine.md, G5 for a feature, G5 for a fix): the change
+// is measured all the same, and the measurement shows that it costs no speed.
 const NO_SLOWER = "no gain is claimed: no slower than the baseline beyond the noise band, on the run's client";
+
+// G5 for a fix (validation_doctrine.md). `when` says when a mode measures: true always (a feature, a perf task,
+// a performance problem, whose number must come back whatever its fix changes), 'fix' when the fix changes code
+// the server runs. The verify engineer reads that from the fix's diff, as it does for G2: a fix to tests,
+// documentation or CI files alone is not measured. A fix whose last Verify round did not say so is measured.
+const NOT_MEASURED = 'not run: no code the server runs changed';
+const unmeasured = (when) => when === 'fix' && C.server_code_changed === false;
+// The claim the reviewer reads: none where G5 did not run.
+const claimNow = (claim, when) => (unmeasured(when) ? '' : claim || '');
+let routeSkipsPerf = false;
+
+// Performance where the task measures: what performance() returns, or {ok, skipped} for a fix G5 does not
+// measure, which the run record says once. The route is logged again whenever that changes: a change the review
+// asks for can add code the server runs to a fix that had none, and take it away again.
+async function measure(claim, when) {
+  const skip = unmeasured(when);
+  if (skip !== routeSkipsPerf) {
+    routeSkipsPerf = skip;
+    logRoute(ROUTES[MODE].filter((t) => !skip || t !== 'Performance'));
+  }
+  if (!skip) return performance(claim);
+  if (!R.phases.some((p) => p.phase === 'Performance' && p.verdict === 'not_run')) note('Performance', 'not_run', NOT_MEASURED);
+  log(`  [inferpilot] G5 ${NOT_MEASURED}: the fix is not measured for speed`);
+  return { ok: true, skipped: true };
+}
 
 async function performance(claim) {
   enter('Performance');
@@ -1518,13 +1574,18 @@ async function performance(claim) {
   const notRun = !!p && String(p.not_run || '').trim();
   const trusted = !!p && !notRun && p.workload_unchanged === true && p.path_ok === true;
   const reproduced = trusted && p.claim_reproduced === true && (!HELD_OUT || p.held_out_ok === true);
-  const ok = trusted && p.guards_ok === true && (!claim || reproduced);
+  // A fix whose base cannot serve the configuration is compared with the last commit that served it. Where the
+  // run knows none, "no slower" has nothing to be judged against: the fix's numbers are reported, as G2's score
+  // is. A number that must come back (a performance problem) is its own measure, and is always judged.
+  const unjudged = trusted && BEFORE_A_FIX[MODE] && claim === NO_SLOWER ? String(p.no_baseline || '').trim() : '';
+  const ok = trusted && p.guards_ok === true && (!claim || reproduced || !!unjudged);
   const why = !p ? 'the performance engineer returned nothing'
     : notRun ? `not run: ${notRun}`
     : !trusted ? `not trusted: ${p.workload_unchanged !== true ? 'workload changed' : 'the run left the intended path'}; ${p.summary || ''}`
       : claim && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true
         ? `the claim does not hold at the held-out operating point; ${p.summary || ''}`
-        : (p.summary || '');
+        : unjudged ? `reported, not judged: no baseline (${unjudged}); ${p.summary || ''}`
+          : (p.summary || '');
   note('Performance', ok ? 'pass' : 'fail', why);
   return { ok, trusted, claimed: !!claim, reproduced };
 }
@@ -1534,7 +1595,7 @@ async function performance(claim) {
 async function reviewLoop(extraGates, perfClaim, runPerf) {
   for (let round = 0; ; round++) {
     enter('Review');
-    const rv = await call('reviewer', 'review', inputs({ round, extra_gates: extraGates || [], claim: perfClaim || '' }),
+    const rv = await call('reviewer', 'review', inputs({ round, extra_gates: extraGates || [], claim: claimNow(perfClaim, runPerf) }),
       REVIEW, `reviewer#${round}`, REVIEW_MODEL ? { model: REVIEW_MODEL } : undefined);
     if (!rv) {
       note('Review', 'fail', 'the reviewer returned nothing');
@@ -1578,11 +1639,18 @@ async function repaired(extraGates, perfClaim, runPerf) {
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {
-    if (!(await performance(perfClaim)).ok) return { ok: false, at: 'Performance' };
+    const perf = await measure(perfClaim, runPerf);
+    if (!perf.ok) return { ok: false, at: 'Performance' };
     const afterPerf = stopAt('Performance');
-    if (afterPerf) return afterPerf;
+    if (afterPerf) return perf.skipped ? stoppedUnmeasured() : afterPerf;
   }
   return null;
+}
+
+// A stop named for Performance still ends a run whose fix G5 does not measure: after Verify, the last phase it ran.
+function stoppedUnmeasured() {
+  note('Verify', 'stopped', `stop_after=Performance: G5 is ${NOT_MEASURED}, so the run stops after Verify`);
+  return { ok: false, stopped: true, at: 'Verify' };
 }
 
 // The PR engineer changes no code: the branch it hands over must be the tree Verify and Review passed.
@@ -1668,8 +1736,8 @@ async function kernelStage() {
   return { integrated };
 }
 
-// Implement -> Kernel -> Verify -> (Performance) -> PR, shared by every code-changing mode.
-// `wps` may be empty only in perf mode when the plan is all kernel hand-offs.
+// Implement -> Kernel -> Verify -> Performance -> PR, shared by every code-changing mode. `runPerf` says when
+// Performance runs (measure()). `wps` may be empty only in perf mode when the plan is all kernel hand-offs.
 async function deliver(wps, extraGates, perfClaim, runPerf) {
   if (wps.length) {
     const impl = await implementAll(wps);
@@ -1686,7 +1754,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   if (stopHere('Verify')) return finish('stopped', 'Verify');
 
   if (runPerf) {
-    const perf = await performance(perfClaim);
+    const perf = await measure(perfClaim, runPerf);
     if (!perf.ok) {
       if (perf.trusted && perf.claimed && !perf.reproduced && MODE === 'perf') {
         // A performance change without a measured win is dropped (guardrails.md).
@@ -1697,7 +1765,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
       }
       return finish('blocked', 'Performance');
     }
-    if (stopHere('Performance')) return finish('stopped', 'Performance');
+    if (stopHere('Performance')) return perf.skipped ? ended(stoppedUnmeasured()) : finish('stopped', 'Performance');
   }
 
   const rev = await reviewLoop(extraGates, perfClaim, runPerf);
@@ -1872,11 +1940,13 @@ async function runIssue() {
     }
     return finish('fixed_on_main', 'Bisect');
   }
-  // A performance issue is fixed when the reported number comes back; the reproduction states it.
-  const runPerf = tri.category === 'performance';
-  if (runPerf) logRoute(ROUTES.issue.flatMap((t) => (t === 'Verify' ? [t, 'Performance'] : [t])));
-  const issueClaim = runPerf ? String(rep.perf_claim || '').trim() : '';
-  if (runPerf && !issueClaim) {
+  // A performance issue is fixed when the reported number comes back; the reproduction states it, and G5
+  // measures it whatever the fix changes. Any other fix is measured when it changes code the server runs, and
+  // is no slower than the base (validation_doctrine.md, G5 for a fix).
+  const perfIssue = tri.category === 'performance';
+  const issueClaim = perfIssue ? String(rep.perf_claim || '').trim() : NO_SLOWER;
+  const runPerf = perfIssue ? true : 'fix';
+  if (perfIssue && !issueClaim) {
     note('Reproduce', 'fail', 'a performance issue reproduced without a perf_claim: the number the fix must restore');
     return finish('blocked', 'Reproduce');
   }
@@ -1889,7 +1959,8 @@ async function runIssue() {
       note('Reproduce', 'stopped', 'stop_after=Diagnose: an existing fix PR is applied without a Diagnose phase, so the run stops before applying it');
       return finish('stopped', 'Reproduce');
     }
-    if (!C.model_path) return askModel('Reproduce');
+    const lacking = askForFix('Reproduce');
+    if (lacking) return lacking;
     const prs = (tri.existing_prs || []).join(', ');
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [] };
@@ -1907,7 +1978,8 @@ async function runIssue() {
   if (dg.verdict === 'baseline_bug' && dg.known_issue) R.known_issues.push({ ...dg.known_issue, cause_of_this_issue: true });
   if (dg.verdict !== 'fix_needed' || !(dg.work_packages || []).length) return finish('diagnosed', 'Diagnose');
   if (stopHere('Diagnose')) return finish('stopped', 'Diagnose');
-  if (!C.model_path) return askModel('Diagnose');
+  const lacking = askForFix('Diagnose');
+  if (lacking) return lacking;
 
   return deliver(dg.work_packages, gates, issueClaim, runPerf);
 }
@@ -1929,7 +2001,16 @@ async function runCi() {
     note('Classify', 'fail', `${cl.failure_class} without a failing_test_cmd; the failing_test gate needs one`);
     return finish('blocked', 'Classify');
   }
-  note('Classify', cl.failure_class, cl.evidence);
+  // A failure on a number the test measures is a performance problem: fixed when that number comes back, which
+  // G5 measures whatever the fix changes, a moved threshold included. Any other fix is measured when it changes
+  // code the server runs, and is no slower than the base (validation_doctrine.md, G5 for a fix).
+  const perfFailure = cl.performance === true;
+  const ciClaim = perfFailure ? String(cl.perf_claim || '').trim() : NO_SLOWER;
+  if (!handOver && perfFailure && !ciClaim) {
+    note('Classify', 'fail', 'a performance failure classified without a perf_claim: the number the fix must restore');
+    return finish('blocked', 'Classify');
+  }
+  note('Classify', cl.failure_class, `${perfFailure ? 'performance: ' : ''}${cl.evidence}`);
   if (handOver) return finish('handed_off', 'Classify');
   if (stopHere('Classify')) return finish('stopped', 'Classify');
 
@@ -1942,10 +2023,11 @@ async function runCi() {
   C.culprit = bi.culprit;
   note('Bisect', 'pass', `culprit ${bi.culprit}`);
   if (stopHere('Bisect')) return finish('stopped', 'Bisect');
-  if (!C.model_path) return askModel('Bisect');
+  const lacking = askForFix('Bisect');
+  if (lacking) return lacking;
 
   return deliver(bi.work_packages, [{ gate: 'failing_test', cmd: failingCmd, expect: 'pass on every lane it failed on' }],
-    '', false);
+    ciClaim, perfFailure ? true : 'fix');
 }
 
 async function runPerf() {

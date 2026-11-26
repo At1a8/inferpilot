@@ -89,6 +89,10 @@ human decision.
   commit or release the report says worked where the base cannot serve the configuration; with neither,
   the fix's score is reported and not judged. Record the model, and what the report says worked, in
   the triage record.
+- Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
+  `client_script`: no slower than the base beyond the noise band, or than the same stand-in for a base
+  that cannot serve; with neither, its numbers are reported and not judged. A `performance` issue is
+  measured whatever its fix changes: the number the reproduction states comes back.
 - **Match the load before concluding.** A crash the reporter saw on one request can need queued load
   elsewhere: sglang #41299, reported on an MI350X VF for a single 32k prompt, on the reporter's commit
   and bare metal passed 6 sequential 32k prompts and crashed 3 of 3 times with 32 of them at concurrency
