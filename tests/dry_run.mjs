@@ -1872,6 +1872,31 @@ const scenarios = [
     check(!slowRewrite.keys.includes('reviewer:reply') && w && w.includes('issue_triager:reply timed out and may still be writing it'),
       `nothing checks or posts a draft a timed-out rewrite may still be writing: ${w}`);
   }],
+  ['issue: a fix whose change cannot be put into effect on this machine stops for a human, and is not investigated', async () => {
+    // A version the fix pins does not install in this image: nothing was measured, and no change to the code repairs that.
+    const cannot = { gate: 'issue_repro', failure_class: 'environment', blocking: true, evidence: 'aiter 0.1.12 cannot be installed in this image' };
+    const r = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [cannot] }),
+    });
+    check(r.result.status === 'blocked' && r.result.stopped_at === 'Verify', `the run stops at Verify: ${r.result.status} at ${r.result.stopped_at}`);
+    check(!r.keys.includes('investigator:investigate') && !r.keys.includes('perf_engineer:perf_eval') && !r.keys.includes('reviewer:review')
+      && r.keys.filter((k) => k === 'verify_engineer:verify').length === 1, 'nothing is investigated, repaired, measured or reviewed after it');
+    check(r.result.phases.some((p) => p.phase === 'Verify' && /issue_repro:environment/.test(p.summary)),
+      `the run record names the gate and its class: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Verify'))}`);
+    check(/could not be put into effect on this machine \(issue_repro\): aiter 0\.1\.12 cannot be installed/.test(r.result.next.say),
+      `the user is told what could not be done: ${r.result.next.say}`);
+    // Any other blocking failure is investigated as before, and one of that class that does not block stops nothing.
+    const usual = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [{ gate: 'G0', failure_class: 'crash', blocking: true }] }
+        : DEFAULTS['verify_engineer:verify']()),
+    });
+    check(usual.keys.includes('investigator:investigate'), 'another class of failure goes to the investigator as before');
+    const mild = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), all_pass: false, failures: [{ ...cannot, gate: 'G3', blocking: false }] }),
+    });
+    check(mild.result.status === 'ready_for_review', `a report-only item of that class stops nothing: ${mild.result.status}`);
+  }],
   ['issue: close_fixed that no longer reproduces', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P2', category: 'crash', action: 'close_fixed', triage_path: `${RUN}/t.md` }),
