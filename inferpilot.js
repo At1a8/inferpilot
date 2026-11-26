@@ -1480,6 +1480,15 @@ async function verifyLoop(extraGates) {
     }
     const failing = blocking.map((f) => `${f.gate}${f.failure_class ? `:${f.failure_class}` : ''}`).join(', ');
     note('Verify', 'fail', failing || v.summary || 'gates failed');
+    // A fix whose change could not be put into effect on this machine (a version that does not install here) was
+    // not measured, and no change to the code repairs that: nothing is investigated, and a human decides.
+    const unset = blocking.filter((f) => String(f.failure_class || '').trim().toLowerCase() === 'environment');
+    if (unset.length) {
+      const why = `the fix's change could not be put into effect on this machine (${unset.map((f) => f.gate).join(', ')}): `
+        + `${unset[0].evidence || unset[0].counts || 'see the round'}; nothing was measured, and a human decides`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     if (round >= MAX_INVESTIGATE) return { ok: false, reason: `investigation budget exhausted (${failing})` };
 
     enter('Investigate');

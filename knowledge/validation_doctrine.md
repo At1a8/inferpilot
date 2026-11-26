@@ -223,25 +223,34 @@ Notes per gate:
   A change outside the framework's code takes effect only once it is put into effect: a dependency
   declaration when what it names is installed, a Dockerfile when its image is built or the steps it
   changes are run in the container (a package it installs, an environment variable it sets, such as
-  `SGLANG_USE_AITER`), a tool when it runs. Every run of the fix is made with the change in effect,
-  and every run of the base without it: the unit test and its control at Implement, `issue_repro` or
-  `failing_test`, both arms of G2 and of G5, and the command the pull request gives. The same run in
-  the unchanged environment shows nothing. The commonest such change is a new version of a package
-  the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned: no line of the framework
-  changes, and every kernel may.
-  The arms then run one after the other, never side by side in one container: stop every server,
-  set the arm's environment, check it (the version the package reports, the variable in the server's
-  environment), launch, measure, stop. The image's environment is put back when the round ends, and
-  the report's commands carry the setup, so that whoever measures again measures the same thing.
+  `SGLANG_USE_AITER`), a tool when it runs. So every tree runs in the environment its own files call
+  for: the fix with the change in effect, the base with the image's, a parent or a mutant of a commit
+  with what that tree declares. That holds for every run of the task: the unit test and its control
+  at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2 and of G5,
+  and the command the pull request gives. The same run in the unchanged environment shows nothing.
+  The commonest such change is a new version of a package the server runs (aiter, PyTorch, Triton,
+  flashinfer), bumped or pinned: no line of the framework changes, and every kernel may.
+  The environment is the arm's own wherever it can be: a variable set for the arm's processes alone,
+  a package installed into a directory of the arm's (`pip install --no-deps --target
+  RUN_DIR/env/<arm>`) and put first on its `PYTHONPATH`. The image's environment is then never
+  changed, and a call that times out leaves nothing behind. Only a package that must replace the
+  image's is installed in place, and then four things hold. The image's state and the commands that
+  restore it are written first (`RUN_DIR/env_restore.sh`, the ledger). Every later launch, in this
+  call or any other, checks the environment against that record before it starts: an interrupted
+  call may have left the change in. The arms run one after the other, never side by side: stop every
+  server, set the arm's environment, check it (the version the package reports), launch, measure,
+  stop. And the image's state is put back once every process of the round has stopped, not before.
   Install what the change names and nothing else: never the framework again (`env_hygiene.md`, *The
-  code under test*), never a package the change does not name.
+  code under test*), never a package the change does not name. The report's commands carry the
+  setup, so that whoever measures again measures the same thing.
   Only what this run's platform uses counts. A ROCm image is built from its own files (sglang:
   `python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`): a version
   moved only in the CUDA declaration changes nothing in this run, which measures as it is and says so
   next to its numbers.
-  Where the change cannot be put into effect on this machine, the gate is a blocking failure that
-  says so, `<package> <version> cannot be installed in this image`: the fix was not measured, and a
-  human decides.
+  Where the change cannot be put into effect on this machine, nothing was measured, and nothing is
+  to be repaired in the code: the gate is a blocking failure of the class `environment`, `<package>
+  <version> cannot be installed in this image`, and the run stops there for a human. It is not
+  investigated, and no fix is planned for it.
 
 ## Failure taxonomy — classify before counting
 

@@ -683,14 +683,25 @@ class FixGatesByFileTest(unittest.TestCase):
                      "on gsm8k and on the task's client",
                      "A change outside the framework's code takes effect only once it is put into effect",
                      "an environment variable it sets, such as `SGLANG_USE_AITER`",
-                     "Every run of the fix is made with the change in effect, and every run of the base without it",
-                     "the unit test and its control at Implement, `issue_repro` or `failing_test`, both arms of G2 and of G5, "
-                     "and the command the pull request gives",
+                     "So every tree runs in the environment its own files call for: the fix with the change in effect, the base with the "
+                     "image's, a parent or a mutant of a commit with what that tree declares",
+                     "the unit test and its control at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2 "
+                     "and of G5, and the command the pull request gives",
                      "The same run in the unchanged environment shows nothing",
                      "a new version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
-                     "The arms then run one after the other, never side by side in one container",
-                     "the report's commands carry the setup",
+                     # the arm's own environment first: nothing to restore, nothing left behind by a call that times out
+                     "The environment is the arm's own wherever it can be",
+                     "`pip install --no-deps --target RUN_DIR/env/<arm>`",
+                     "a call that times out leaves nothing behind",
+                     "Only a package that must replace the image's is installed in place",
+                     "The image's state and the commands that restore it are written first (`RUN_DIR/env_restore.sh`, the ledger)",
+                     "Every later launch, in this call or any other, checks the environment against that record before it starts",
+                     "The arms run one after the other, never side by side",
+                     "put back once every process of the round has stopped, not before",
+                     "The report's commands carry the setup",
                      "Install what the change names and nothing else: never the framework again",
+                     "the gate is a blocking failure of the class `environment`",
+                     "It is not investigated, and no fix is planned for it",
                      "Only what this run's platform uses counts",
                      "`python/pyproject_other.toml`, `python/pyproject_rocm.toml`, `docker/rocm.Dockerfile`",
                      "a version moved only in the CUDA declaration changes nothing in this run",
@@ -727,31 +738,46 @@ class FixGatesByFileTest(unittest.TestCase):
                      "which the ROCm image does not install",
                      "A fix whose change takes effect outside the worktree",
                      "a package or an environment variable a Dockerfile sets",
-                     "the base arm in the image's environment first",
-                     "never measure the fix arm in the image's environment and call it the fix",
-                     "Run that gate, and every arm after it, where the fix takes effect",
-                     "no server is started ahead, and no two arms run side by side",
-                     "the reproduction that put the change into effect is stopped, and the image's environment back, before the base arm of G2 starts",
+                     "Run that gate, and every arm after it, in the environment its tree calls for",
+                     "Make the environment the arm's own wherever you can",
+                     "Only a package that must replace the image's is installed in place",
+                     "First write the image's state and the commands that restore it (`RUN_DIR/env_restore.sh`, and the ledger)",
+                     "no server is started ahead and no two arms run side by side",
+                     "The reproduction that put the change into effect is stopped, and the image's state back, before the base arm of G2 starts",
+                     "check the environment against the ledger's record before the round's first launch",
                      "Install what the change names and nothing else, never the framework again",
+                     '`"failure_class": "environment"`',
+                     "Never run the fix's arm in the image's environment and call it the fix",
                      "`false` only when every file the fix changes is a test, a documentation file or a CI file"):
             self.assertIn(said, role, "roles/verify_engineer.md does not say it")
         self.assertNotIn("G5 has the narrower line", role, "the verify engineer still judges what the server runs for G5")
         perf = self.flat("roles/perf_engineer.md")
         for said in ("**A fix is measured whatever file it changes,** tests, documentation and CI files apart",
                      "never judge whether the server runs it",
-                     "is measured with the change in effect on the fix arm and without it on the base arm, as Verify measured it",
-                     "Set the arm's environment and check it before every measurement, the warm-up, each round, the held-out point and the guards alike",
-                     "arms that are interleaved switch the environment at each switch",
-                     "never measure the fix arm in the image's environment and call it the fix",
+                     "is measured with each arm in the environment its tree calls for, as Verify set them",
+                     "the warm-up, each round, the held-out point and the guards alike",
+                     "One installed in place is checked against the ledger's record before every launch",
+                     "return `not_run` saying so",
+                     "never the fix's arm on the image's environment",
                      "is measured as it is, and `summary` says so"):
             self.assertIn(said, perf, "roles/perf_engineer.md does not say it")
         # Every role that runs a fix runs it where its change takes effect, not Verify alone.
-        for path, said in (("roles/test_engineer.md", "is tested where it takes effect"),
-                           ("roles/test_engineer.md", "Both in one environment show nothing"),
-                           ("roles/pr_engineer.md", "is put into effect for that run and taken back after it, and the body gives the setup with the command"),
+        for path, said in (("roles/test_engineer.md", "is tested with every tree in the environment its own files call for"),
+                           ("roles/test_engineer.md", "a mutant of the commit in the same, the parent with what the parent declares"),
+                           ("roles/test_engineer.md", "Step 4 compares the same way"),
+                           ("roles/test_engineer.md", "a check you leave running for the finishing call keeps its environment"),
+                           ("roles/test_engineer.md", "Two trees in one environment show nothing"),
+                           ("roles/pr_engineer.md", "each tree in the environment its own files call for"),
+                           ("roles/pr_engineer.md", "the body gives the setup with the command"),
                            ("roles/director.md", "gives an arm whose change takes effect outside its tree"),
                            ("templates/validation_report.md", "the setup that puts it into effect before the arm's commands")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        # A change that cannot be put into effect was not measured, and no change to the code repairs that: the run
+        # stops for a human before anything is investigated.
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        stop = "const unset = blocking.filter((f) => String(f.failure_class || '').trim().toLowerCase() === 'environment');"
+        self.assertIn(stop, src)
+        self.assertLess(src.index(stop), src.index("enter('Investigate');"), "an environment failure goes to the investigator")
         review = self.flat("roles/reviewer.md")
         for said in ("`server_code_changed` false means the run measured neither its accuracy nor its speed",
                      "A changed file that is not a test, a documentation file or a CI file is a `blocker` finding",

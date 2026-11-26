@@ -94,16 +94,17 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
      (`validation_doctrine.md`, *What a fix changes decides its gates*): never judge whether the
      server runs it. One whose change takes effect outside the worktree (a new version of a package
      the server runs: aiter, PyTorch, Triton, flashinfer; a package or an environment variable a
-     Dockerfile sets) is measured with the change in effect on the fix arm and without it on the
-     base arm, as Verify measured it: the ledger has both environments. Set the arm's environment
-     and check it before every measurement, the warm-up, each round, the held-out point and the
-     guards alike, with every server of the other arm stopped: arms that are interleaved switch the
-     environment at each switch. Put the image's environment back when the measurement ends, and
-     give both environments in `results`. A change that cannot be put into effect here leaves the
-     fix unmeasured: `claim_reproduced` false, and `summary` says `<package> <version> cannot be
-     installed in this image`; never measure the fix arm in the image's environment and call it the
-     fix. A change in a file this run's platform does not use (a version in the CUDA declaration,
-     on a ROCm image) is measured as it is, and `summary` says so.
+     Dockerfile sets) is measured with each arm in the environment its tree calls for, as Verify
+     set them: the ledger has both, and how each is made. An environment of the arm's own (a
+     directory on its `PYTHONPATH`, a variable of its process) is given to every launch of that arm,
+     the warm-up, each round, the held-out point and the guards alike. One installed in place is
+     checked against the ledger's record before every launch, with every server of the other arm
+     stopped, and the image's state is put back once all of yours have stopped
+     (`RUN_DIR/env_restore.sh`). Give both environments in `results`. A change that cannot be put
+     into effect here leaves nothing measured: return `not_run` saying so (`<package> <version>
+     cannot be installed in this image`), never the fix's arm on the image's environment. A change
+     in a file this run's platform does not use (a version in the CUDA declaration, on a ROCm
+     image) is measured as it is, and `summary` says so.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
 3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, in

@@ -45,19 +45,31 @@ clock can start before your session does.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
-   Run that gate, and every arm after it, where the fix takes effect (`validation_doctrine.md`, *What
-   a fix changes decides its gates*). A fix to a dependency declaration is not in the environment
-   until what it names is installed, one to a Dockerfile until its image is built or the steps it
-   changes are run in the container (a package it installs, an environment variable it sets), one to
-   a benchmark or a tool until the tool runs: a run in the unchanged environment shows nothing. Such
-   a fix changes the launch order of this step: no server is started ahead, and no two arms run side
-   by side. For each run in turn, stop every server, set the arm's environment (the image's for the
-   base, the change in effect for the fix), check it, launch, measure, stop: the reproduction that
-   put the change into effect is stopped, and the image's environment back, before the base arm of
-   G2 starts. Install what the change names and nothing else, never the framework again
-   (`env_hygiene.md`). Put the image's environment back when the round ends, with both environments
-   in the ledger. Where the change cannot be put into effect on this machine, the gate is a blocking
-   failure that says so.
+   Run that gate, and every arm after it, in the environment its tree calls for
+   (`validation_doctrine.md`, *What a fix changes decides its gates*). A fix to a dependency
+   declaration is not in the environment until what it names is installed, one to a Dockerfile until
+   its image is built or the steps it changes are run in the container (a package it installs, an
+   environment variable it sets), one to a benchmark or a tool until the tool runs: a run in the
+   unchanged environment shows nothing.
+   - Make the environment the arm's own wherever you can: a variable in the arm's process
+     environment only, a package in a directory of the arm's (`pip install --no-deps --target
+     RUN_DIR/env/<arm> ...`) put first on its `PYTHONPATH`, checked by the version the package
+     reports there. The image's environment is then untouched, the arms launch as any others, and a
+     call that times out leaves nothing behind.
+   - Only a package that must replace the image's is installed in place. First write the image's
+     state and the commands that restore it (`RUN_DIR/env_restore.sh`, and the ledger). Then no
+     server is started ahead and no two arms run side by side: for each run in turn, stop every
+     server, set the arm's environment, check it, launch, measure, stop. The reproduction that put
+     the change into effect is stopped, and the image's state back, before the base arm of G2
+     starts. Put the image's state back once every process of the round has stopped, not before.
+   - Whatever the way, check the environment against the ledger's record before the round's first
+     launch: an earlier call that was interrupted may have left a change in place
+     (`env_restore.sh` puts it back). Install what the change names and nothing else, never the
+     framework again (`env_hygiene.md`).
+   - Where the change cannot be put into effect on this machine, the gate is a blocking failure with
+     `"failure_class": "environment"`, which says what could not be done (`"<package> <version>
+     cannot be installed in this image"`): the run stops there for a human, and nothing is
+     investigated. Never run the fix's arm in the image's environment and call it the fix.
 2. Run the gates the spec or the plan names, each against the baseline **in the same scheduling
    pattern**, in this order. A blocking gate that fails ends the round, and the gates after it are
    reported `not run`; a report-only item that misses stops nothing. A port whose spec gives the
@@ -93,12 +105,10 @@ clock can start before your session does.
        in python/pyproject.toml, which the ROCm image does not install"`.
      - A fix whose change takes effect outside the worktree (a new version of a package the server
        runs: aiter, PyTorch, Triton, flashinfer; a package or an environment variable a Dockerfile
-       sets) is measured with the change in effect on the fix arm and without it on the base arm,
-       one arm after the other (step 1): the base arm in the image's environment first; then the
-       change put into effect and checked (the version the package reports, the variable in the
-       server's environment), and the fix arm. A change you cannot put into effect here is a
-       blocking failure of G2, `"<package> <version> cannot be installed in this image"`: never
-       measure the fix arm in the image's environment and call it the fix.
+       sets) is measured with the change in effect on the fix arm and without it on the base arm, as
+       step 1 sets the two environments. Both go in the ledger, where Performance and the report
+       find them. A change you cannot put into effect here is the blocking failure of step 1
+       (`"failure_class": "environment"`): G2 is not measured on the image's environment instead.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
        model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
        questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
