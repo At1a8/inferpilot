@@ -1692,26 +1692,9 @@ const scenarios = [
     check(asks(await run({ mode: 'issue', task: 't', client_script: '/s/client.sh', stability: 'yes' }), 'stability'),
       'a gate field that is neither true nor false is asked about, not read as off');
     check(asks(await run({ mode: 'feature', task: 't', long_context: 1 }), 'long_context'), 'the same for G3');
-    const g4bare = await run({ mode: 'issue', task: 't', stability: true }, {
-      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
-        gpu_ids: '0,1', client_script: `${RUN}/scripts/perf.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
-    });
-    const g4setup = (g4bare.calls.find((c) => c.key === 'director:setup') || {}).ins || {};
-    const g4round = (g4bare.calls.find((c) => c.key === 'verify_engineer:verify') || {}).ins || {};
-    check(g4bare.result.status !== 'needs_input' && g4setup.client_script === 'template' && g4round.client_script === `${RUN}/scripts/perf.sh`
-      && g4round.stability === true,
-      `G4 without a client of the task's is no question: Setup renders InferPilot's client template, and G4 keeps it up (${g4bare.result.status})`);
-    check(g4bare.result.provenance.client_script === 'default' && g4bare.result.task_def.client_script === 'template'
-      && g4bare.result.assumptions.some((a) => /^client_script: stability is on .* the template's own workload/.test(a))
-      && (g4setup.assumptions || []).length === 1,
-      `the run records that it took it, on the template's own workload, for the roles and the report: ${JSON.stringify(g4bare.result.assumptions)}`);
-    const g4load = await run({ mode: 'issue', task: 't', stability: true, workload: '{"isl":30000,"osl":512,"conc":64}' });
-    check(g4load.result.status === 'blocked' && g4load.result.stopped_at === 'Setup'
-      && /on the task's workload$/.test(g4load.result.assumptions.join(' ')),
-      `on the task's workload when it gives one; and a template Setup did not render stops the run: ${g4load.result.status}`);
     const perfClient = await run({ mode: 'perf', task: 'p', stability: 'true', client_script: '' });
-    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'and asked once where the mode asks too');
-    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, client_script: '/s/client.sh' });
+    check((perfClient.result.questions || []).filter((q) => q.field === 'client_script').length === 1, 'G4 without the client it runs: asked once where the mode asks too');
+    const g4 = await run({ mode: 'issue', task: 't', stability: 'True', long_context: false, server_script: '/s/server.sh', client_script: '/s/client.sh' });
     const g4verify = g4.calls.find((c) => c.key === 'verify_engineer:verify');
     check(g4.result.status !== 'needs_input' && g4verify && g4verify.ins.stability === true && g4verify.ins.long_context === false,
       `true and false as words or values start the run: ${g4.result.status}`);
@@ -1722,6 +1705,37 @@ const scenarios = [
     let msg = '';
     try { await run({ mode: 'issue', task: 't', inferpilot_dir: '' }); } catch (e) { msg = e.message; }
     check(msg.includes('args.inferpilot_dir is required'), `no InferPilot checkout is still an error: ${msg}`);
+  }],
+  ['arguments: with stability on the task names the server and the client G4 keeps up, and no template is offered for either', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    const offers = (r) => (r.result.questions || []).filter((q) => (q.options || []).includes('template') || /template/i.test(q.question));
+    const none = await run({ mode: 'issue', task: 't', stability: true });
+    check(asks(none, 'server_script') && asks(none, 'client_script') && fields(none).length === 2,
+      `an issue with neither is asked for both, and for nothing else: ${fields(none)}`);
+    check(offers(none).length === 0, `neither question offers a template: ${JSON.stringify(offers(none).map((q) => q.field))}`);
+    const ci = await run({ mode: 'ci', task: 'c', stability: 'true', client_script: '/s/client.sh' });
+    check(asks(ci, 'server_script') && eqList(fields(ci), ['server_script']), `a ci task is asked for the one it lacks: ${fields(ci)}`);
+    const feature = await run({ mode: 'feature', task: 't', stability: true });
+    check(asks(feature, 'client_script') && eqList(fields(feature), ['client_script']) && offers(feature).length === 0,
+      `a feature without a workload, whose server the mode asked for, is asked for its client, with no template: ${fields(feature)}`);
+    const noServer = await run({ mode: 'feature', task: 't', stability: true, server_script: '', client_script: '/s/client.sh' });
+    check(fields(noServer).filter((f) => f === 'server_script').length === 1, `the server is asked once where the mode asks too: ${fields(noServer)}`);
+    const off = await run({ mode: 'issue', task: 't', stability: false });
+    check(off.result.status !== 'needs_input', `with stability off an issue names neither: ${off.result.status}`);
+    // InferPilot's client, named by the task all the same, runs the task's workload: never lengths and a concurrency of its own.
+    const tpl = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template' });
+    check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
+    const tplFeature = await run({ mode: 'feature', task: 't', stability: true, client_script: 'Template' });
+    check(asks(tplFeature, 'workload'), 'the same for a feature');
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const load = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: 'template',
+      workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);
+    const ve = load.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(load.result.status !== 'needs_input' && ve && ve.ins.stability === true && ve.ins.client_script === `${RUN}/scripts/perf.sh`
+      && ve.ins.server_script === '/s/server.sh',
+      `with its workload the run starts, on the task's server and the rendered client: ${load.result.status} ${ve && ve.ins.client_script}`);
+    const plain = await run({ mode: 'issue', task: 't', client_script: 'template' }, rendered);
+    check(plain.result.status !== 'needs_input', `without stability nothing more is asked of a task that names the template: ${plain.result.status}`);
   }],
   ['intake: a complete definition starts without it', async () => {
     const r = await run({ mode: 'issue', task: 'i' });

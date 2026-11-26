@@ -14,8 +14,8 @@ of it.
 | `framework_dir` | the framework checkout each task works in, on its own branch from the current main (absolute path; for sglang the image's `/sgl-workspace/sglang` when not given, which the image installs sglang from) | required | required | required | required | the upstream scan reads it |
 | `model_path` | the model the baseline and the gates run | required | recommended: the reporter's model | — | required | — |
 | `workload` | the fixed benchmark, e.g. `{"isl": 8192, "osl": 1024, "conc": 64}` | when the task claims a gain | for a performance issue | — | required | — |
-| `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended | — | required | — |
-| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given | for a performance issue | — | required | — |
+| `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended; required with `stability` on | — | required | — |
+| `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; a feature's numbers on it are reported, never a claim (§1.2) | when a workload is given, or with `stability` on | for a performance issue, or with `stability` on | — | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
@@ -30,7 +30,7 @@ of it.
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
 | `tune` | default `false`: the feature runs at the configuration of the target PR or design; `true`: a work package chooses its knobs by measurement | optional | | | | |
 | `held_out`, `guards`, `sweep` | performance checks beyond the task's workload and goal, each off by default: a held-out operating point the gain must also hold at, guard workloads of InferPilot's choosing, points beyond the workload's own | optional | optional | | optional | |
-| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack on long prompts), `stability` runs G4 (the `client_script` run back to back for more than 48 hours; without one, InferPilot's client template) | optional | optional | | optional | |
+| `long_context`, `stability` | correctness gates beyond the default ones, each off by default: `long_context` runs G3 (needle-in-a-haystack on long prompts), `stability` runs G4 (the `client_script` run back to back for more than 48 hours against the server `server_script` starts, so the task names both) | optional | optional | | optional | |
 | `kernel_backend` with `kernel_backend_dir` or `kernel_backend_command` | where kernel hand-offs go | optional | optional | optional | optional | |
 
 `inferpilot.js` checks the required fields (and a back end's own field) for every definition; one that
@@ -64,16 +64,16 @@ the user.
 - **Long context and stability** (G3, G4) run only when the task sets `long_context` or `stability`: G3
   on needle-in-a-haystack prompts, G4 as the `client_script` run back to back for more than 48 hours
   against one server, at the highest concurrency of the workload (`../knowledge/validation_doctrine.md`;
-  `scripts/stability.sh` runs it). A task with `stability` on that brings a `client_script` keeps that
-  up, whatever its mode. One that gives its scenario (`workload`) but no client keeps up InferPilot's
-  client template on it (§1.2), and one that gives neither, the template on its own workload: 8192
-  tokens in, 1024 out, concurrency 32. Nothing is asked on G4's account, and the report says which
-  load it was. The load that shows most is the task's own: long prompts at high concurrency, on which
-  the feature engages. `goal` does not turn the gates on; from a request in plain words, the intake
-  sets them. A task that sets neither is reported with both as `not run: not asked`. G4 runs once in a
-  run: after a later change to the code, a review's for one, it is not run again, and the report says
-  which commit it ran on. With `stability` on, a Verify round asks for a limit of about 6 days, and
-  uses it in full only when G4 fails and the baseline runs the same test as its control.
+  `scripts/stability.sh` runs it). The user asked for G4 and says what it keeps up: a task with
+  `stability` on names its `server_script` and its `client_script`, whatever its mode, and is asked for
+  the one it lacks. No template is offered for either on G4's account. A task that sets `client_script:
+  template` all the same gives the `workload` it runs, and is asked for that: the template's own lengths
+  and concurrency are a load nobody chose. The workload to keep up is long prompts at high concurrency.
+  `goal` does not turn the gates on; from a request in plain words, the intake sets them. A task that
+  sets neither is reported with both as `not run: not asked`. G4 runs once in a run: after a later
+  change to the code, a review's for one, it is not run again, and the report says which commit it ran
+  on. With `stability` on, a Verify round asks for a limit of about 6 days, and uses it in full only
+  when G4 fails and the baseline runs the same test as its control.
 
 ```bash
 # server.sh
