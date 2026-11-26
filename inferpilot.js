@@ -1477,12 +1477,22 @@ async function verifyLoop(extraGates) {
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
-    // An accuracy problem is fixed when its score comes back, and only G2 measures that: a round that passes
-    // without it (the fix changed a test alone, say its threshold) has shown nothing.
+    // An accuracy problem is fixed when its score comes back, and only G2 measures that. A round is accepted
+    // neither without G2 (the fix changed a test alone, say its threshold) nor with a G2 that failed without
+    // blocking: the base scores low as well, which is the failure being fixed and no known issue. Both ways a
+    // round is accepted are held to it: all gates passing, and failures that do not block.
     const g2 = String((v.gates || {}).G2 || '').trim();
-    if (C.accuracy_claim && v.all_pass === true && (!g2 || /^not run\b/i.test(g2))) {
-      note('Verify', 'fail', `the failure is an accuracy problem, and the round passed without G2: nothing measured "${C.accuracy_claim}"`);
-      return { ok: false, reason: 'G2 was not run for an accuracy problem' };
+    const g2Failed = (fs) => fs.some((f) => /^G2\b/i.test(String(f.gate || '').trim()));
+    if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length))) {
+      if (!g2 || /^not run\b/i.test(g2)) {
+        note('Verify', 'fail', `the failure is an accuracy problem, and the round passed without G2: nothing measured "${C.accuracy_claim}"`);
+        return { ok: false, reason: 'G2 was not run for an accuracy problem' };
+      }
+      if (g2Failed(failures) || /^fail\b/i.test(g2)) {
+        note('Verify', 'fail', `the score the fix must restore did not come back ("${C.accuracy_claim}"): G2 failed, `
+          + 'which blocks for an accuracy problem whatever the base scores');
+        return { ok: false, reason: 'the accuracy claim is not met' };
+      }
     }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
@@ -1505,6 +1515,13 @@ async function verifyLoop(extraGates) {
     }
     note('Investigate', inv.verdict, inv.summary || '');
     if (inv.verdict === 'baseline_bug') {
+      // The base of an accuracy problem scores low too: that is the failure being fixed. Recorded as a known
+      // issue, it would excuse the score in the next round.
+      if (C.accuracy_claim && g2Failed(blocking)) {
+        note('Investigate', 'fail', `the score the fix must restore did not come back ("${C.accuracy_claim}"), and the base scores the `
+          + 'same: that is the failure itself, not a known issue; whether the threshold was wrong is a human\'s to say');
+        return { ok: false, reason: 'the accuracy claim is not met' };
+      }
       if (inv.known_issue) R.known_issues.push(inv.known_issue);
       continue;
     }

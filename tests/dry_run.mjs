@@ -1655,6 +1655,42 @@ const scenarios = [
       `a round that passes without G2 is not accepted, and nothing goes on to review: ${ended(moved)}`);
     const silent = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }), ...verified({ gates: {} }) });
     check(silent.result.status === 'blocked' && silent.result.stopped_at === 'Verify', `nor one that says nothing of G2: ${ended(silent)}`);
+    // The other way a round is accepted: failures that do not block. It is held to G2 as well.
+    const reportOnly = [{ gate: 'G3', blocking: false, evidence: 'a report-only item missed' }];
+    const lenient = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim, failure_class: 'test_bug' }),
+      ...verified({ ...unmeasured, all_pass: false, failures: reportOnly }) });
+    check(lenient.result.status === 'blocked' && lenient.result.stopped_at === 'Verify' && !lenient.keys.includes('reviewer:review')
+      && /passed without G2/.test(JSON.stringify(lenient.result.phases)),
+      `a round whose only failures do not block is not accepted without G2 either: ${ended(lenient)}`);
+    const measured = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      ...verified({ gates: { G2: 'pass 0.936, the claim is 0.93' }, all_pass: false, failures: reportOnly }) });
+    check(measured.result.status === 'ready_for_review', `with G2 measured, a report-only miss stops nothing: ${ended(measured)}`);
+    // A score below the claim is never excused as a known issue: the base scores low too, and that is the failure being fixed.
+    const below = { gates: { G2: 'fail 0.871, the claim is 0.93' }, all_pass: false };
+    const excused = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      ...verified({ ...below, failures: [{ gate: 'G2', blocking: false, evidence: 'the base scores 0.87 as well: known issue' }] }) });
+    check(excused.result.status === 'blocked' && excused.result.stopped_at === 'Verify' && !excused.keys.includes('reviewer:review')
+      && /did not come back/.test(JSON.stringify(excused.result.phases)),
+      `a G2 that failed without blocking is not accepted for an accuracy problem: ${ended(excused)}`);
+    const waved = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      ...verified({ gates: { G2: 'fail 0.871, the claim is 0.93; the base scores the same (KI-9)' }, all_pass: true, failures: [] }) });
+    check(waved.result.status === 'blocked' && waved.result.stopped_at === 'Verify',
+      `nor a round that calls itself passed with a G2 that says fail: ${ended(waved)}`);
+    const onBase = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      ...verified({ ...below, failures: [{ gate: 'G2', blocking: true, evidence: '0.871 on the fix' }] }),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base scores 0.87' }, summary: 'the base scores the same' }) });
+    check(onBase.result.status === 'blocked' && onBase.keys.filter((k) => k === 'verify_engineer:verify').length === 1
+      && !(onBase.result.known_issues || []).some((k) => k.id === 'KI-9') && /not a known issue/.test(JSON.stringify(onBase.result.phases)),
+      `the base's low score is the failure itself: it is not recorded as a known issue, and the run stops for a human: ${ended(onBase)}`);
+    // Any other gate that fails on the base as well is a known issue, as before.
+    const other = await run({ mode: 'ci', task: 'c' }, { ...classified({ accuracy: true, accuracy_claim: claim }),
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), gates: { G2: 'pass 0.936, the claim is 0.93' }, all_pass: false,
+          failures: [{ gate: 'G0', blocking: true, evidence: 'a module test fails on the base too' }] }
+        : { ...DEFAULTS['verify_engineer:verify'](), gates: { G2: 'pass 0.936, the claim is 0.93' } }),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'a module test' }, summary: 'on the base too' }) });
+    check(other.result.status === 'ready_for_review' && (other.result.known_issues || []).some((k) => k.id === 'KI-8'),
+      `another gate's failure on the base is still a known issue: ${ended(other)}`);
     const plain = await run({ mode: 'ci', task: 'c' }, { ...classified({ failure_class: 'test_bug' }), ...verified(unmeasured) });
     const pv = plain.calls.find((c) => c.key === 'verify_engineer:verify');
     check(plain.result.status === 'ready_for_review' && pv && !pv.ins.accuracy_claim,

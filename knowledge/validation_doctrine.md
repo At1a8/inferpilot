@@ -79,9 +79,10 @@ Notes per gate:
   run or from the threshold the test had when it last passed), and G2 measures it where it showed,
   with the failing test's own measurement, whatever the fix changes. G2 reads the score, not the
   assertion: a score below the claim is a blocking failure although the test passes, so a threshold
-  moved in a test restores nothing. Where the threshold itself was wrong (a baseline no commit ever
-  met), that is a human's to say: the run stops with the scores of the fix, of the base and of the
-  last green run.
+  moved in a test restores nothing. No known issue excuses it: the base scores low as well, and that
+  is the failure being fixed. Where the threshold itself was wrong (a baseline no commit ever met),
+  that is a human's to say: the run stops with the scores of the fix, of the base and of the last
+  green run.
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose

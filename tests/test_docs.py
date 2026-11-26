@@ -893,9 +893,14 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("const accClaim = accFailure ? String(cl.accuracy_claim || '').trim() : '';", "the score to restore is not read"),
                 ("if (!handOver && accFailure && !accClaim) {", "an accuracy failure goes on without the score its fix must restore"),
                 ("if (!handOver && accClaim) C.accuracy_claim = accClaim;", "the claim does not reach the verify engineer"),
-                ("if (C.accuracy_claim && v.all_pass === true && (!g2 || /^not run\\b/i.test(g2))) {",
-                 "a round that passes without G2 is accepted for an accuracy problem")):
+                ("if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length))) {",
+                 "one of the two ways a round is accepted is not held to G2"),
+                ("if (!g2 || /^not run\\b/i.test(g2)) {", "a round that passes without G2 is accepted for an accuracy problem"),
+                ("if (g2Failed(failures) || /^fail\\b/i.test(g2)) {", "a G2 that failed without blocking is accepted"),
+                ("if (C.accuracy_claim && g2Failed(blocking)) {", "the base's low score becomes a known issue, which excuses the next round")):
             self.assertIn(said, src, why)
+        # The check sits before the line that accepts a round, whichever way it is accepted.
+        self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
 
     def test_the_documents_say_what_is_measured(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
@@ -903,6 +908,7 @@ class CiAccuracyProblemTest(unittest.TestCase):
         for said in ("A CI failure on a score its test measures", "It is fixed when the score comes back, so the score is the claim",
                      "`accuracy_claim`: the set, the model and the value", "with the failing test's own measurement, whatever the fix changes",
                      "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
+                     "No known issue excuses it: the base scores low as well",
                      "that is a human's to say"):
             self.assertIn(said, note[0])
         for path, said in (
@@ -913,6 +919,14 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
                 ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
                 ("roles/verify_engineer.md", "Never report G2 as `not run` then"),
+                ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
+                ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
+                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
+                ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
+                ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),
+                ("knowledge/acceptance.md", "A failure that is itself one of accuracy or of performance is measured whatever its fix changes"),
+                ("templates/ci_triage.md", "for an accuracy problem the score the fix restores"),
                 ("templates/ci_triage.md", "| accuracy problem: yes / no |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
 

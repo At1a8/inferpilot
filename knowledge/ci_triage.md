@@ -87,6 +87,10 @@ from 10-02 to at least 10-25) had no owner.
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
   unless the failure is a performance problem (§2): G5 then measures the number the fix must restore,
   whatever the fix changes.
+- An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included:
+  G2 measures the score the fix must restore, with the failing test's own measurement, and a
+  threshold moved in the test restores nothing. gsm8k against the base runs besides, by the fix's
+  files.
 - No test is skipped or loosened to turn the job green unless the PR says why and links an issue.
 
 ## 5. Output

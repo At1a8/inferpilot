@@ -35,7 +35,8 @@
      (G0 when the fix is behind a feature's switch), and gsm8k on the fix against the base, or against
      the culprit's parent where the base cannot serve, when the fix changes code the server runs (G2);
      its speed on the task's client against the same commit (G5), and for a performance problem the
-     number the fix restores, whatever it changes.
+     number the fix restores, whatever it changes; for an accuracy problem the score the fix restores,
+     by the failing test's own measurement (G2), whatever it changes.
      Handover: who, what evidence. -->
 
 ## Dates
