@@ -15,8 +15,32 @@ fix PR or a handover within a week for anything else.
 - **AMD Failure Tracker** issues on sglang, titled `[Failure Tracker] PR Test (AMD)` (label
   `ci-failure-tracker`). A bot rewrites the body; the machine-readable state sits in an HTML comment
   `<!-- ci-failure-tracker-state: {...} -->`. Entries are keyed by `test_file::test_function` with
-  `cluster` (an error-signature title), `error`, `status`, `job_url`, `job_id`, `detail_url`,
-  `run_started_at`, `first_seen`, `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters.
+  `cluster` (an error-signature title), `error`, `job_url`, `job_id`, `detail_url`, `first_seen`,
+  `last_seen`. `scripts/scan_ci.py` parses it and aggregates clusters. The bot has written the state in
+  two forms, and the script reads both:
+  - each entry with a `status` in words (`new regression (since DATE)`, `never-passed`, `flaky`,
+    `infrastructure`): the trackers up to October 2026;
+  - version 3, the tracker open since 2026-10-22: `active` entries carry counts instead. `failed` and
+    `observed` are the runs a test failed, of the runs of its image variants from its first failing
+    run on; `streak` is its failures in a row up to the latest run of those variants; `fail_runs` are
+    the runs that failed, `variants` the images it failed on (rocm10, rocm720, rocm724); `fix_pr` is a
+    pull request the bot's analysis names as the fix, in sglang or in another repository, which may
+    be wrong. An entry stays in `active` for days after the test stopped failing, then moves to
+    `archive`, which keeps its key, dates and counts only. The script gives each entry the bot's own
+    kind, as the tracker's body lists them: `no longer failing` (the latest scan did not see it fail,
+    whatever streak it kept: the run of an image that is not run again keeps one), `broken` (two or
+    more runs in a row, since the day that run of failures began), `new` (one failing run) and
+    `flaky` (the rest). On 2026-11-26 the tracker held 156 active entries, and 14 of them were
+    failing.
+
+  What a status said in words, the counts say in part. `broken` since one day, after runs that
+  passed, is the earlier `new regression (since DATE)`, and `flaky` the earlier `flaky`. Nothing in
+  the counts is the earlier `never-passed`: `observed` begins at the first failure the tracker saw,
+  so a test that failed every run counted may have passed before, and a regression that has not
+  passed since looks the same. Tell the two apart by the lane's runs before `first_seen` (the job's
+  history) before a failure is classified as a `test_bug`. A state in any other form, or one that is
+  not JSON, is reported as not read (`unread` in the script's output): read the issue itself then,
+  and never take an empty result for a tracker without failures.
 - **Nightly** failures and **human-filed** CI issues (`[CI] [AMD] ...`).
 - A tracker only covers a few days (one snapshot covered 10-22 to 10-25). Record first-seen and fixed
   dates yourself; the tracker will not keep them.
