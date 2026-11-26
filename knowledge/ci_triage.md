@@ -69,12 +69,20 @@ request, and the results (`pr_playbook.md` §Attribution). No second pull reques
 failure. A fix that has merged needs none of this: main has it.
 
 Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents
-hold. The run applies one on its own only where the author can already put code on main, which every
-run executes: an owner, a member or a collaborator of the repository. For any other it stops and asks
+hold. The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks
 which one to verify, or none. The task can say so from the start (`apply_prs`: the pull requests the
-run may apply, or `none`), and can name one the classification did not find. One pull request is
-verified in a run: several applied together would show nothing of each, and the others are named in the
-triage record.
+run may apply, or `none`), and then nothing is asked. Nothing else stands for that word. What the
+classification says of the author is no proof that the author can put code on main: an association
+with the repository (a member of its organisation, a collaborator) can come without write access, a
+model read it, and the run has no way of its own to look the permission up. What the Intake read
+into a request in plain words is a reading too, and is asked about: only a field or an answer the
+caller gave counts. A task a scan offers names no pull request to apply.
+
+What the user names is looked up like any other: the classification is given it (`named_prs`), and
+the run applies only a pull request found open, with the commit its branch is at. One that is
+closed, merged or not found is not applied, the triage record says why, and the run goes on to a fix
+of its own. One pull request is verified in a run: several applied together would show nothing of
+each, and the others are named in the triage record.
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a

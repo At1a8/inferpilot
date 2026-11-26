@@ -29,6 +29,7 @@ a CI failure on a number its test measures): its number must come back, whatever
 issue whose reporter's code fails while main passes ends as *fixed on main*; with `bisect_fixed` a
 Bisect phase first finds the commit that fixed it. A CI failure that an open pull request already fixes
 skips Bisect: the run verifies that pull request and drafts a comment for it, as it does for an issue.
+It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say.
 Spinoff runs when the run found problems that are not its own: a failure the base commit shows without
 the change, or a lead a role met on the way (a bug in code it read, a broken test or image). For each
 failure the base commit shows, it gives the upstream issue that tracks it, or an issue draft for you to
@@ -589,7 +590,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` back end: the GEAK checkout whose kernel lane runs as an outside program |
 | `kernel_backend_command` | `command` back end: shell command with `{task_dir}`, `{out_dir}`, `{gpu_ids}`, `{budget}`; for `geak` it replaces the default command |
 | `kernel_budget` | optimization rounds for the kernel back end (default 6), its `{budget}` |
-| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so one by an author who is not a maintainer of the repository is applied only when named here; without it the run asks |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so the run applies one only when it is named here, whoever wrote it; without it the run asks |
 | `sources`, `since` | `scan`: any of `ci`, `issues`, `upstream` (the default) and `hardware`, `perf`; the start of the window (default: the previous report) |
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |

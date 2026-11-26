@@ -2083,6 +2083,23 @@ const scenarios = [
     check(im && im.ins.work_package.kind === 'apply_pr' && im.ins.work_package.goal.includes('#40872'), 'apply_pr work package');
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].cmd === 'bash repro.sh', `issue_repro gate carries the reproduction: ${JSON.stringify(v && v.ins.extra_gates)}`);
+    // The run ends in a comment for that pull request, as a ci run's does: the PR engineer is told which, and the
+    // result says to post the comment, not to push a branch that has no pull request of its own.
+    const pe = r.calls.find((c) => c.key === 'pr_engineer:pr');
+    const n = r.result.next;
+    check(pe && eqList(pe.ins.existing_prs, ['#40872']) && eqList(r.result.pr.comment_for, ['#40872']),
+      `the PR engineer knows which pull request the comment is for: ${JSON.stringify(pe && pe.ins.existing_prs)}`);
+    check(/^#40872 is verified: the comment for it is drafted at /.test(n.say) && /nothing is to be pushed/.test(n.say)
+      && n.user.some((u) => u.startsWith('post the verification comment on #40872')) && !n.user.some((u) => /git push|^push /.test(u)),
+      `the user is told to post the comment, not to push a branch: ${JSON.stringify(n)}`);
+    // One pull request is verified in a run: several applied together would show nothing of each.
+    const several = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872', ' #40901 '],
+        triage_path: `${RUN}/t.md` }) });
+    const first = several.calls.find((c) => c.key === 'implementer:implement').ins.work_package.goal;
+    check(first.includes('#40872') && !first.includes('#40901') && eqList(several.result.pr.comment_for, ['#40872'])
+      && several.result.phases.some((p) => p.phase === 'Reproduce' && p.summary === '#40872 is verified. Not verified in this run, which takes one: #40901'),
+      `of several the first is verified and the others are named: ${first}`);
   }],
   ['issue: a root cause in an AMD component gets an issue drafted for that repository, and a workaround in the framework only for a P0', async () => {
     const draft = `${RUN}/component_issue.md`;
@@ -2188,13 +2205,13 @@ const scenarios = [
     check(r.result.status === 'handed_off', `status ${r.result.status}`);
     check(!r.keys.includes('ci_guardian:bisect'), 'no bisect for infrastructure');
   }],
-  ['ci: an open pull request that already fixes the failure is verified, not fixed a second time', async () => {
+  ['ci: an open pull request that already fixes the failure is verified on the user\'s word, not fixed a second time', async () => {
     const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
     const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
-    const mine = { pr: '#50220', author: 'alice', association: 'MEMBER', head: 'abc1234' };
-    const theirs = { pr: '#50231', author: 'mallory', association: 'CONTRIBUTOR', head: 'def5678' };
+    const mine = { pr: '#50220', author: 'alice', association: 'MEMBER', head: 'abc1234', state: 'open' };
+    const theirs = { pr: '#50231', author: 'mallory', association: 'CONTRIBUTOR', head: 'def5678', state: 'open' };
     const applied = (r) => (r.calls.find((c) => c.key === 'implementer:implement') || { ins: {} }).ins.work_package || {};
-    const r = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [mine] }));
+    const r = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ existing_prs: [mine] }));
     check(r.result.status === 'ready_for_review' && !r.keys.includes('ci_guardian:bisect'), `no culprit is searched for: ${ended(r)}`);
     check(eqList(r.phases, ['Setup', 'Classify', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     check(applied(r).kind === 'apply_pr' && applied(r).goal.startsWith('apply the existing fix #50220 at abc1234 ')
@@ -2215,42 +2232,106 @@ const scenarios = [
       && /nothing is to be pushed/.test(n.say) && n.user.some((u) => u.startsWith('post the verification comment on #50220'))
       && !n.user.some((u) => /git push|^push /.test(u)), `the user is told to post the comment, not to push a branch: ${JSON.stringify(n)}`);
 
-    // A pull request runs its author's code here, next to the keys the agents hold: one by an author who cannot merge
-    // into the repository is applied only on the user's word.
-    for (const who of [theirs, { ...theirs, association: '' }, { ...theirs, association: 'first_time_contributor' }, { pr: '#50231' }]) {
+    // A pull request runs its author's code here, next to the keys the agents hold: the run applies one only on the
+    // user's word, whoever wrote it. What the classification says of the author is a model's report of an
+    // association, which does not show that the author can put code on main.
+    for (const who of [mine, { ...mine, association: 'OWNER' }, { ...theirs, association: 'COLLABORATOR' }, theirs, { ...theirs, association: '' }]) {
       const asked = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [who] }));
       const q = (asked.result.next.ask || [])[0] || {};
       check(asked.result.status === 'needs_input' && asked.result.stopped_at === 'Classify' && !asked.keys.includes('implementer:implement')
-        && !asked.keys.includes('ci_guardian:bisect') && q.field === 'apply_prs' && eqList(q.options, ['#50231', 'none'])
-        && 'apply_prs' in asked.result.next.rerun_with.answers,
+        && !asked.keys.includes('ci_guardian:bisect') && q.field === 'apply_prs' && eqList(q.options, [who.pr, 'none'])
+        && /so the run applies one only on your word/.test(q.question),
         `a pull request by ${who.association || 'an author of unknown standing'} is not run without the user's word: ${ended(asked)}, ${JSON.stringify(q.options)}`);
+      // The answer takes the place of a field the task left blank, which would otherwise win over it.
+      check(asked.result.next.rerun_with.apply_prs === '' && asked.result.next.rerun_with.answers.apply_prs === null,
+        `the rerun clears the field and waits for the answer: ${JSON.stringify(asked.result.next.rerun_with)}`);
     }
     const allowed = await run({ mode: 'ci', task: 'c', apply_prs: ['#50231'] }, classified({ existing_prs: [theirs] }));
     check(allowed.result.status === 'ready_for_review' && applied(allowed).goal.includes('#50231 at def5678') && !allowed.keys.includes('ci_guardian:bisect'),
       `named in the task, it is verified: ${ended(allowed)}`);
     const answered = await run({ mode: 'ci', task: 'c', answers: { apply_prs: '#50231' } }, classified({ existing_prs: [theirs] }));
     check(answered.result.status === 'ready_for_review' && applied(answered).goal.includes('#50231'), `the answer to the question does the same: ${ended(answered)}`);
+    // The question asks for the number: a bare number, "PR 50231" and the pull request's URL all name it.
+    for (const word of ['50231', ' #50231 ', 'PR 50231', 'pr #50231', 'https://github.com/sgl-project/sglang/pull/50231',
+      'https://github.com/sgl-project/sglang/pull/50231/files']) {
+      const bare = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      check(bare.result.status === 'ready_for_review' && applied(bare).goal.includes('#50231 at def5678') && !bare.keys.includes('ci_guardian:bisect'),
+        `the answer ${JSON.stringify(word)} names the pull request: ${ended(bare)}, ${applied(bare).goal}`);
+    }
+    // A field the task set blank does not stand in the answer's way, in this run or in the one after the question.
+    for (const blank of [[], '  ', ['']]) {
+      const empty = await run({ mode: 'ci', task: 'c', apply_prs: blank }, classified({ existing_prs: [theirs] }));
+      check(empty.result.status === 'needs_input' && empty.result.next.rerun_with.apply_prs === '',
+        `a blank apply_prs (${JSON.stringify(blank)}) is no word: the run asks (${ended(empty)})`);
+      const then = await run({ mode: 'ci', task: 'c', apply_prs: blank, ...empty.result.next.rerun_with, answers: { apply_prs: '#50231' } },
+        classified({ existing_prs: [theirs] }));
+      check(then.result.status === 'ready_for_review' && applied(then).goal.includes('#50231'), `and the answer is taken: ${ended(then)}`);
+      const direct = await run({ mode: 'ci', task: 'c', apply_prs: blank, answers: { apply_prs: 'none' } }, classified({ existing_prs: [theirs] }));
+      check(direct.result.status === 'ready_for_review' && direct.keys.includes('ci_guardian:bisect'),
+        `"none" as the answer next to a blank field is taken too: ${ended(direct)}`);
+    }
     const refused = await run({ mode: 'ci', task: 'c', apply_prs: 'none' }, classified({ existing_prs: [theirs] }));
     check(refused.result.status === 'ready_for_review' && refused.keys.includes('ci_guardian:bisect') && applied(refused).kind !== 'apply_pr'
       && !refused.result.pr.comment_for && refused.result.next.user.some((u) => /push/.test(u))
       && refused.result.phases.some((p) => p.phase === 'Classify' && /#50231 by mallory \(contributor\): open, and not applied/.test(p.summary)),
       `"none" has the run fix the failure itself, and nothing is asked again: ${ended(refused)}`);
-    // With the user's word given, it alone decides: a maintainer's pull request the task does not name is not applied either.
+    // The user's word alone decides which: a pull request the task does not name is not applied, whoever wrote it.
     const narrowed = await run({ mode: 'ci', task: 'c', apply_prs: ['#50231'] }, classified({ existing_prs: [mine, theirs] }));
     check(applied(narrowed).goal.includes('#50231') && !applied(narrowed).goal.includes('#50220'), `the task's word decides which: ${applied(narrowed).goal}`);
-    // The user can name a pull request the classification did not find.
-    const pointed = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] }, classified({}));
-    check(pointed.result.status === 'ready_for_review' && applied(pointed).goal.startsWith('apply the existing fix #777 and ')
-      && !pointed.keys.includes('ci_guardian:bisect'), `a pull request the task names is verified against the failure: ${ended(pointed)}`);
+
+    // What the Intake read into a request is a model's reading, not the user's word: the run asks, and names it first.
+    const read = { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read',
+      task_def: { ...ins.given, mode: 'ci', task: 'c', apply_prs: ['#50231'] } }) };
+    const inferred = await run({ mode: 'ci', task: 'c', request: 'the red job; someone opened 50231 for it' },
+      { ...read, ...classified({ existing_prs: [mine, theirs] }) });
+    const iq = (inferred.result.next.ask || [])[0] || {};
+    check(inferred.result.status === 'needs_input' && inferred.result.stopped_at === 'Classify' && !inferred.keys.includes('implementer:implement')
+      && eqList(iq.options, ['#50231', '#50220', 'none']) && /The request seems to name #50231: say so here to confirm it\./.test(iq.question),
+      `a pull request the Intake read into the request is asked about, not applied: ${ended(inferred)}, ${JSON.stringify(iq.options)}`);
+    const confirmed = await run({ mode: 'ci', task: 'c', request: 'the red job; someone opened 50231 for it', answers: { apply_prs: '#50231' } },
+      { ...read, ...classified({ existing_prs: [mine, theirs] }) });
+    check(confirmed.result.status === 'ready_for_review' && applied(confirmed).goal.includes('#50231 at def5678'),
+      `confirmed in the answer, it is verified: ${ended(confirmed)}`);
+
+    // What the user names is looked up: Classify is told, and only one it returns open, with the commit its branch
+    // is at, is applied. A closed or a merged one is not reported as an open fix, and no revision is guessed.
+    const told = (x) => (x.calls.find((c) => c.key === 'ci_guardian:classify') || { ins: {} }).ins.named_prs;
+    check(eqList(told(allowed), ['#50231']) && eqList(told(r), ['#50220']) && told(refused) === undefined && eqList(told(inferred), ['#50231'])
+      && eqList(told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'https://github.com/sgl-project/sglang/pull/777' } }, classified({}))), ['#777']),
+      `Classify is given the pull requests the task or the request names: ${JSON.stringify([told(allowed), told(r), told(refused), told(inferred)])}`);
+    const pointed = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] },
+      classified({ existing_prs: [{ pr: '#777', author: 'carol', association: 'NONE', head: '7770001', state: 'open' }] }));
+    check(pointed.result.status === 'ready_for_review' && applied(pointed).goal.startsWith('apply the existing fix #777 at 7770001 ')
+      && !pointed.keys.includes('ci_guardian:bisect'), `a pull request the task names is verified once Classify has looked it up: ${ended(pointed)}`);
+    for (const [found, why] of [
+      [[], '#777: the classification did not find it as a pull request of this repository'],
+      [[{ pr: '#777', author: 'carol', head: '7770001', state: 'closed' }], '#777: it is closed'],
+      [[{ pr: '#777', author: 'carol', head: '7770001', state: 'merged' }], '#777: it is merged'],
+      [[{ pr: '#777', author: 'carol', head: '7770001' }], '#777: it is not said to be open'],
+      [[{ pr: '#777', author: 'carol', state: 'open' }], '#777: the commit its branch is at is not known'],
+      [[{ pr: 'ROCm/aiter#777', author: 'carol', head: '7770001', state: 'open' }], '#777: the classification did not find it as a pull request of this repository'],
+    ]) {
+      const gone = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] }, classified({ existing_prs: found }));
+      check(gone.result.status === 'ready_for_review' && gone.keys.includes('ci_guardian:bisect') && applied(gone).kind !== 'apply_pr'
+        && !gone.result.pr.comment_for
+        && gone.result.phases.some((p) => p.phase === 'Classify' && p.summary === `named for verification, and not applied: ${why}`),
+        `a named pull request that is not open with a known head (${why}) is not applied, and the run fixes the failure itself: ${ended(gone)}, ${
+          JSON.stringify(gone.result.phases.filter((p) => p.phase === 'Classify').map((p) => p.summary))}`);
+    }
+    // Nor is one the classification found itself asked about when it is not open with a head.
+    const stale = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ ...theirs, state: 'closed' }, { ...mine, head: '' }] }));
+    check(stale.result.status === 'ready_for_review' && stale.keys.includes('ci_guardian:bisect') && !(stale.result.next.ask || []).length,
+      `nothing is asked about a pull request that cannot be applied: ${ended(stale)}`);
 
     // One pull request is verified in a run: several applied together would show nothing of each.
-    const two = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [mine, { ...theirs, association: 'COLLABORATOR' },
-      { pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER' }] }));
+    const two = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220', '#50231'] }, classified({ existing_prs: [mine, theirs,
+      { pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER', state: 'open', head: '8120001' }] }));
     check(applied(two).goal.includes('#50220') && !applied(two).goal.includes('#50231') && eqList(two.result.pr.comment_for, ['#50220'])
       && two.result.phases.some((p) => p.phase === 'Classify' && /Not verified in this run, which takes one: #50231/.test(p.summary))
       && two.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('ROCm/aiter#812: named as a fix, but not as a pull request of this repository')),
       `the first is verified, the others are named: ${applied(two).goal}`);
-    const foreign = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER' }] }));
+    const foreign = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER',
+      state: 'open', head: '8120001' }] }));
     check(foreign.result.status === 'ready_for_review' && foreign.keys.includes('ci_guardian:bisect') && applied(foreign).kind !== 'apply_pr',
       `one of another repository cannot be applied to this tree: the culprit is found and fixed as before: ${ended(foreign)}`);
     // None named: as before.
@@ -2260,21 +2341,23 @@ const scenarios = [
         `no open fix (${JSON.stringify(none)}): the bisect runs`);
     }
     // What is handed over is handed over, whatever fix is named for it.
-    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ failure_class: 'flaky', existing_prs: [mine] }));
+    const flaky = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ failure_class: 'flaky', existing_prs: [mine] }));
     check(flaky.result.status === 'handed_off' && !flaky.keys.includes('implementer:implement'), `a flaky failure is handed over all the same: ${ended(flaky)}`);
     // A failure on a number: the pull request must restore it.
-    const perf = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [mine], performance: true,
+    const perf = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ existing_prs: [mine], performance: true,
       perf_claim: 'output throughput back above 1100 tok/s' }));
     check(perf.result.status === 'ready_for_review' && perf.calls.find((c) => c.key === 'perf_engineer:perf_eval').ins.claim === 'output throughput back above 1100 tok/s',
       `a performance failure is judged on its number with the existing fix too: ${ended(perf)}`);
     // An existing fix has no Bisect: a stop named for it holds before the fix is applied or asked about, and no fix starts without a model.
-    for (const who of [mine, theirs]) {
-      const skipped = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect' }, classified({ existing_prs: [who] }));
-      check(skipped.result.status === 'stopped' && skipped.result.stopped_at === 'Classify' && !skipped.keys.includes('implementer:implement'),
-        `stop_after=Bisect holds before the existing fix ${who.pr} is applied: ${ended(skipped)}`);
+    for (const word of [['#50220'], undefined]) {
+      const skipped = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect', ...(word ? { apply_prs: word } : {}) },
+        classified({ existing_prs: [mine] }));
+      check(skipped.result.status === 'stopped' && skipped.result.stopped_at === 'Classify' && !skipped.keys.includes('implementer:implement')
+        && !(skipped.result.next.ask || []).length,
+        `stop_after=Bisect holds before the existing fix is ${word ? 'applied' : 'asked about'}: ${ended(skipped)}`);
     }
     let classifiedOnce = false;
-    const lifted = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect' }, {
+    const lifted = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect', apply_prs: ['#50220'] }, {
       'ci_guardian:classify': () => {
         classifiedOnce = true;
         return { ...DEFAULTS['ci_guardian:classify'](), existing_prs: [mine] };
@@ -2283,7 +2366,7 @@ const scenarios = [
     check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Classify' && !lifted.keys.includes('implementer:implement')
       && (((lifted.result.next || {}).ask || [])[0] || {}).field === 'model_path',
       `a stop the control file lifts starts no existing fix without a model: ${ended(lifted)}`);
-    const later = await run({ mode: 'ci', task: 'c', stop_after: 'Verify' }, classified({ existing_prs: [mine] }));
+    const later = await run({ mode: 'ci', task: 'c', stop_after: 'Verify', apply_prs: ['#50220'] }, classified({ existing_prs: [mine] }));
     check(later.result.status === 'stopped' && later.result.stopped_at === 'Verify' && later.keys.includes('implementer:implement'),
       `with a later stop the existing fix is applied and verified: ${ended(later)}`);
   }],
@@ -2478,6 +2561,17 @@ const scenarios = [
     check(before.result.next.say.includes('before this scan') && before.result.next.say.includes(`${RUN}/daily_report.md`)
       && !(before.result.next.user || []).some((u) => u.includes('daily_report.md')),
       `that day's report, shared before this scan, is named as such, and this scan's stays a file: ${before.result.next.say}`);
+    // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
+    // with the task, so that the run started from it asks. A perf task's candidates are the task itself.
+    const offers = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
+      { rank: 1, task: 'rocm720 unit lane red', type: 'ci', priority: 'P0', source: 'ci',
+        task_def: { mode: 'ci', task: 'https://github.com/sgl-project/sglang/actions/runs/1', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#50231'] } },
+      { rank: 2, task: 'A/B two decode PRs', type: 'perf', priority: 'P2', source: 'upstream',
+        task_def: { mode: 'perf', task: 'decode throughput', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#46329'] } }] }) });
+    const [ciOffer, perfOffer] = offers.result.next.start || [];
+    check(ciOffer && ciOffer.args.mode === 'ci' && !('apply_prs' in ciOffer.args) && ciOffer.args.framework_dir === '/sgl-workspace/sglang'
+      && perfOffer && eqList(perfOffer.args.apply_prs, ['#46329']),
+      `a ci task a scan offers names no pull request to apply: ${JSON.stringify(offers.result.next.start)}`);
     const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
     check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
       && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,

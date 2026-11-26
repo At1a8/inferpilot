@@ -99,7 +99,11 @@ clock can start before your session does; on the call that finishes a gate, `inc
    as an absolute pass.
    - **The tests:** run them on the commit as it is, and each one that fails again on the parent
      (`<commit>^` in a throwaway worktree, as in step 3; a run longer than one tool call goes through a
-     driver, as step 0 says of step 3's control), with the same command and environment. A failure is
+     driver, as step 0 says of step 3's control), with the same command and environment. The parent
+     is the tree before the package, here as in step 3: for a package of several commits (an
+     `apply_pr` package keeps its author's) it is the commit the package was made on, not
+     `<commit>^`, where a test an earlier commit of the package broke fails already and would pass
+     for unchanged. A failure is
      unchanged only when the test fails there the same way, the same test with the same error. One
      that passes on the parent is the package's, and so is one that fails there another way (an
      assertion there, a crash here). One the parent cannot run at all because of the failure the

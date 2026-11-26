@@ -183,6 +183,21 @@ const asObject = (v) => {
     return {};
   }
 };
+// The pull requests a task names for the run to apply (apply_prs), as the words they were given in. The user's
+// word is what the caller gave: the field or, where the field is blank, the answer. What the Intake read into a
+// request is its reading, not that word (existingFix).
+const prWords = (v) => (Array.isArray(v) ? v : [v]).map((p) => String(p == null ? '' : p).trim()).filter(Boolean);
+function namedPrs() {
+  const field = prWords(RAW.apply_prs);
+  const said = field.length ? field : prWords(asObject(RAW.answers).apply_prs);
+  return { said, read: said.length ? [] : prWords(A.apply_prs) };
+}
+// A pull request of the framework's repository, however it is written: #50231, 50231, PR 50231 or its URL. The
+// repository of a URL is Classify's to check: it returns a pull request of another one under its full name.
+const prNumber = (p) => {
+  const m = /^(?:pr\s*|pull request\s*)?#?(\d+)$/i.exec(p) || /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#]\S*)?$/i.exec(p);
+  return m ? `#${m[1]}` : '';
+};
 const TASK_PROMPTS = {
   feature: 'Which upstream PR, design or paper should be brought to AMD (URL)?',
   issue: 'Which issue (URL or <repo>#<n>)?',
@@ -462,6 +477,8 @@ const C = {
   lock_idle_hours: String(LOCK_IDLE_HOURS),
   run_dir: '',
   resume_run_dir: String(A.run_dir || ''),
+  // ci: the pull requests the task or the request names for verification, for Classify to look up (existingFix)
+  named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prNumber(p) || p).filter((p) => !/^none$/i.test(p)) : [],
   branch: String(A.branch || ''),
   worktree: String(A.worktree || ''),
 };
@@ -786,8 +803,9 @@ const CLASSIFY = S({
   failing_test_cmd: str,
   // open pull requests that already fix this failure, the likeliest first: the run verifies one in place of
   // finding the culprit and writing a fix of its own. pr: #<n>; association: the author's, as GitHub gives it
-  // (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, ...); head: the commit its branch is at
-  existing_prs: arr(S({ pr: str, author: str, association: str, head: str }, ['pr'])),
+  // (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, ...), for the user to read; head: the commit its branch is at;
+  // state: open, closed, merged or not_found, also for the ones the task names (named_prs), which are looked up
+  existing_prs: arr(S({ pr: str, author: str, association: str, head: str, state: str }, ['pr'])),
   window: str,
   // the test fails on a number it measures (a throughput, a latency, a speed threshold), not on an error:
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
@@ -1131,8 +1149,12 @@ function nextSteps(status, at) {
         ? ` That day's daily report was shared before this scan: ${R.daily_report_url}; this scan's stays at ${C.run_dir}/daily_report.md.`
         : ` The daily report is shared: ${R.daily_report_url}.`;
     out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.${shared}${report}`;
+    // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
+    // with the task, so that the run started from it asks.
+    const offered = (def) => (String(def.mode).trim().toLowerCase() === 'ci'
+      ? Object.fromEntries(Object.entries(def).filter(([k]) => k !== 'apply_prs')) : def);
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
-      .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...t.task_def } }));
+      .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
     out.say = `The design waits for you: ${C.design_path || `${C.run_dir}/design.md`}. To go on with it, run again from `
       + `Implement in this run directory; to change it, say how and run the task again.${report}`;
@@ -1159,7 +1181,8 @@ function nextSteps(status, at) {
     out.say = `The run stopped after ${at}, before it ran any code that is not on main: ${last}. Answer with the pull request to verify, `
       + `or "none" to have the run fix the failure itself, and run the task again: it starts over.${report}`;
     out.ask = R.questions;
-    out.rerun_with = { answers: { apply_prs: null } };
+    // A field the task set blank (an empty list, spaces) would win over the answer and be asked about again.
+    out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };
   } else if (status === 'needs_input' && (R.questions || []).some((q) => FIX_NEEDS[q.field])) {
     const what = R.questions.map((q) => FIX_NEEDS[q.field]).filter(Boolean).join(' and ');
     out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over.${report}`;
@@ -2084,7 +2107,12 @@ async function runIssue() {
     }
     const lacking = askForFix('Reproduce');
     if (lacking) return lacking;
-    const prs = (tri.existing_prs || []).join(', ');
+    // One pull request is verified in a run, as for a CI failure: several applied together would show nothing of
+    // each. The PR phase writes the comment for it, and the result says to post that, not to push a branch.
+    const listed = (tri.existing_prs || []).map((p) => String(p || '').trim()).filter(Boolean);
+    const prs = listed[0] || '';
+    if (prs) C.existing_prs = [prs];
+    if (listed.length > 1) note('Reproduce', 'existing_fix', `${prs} is verified. Not verified in this run, which takes one: ${listed.slice(1).join(', ')}`);
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [] };
     return deliver([wp], gates, issueClaim, runPerf);
@@ -2123,35 +2151,49 @@ async function runIssue() {
 }
 
 // A pull request someone else opened runs its author's code on this machine, next to the keys its agents hold.
-// The run applies one on its own only where its author can already put code on main, which every run executes:
-// an owner, a member or a collaborator of the repository. Any other needs the user's word: the task names the
-// pull requests the run may apply (apply_prs), or a word such as "none", and then nothing is asked.
+// The run applies one only on the user's word: the task names the pull requests the run may apply (apply_prs),
+// or a word such as "none", and then nothing is asked. Nothing else stands for that word. Not what the Intake
+// read into a request, which is a model's reading: it is asked about. Not what the classification says of the
+// author: an association (member, collaborator) does not show that the author can put code on main, and the
+// run has no way of its own to look that permission up. So a pull request the task does not name is asked
+// about, whoever wrote it.
+// What the user names is looked up all the same (C.named_prs, for Classify): only a pull request the
+// classification returns as open, with the commit its branch is at, is applied, so that a closed or a merged
+// one is not reported as an open fix and the run knows which revision it verified.
 // One pull request is verified in a run: several applied together would show nothing of each.
-const MAINTAINERS = ['OWNER', 'MEMBER', 'COLLABORATOR'];
 const describePr = (p) => `${p.pr}${p.author ? ` by ${p.author}` : ''}${p.association ? ` (${p.association.toLowerCase()})` : ''}`;
 function existingFix(found) {
+  const { said, read } = namedPrs();
   const isPr = (p) => /^#\d+$/.test(p);
-  const given = (Array.isArray(A.apply_prs) ? A.apply_prs : (A.apply_prs ? [A.apply_prs] : [])).map((p) => String(p || '').trim()).filter(Boolean);
   const named = (Array.isArray(found) ? found : []).filter((p) => p && typeof p === 'object')
     .map((p) => ({ pr: String(p.pr || '').trim(), author: String(p.author || '').trim(),
-      association: String(p.association || '').trim().toUpperCase(), head: String(p.head || '').trim() }))
+      association: String(p.association || '').trim().toUpperCase(), head: String(p.head || '').trim(),
+      state: String(p.state || '').trim().toLowerCase() }))
     .filter((p) => p.pr);
   const here = named.filter((p) => isPr(p.pr));
-  const byUser = given.filter(isPr);
-  // What the user names comes first, found by the classification or not; then what the classification found.
-  const candidates = [...byUser.map((pr) => here.find((p) => p.pr === pr) || { pr, author: '', association: '', head: '' }),
-    ...here.filter((p) => !byUser.includes(p.pr))];
-  const trusted = given.length ? candidates.filter((p) => byUser.includes(p.pr)) : candidates.filter((p) => MAINTAINERS.includes(p.association));
-  const apply = trusted[0] || null;
+  const usable = here.filter((p) => p.state === 'open' && p.head);
+  const numbers = (words) => [...new Set(words.map(prNumber).filter(Boolean))];
+  const byUser = numbers(said);
+  const seems = numbers(read); // what the Intake read into the request: asked about, first among the candidates
+  const apply = byUser.map((pr) => usable.find((p) => p.pr === pr)).find(Boolean) || null;
+  // What the task or the request names and the run cannot apply, each with why.
+  const refused = (byUser.length ? byUser : seems).filter((pr) => !usable.some((p) => p.pr === pr)).map((pr) => {
+    const p = here.find((x) => x.pr === pr);
+    return `${pr}: ${!p ? 'the classification did not find it as a pull request of this repository'
+      : p.state !== 'open' ? `it is ${p.state || 'not said to be open'}` : 'the commit its branch is at is not known'}`;
+  });
+  const candidates = [...seems.map((pr) => usable.find((p) => p.pr === pr)).filter(Boolean), ...usable.filter((p) => !seems.includes(p.pr))];
   const others = candidates.filter((p) => p !== apply);
-  const out = { apply, others, given, foreign: named.filter((p) => !isPr(p.pr)), ask: null };
-  if (!apply && !given.length && candidates.length) {
+  const out = { apply, others, said, refused, foreign: named.filter((p) => !isPr(p.pr)), ask: null };
+  if (!said.length && candidates.length) {
     const who = candidates.map(describePr).join(', ');
+    const confirm = seems.filter((pr) => candidates.some((p) => p.pr === pr));
     out.ask = { who, question: { field: 'apply_prs',
       question: `${who}: open, and said to fix this failure. Verifying a pull request runs its code and its tests on this machine, next `
-        + `to the keys the agents hold, and ${candidates.length === 1 ? 'its author is' : 'their authors are'} not among the repository's `
-        + 'maintainers. Which one should the run verify? Its number, or "none" to have the run fix the failure itself.',
-      why: 'a pull request by someone who cannot merge into the repository is run only on your word',
+        + 'to the keys the agents hold, so the run applies one only on your word. '
+        + `${confirm.length ? `The request seems to name ${confirm.join(', ')}: say so here to confirm it. ` : ''}`
+        + 'Which one should the run verify? Its number, or "none" to have the run fix the failure itself.',
+      why: "a pull request is someone else's code: it runs on this machine only on your word",
       options: [...candidates.map((p) => p.pr), 'none'] } };
   }
   return out;
@@ -2206,6 +2248,7 @@ async function runCi() {
     note('Classify', 'existing_fix', `${fix.foreign.map((p) => p.pr).join(', ')}: named as a fix, but not as a pull request of this `
       + 'repository (#<n>); not applied');
   }
+  if (fix.refused.length) note('Classify', 'existing_fix', `named for verification, and not applied: ${fix.refused.join('; ')}`);
   if (fix.apply || fix.ask) {
     // An existing fix has no Bisect phase: a stop named for it still ends the run before the fix is applied.
     if (stopHere('Bisect')) {
@@ -2214,8 +2257,8 @@ async function runCi() {
     }
   }
   if (fix.ask) {
-    note('Classify', 'needs_input', `${fix.ask.who}: open, and said to fix this failure. Verifying it runs its code on this machine, `
-      + 'and its author cannot merge into the repository: the run applies it only on the user\'s word');
+    note('Classify', 'needs_input', `${fix.ask.who}: open, and said to fix this failure. Verifying it runs its code on this machine: `
+      + 'the run applies it only on the user\'s word');
     R.questions = [fix.ask.question];
     return finish('needs_input', 'Classify');
   }
@@ -2227,13 +2270,13 @@ async function runCi() {
     C.existing_pr = fix.apply;
     note('Classify', 'existing_fix', `${describePr(fix.apply)}: open, and said to fix this failure; verified in place of a fix of the run's `
       + `own${fix.others.length ? `. Not verified in this run, which takes one: ${fix.others.map((p) => p.pr).join(', ')}` : ''}`);
-    const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${pr}${head ? ` at ${head}` : ''} and complete what verification needs`,
+    const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`,
       test: 'the failing test passes on every lane it failed on; the PR\'s own tests pass', files: [], depends_on: [] };
     return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');
   }
   if (fix.others.length) {
     note('Classify', 'existing_fix', `${fix.others.map(describePr).join(', ')}: open, and not applied: the task names the pull requests `
-      + `the run may apply (apply_prs: ${fix.given.join(', ')}), and none of these. The run fixes the failure itself`);
+      + `the run may apply (apply_prs: ${fix.said.join(', ')}), and none of these. The run fixes the failure itself`);
   }
 
   enter('Bisect');

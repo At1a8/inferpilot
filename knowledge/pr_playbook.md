@@ -106,7 +106,12 @@ Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; r
   differs from the description's by more than run-to-run noise replaces it there. A PR nobody has
   re-run is not pushed.
 - The verification comment for an existing PR (the PR engineer's step 5) rewrites no description and
-  carries no attribution line; it is re-run before it is posted all the same.
+  carries no attribution line; it is re-run before it is posted all the same. It is for one PR: a
+  run verifies one (for an issue the first its triage lists, for a CI failure the one the user
+  names) and names the others without applying them, since several applied together would show
+  nothing of each. The run's result says to post the comment, and gives no push command: the run
+  has no PR of its own. What the run added on top of the PR is offered in the comment as patches
+  of its own (`RUN_DIR/patches_additions`), apart from the PR's commits.
 - A repository that asks for more disclosure of AI assistance gets it as well (vLLM: the "AI
   assistance was used" box of its PR template, its `/pr-checklist` skill, and a trailer such as
   `Co-authored-by:` on each commit).

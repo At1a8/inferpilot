@@ -55,8 +55,14 @@ the commits like any other. Commits no package of this attempt names stay on the
      resolve conflicts following upstream's intent, keep the author's commits intact. Write the head
      you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit.
      Where the package names a head and the PR has moved since, say so in `notes`, and go on with what
-     you fetched. What you add (a resolution, a missing test) is commits of your own after the
-     author's, never folded into theirs.
+     you fetched. What you add (a missing test, a fix on top) is commits of your own after the
+     author's, never folded into theirs. One thing cannot be kept apart: a conflict resolved during
+     a cherry-pick is staged before `git cherry-pick --continue`, and so is part of that commit.
+     Resolve only what git marked, and write each such commit in the ledger and in `notes`, with
+     the files and what you chose: the verification comment says that this commit is not the
+     author's as pushed. Once the last of the PR's commits is on the branch, before anything of
+     your own, write that tip in the ledger as well (`git rev-parse HEAD`, "the PR as applied"):
+     what comes after it is the run's, and the PR phase exports it apart.
    - `test` / `docs`: register tests where CI discovers them; document user-visible switches.
 4. Leave the package ready for the PR, which changes no code: run the repository's formatters and
    linters on the files you changed (sglang: `pre-commit run --files <files>`, `env_hygiene.md`),
