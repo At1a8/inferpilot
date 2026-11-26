@@ -1006,12 +1006,130 @@ const scenarios = [
     const early = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': () => null });
     check(!early.keys.includes('issue_triager:reply'), 'no triage, no reply to rewrite');
   }],
+  ['issue: the reviewer checks the reply draft against the run; what it finds is rewritten once, and what is left the user hears of', async () => {
+    const clean = await run({ mode: 'issue', task: 'i' });
+    const chk = clean.calls.find((c) => c.key === 'reviewer:reply');
+    check(chk && chk.ins.reply_draft_path === `${RUN}/reply_draft.md` && chk.ins.status === 'ready_for_review',
+      'the reviewer reads the rewritten draft and how the run ended');
+    check(clean.keys.indexOf('reviewer:reply') > clean.keys.indexOf('issue_triager:reply')
+      && clean.keys.indexOf('reviewer:reply') < clean.keys.indexOf('director:report'), 'after the draft, before the report');
+    check(!chk.prompt.includes('Return it in\n`leads`'), 'a closing phase hands on no leads');
+    check(clean.result.next.user.some((u) => u.startsWith('post the reply draft on the issue:')), 'a clean draft is the user\'s to post');
+    const finding = { claim: 'a human reviewed the fix', issue: 'nobody did: the PR is a draft for review', evidence: 'run.json' };
+    const fixed = await run({ mode: 'issue', task: 'i', review_model: 'other-model' }, {
+      'reviewer:reply': (ins, n) => ({ findings: n === 1 ? [finding] : [], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }),
+    });
+    const rewrite = fixed.calls.filter((c) => c.key === 'issue_triager:reply')[1];
+    check(rewrite && JSON.stringify(rewrite.ins.reply_findings).includes('a human reviewed the fix'), 'the findings go back to the triager');
+    check(fixed.calls.filter((c) => c.key === 'reviewer:reply').map((c) => c.model).join() === 'other-model,other-model',
+      'review_model reaches the reply check too');
+    check(fixed.result.reply_draft_path === `${RUN}/reply_draft_2.md` && fixed.result.next.user.some((u) => u.startsWith('post the reply draft')),
+      `the rewritten draft, checked clean: ${fixed.result.reply_draft_path}`);
+    check(fixed.result.phases.some((p) => p.phase === 'Reply' && p.verdict === 'checked'), 'the check is in the record');
+    const left = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }) });
+    check(left.keys.filter((k) => k === 'reviewer:reply').length === 2 && left.keys.filter((k) => k === 'issue_triager:reply').length === 2,
+      'one rewrite, checked once more, no further round');
+    const say = (left.result.next.user || []).find((u) => u.includes('reply draft'));
+    check(say && say.startsWith('read the reply draft against what the run showed before posting it') && say.includes('nobody did'),
+      `what is left reaches the user: ${say}`);
+    const unchecked = await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => null });
+    const u = (unchecked.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(unchecked.result.status === 'ready_for_review' && u && u.includes('not checked'), `a draft nobody checked is not offered for posting as is: ${u}`);
+    const blocked = await run({ mode: 'issue', task: 'i', max_investigate_rounds: 0 }, {
+      'verify_engineer:verify': () => ({ all_pass: false, failures: [{ gate: 'issue_repro', failure_class: 'crash' }] }),
+    });
+    check(blocked.result.stopped_at === 'Verify' && blocked.keys.includes('reviewer:reply')
+      && !blocked.result.next.say.includes('only what the run showed'),
+      `next.say names where the run ended, not the reply check after it: ${blocked.result.next.say}`);
+    const replyLine = (r) => (r.result.next.user || []).find((x) => x.includes('reply draft'));
+    const doc = (role) => phaseSection(readFileSync(path.join(INFERPILOT, 'roles', `${role}.md`), 'utf8'), 'reply').replace(/\s+/g, ' ');
+    check(doc('reviewer').includes('no promised date (a date the run recorded, such as an image tag\'s, is a fact'),
+      'a date the run recorded is told; only a promised one is out');
+    const noRecord = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: ' ' }) }));
+    check(noRecord && !noRecord.startsWith('post the reply draft') && noRecord.includes('wrote no reply_check.md'),
+      `a check that wrote no record of itself is none: ${noRecord}`);
+    const stale = replyLine(await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': (ins, n) => (n === 1 ? { findings: [finding], check_path: `${RUN}/reply_check.md` } : { findings: [], check_path: '' }),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }) }));
+    check(stale && stale.includes('wrote no reply_check.md') && !stale.includes(`(${RUN}/reply_check.md)`),
+      `the first round's record is not given for the second check: ${stale}`);
+    const claimless = await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [{ claim: '', issue: 'the ledger has 2/2, the draft 3/3' }], check_path: `${RUN}/reply_check.md` }) });
+    const cl = replyLine(claimless);
+    check(claimless.keys.filter((k) => k === 'issue_triager:reply').length === 2 && cl && !cl.startsWith('post the reply draft')
+      && cl.includes('a claim the reviewer did not quote: the ledger has 2/2'), `a finding that quotes no claim is a finding still: ${cl}`);
+    const blank = await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [{ claim: '', issue: '', evidence: 'experiment_ledger.md, Unit tests' }], check_path: `${RUN}/reply_check.md` }) });
+    const bl = replyLine(blank);
+    check(blank.keys.filter((k) => k === 'issue_triager:reply').length === 2 && bl && !bl.startsWith('post the reply draft')
+      && bl.includes('a claim the reviewer did not quote: the reviewer did not say what the run shows (its evidence: experiment_ledger.md, Unit tests)'),
+      `a finding with neither claim nor issue is a finding still, not a clean check: ${bl}`);
+    check(blank.result.reply_findings.length === 1 && blank.result.reply_findings[0].evidence === 'experiment_ledger.md, Unit tests',
+      'and what it did give is kept');
+    for (const [given, what] of [['not written', 'words that are no path'], [`${RUN}/reply_draft.md`, 'the draft\'s own path'],
+      [`${RUN}/../other_run/reply_check.md`, 'another run\'s record']]) {
+      const elsewhere = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: given }) }));
+      check(elsewhere && !elsewhere.startsWith('post the reply draft') && elsewhere.includes(`gave ${given} as its record, which is not this run's reply_check.md`)
+        && !elsewhere.includes(`(${given})`), `${what} as check_path is no record of this run's check: ${elsewhere}`);
+    }
+    const slashes = replyLine(await run({ mode: 'issue', task: 'i' }, { 'reviewer:reply': () => ({ findings: [], check_path: `${RUN}//reply_check.md ` }) }));
+    check(slashes && slashes.startsWith('post the reply draft'), `the record's path written with a doubled slash is the record still: ${slashes}`);
+    const recheck = (second) => run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, {
+      'reviewer:reply': (ins, n) => (n === 1 ? { findings: [finding], check_path: `${RUN}/reply_check.md` } : second()),
+      'issue_triager:reply': (ins, n) => ({ reply_draft_path: `${RUN}/reply_draft${n === 1 ? '' : '_2'}.md` }) });
+    for (const [second, what] of [[() => null, 'returned nothing'],
+      [async () => { await new Promise((r) => setTimeout(r, 400)); return { findings: [], check_path: `${RUN}/reply_check.md` }; }, 'timed out']]) {
+      const gone = replyLine(await recheck(second));
+      check(gone && gone.includes('not checked since it was rewritten: the reviewer returned nothing') && gone.includes(`${RUN}/reply_draft_2.md`)
+        && !gone.includes('reply_check.md'), `a second check that ${what} does not leave the first draft's record beside the rewritten one: ${gone}`);
+    }
+    check(doc('reviewer').includes('with any other value the draft counts as not checked') && doc('reviewer').includes('Every entry of `findings` is a finding'),
+      'the reviewer is told what its record\'s path and an empty finding mean');
+    const halfway = replyLine(await run({ mode: 'issue', task: 'i' }, {
+      'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': (ins, n) => (n === 1 ? { reply_draft_path: `${RUN}/reply_draft.md` } : null) }));
+    check(halfway && halfway.includes('nobody did') && halfway.includes('rewritten halfway') && !halfway.includes('still be writing'),
+      `a rewrite that returned nothing may have left the draft half done: ${halfway}`);
+    const writing = replyLine(await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, {
+      'reviewer:reply': () => ({ findings: [finding], check_path: `${RUN}/reply_check.md` }),
+      'issue_triager:reply': async (ins, n) => {
+        if (n > 1) await new Promise((r) => setTimeout(r, 400));
+        return { reply_draft_path: `${RUN}/reply_draft.md` };
+      } }));
+    check(writing && writing.includes('issue_triager:reply#fix timed out and may still be writing it: stop it before reading or posting'),
+      `a rewrite that timed out may be writing the draft still: ${writing}`);
+    const cause = await run({ mode: 'issue', task: 'i' }, {
+      'investigator:diagnose': () => ({ verdict: 'baseline_bug', root_cause: 'pre-existing on main', known_issue: { id: 'KI-008' } }) });
+    const cr = cause.calls.find((c) => c.key === 'reviewer:reply');
+    const ct = cause.calls.find((c) => c.key === 'issue_triager:reply');
+    check(cause.result.known_issues.length === 1 && cause.result.known_issues[0].cause_of_this_issue === true
+      && cr && cr.ins.known_issues[0].cause_of_this_issue === true,
+      'the baseline bug Diagnose found is marked as the issue\'s own cause');
+    check(ct && doc('reviewer').includes('the one with `cause_of_this_issue` is what Diagnose found the issue\'s own failure to be')
+      && doc('issue_triager').includes('The one with `cause_of_this_issue` is the exception'),
+      'the reply explains the issue\'s own cause as that, and the check does not flag it');
+  }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'needs_info', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
     });
     check(r.result.status === 'triaged' && r.result.stopped_at === 'Triage', `status ${r.result.status}`);
     check(!r.keys.includes('issue_triager:reply') && r.result.reply_draft_path === `${RUN}/reply.md`, 'the Triage draft is the reply');
+    const u = (r.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(u && !u.startsWith('post the reply draft') && u.includes('ended at Triage'), `a draft no reviewer checked is not offered as is: ${u}`);
+    const noRewrite = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:reply': () => null });
+    const v = (noRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(!noRewrite.keys.includes('reviewer:reply') && v && !v.startsWith('post the reply draft')
+      && v.includes('an earlier one or one rewritten halfway') && !v.includes('still be writing'),
+      `a draft the rewrite returned nothing for is not offered as is: ${v}`);
+    const slowRewrite = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'issue_triager:reply': async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { reply_draft_path: `${RUN}/reply_draft.md` };
+    } });
+    const w = (slowRewrite.result.next.user || []).find((x) => x.includes('reply draft'));
+    check(!slowRewrite.keys.includes('reviewer:reply') && w && w.includes('issue_triager:reply timed out and may still be writing it'),
+      `nothing checks or posts a draft a timed-out rewrite may still be writing: ${w}`);
   }],
   ['issue: close_fixed that no longer reproduces', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
