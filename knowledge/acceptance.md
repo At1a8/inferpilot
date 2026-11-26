@@ -41,10 +41,10 @@ Two rules hold across the dimensions:
   the loss (`eval_accuracy.sh gsm8k gpqa_diamond simple_qa`); other sets (a long-context set for KV
   compression), more runs or another budget by name; a determinism task, token equality (§1.4). No role
   decides it on its own: the Intake keeps what the user said in `goal`, and every role reads it there.
-- **A fix** (issue, ci) is measured too when it changes code the server runs, on the task's
-  `model_path`: the fix against the base, or against the last commit that served the configuration
-  where the base cannot (`validation_doctrine.md`, *G2 for a fix*). One that changes tests,
-  documentation or CI files alone is not, nor one for a model that answers no text questions.
+- **A fix** (issue, ci) is measured too when it changes anything but tests and documentation, on the
+  task's `model_path`: the fix against the base, or against the last commit that served the
+  configuration where the base cannot (`validation_doctrine.md`, *G2 for a fix*). One that changes
+  tests or documentation alone is not, nor one for a model that answers no text questions.
 - **Harness:** evalscope for every set, through `scripts/eval_accuracy.sh`, every run sampled afresh
   (never evalscope's cache). It runs through InferPilot's `accuracy.sh`, with the same settings for
   every arm: the task's, else those the feature's source tests with (thinking off for PARD-2), else
@@ -124,7 +124,7 @@ extra items of its feature classes (§1.4).
 | Dimension | Upstream feature | Issue fix | CI fix | Performance | Requirement |
 |---|---|---|---|---|---|
 | Correctness | required | required; the reproduction becomes a regression test | required; the failing test passes on every lane it failed on | required | required |
-| Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | required when the fix changes code the server runs: gsm8k at most 1 point below the base (§1.1); a loss the issue reports comes back as well | required when the fix changes code the server runs, as for an issue fix; none for a fix to tests, documentation or CI files alone | required, as for a feature (§1.1) | on the requester's data set |
+| Accuracy | required: gsm8k, and gpqa_diamond and simple_qa when the user says the change may lose accuracy; each at most 1 point below the baseline (§1.1) | required when the fix changes anything but tests and documentation: gsm8k at most 1 point below the base (§1.1); a loss the issue reports comes back as well | required when the fix changes anything but tests and documentation, as for an issue fix; none for a fix to tests or documentation alone | required, as for a feature (§1.1) | on the requester's data set |
 | Performance | required: the gain the feature claims, or, where it claims none, no slower than the baseline (§1.2) | required when the fix changes code the server runs: no slower than the base (§1.2); always when the issue is a performance problem: the reported number comes back | required when the fix changes code the server runs, as for an issue fix; always when the failure is a performance problem: the number its test measures comes back; none for any other fix to tests, documentation or CI files alone | required: the gain; a guard and a held-out point when the task asks (`guards`, `held_out`) | the requester's SLA |
 | Stability | when the task asks (`stability`, G4) | when the task asks (`stability`, G4); a reported crash or hang is judged by its reproduction | a flaky test passes repeatedly (§4) | when the task asks (`stability`, G4) | when the requester asks (`stability`, G4) |
 | Compatibility | required | required | required | required | the requester's platforms |

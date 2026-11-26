@@ -53,12 +53,14 @@ Notes per gate:
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
   below) or the subject of a determinism task, never the accuracy gate.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
-  report was about, when it changes code the server runs: gsm8k (1319) on the fix and on the base, each
-  once, with the run's launch script and model, the fix at most 1 point below the base. Every task that
-  ends in a pull request brings its accuracy with it: the framework's PR template asks it of a change
-  to outputs, and a fix on the serving path can be one without meaning to. A fix to tests,
-  documentation or CI files alone changes nothing the server runs and has no G2: `not run: no code the
-  server runs changed`. Nor has the fix for a model that answers no text questions (a diffusion,
+  report was about, when it changes anything but tests and documentation: gsm8k (1319) on the fix and
+  on the base, each once, with the run's launch script and model, the fix at most 1 point below the
+  base. Every task that ends in a pull request brings its accuracy with it: the framework's PR
+  template asks it of a change to outputs, and a fix on the serving path can be one without meaning
+  to. Nobody judges whether the server runs the file a fix changes: that judgement can be wrong, and
+  measuring is the safe side (*What a fix changes decides its gates*). A fix to tests or
+  documentation alone has no G2: `not run: only tests or documentation changed`. Nor has the fix for
+  a model that answers no text questions (a diffusion,
   speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
   questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
   reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
@@ -188,11 +190,12 @@ Notes per gate:
   a feature task names its client as it names its server, and one that names none is asked for it
   (`templates/task_definition.md` §1.1).
 - **G5 for a fix.** The fix of an issue or of a CI failure is measured for speed as it is for
-  accuracy (*G2 for a fix*), and on the same condition: when it changes code the server runs. Whoever
+  accuracy (*G2 for a fix*), on a narrower condition: when it changes code the server runs. Whoever
   merges a fix on the serving path asks what it costs, so its pull request shows the fix next to the
   base on the task's client, with the run's launch script and model: no slower than the base beyond
-  the noise band, by the median of its rounds. One diff decides both gates: a fix to tests,
-  documentation or CI files alone has no G5 either, `not run: no code the server runs changed`. Where
+  the noise band, by the median of its rounds. The same diff is read for both gates, by two lines
+  (*What a fix changes decides its gates*): a fix that changes no code the server runs has no G5,
+  `not run: no code the server runs changed`, though G2 may run on it. Where
   the base cannot serve the configuration because that is the failure being fixed, the fix is compared
   with the last commit that served it: the one G2 measured against, or, where G2 did not run (a model
   that answers no text questions), the one the triage record names. Only where the run knows no such
@@ -207,24 +210,33 @@ Notes per gate:
   or the failing test. A threshold moved in a test restores nothing, and G5 says so.
   A fix that is slower, or a number that does not come back, stops the task at Performance for a
   human, and nothing is rolled back: what a correct fix may cost is not a role's to decide.
-- **What counts as code the server runs.** G2 and G5 measure a fix by what its pull request changes,
-  and the line is drawn by file. These are not code the server runs: tests (sglang: `test/`),
-  documentation, CI files (`.github/`, `scripts/ci/`), Dockerfiles, benchmark and tool scripts
-  (`benchmark/`, `tools/`, `examples/`), and a dependency declaration that moves no version (one that
-  was missing, a package's metadata). A fix that changes only such files has neither gate: `not run:
-  no code the server runs changed`. A pull request that changes one of them and a line of code
-  changes code. The framework's own fixes draw the same line: of the 32 fix pull requests merged
-  from 2026-05-26 to 2026-11-26 that changed only such files, none measured the server's accuracy or
-  speed, and its CI runs no server suite for a change to `docs/`, `benchmark/`, `tools/` or `docker/`.
+- **What a fix changes decides its gates.** The fix's diff is read for G2 and for G5, each by a line
+  of its own, drawn by file.
+  G2 runs for every fix that changes a file other than tests and documentation (sglang: `test/`;
+  `docs/`, `*.md`). Whether the server runs that file is nobody's to judge: a module under `python/`
+  can be taken for a tool, a script can be one the launch path imports, and an accuracy loss let
+  through on such a reading is the costly mistake. So a fix to a CI file, a Dockerfile, a benchmark
+  or tool script or a dependency file is measured on gsm8k like a fix to a model file.
+  G5 runs when the fix changes code the server runs. These are not: tests, documentation, CI files
+  (`.github/`, `scripts/ci/`), Dockerfiles, benchmark and tool scripts (`benchmark/`, `tools/`,
+  `examples/`), and a dependency declaration that moves no version (one that was missing, a
+  package's metadata). A fix that changes only such files has no G5: `not run: no code the server
+  runs changed`. A pull request that changes one of them and a line of code changes code. The
+  framework's own fixes measure less than either line: of the 32 fix pull requests merged from
+  2026-05-26 to 2026-11-26 that changed no code, none measured the server's accuracy or speed.
   One change to those files is a change to code all the same: a new version of a package the
   server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned. No line of the framework
   changes, and every kernel may. The fix arm is measured with that version installed and the base
-  arm with the image's, and the image's version is put back when the round ends. Where the version
-  cannot be installed in the run's image, G2 and G5 are a blocking failure, `<package> <version>
-  cannot be installed in this image`: the fix was not measured, and a human decides.
-  A fix that changes no code the server runs is still shown to work where its change takes effect.
-  Its `issue_repro` or `failing_test` runs with the declaration installed, in the image built from
-  the Dockerfile, or by running the tool: the same gate in the unchanged environment shows nothing.
+  arm with the image's, for both gates, and the image's version is put back when the round ends.
+  Where the version cannot be installed in the run's image, G2 and G5 are a blocking failure,
+  `<package> <version> cannot be installed in this image`: the fix was not measured, and a human
+  decides.
+  A fix whose change is not in the run's container (a Dockerfile, a dependency declaration) is
+  measured there all the same, and `gates` says next to the score that the change was not in
+  effect: both arms then ran one environment, and the score shows only that.
+  A fix is shown to work where its change takes effect. Its `issue_repro` or `failing_test` runs
+  with the declaration installed, in the image built from the Dockerfile, or by running the tool:
+  the same gate in the unchanged environment shows nothing.
 
 ## Failure taxonomy — classify before counting
 

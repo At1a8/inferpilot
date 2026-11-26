@@ -659,43 +659,60 @@ class FeatureOffTest(unittest.TestCase):
             self.assertIn("without a switch", item, "the playbook runs G0 again after a fix, switch or no switch")
 
 
-class ServerCodeTest(unittest.TestCase):
-    """G2 and G5 measure a fix by what its pull request changes, and the line is drawn by file
-    (knowledge/validation_doctrine.md, What counts as code the server runs). Tests, documentation, CI files,
-    Dockerfiles, benchmark and tool scripts and dependency declarations that move no version are not code the
-    server runs; a new version of a package the server runs is. A fix that changes no code is shown to work
-    where its change takes effect."""
+class FixGatesByFileTest(unittest.TestCase):
+    """The diff of a fix is read for G2 and for G5, each by a line of its own, drawn by file
+    (knowledge/validation_doctrine.md, What a fix changes decides its gates). G2 runs for every fix that changes a
+    file other than tests and documentation: nobody judges whether the server runs it, since that judgement can
+    be wrong. G5 runs when the fix changes code the server runs, which a new version of a runtime dependency is."""
 
     @staticmethod
     def flat(path):
         return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
-    def test_the_doctrine_draws_the_line_by_file(self):
-        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **What counts as code the server runs.**")]
-        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say what counts as code the server runs")
-        for said in ("the line is drawn by file", "tests (sglang: `test/`)", "documentation", "CI files (`.github/`, `scripts/ci/`)",
-                     "Dockerfiles", "benchmark and tool scripts", "a dependency declaration that moves no version",
-                     "`not run: no code the server runs changed`", "A pull request that changes one of them and a line of code changes code",
+    def test_the_doctrine_gives_each_gate_its_line(self):
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **What a fix changes decides its gates.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say what a fix's files decide")
+        for said in ("each by a line of its own, drawn by file",
+                     "G2 runs for every fix that changes a file other than tests and documentation (sglang: `test/`; `docs/`, `*.md`)",
+                     "Whether the server runs that file is nobody's to judge",
+                     "a fix to a CI file, a Dockerfile, a benchmark or tool script or a dependency file is measured on gsm8k",
+                     "G5 runs when the fix changes code the server runs", "CI files (`.github/`, `scripts/ci/`)", "Dockerfiles",
+                     "benchmark and tool scripts", "a dependency declaration that moves no version",
+                     "has no G5: `not run: no code the server runs changed`",
+                     "A pull request that changes one of them and a line of code changes code",
                      "a new version of a package the server runs (aiter, PyTorch, Triton, flashinfer), bumped or pinned",
-                     "The fix arm is measured with that version installed and the base arm with the image's",
-                     "the image's version is put back when the round ends", "cannot be installed in this image",
-                     "is still shown to work where its change takes effect",
+                     "The fix arm is measured with that version installed and the base arm with the image's, for both gates",
+                     "cannot be installed in this image", "`gates` says next to the score that the change was not in effect",
+                     "A fix is shown to work where its change takes effect",
                      "the same gate in the unchanged environment shows nothing"):
             self.assertIn(said, note[0])
+        g2 = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")][0]
+        for said in ("when it changes anything but tests and documentation", "Nobody judges whether the server runs the file a fix changes",
+                     "A fix to tests or documentation alone has no G2: `not run: only tests or documentation changed`"):
+            self.assertIn(said, g2)
+        self.assertNotIn("tests, documentation or CI files alone changes nothing the server runs and has no G2", g2,
+                         "a fix to a CI file alone still goes without G2")
 
-    def test_the_verify_engineer_reads_the_diff_by_that_line(self):
+    def test_the_roles_read_the_diff_by_those_lines(self):
         role = self.flat("roles/verify_engineer.md")
-        for said in ("when no file it names is code the server runs (`validation_doctrine.md`, *What counts as code the server runs*",
+        for said in ("decides G2 and G5, each by its own line (`validation_doctrine.md`, *What a fix changes decides its gates*)",
+                     "G2 runs unless every file it names is a test or a documentation file",
+                     '`"G2": "not run: only tests or documentation changed"`',
+                     "Never judge whether the server runs a file",
+                     "the Dockerfile change is not in effect in this container",
+                     "G5 has the narrower line",
                      "a Dockerfile, a benchmark or tool script, or a dependency declaration that moves no version",
                      "A fix that moves the version of a package the server runs",
                      "Measure the base arm on the image's version first",
-                     "put the image's version back before the round ends",
                      "never measure the fix arm on the image's version and call it the fix",
                      "Run that gate where the fix takes effect",
                      "`false` only when no file the fix changes is code the server runs"):
             self.assertIn(said, role, "roles/verify_engineer.md does not say it")
-        self.assertNotIn("is a test, a documentation file or a CI file of the repository", role,
-                         "the verify engineer still measures a fix to a Dockerfile or a tool")
+        self.assertNotIn("G2\": \"not run: no code the server runs changed", role, "G2 is still left out on a judgement about the server")
+        review = self.flat("roles/reviewer.md")
+        for said in ("G2 is missing only for a fix to tests or documentation alone",
+                     "`server_code_changed` false means the run did not measure the fix's speed"):
+            self.assertIn(said, review, "roles/reviewer.md does not say it")
 
 
 class FixAccuracyTest(unittest.TestCase):
@@ -749,12 +766,12 @@ class FixAccuracyTest(unittest.TestCase):
     def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_says_what_it_is_compared_with(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")
-        for said in ("when it changes code the server runs", "the fix at most 1 point below the base", "has no G2",
+        for said in ("when it changes anything but tests and documentation", "the fix at most 1 point below the base", "has no G2",
                      "a model that answers no text questions", "The reproduction or the failing test runs first",
                      "it is never launched for G2", "the last commit that served the configuration",
                      "the culprit's parent for a CI fix", "The gate and the pull request name that commit", "it is reported"):
             self.assertIn(said, note[0])
-        for path, said in (("roles/verify_engineer.md", "not run: no code the server runs changed"),
+        for path, said in (("roles/verify_engineer.md", "not run: only tests or documentation changed"),
                            ("roles/verify_engineer.md", "not run: the model answers no text questions"),
                            ("roles/verify_engineer.md", "That gate of `extra_gates` runs first"),
                            ("roles/verify_engineer.md", "launch nothing for G2 until its gate of `extra_gates` has passed"),
@@ -772,10 +789,10 @@ class FixAccuracyTest(unittest.TestCase):
                            ("roles/director.md", "for the G2 and the G5 of a fix whose baseline was measured on another commit"),
                            ("templates/validation_report.md", "the commit its baseline was measured on when that was not the base"),
                            ("roles/intake.md", "An issue or a ci task needs it too"),
-                           ("knowledge/acceptance.md", "required when the fix changes code the server runs"),
-                           ("knowledge/issue_triage.md", "A fix that changes code the server runs is measured on gsm8k as well"),
-                           ("knowledge/ci_triage.md", "A fix that changes code the server runs is measured on gsm8k as well"),
-                           ("knowledge/pr_playbook.md", "A fix that changes code the server runs gives the same two scores")):
+                           ("knowledge/acceptance.md", "required when the fix changes anything but tests and documentation"),
+                           ("knowledge/issue_triage.md", "A fix that changes anything but tests and documentation is measured on gsm8k as well"),
+                           ("knowledge/ci_triage.md", "A fix that changes anything but tests and documentation is measured on gsm8k as well"),
+                           ("knowledge/pr_playbook.md", "A fix that changes anything but tests and documentation gives the same two scores")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
         acceptance = (ROOT / "knowledge" / "acceptance.md").read_text(encoding="utf-8")
         row = [line for line in acceptance.splitlines() if line.startswith("| Accuracy | required: gsm8k")]
@@ -856,14 +873,14 @@ class FixPerformanceTest(unittest.TestCase):
             self.assertIn(field, body, "%s does not take %s" % (schema, field))
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
-        for said in ("when it changes code the server runs", "no slower than the base beyond the noise band", "One diff decides both gates",
-                     "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
+        for said in ("when it changes code the server runs", "no slower than the base beyond the noise band", "The same diff is read for both gates, by two lines",
+                     "has no G5", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
                      "the one the triage record names", "reported and not judged", "names its client as it names its model",
                      "no template is offered for it", "A performance problem is measured whatever its fix changes",
                      "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
                      "stops the task at Performance for a human, and nothing is rolled back"):
             self.assertIn(said, note[0])
-        for path, said in (("roles/verify_engineer.md", 'and the answer `"server_code_changed": false`'),
+        for path, said in (("roles/verify_engineer.md", 'the answer says `"server_code_changed": false`'),
                            ("roles/verify_engineer.md", "That one diff decides G5 as well"),
                            ("roles/verify_engineer.md", "Read the diff in every round"),
                            ("roles/perf_engineer.md", "**A fix (issue, ci) has no baseline from Setup:** measure both arms yourself"),
@@ -884,7 +901,7 @@ class FixPerformanceTest(unittest.TestCase):
                            ("roles/director.md", "for the G2 and the G5 of a fix whose baseline was measured on another commit"),
                            ("roles/intake.md", "An issue or a ci task needs a client too, unless `stop_after` ends the run before a fix"),
                            ("roles/intake.md", "offer no `template` for it"),
-                           ("roles/reviewer.md", "`server_code_changed` false means the run measured neither its accuracy nor its speed"),
+                           ("roles/reviewer.md", "`server_code_changed` false means the run did not measure the fix's speed"),
                            ("templates/task_definition.md", "So does an issue or a ci task that can reach a fix"),
                            ("templates/task_definition.md", "G2 and G5 then serve the fix of a task that has a `model_path` with "
                                                             "`server.sh`"),
@@ -899,8 +916,8 @@ class FixPerformanceTest(unittest.TestCase):
                                                        "back"),
                            ("knowledge/perf_evaluation.md", "The fix of an issue or of a CI failure is measured the same way when it changes "
                                                             "code the server runs"),
-                           ("knowledge/issue_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
-                           ("knowledge/ci_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
+                           ("knowledge/issue_triage.md", "A fix that changes code the server runs is measured for speed as well (G5 for a fix"),
+                           ("knowledge/ci_triage.md", "A fix that changes code the server runs is measured for speed as well (G5 for a fix"),
                            ("knowledge/ci_triage.md", "**A failure on a number is a performance problem,** whatever its class"),
                            ("knowledge/pr_playbook.md", "So does a fix that changes code the server runs, the fix next to the base"),
                            ("knowledge/dev_methodology.md", "nor is a fix that changes code the server runs slower than the base")):

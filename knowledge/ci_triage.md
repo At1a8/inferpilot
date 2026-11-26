@@ -70,11 +70,12 @@ from 10-02 to at least 10-25) had no owner.
   fix; one the regression kept from running at all (the module did not import) is judged against the
   culprit's parent. G0 (`validation_doctrine.md`) only when the fix is behind a feature's switch: most
   CI fixes have none, and nothing to turn off.
-- A fix that changes code the server runs is measured on gsm8k as well (G2 for a fix,
-  `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent where the
-  regression keeps the base from serving. A fix to tests, documentation or CI files alone (a
-  `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of §1).
-- Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
+- A fix that changes anything but tests and documentation is measured on gsm8k as well (G2 for a
+  fix, `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent where
+  the regression keeps the base from serving. A fix to tests or documentation alone (a `test_bug`) is
+  not, nor one for a model that answers no text questions (the Wan DiT failures of §1).
+- A fix that changes code the server runs is measured for speed as well (G5 for a fix,
+  `validation_doctrine.md`), on the task's
   `client_script`: no slower than the base beyond the noise band, or than the culprit's parent where
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
   unless the failure is a performance problem (§2): G5 then measures the number the fix must restore,
