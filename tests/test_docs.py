@@ -550,7 +550,7 @@ class ComponentCauseTest(unittest.TestCase):
         for said in ("function componentCause(found, said) {",
                      "C.component_issue = R.component_issue = { component, draft_path: draft, summary: String(said || '').trim().slice(0, 1200) };",
                      "if (C.component_issue && C.priority !== 'P0') {",
-                     "const noDraft = componentCause(dg, dg.summary);",
+                     "const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';",
                      "file the issue draft in ${R.component_issue.component}'s repository"):
             self.assertIn(said, src)
         self.assertIn("const COMPONENTS = ['aiter', 'mori', 'rocm', 'pytorch_rocm'];", src)

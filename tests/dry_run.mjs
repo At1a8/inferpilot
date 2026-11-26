@@ -1976,6 +1976,19 @@ const scenarios = [
     check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Diagnose' && !bare.keys.includes('implementer:implement'),
       `a component named without its draft stops at Diagnose: ${bare.result.status} at ${bare.result.stopped_at}`);
 
+    // Only a diagnosis that establishes the root cause names a component: a suspicion is not an issue to file.
+    for (const verdict of ['inconclusive', 'not_amd_side']) {
+      const unsure = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+        'investigator:diagnose': () => inAiter({ verdict, work_packages: [] }) });
+      check(unsure.result.status === 'diagnosed' && !unsure.result.component_issue && !filed(unsure),
+        `${verdict}: no component is recorded, and no draft is given to file: ${unsure.result.status}, ${JSON.stringify(unsure.result.component_issue)}`);
+      const reply = unsure.calls.find((c) => c.key === 'issue_triager:reply');
+      check(reply && !reply.ins.component_issue, `${verdict}: nor does the reply name one`);
+    }
+    const onBase = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1'),
+      'investigator:diagnose': () => inAiter({ verdict: 'baseline_bug', work_packages: [], known_issue: { id: 'KI-7', title: 'aiter reads past the block' } }) });
+    check(onBase.result.status === 'diagnosed' && onBase.result.component_issue && !!filed(onBase),
+      `the baseline's own bug, found in a component, has its draft: ${onBase.result.status}`);
     // A root cause in the framework is unchanged, at any priority.
     const own = await run({ mode: 'issue', task: 'i' }, { 'issue_triager:triage': triage('P1') });
     check(own.result.status === 'ready_for_review' && !own.result.component_issue && !filed(own), 'a root cause in the framework is fixed as before');

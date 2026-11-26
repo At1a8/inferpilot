@@ -70,8 +70,9 @@ third-party library, the verdict is `not_amd_side` with the evidence.
 **A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of
 PyTorch; `issue_triage.md` §5): show it there, with the component's own call on the shapes and dtypes
 of the reproduction and no framework, or with that call replaced. Return `component` (`aiter`, `mori`,
-`rocm` or `pytorch_rocm`, and nothing for any other cause: a third-party library is `not_amd_side`),
-and draft the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): that
+`rocm` or `pytorch_rocm`, and nothing for any other cause: a third-party library is `not_amd_side`; nor
+with `inconclusive`, where no experiment has shown it there yet: the run records none then), and draft
+the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): that
 reproduction, the versions, the GPU, counts and short log excerpts, never paths or names of this
 machine (`guardrails.md`). Then by `priority`: for a P0, `work_packages` are the workaround in the
 framework, HIP-only and the smallest that serves the reported configuration, each with a comment that

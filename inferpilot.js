@@ -2010,7 +2010,9 @@ async function runIssue() {
     return finish('blocked', 'Diagnose');
   }
   note('Diagnose', dg.verdict, dg.root_cause);
-  const noDraft = componentCause(dg, dg.summary);
+  // A component is recorded only with a diagnosis that establishes the root cause: one that is inconclusive, or
+  // that puts the cause outside AMD code, names no component for a human to file an issue with.
+  const noDraft = ['fix_needed', 'baseline_bug'].includes(dg.verdict) ? componentCause(dg, dg.summary) : '';
   if (noDraft) {
     note('Diagnose', 'fail', noDraft);
     return finish('blocked', 'Diagnose');
