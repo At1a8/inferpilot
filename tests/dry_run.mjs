@@ -2018,7 +2018,7 @@ const scenarios = [
     const other = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
       evidence: 'the lane is MI300X on rocm724; this machine is MI355X on rocm10' }));
     check(other.result.status === 'handed_off' && other.result.stopped_at === 'Classify' && !other.keys.includes('ci_guardian:bisect')
-      && other.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('this machine is not the lane that failed: the lane is MI300X')),
+      && other.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off' && p.summary.includes(': the lane is MI300X')),
       `a lane this machine cannot be is handed over, with what it needs: ${ended(other)}`);
     for (const out of [{ on_main: 'fails' }, {}]) {
       const fails = await run({ mode: 'ci', task: 'c' }, classified(out));
@@ -2041,6 +2041,19 @@ const scenarios = [
       && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
         && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
       `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // Where part fails and part was not run, what fails is fixed, and the run says what the fix does not answer for.
+    const mixed = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', unchecked: 'the two tests on rocm724' }));
+    check(mixed.result.status === 'ready_for_review' && mixed.keys.includes('ci_guardian:bisect') && mixed.result.unchecked === 'the two tests on rocm724'
+      && mixed.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'unchecked' && p.summary.includes('the two tests on rocm724')),
+      `a failure of main with a part not run is fixed, and the part is kept in the run record and the result: ${ended(mixed)}`);
+    const report = mixed.calls.find((c) => c.key === 'director:report');
+    check(report && report.ins.unchecked === 'the two tests on rocm724', 'the report is written knowing it');
+    // The failure came in after the task's base: a fix on that base would fix nothing.
+    const later = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
+      evidence: 'fails on main at abc1234, passes on the task worktree at 0ld5ha: start the task on main' }, ['failure_class', 'failing_test_cmd']));
+    check(later.result.status === 'handed_off' && !later.keys.includes('ci_guardian:bisect')
+      && later.result.phases.some((p) => p.phase === 'Classify' && p.summary.includes('passes on the task worktree at 0ld5ha')),
+      `a failure main shows and the task's own tree does not is not fixed on that tree: ${ended(later)}`);
     // Every test three times can outlast the call: it is told its limit, and what it did not reach is unchecked.
     const told = stale.calls.find((c) => c.key === 'ci_guardian:classify');
     check(told.ins.time_limit_min > 0 && !Number.isNaN(Date.parse(told.ins.deadline_utc)),

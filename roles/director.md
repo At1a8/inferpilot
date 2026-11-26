@@ -396,6 +396,8 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
   every time.
+- With `unchecked` (a ci task of which a part was not run on this machine: tests, lanes), name that
+  part and say that the fix does not answer for it: it is still to be run where it can be.
 - List `spinoffs` with the known issues: for each, the upstream issue that tracks it or the issue draft
   a human is to file, and the definition that starts InferPilot on it; then the unconfirmed leads, each
   with what would confirm it. A spinoff with `withdrawn_draft` was written as a draft and not counted:

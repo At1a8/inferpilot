@@ -14,12 +14,13 @@ Input: `task` (a Failure Tracker issue and cluster, a job URL, or a CI issue); `
 from this call's start, 0 when there is none) and `deadline_utc`, that moment.
 
 **Main first, on the lane's own image.** Once you have the failing tests (step 3), and before you
-classify anything, run them on main: the commit `origin/main` names after a `git fetch origin`. That is
-the task worktree only where its base is that commit. A task can begin on an earlier one, and then
-main is a clean throwaway worktree, removed when done:
-`git -C <framework_dir> worktree add --detach RUN_DIR/main origin/main`. `evidence` names the commit.
-The run counts only in the environment of the lane that failed (`ci_triage.md` §2): that lane's newest
-image, its GPU model and its node count.
+classify anything, run them on main: the commit `origin/main` names after a `git fetch origin`. Where
+the task worktree's base is that commit, run them there. Where it is not (the task names an earlier
+base, or main has moved since Setup), main is a clean throwaway worktree, removed when done:
+`git -C <framework_dir> worktree add --detach RUN_DIR/main origin/main`.
+A failure found there is run on the task worktree as well: the fix is made on that tree, so the failure
+has to show on it. `evidence` names the commits. The run counts only in the environment of the lane
+that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and its node count.
 
 - **Which image is the newest is established, not assumed.** It is the newest tag of the lane's
   variant (rocm10, rocm720 or rocm724) in the registry, and no older than the one the lane's latest
@@ -34,9 +35,9 @@ image, its GPU model and its node count.
   fails, and its class is `flaky` (step 2). So does one the tracker shows failing only some of its
   runs, whatever one green run here says.
 - **Within your limit.** A large cluster run three times can take longer than this call has. With
-  `time_limit_min` above 0, plan from `deadline_utc`, keep the last 15 minutes for stopping what you
-  started and writing the record, and stop a test that would run past it. What you did not reach is
-  `unchecked`, like any part you could not run: it is handed over, never guessed.
+  `time_limit_min` above 0, plan from `deadline_utc`: keep a quarter of the time to it, at most 15
+  minutes, for stopping what you started and writing the record, and stop a test that would run into
+  that reserve. What you did not reach is `unchecked`, like any part you could not run: never guessed.
 
 Then:
 
@@ -48,12 +49,17 @@ Then:
 - Any of it fails: `on_main: "fails"`, and the failure is main's, whatever the age of the image:
   classify it (step 2), and list in the triage record what passed. A lane whose Python or PyTorch
   is older than the code or the test needs is such a failure: the lane is supported, and one of the
-  two has to run on it.
+  two has to run on it. `failing_test_cmd` runs the task worktree, never `RUN_DIR/main`, which is
+  gone by then. `unchecked` names what of the task you could not run: the run fixes what fails, and
+  says that the fix does not answer for the rest.
 - This machine cannot be that lane (another GPU model, another ROCm, a second node it lacks), or it
   is not in the lane's newest image, or which image that is cannot be established: `on_main:
   "not_run"`, with what the lane needs in `evidence`. Never conclude from a run in another
   environment, in either direction: the run hands the failure over, and the note says which image
   and hardware to start InferPilot on.
+- The tests fail on main and pass on the task worktree: the failure came in after the task's base,
+  and a fix made on that base would fix nothing. `on_main: "not_run"`, with both commits in
+  `evidence`: the task is started again on main.
 - What you could run passes, and part of the task you could not run here (a second lane, a test
   that needs more GPUs): `on_main: "passes"` with `unchecked` naming that part. The run hands it
   over, and does not call the task resolved.
@@ -82,7 +88,7 @@ Return:
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
  "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
- "unchecked": "<with passes: the tests or lanes of the task that were not run here>",
+ "unchecked": "<the tests or lanes of the task that were not run here>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",

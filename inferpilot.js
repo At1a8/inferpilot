@@ -2034,9 +2034,9 @@ async function runCi() {
   // lane does is handed over, since a run in another environment shows nothing either way. Only a failure that
   // main shows there is classified and fixed.
   const onMain = String(cl.on_main || 'fails').trim().toLowerCase();
+  // A cluster is several tests, on one lane or more: what was run says nothing of what was not.
+  const unchecked = String(cl.unchecked || '').trim();
   if (onMain === 'passes') {
-    // A cluster is several tests, on one lane or more: what passed says nothing of what was not run.
-    const unchecked = String(cl.unchecked || '').trim();
     if (unchecked) {
       note('Classify', 'handed_off', `what was run passes on main, and part of the task was not run: ${unchecked}; ${cl.evidence}`);
       return finish('handed_off', 'Classify');
@@ -2047,12 +2047,18 @@ async function runCi() {
     return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');
   }
   if (onMain === 'not_run') {
-    note('Classify', 'handed_off', `this machine is not the lane that failed: ${cl.evidence}`);
+    note('Classify', 'handed_off', `main was not judged where the task needs it (the lane's environment, the task's own tree): ${cl.evidence}`);
     return finish('handed_off', 'Classify');
   }
   if (!cl.failure_class) {
     note('Classify', 'fail', 'main fails on the lane, and the failure has no class');
     return finish('blocked', 'Classify');
+  }
+  // What fails is fixed. The part of the task that was not run stays unknown: the fix does not answer for it,
+  // and the run record and the result say so.
+  if (unchecked) {
+    C.unchecked = R.unchecked = unchecked;
+    note('Classify', 'unchecked', `part of the task was not run here, and the fix does not answer for it: ${unchecked}`);
   }
   if (!handOver && !failingCmd) {
     note('Classify', 'fail', `${cl.failure_class} without a failing_test_cmd; the failing_test gate needs one`);

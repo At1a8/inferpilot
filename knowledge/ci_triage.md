@@ -70,7 +70,10 @@ that the tracker shows failing only some of its runs, is `flaky`, not passing.
   entries in November 2026).
 - This machine cannot be that lane (another GPU model, another ROCm, a second node), or is not in
   its newest image: no conclusion is drawn, in either direction, and the failure is handed over with
-  what the lane needs. So is the part of a task that could not be run here, where the rest passes.
+  what the lane needs. So is the part of a task that could not be run here, where the rest passes;
+  where the rest fails, the run fixes what fails and names what it did not check. A failure that
+  shows on main and not on the task's own tree came in after the task's base: the task is started
+  again on main.
 
 A task that only asks whether main still fails sets `stop_after=Classify`: it needs no model and no
 client, which a task that can reach a fix is asked for before it starts.
