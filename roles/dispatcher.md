@@ -27,7 +27,8 @@ Input: `candidates_path`.
 5. Write `RUN_DIR/task_queue.md` (`templates/task_queue.md`) and `RUN_DIR/queue.json`; for each of the
    top entries, include the task definition that starts it (`templates/task_definition.md`) with every
    field its mode requires that the scan can establish; leave out what it cannot (a model that is not
-   on this machine, the workload of a performance task), and the run asks for it.
+   on this machine, the workload of a performance task, the client a fix is measured on), and the run
+   asks for it.
 6. Write `RUN_DIR/daily_report.md` from `templates/daily_report.md`: the day's report on the framework,
    which the director shares as an issue in InferPilot's repository. Keep its order: the summary, (1) the
    AMD CI on main, every failing job with since when it fails, when it last passed, its failed tests or

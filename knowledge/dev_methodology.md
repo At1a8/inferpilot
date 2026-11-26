@@ -118,8 +118,9 @@ practice. Artifacts live in the run's working directory; the templates are in `.
   load.
 - **Artifact:** performance section of `validation_report.md`.
 - **Gate:** the claimed benefit reproduces; a feature that claims none is no slower than the baseline
-  (`validation_doctrine.md`, *G5 for a feature*); no guard workload the task names regresses beyond
-  the noise band.
+  (`validation_doctrine.md`, *G5 for a feature*), nor is a fix that changes code the server runs
+  slower than the base (*G5 for a fix*); no guard workload the task names regresses beyond the noise
+  band.
 
 ### 7. Review — an independent read before the PR
 

@@ -23,7 +23,9 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    `plan`. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code change,
    `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the fix
    must pass.
-5. `category`: exactly one of the values below; `performance` also runs the performance evaluation.
+5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
+   judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
+   any other issue is measured for speed when it changes code the server runs.
 6. Fill `RUN_DIR/issue_triage.md` (`templates/issue_triage.md`), including the reply draft; also save
    the reply alone as `RUN_DIR/reply_draft.md`.
 
@@ -125,8 +127,9 @@ and each is someone's: give a human what it takes to hand it on. Also read `know
    log excerpts, never paths or names of this machine (`guardrails.md`). A mechanism no experiment
    confirmed is written as a hypothesis. `drafted`.
 4. `task_definition` for `tracked` and `drafted`: the line that starts InferPilot on it, `mode=issue,
-   task=<issue URL>` with the model and GPUs this run used: the upstream issue, or the draft's once a
-   human files it. An open PR that fixes it is then Triage's to find (`push_existing_pr`).
+   task=<issue URL>` with the model, the client and the GPUs this run used: the upstream issue, or the
+   draft's once a human files it. An open PR that fixes it is then Triage's to find
+   (`push_existing_pr`).
 
 Never file or comment upstream: the drafts are a human's to post.
 
@@ -135,7 +138,7 @@ Return:
 ```json
 {"spinoffs": [{"id": "KI-007", "source": "known_issue", "status": "drafted", "upstream": "",
   "draft_path": "/abs/RUN_DIR/spinoff/KI-007.md",
-  "task_definition": "mode=issue, task=<issue URL>, model_path=..., gpu_ids=0,1,2,3,4,5,6,7"},
+  "task_definition": "mode=issue, task=<issue URL>, model_path=..., client_script=..., gpu_ids=0,1,2,3,4,5,6,7"},
   {"id": "KI-008", "source": "lead", "status": "drafted", "draft_path": "/abs/RUN_DIR/spinoff/KI-008.md",
    "known_issue": {"id": "KI-008", "title": "..."},
    "base_import": "/abs/RUN_DIR/spinoff/base/python/sglang/__init__.py", "task_definition": "..."},

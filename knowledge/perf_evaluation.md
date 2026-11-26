@@ -41,6 +41,11 @@ A feature is measured whether it claims a gain or not (`validation_doctrine.md`,
 with a claim, the gain shows beyond the noise band; without one, or on InferPilot's client, the feature
 is no slower than the baseline beyond the noise band. So a feature task names its client, as a perf
 task does.
+The fix of an issue or of a CI failure is measured the same way when it changes code the server runs
+(`validation_doctrine.md`, *G5 for a fix*): on the task's client, no slower than the base beyond the
+noise band, or than the last commit that served the configuration where the base cannot. A
+performance problem is measured whatever its fix changes, where it showed, and its number comes back.
+So an issue or a ci task that can reach a fix names its client too.
 The table below is for the workloads a task lists beside it, and for choosing one with the user when a
 task has none. Guard workloads are the ones the task's `goal` names; InferPilot adds its own from the
 table only when the task sets `guards`. When there is none, the report says that none was measured.

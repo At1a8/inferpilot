@@ -45,11 +45,14 @@
 
 | Workload | Budget | Reference arm | Feature arm | Delta | Runs | Artifact |
 |---|---|---|---|---|---|---|
-| the claim's: a gain, or, where none is claimed, no slower than the baseline | | | | | | |
+| the claim's: a gain, or, where none is claimed, no slower than the baseline (a feature, a fix); for a performance problem, the number restored | | | | | | |
 | held-out (`perf_evaluation.md` §3; only with `held_out`) | | | | | | |
 
 <!-- Also: the guard workloads the task names (and InferPilot's own with `guards`); out-of-memory / retraction checks; the
-     reward-hack checks (`knowledge/reward_hacks.md` P) with their result. -->
+     reward-hack checks (`knowledge/reward_hacks.md` P) with their result.
+     A fix that changes no code the server runs: `not run: no code the server runs changed`, and no
+     table. A fix whose base cannot serve the configuration: the commit it was compared with, or that
+     it has no baseline. -->
 
 ## Known issues encountered
 
@@ -74,9 +77,9 @@
        servers start, since a number measured next to another job is not a measurement.
      - For each test and measurement the PR body cites: each arm's tree made again from its commit
        (`git -C <framework_dir> worktree add --detach <dir> <commit>`: the base commit and the branch's
-       head; for the G2 of a fix, the commit its baseline was measured on when that was not the base,
-       and the fix alone when it had none); every command of an arm, its server, tests, reproduction
-       and benchmark client alike, with
+       head; for the G2 and the G5 of a fix, the commit its baseline was measured on when that was not
+       the base, and the fix alone when it had none); every command of an arm, its server, tests,
+       reproduction and benchmark client alike, with
        that tree first on PYTHONPATH, and `python -c "import sglang; print(sglang.__file__)"` under the
        same PYTHONPATH printing a path inside it (`env_hygiene.md`, *The code under test*); the
        measurement as the run made it (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per

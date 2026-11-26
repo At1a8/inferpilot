@@ -665,6 +665,11 @@ const scenarios = [
     check(heldOut.result.status === 'blocked' && heldOut.result.stopped_at === 'Performance'
       && heldOut.result.phases.some((p) => p.phase === 'Performance' && p.summary.includes('the claim does not hold at the held-out operating point')),
     `with held_out on, no slowdown holds at the held-out point too: ${heldOut.result.status}`);
+    // What lets a fix go unmeasured or unjudged (G5 for a fix) is no way out for a feature, which always has a baseline.
+    const asAFix = await run({ mode: 'feature', task: 't' }, { ...noGain(''), ...measured({ claim_reproduced: false, no_baseline: 'the base does not start' }),
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false }) });
+    check(asAFix.result.status === 'blocked' && asAFix.result.stopped_at === 'Performance' && asAFix.keys.includes('perf_engineer:perf_eval'),
+      `a feature is measured and judged whatever a role says of its diff or its baseline: ${asAFix.result.status} at ${asAFix.result.stopped_at}`);
     const gain = await run({ mode: 'feature', task: 't' });
     const gp = gain.calls.find((c) => c.key === 'perf_engineer:perf_eval');
     check(gain.result.status === 'ready_for_review' && gp && gp.ins.claim === '+20% output tok/s at equal HBM',
@@ -904,8 +909,18 @@ const scenarios = [
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
     const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
-    check(eqList(r.phases, ['Setup', 'Verify', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
+    check(eqList(r.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']) && eqList(r.route, r.phases),
+      `phases ${r.phases} | route ${r.route}`);
     check(!r.keys.some((k) => /^(issue_triager:(triage|reproduce)|investigator:diagnose|implementer:implement)$/.test(k)), `nothing before Verify: ${r.keys}`);
+    // G5 for a fix, as in a first run: measured when it changes code the server runs, which this run's Verify says again.
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    const noServerCode = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false }) };
+    const speed = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(speed && NO_SLOWER.test(speed.ins.claim), `the fix is measured for speed, and the claim is that it is no slower: ${speed && speed.ins.claim}`);
+    const testsOnly = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, noServerCode);
+    check(testsOnly.result.status === 'ready_for_review' && !testsOnly.keys.includes('perf_engineer:perf_eval')
+      && eqList(testsOnly.phases, ['Setup', 'Verify', 'Review', 'PR', 'Reply', 'Report']) && eqList(testsOnly.route, testsOnly.phases),
+      `a fix to tests alone is not measured, and the route logged again is the resumed run's own: ${testsOnly.phases} | ${testsOnly.route}`);
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && eqList(v.ins.extra_gates, [{ gate: 'issue_repro', cmd: 'bash repro.sh', expect: 'fixed' }]), `the run's reproduction is the gate: ${v && JSON.stringify(v.ins.extra_gates)}`);
     const reply = r.calls.find((c) => c.key === 'issue_triager:reply');
@@ -925,12 +940,12 @@ const scenarios = [
     const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'issue_triager.md'), 'utf8'), 'reply').replace(/\s+/g, ' ');
     check(doc.includes('in place of one an earlier attempt left there') && doc.includes('Only a run resumed from Verify (`resume_from: verify`), which ran no Triage, keeps the one there'),
       'a retry that ran Triage again keeps its own Triage draft');
-    const perf = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
+    const perf = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, { ...noServerCode,
       'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: 'TTFT back under 200 ms' }),
     });
     const pe = perf.calls.find((c) => c.key === 'perf_engineer:perf_eval');
-    check(pe && pe.ins.claim === 'TTFT back under 200 ms' && eqList(perf.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']),
-      `a performance issue is measured again on its claim: ${perf.phases}`);
+    check(pe && pe.ins.claim === 'TTFT back under 200 ms' && eqList(perf.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report'])
+      && eqList(perf.route, perf.phases), `a performance issue is measured again on its claim, whatever its fix changes: ${perf.phases} | ${perf.route}`);
     const lostClaim = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN }, {
       'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: '' }),
     });
@@ -969,7 +984,25 @@ const scenarios = [
     check(!r.keys.includes('ci_guardian:classify') && !r.keys.includes('ci_guardian:bisect'), 'no classify, no bisect');
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].gate === 'failing_test' && v.ins.extra_gates[0].cmd === 'pytest test_x.py', `gate ${v && JSON.stringify(v.ins.extra_gates)}`);
-    check(!r.keys.includes('perf_engineer:perf_eval'), 'a CI fix is not measured for speed');
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    const speed = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(speed && NO_SLOWER.test(speed.ins.claim) && eqList(r.phases, ['Setup', 'Verify', 'Performance', 'Review', 'PR', 'Report'])
+      && eqList(r.route, r.phases), `a CI fix is measured for speed as in a first run (G5 for a fix): ${r.phases} | ${speed && speed.ins.claim}`);
+    const noServerCode = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false }) };
+    const testOnly = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN }, noServerCode);
+    check(testOnly.result.status === 'ready_for_review' && !testOnly.keys.includes('perf_engineer:perf_eval')
+      && eqList(testOnly.phases, ['Setup', 'Verify', 'Review', 'PR', 'Report']) && eqList(testOnly.route, testOnly.phases),
+      `a fix to the test alone is not measured: ${testOnly.phases} | ${testOnly.route}`);
+    const number = 'output throughput back above 1100 tok/s in test_bench_serving default';
+    const perfFailure = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN }, { ...noServerCode,
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: number }) });
+    const ne = perfFailure.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(perfFailure.result.status === 'ready_for_review' && ne && ne.ins.claim === number && eqList(perfFailure.route, perfFailure.phases),
+      `a failure on a number the test measures is measured again on that number, whatever its fix changes: ${ne && ne.ins.claim}`);
+    const lostNumber = await run({ mode: 'ci', task: 'job', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_required: true, perf_claim: '' }) });
+    check(lostNumber.result.stopped_at === 'Setup' && !lostNumber.keys.includes('verify_engineer:verify'),
+      `a performance failure whose number is lost is not passed unmeasured: ${lostNumber.result.status} at ${lostNumber.result.stopped_at}`);
     const rv = r.calls.find((c) => c.key === 'reviewer:review');
     check(v && v.ins.triage_path === `${RUN}/ci_triage.md` && rv && rv.ins.triage_path === `${RUN}/ci_triage.md`,
       `Verify and Review read the lanes it failed on: ${v && v.ins.triage_path}`);
@@ -983,6 +1016,9 @@ const scenarios = [
     check(/^\| failing test command \|/m.test(template) && classify.includes('with `failing_test_cmd` word for word in its *failing test command* row')
       && resume.includes('word for word from the *failing test command* row of `ci_triage.md`'),
       'the failing test command is written where a resume reads it');
+    check(/^\| performance problem: yes \/ no \|/m.test(template) && resume.includes('a `ci` failure that `ci_triage.md` gives as a performance problem')
+      && resume.includes('a fix of a problem that is not one of performance, are judged all the same, as no slower than the baseline'),
+      'and so is whether the failure is a performance problem, which a resume measures on its number');
   }],
   ['agents: a timed-out call is not retried and goes on the attention list', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 3, agent_timeout_ms: 100 }, {
@@ -1089,7 +1125,7 @@ const scenarios = [
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const afterPr = r.phases.slice(r.phases.indexOf('PR'));
-    check(eqList(afterPr, ['PR', 'Implement', 'Verify', 'Review', 'PR', 'Report']), `phases after the first PR: ${afterPr}`);
+    check(eqList(afterPr, ['PR', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases after the first PR: ${afterPr}`);
     check(r.result.done.some((d) => d.wp === 'H1'), 'the hygiene package was verified');
     const changed = await run({ mode: 'ci', task: 'c' }, {
       'pr_engineer:pr': () => ({ branch: 'inferpilot/task', lint_pass: true, feature_off_final: true, content_unchanged: false,
@@ -1140,7 +1176,10 @@ const scenarios = [
       check(r.result.next.say.startsWith('Stopped after Setup, as stop_after asked.'), `${mode}: ${r.result.next.say}`);
     }
     check(asks(await run({ mode: 'feature', task: 't', stop_after: 'Reproduce' }), 'stop_after'), 'Reproduce is not a feature phase');
-    check(asks(await run({ mode: 'ci', task: 't', stop_after: 'Performance' }), 'stop_after'), 'ci never runs Performance');
+    check(asks(await run({ mode: 'ci', task: 't', stop_after: 'Reproduce' }), 'stop_after'), 'Reproduce is not a ci phase');
+    const measured = await run({ mode: 'ci', task: 't', stop_after: 'Performance' });
+    check(measured.result.status === 'stopped' && measured.result.stopped_at === 'Performance' && !measured.keys.includes('reviewer:review'),
+      `a ci fix is measured, and the run can stop after it: ${measured.result.status} at ${measured.result.stopped_at}`);
     const ok = await run({ mode: 'issue', task: 'i', stop_after: 'reproduce' });
     check(ok.result.status === 'stopped' && ok.result.stopped_at === 'Reproduce', `case does not matter: ${ok.result.status}`);
   }],
@@ -1210,8 +1249,8 @@ const scenarios = [
     `a stop named while the run passes that phase again is not behind it: ${checkedNow.result.status} at ${checkedNow.result.stopped_at}`);
     const cleared = await run({ mode: 'issue', task: 'i', stop_after: 'Setup' }, undefined, { control: () => ({ stop_after: '' }) });
     check(cleared.result.stopped_at !== 'Setup' && cleared.phases.includes('Triage'), `cleared: ${cleared.result.status}`);
-    const bad = await run({ mode: 'ci', task: 'c', stop_after: 'Verify' }, undefined, { control: () => ({ stop_after: 'Performance' }) });
-    check(bad.lines.some((l) => /stop_after=performance is not a phase of mode=ci; the stop stays verify/.test(l))
+    const bad = await run({ mode: 'ci', task: 'c', stop_after: 'Verify' }, undefined, { control: () => ({ stop_after: 'Reproduce' }) });
+    check(bad.lines.some((l) => /stop_after=reproduce is not a phase of mode=ci; the stop stays verify/.test(l))
       && bad.result.status === 'stopped' && bad.result.stopped_at === 'Verify', `a phase the mode lacks keeps the stop: ${bad.result.stopped_at}`);
   }],
   ['stop_after: a stop asked for now still runs the closing phases, Spinoff among them, without confirming leads', async () => {
@@ -1629,6 +1668,186 @@ const scenarios = [
     check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci) && !ci.keys.includes('implementer:implement'),
       `ci: the same, after Bisect: ${ci.result.status} at ${ci.result.stopped_at}`);
   }],
+  ['issue and ci: a task that can reach a fix names the client G5 measures it on; one that stops before the fix needs none', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    for (const [mode, task] of [['issue', 'i'], ['ci', 'c']]) {
+      const none = await run({ mode, task, client_script: '' });
+      const q = (none.result.questions || []).find((x) => x.field === 'client_script') || {};
+      check(asks(none, 'client_script') && eqList(fields(none), ['client_script']), `${mode}: without a client it is asked for, and nothing else is: ${fields(none)}`);
+      check(/G5 measures the fix on/.test(q.question || '') && /no slower/.test(q.why || '') && !(q.options || []).length
+        && !/template/i.test(q.question || ''), `${mode}: the question says what the client is for, and offers no template: ${JSON.stringify(q)}`);
+      const both = await run({ mode, task, client_script: '', model_path: '' });
+      check(eqList(fields(both).sort(), ['client_script', 'model_path']), `${mode}: a task with neither is asked for the model and the client: ${fields(both)}`);
+    }
+    check(asks(await run({ mode: 'issue', task: 'i', client_script: '', stop_after: 'Implement' }), 'client_script'),
+      'a run that stops after Implement has a fix: asked');
+    for (const [mode, stop] of [['issue', 'Triage'], ['issue', 'Reproduce'], ['issue', 'Diagnose'], ['ci', 'Classify'], ['ci', 'Bisect']]) {
+      const r = await run({ mode, task: 't', client_script: '', stop_after: stop });
+      check(r.result.status === 'stopped' && r.result.stopped_at === stop && !r.keys.includes('intake:define'),
+        `${mode} stopping after ${stop} has no fix to measure and starts without a client: ${r.result.status} at ${r.result.stopped_at}`);
+    }
+    // InferPilot's client, named by the task all the same, runs the task's workload: G5 never judges a fix on lengths
+    // and a concurrency of the template's own.
+    const tpl = await run({ mode: 'ci', task: 'c', client_script: 'template' });
+    check(asks(tpl, 'workload') && eqList(fields(tpl), ['workload']), `the template named without a workload: the workload is asked for: ${fields(tpl)}`);
+    const part = await run({ mode: 'issue', task: 'i', client_script: 'template', workload: '{"conc":64}' });
+    check(asks(part, 'workload') && /gives no input length and no output length/.test(JSON.stringify(part.result.questions)),
+      `a workload that names a part of the load is asked for again: ${JSON.stringify(part.result.questions)}`);
+    const rendered = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), client_script: `${RUN}/scripts/perf.sh` }) };
+    const load = await run({ mode: 'ci', task: 'c', client_script: 'template', workload: '{"isl":8192,"osl":1024,"conc":64}' }, rendered);
+    const pe = load.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(load.result.status === 'ready_for_review' && pe && pe.ins.client_script === `${RUN}/scripts/perf.sh`,
+      `with its workload the run starts, and the fix is measured on the rendered client: ${load.result.status} ${pe && pe.ins.client_script}`);
+    for (const mode of ['issue', 'ci']) {
+      const measured = (await run({ mode, task: 't' })).calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      check(measured && measured.ins.client_script === '/s/client.sh' && measured.ins.server_script === `${RUN}/scripts/server.sh`,
+        `${mode}: the task's client and the run's server script reach the performance engineer, who measures the fix`);
+    }
+  }],
+  ['issue and ci: no fix starts without a client either, when the stop before it was on a phase the route skips or the control file lifted it', async () => {
+    const asked = (r, want) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), want)
+      && want.every((f) => f in ((((r.result.next || {}).rerun_with || {}).answers) || {}));
+    let reproduced = false;
+    const issue = await run({ mode: 'issue', task: 'i', client_script: '', stop_after: 'Diagnose' }, {
+      'issue_triager:reproduce': () => {
+        reproduced = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (reproduced ? { stop_after: '' } : {}) });
+    check(issue.result.status === 'needs_input' && issue.result.stopped_at === 'Diagnose' && asked(issue, ['client_script'])
+      && !issue.keys.includes('implementer:implement') && issue.keys.includes('director:report'),
+      `issue: a stop the control file lifts starts no fix without a client; the run asks for it and reports: ${issue.result.status} at ${issue.result.stopped_at}`);
+    check(/Give the client, and run the task again/.test(issue.result.next.say) && /G5 on the task's client/.test(issue.result.next.say),
+      `and says what to give, and why: ${issue.result.next.say}`);
+    let classified = false;
+    const ci = await run({ mode: 'ci', task: 'c', client_script: '', model_path: '', stop_after: 'Bisect' }, {
+      'ci_guardian:classify': () => {
+        classified = true;
+        return { failure_class: 'code_regression', failing_test_cmd: 'pytest test_x.py', window: 'a..b', evidence: 'new regression', triage_path: `${RUN}/ci_triage.md` };
+      },
+    }, { control: () => (classified ? { stop_after: '' } : {}) });
+    check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci, ['model_path', 'client_script'])
+      && !ci.keys.includes('implementer:implement'),
+      `ci: with neither, the run asks for the model and the client together: ${JSON.stringify((ci.result.next || {}).ask)}`);
+    check(/Give the model and the client, and run the task again/.test(ci.result.next.say), `and says so: ${ci.result.next.say}`);
+    const existing = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+      triage_path: `${RUN}/t.md` }) };
+    let triaged = false;
+    const pr = await run({ mode: 'issue', task: 'i', client_script: '', stop_after: 'Triage' }, {
+      'issue_triager:triage': () => {
+        triaged = true;
+        return existing['issue_triager:triage']();
+      },
+    }, { control: () => (triaged ? { stop_after: '' } : {}) });
+    check(pr.result.status === 'needs_input' && pr.result.stopped_at === 'Reproduce' && asked(pr, ['client_script'])
+      && !pr.keys.includes('implementer:implement'),
+      `an existing fix PR is not applied without a client: ${pr.result.status} at ${pr.result.stopped_at}`);
+  }],
+  ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    const verified = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: changed }) });
+    const measured = (out) => ({ 'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: true, guards_ok: true,
+      workload_unchanged: true, path_ok: true, results: [], ...out }) });
+    const perfNote = (r) => r.result.phases.filter((p) => p.phase === 'Performance');
+    for (const [said, answers] of [['says nothing of its diff', {}], ['changes code the server runs', verified(true)]]) {
+      const r = await run({ mode: 'issue', task: 'i' }, { ...answers, ...measured({ summary: '+0.4% output tok/s, within noise' }) });
+      const pe = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      const rv = r.calls.find((c) => c.key === 'reviewer:review');
+      check(r.result.status === 'ready_for_review' && pe && NO_SLOWER.test(pe.ins.claim),
+        `a fix that ${said} is measured, and the claim is that it is no slower: ${r.result.status}, ${pe && pe.ins.claim}`);
+      check(rv && NO_SLOWER.test(rv.ins.claim) && perfNote(r).some((p) => p.verdict === 'pass' && p.summary.includes('within noise')),
+        `the reviewer reads the same claim, and the run record has the measurement: ${rv && rv.ins.claim}`);
+    }
+    const tests = await run({ mode: 'issue', task: 'i' }, verified(false));
+    const rv = tests.calls.find((c) => c.key === 'reviewer:review');
+    check(tests.result.status === 'ready_for_review' && !tests.keys.includes('perf_engineer:perf_eval') && !tests.phases.includes('Performance'),
+      `a fix to tests, documentation or CI files alone is not measured: ${tests.result.status}, ${tests.phases}`);
+    check(eqList(perfNote(tests).map((p) => `${p.verdict}: ${p.summary}`), ['not_run: not run: no code the server runs changed']),
+      `the run record says that G5 was not run, and why, once: ${JSON.stringify(perfNote(tests))}`);
+    check(eqList(tests.route, tests.phases) && rv && !rv.ins.claim && rv.ins.server_code_changed === false,
+      `the route is logged again without Performance, and the reviewer reads no claim: ${tests.route} | ${rv && JSON.stringify(rv.ins.claim)}`);
+    const slower = await run({ mode: 'issue', task: 'i' }, measured({ claim_reproduced: false, summary: '-6% output tok/s (median of 3)' }));
+    check(slower.result.status === 'blocked' && slower.result.stopped_at === 'Performance' && !slower.keys.includes('implementer:rollback')
+      && !slower.keys.includes('reviewer:review'),
+      `a fix that is slower than the base stops at Performance, for a human, and nothing is rolled back: ${slower.result.status} at ${slower.result.stopped_at}`);
+    // The base cannot serve the configuration (the crash being fixed), and the run knows no commit that did: the
+    // fix's numbers have nothing to be judged against, and are reported.
+    const alone = await run({ mode: 'issue', task: 'i' }, measured({ claim_reproduced: false, no_baseline: 'the base does not start on this configuration',
+      summary: '1820 output tok/s (median of 3)' }));
+    check(alone.result.status === 'ready_for_review'
+      && perfNote(alone).some((p) => p.verdict === 'pass' && p.summary.startsWith('reported, not judged: no baseline (the base does not start')),
+      `a fix with no baseline is reported, not judged: ${alone.result.status}, ${JSON.stringify(perfNote(alone))}`);
+    const perfIssue = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'performance', action: 'reproduce', triage_path: `${RUN}/t.md` }),
+      'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash bench.sh', perf_claim: 'decode tok/s back to 2400 at c32 (v0.5.21)',
+        evidence: '1710 tok/s 3/3' }) };
+    const number = await run({ mode: 'issue', task: 'i' }, { ...perfIssue, ...verified(false) });
+    const ne = number.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(number.result.status === 'ready_for_review' && ne && ne.ins.claim === 'decode tok/s back to 2400 at c32 (v0.5.21)',
+      `a performance issue is measured whatever its fix changes, on the number it must restore: ${number.result.status}, ${ne && ne.ins.claim}`);
+    const unrestored = await run({ mode: 'issue', task: 'i' }, { ...perfIssue,
+      ...measured({ claim_reproduced: false, no_baseline: 'the base does not start', summary: '1750 tok/s' }) });
+    check(unrestored.result.status === 'blocked' && unrestored.result.stopped_at === 'Performance',
+      `a number that must come back is its own measure: no baseline excuses it (${unrestored.result.status} at ${unrestored.result.stopped_at})`);
+    // A stop named for Performance still ends a run whose fix is not measured.
+    const stopped = await run({ mode: 'issue', task: 'i', stop_after: 'Performance' }, verified(false));
+    check(stopped.result.status === 'stopped' && stopped.result.stopped_at === 'Verify' && !stopped.keys.includes('reviewer:review')
+      && stopped.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'stopped' && /stop_after=Performance: G5 is not run/.test(p.summary)),
+      `stop_after=Performance ends an unmeasured fix after Verify, and says why: ${stopped.result.status} at ${stopped.result.stopped_at}`);
+    const stoppedMeasured = await run({ mode: 'issue', task: 'i', stop_after: 'Performance' });
+    check(stoppedMeasured.result.status === 'stopped' && stoppedMeasured.result.stopped_at === 'Performance'
+      && stoppedMeasured.keys.includes('perf_engineer:perf_eval'), `a measured one stops after Performance: ${stoppedMeasured.result.stopped_at}`);
+    // What the review asks for can add code the server runs to a fix that had none: G5 runs once a Verify round
+    // no longer says that the fix changes none, also when that round says nothing of the diff.
+    const grown = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': (ins, n) => ({ ...DEFAULTS['verify_engineer:verify'](), ...(n > 1 ? {} : { server_code_changed: false }) }),
+      'reviewer:review': (ins, n) => (n === 1
+        ? { verdict: 'changes_requested', findings: [{ severity: 'major', issue: 'the guard belongs in the scheduler' }], work_packages: [WP('R1')],
+          review_path: `${RUN}/review.md` }
+        : DEFAULTS['reviewer:review']()),
+    });
+    const claims = grown.calls.filter((c) => c.key === 'reviewer:review').map((c) => c.ins.claim);
+    check(grown.result.status === 'ready_for_review'
+      && eqList(grown.phases.slice(grown.phases.indexOf('Verify')), ['Verify', 'Review', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']),
+      `a fix that comes to change server code after a review is measured then: ${grown.phases}`);
+    check(!claims[0] && NO_SLOWER.test(claims[1]) && grown.route.includes('Performance') && grown.route.length === 11,
+      `the second review reads the claim, and the route has Performance again: ${JSON.stringify(claims)} | ${grown.route}`);
+  }],
+  ['ci: a fix is measured as an issue\'s is, and a failure on a number the test measures always is, on that number', async () => {
+    const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
+    const verified = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: changed }) });
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const fix = await run({ mode: 'ci', task: 'c' });
+    const pe = fix.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+    check(fix.result.status === 'ready_for_review' && pe && NO_SLOWER.test(pe.ins.claim),
+      `a ci fix is measured, and the claim is that it is no slower: ${fix.result.status}, ${pe && pe.ins.claim}`);
+    const testBug = await run({ mode: 'ci', task: 'c' }, { ...classified({ failure_class: 'test_bug' }), ...verified(false) });
+    check(testBug.result.status === 'ready_for_review' && !testBug.keys.includes('perf_engineer:perf_eval')
+      && testBug.result.phases.some((p) => p.phase === 'Performance' && p.verdict === 'not_run')
+      && eqList(testBug.phases, ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Review', 'PR', 'Report']) && eqList(testBug.route, testBug.phases),
+      `a fix to a test alone is not measured, and the run says so: ${testBug.phases}`);
+    const claim = 'output throughput back above 1100 tok/s in test_bench_serving default (1180 in the last green run)';
+    const perf = { performance: true, perf_claim: claim };
+    for (const [what, answers] of [['code the server runs', verified(true)], ['only the test', verified(false)]]) {
+      const r = await run({ mode: 'ci', task: 'c' }, { ...classified(perf), ...answers });
+      const e = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');
+      const rv = r.calls.find((c) => c.key === 'reviewer:review');
+      check(r.result.status === 'ready_for_review' && e && e.ins.claim === claim && rv && rv.ins.claim === claim,
+        `a performance failure whose fix changes ${what} is measured, on the number it must restore: ${r.result.status}, ${e && e.ins.claim}`);
+      check(r.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('performance: ')), 'and the run record names it a performance failure');
+    }
+    // A threshold moved in the test restores nothing: the number is measured, and the run stops for a human.
+    const moved = await run({ mode: 'ci', task: 'c' }, { ...classified({ ...perf, failure_class: 'test_bug' }), ...verified(false),
+      'perf_engineer:perf_eval': () => ({ claim_reproduced: false, held_out_ok: true, guards_ok: true, workload_unchanged: true, path_ok: true,
+        summary: '1012 tok/s on the fix, 1009 on the base, 1180 at the culprit\'s parent' }) });
+    check(moved.result.status === 'blocked' && moved.result.stopped_at === 'Performance' && !moved.keys.includes('implementer:rollback'),
+      `a fix that leaves the number where it fell stops at Performance, and nothing is rolled back: ${moved.result.status} at ${moved.result.stopped_at}`);
+    const noNumber = await run({ mode: 'ci', task: 'c' }, classified({ performance: true }));
+    check(noNumber.result.status === 'blocked' && noNumber.result.stopped_at === 'Classify' && !noNumber.keys.includes('ci_guardian:bisect')
+      && /without a perf_claim/.test(JSON.stringify(noNumber.result.phases)),
+      `a performance failure without the number to restore stops before the bisect: ${noNumber.result.status} at ${noNumber.result.stopped_at}`);
+    const flaky = await run({ mode: 'ci', task: 'c' }, classified({ performance: true, failure_class: 'flaky', failing_test_cmd: '' }));
+    check(flaky.result.status === 'handed_off', `a flaky one is handed over as any other, with no number asked of it: ${flaky.result.status}`);
+  }],
   ['implement: done without a commit is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
       'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: '', unit_test_cmd: 'pytest -q t.py' }),
@@ -1655,9 +1874,10 @@ const scenarios = [
   ['issue: reproduce, diagnose, fix, verify with the reproduction as a gate', async () => {
     const r = await run({ mode: 'issue', task: 'https://github.com/sgl-project/sglang/issues/38849' });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
-    check(eqList(r.phases, ['Setup', 'Triage', 'Reproduce', 'Diagnose', 'Implement', 'Verify', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
-    check(r.heads[8].startsWith('=== PHASE 9/10 [#########-]: Reply ===') && r.heads[9].startsWith('=== PHASE 10/10 [##########]: Report ==='),
-      `the issue route numbers Reply and Report: ${r.heads[8]} | ${r.heads[9]}`);
+    check(eqList(r.phases, ['Setup', 'Triage', 'Reproduce', 'Diagnose', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']),
+      `phases ${r.phases}`);
+    check(r.heads[9].startsWith('=== PHASE 10/11 [##########-]: Reply ===') && r.heads[10].startsWith('=== PHASE 11/11 [###########]: Report ==='),
+      `the issue route numbers Reply and Report: ${r.heads[9]} | ${r.heads[10]}`);
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('issue_repro'), 'issue_repro gate passed to verify');
     check(r.result.priority === 'P0', 'priority recorded');
@@ -1907,7 +2127,7 @@ const scenarios = [
       'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'], triage_path: `${RUN}/t.md` }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
-    check(eqList(r.phases, ['Setup', 'Triage', 'Reproduce', 'Implement', 'Verify', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
+    check(eqList(r.phases, ['Setup', 'Triage', 'Reproduce', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Reply', 'Report']), `phases ${r.phases}`);
     const im = r.calls.find((c) => c.key === 'implementer:implement');
     check(im && im.ins.work_package.kind === 'apply_pr' && im.ins.work_package.goal.includes('#40872'), 'apply_pr work package');
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
@@ -1946,7 +2166,7 @@ const scenarios = [
   ['ci: code regression to a fix PR', async () => {
     const r = await run({ mode: 'ci', task: 'tracker cluster _check ImportError' });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
-    check(eqList(r.phases, ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
+    check(eqList(r.phases, ['Setup', 'Classify', 'Bisect', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && JSON.stringify(v.ins.extra_gates).includes('failing_test'), 'failing_test gate passed to verify');
   }],
@@ -2510,9 +2730,14 @@ const scenarios = [
   ['arguments: with stability on the task names the server and the client G4 keeps up, and no template is offered for either', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);
     const offers = (r) => (r.result.questions || []).filter((q) => (q.options || []).includes('template') || /template/i.test(q.question));
-    const none = await run({ mode: 'issue', task: 't', stability: true });
+    const none = await run({ mode: 'issue', task: 't', stability: true, client_script: '' });
     check(asks(none, 'server_script') && asks(none, 'client_script') && fields(none).length === 2,
       `an issue with neither is asked for both, and for nothing else: ${fields(none)}`);
+    // An issue that stops before its fix has nothing for G5 to measure: the client is asked for on G4's account alone.
+    const early = await run({ mode: 'issue', task: 't', stability: true, client_script: '', stop_after: 'Reproduce' });
+    const eq = (early.result.questions || []).find((q) => q.field === 'client_script') || {};
+    check(eqList(fields(early), ['server_script', 'client_script']) && /G4 keeps up for more than 48 hours/.test(eq.question || '')
+      && !/G5/.test(`${eq.question} ${eq.why}`), `before the fix, on G4's account alone: ${JSON.stringify(eq)}`);
     check(offers(none).length === 0, `neither question offers a template: ${JSON.stringify(offers(none).map((q) => q.field))}`);
     const ci = await run({ mode: 'ci', task: 'c', stability: 'true', client_script: '/s/client.sh' });
     check(asks(ci, 'server_script') && eqList(fields(ci), ['server_script']), `a ci task is asked for the one it lacks: ${fields(ci)}`);
@@ -2540,8 +2765,9 @@ const scenarios = [
     check(load.result.status !== 'needs_input' && ve && ve.ins.stability === true && ve.ins.client_script === `${RUN}/scripts/perf.sh`
       && ve.ins.server_script === '/s/server.sh',
       `with its workload the run starts, on the task's server and the rendered client: ${load.result.status} ${ve && ve.ins.client_script}`);
-    const plain = await run({ mode: 'issue', task: 't', client_script: 'template' }, rendered);
-    check(plain.result.status !== 'needs_input', `without stability nothing more is asked of a task that names the template: ${plain.result.status}`);
+    const plain = await run({ mode: 'issue', task: 't', client_script: 'template', stop_after: 'Reproduce' }, rendered);
+    check(plain.result.status !== 'needs_input',
+      `without stability, and stopping before its fix, a task that names the template is asked nothing more: ${plain.result.status}`);
   }],
   ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);

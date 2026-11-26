@@ -21,8 +21,8 @@
 ## Starting the top tasks
 
 <!-- One task definition per top entry (task_definition.md), passed to inferpilot.js as it is. Fields the
-     scan cannot establish (a model not on this machine, a performance task's workload) stay out; the
-     run asks for them. -->
+     scan cannot establish (a model not on this machine, a performance task's workload, the client an
+     issue's or a ci task's fix is measured on) stay out; the run asks for them. -->
 
 ```json
 {"mode": "issue", "task": "<issue URL>", "framework_dir": "<checkout>", "model_path": "<the reporter's model>"}

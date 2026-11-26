@@ -498,7 +498,7 @@ class LongGatesTest(unittest.TestCase):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         self.assertIn("const g4 = (mode === 'issue' || mode === 'ci') && asked(a.stability) === 'true';", src,
                       "a feature and a perf task name their server and their client anyway: G4 asks an issue or a ci task")
-        self.assertIn("if (g4 && !a.client_script) {", src, "stability is on without a client to run")
+        self.assertIn("if ((g4 || fixes) && !a.client_script) {", src, "stability is on without a client to run")
         for field in self.FLAGS:
             self.assertIn("['%s', '" % field, src, "a value of %s that is neither true nor false is not asked about" % field)
 
@@ -509,7 +509,7 @@ class LongGatesTest(unittest.TestCase):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         self.assertIn("if (g4 && !a.server_script) {", src,
                       "an issue or a ci task with stability on may start without a server for G4")
-        self.assertIn("if (g4 && gaps.length) {", src, "the client template would keep up its own lengths and concurrency")
+        self.assertIn("if ((g4 || fixes) && gaps.length) {", src, "the client template would keep up its own lengths and concurrency")
         block = re.search(r"\n  const g4 = .*?\n  const kb = ", src, re.S)
         self.assertIsNotNone(block, "the G4 questions are not where missingFields has them")
         self.assertEqual(block.group(0).count("ask('"), 3, "G4 asks for its server, its client and the template's workload")
@@ -523,8 +523,7 @@ class LongGatesTest(unittest.TestCase):
                            ("knowledge/validation_doctrine.md", "no template is taken for it"),
                            ("knowledge/validation_doctrine.md", "never on lengths and a concurrency of its own"),
                            ("roles/intake.md", "a task without a `server_script` or without a `client_script` is asked for it, in any mode"),
-                           ("roles/intake.md", "Where only G4 needs the script"),
-                           ("roles/intake.md", "the question offers no `template`"),
+                           ("roles/intake.md", "An issue's or a ci task's question offers no `template`"),
                            ("README.md", "names its `server_script` and its `client_script`, in any mode, and is asked for the one it lacks: "
                                          "G4 takes no template of its own accord"),
                            ("README.zh-CN.md", "任何模式下任务都要给出自己的 `server_script` 和 `client_script`，缺哪个就问哪个：G4 不会自行改用模板")):
@@ -678,7 +677,8 @@ class FixAccuracyTest(unittest.TestCase):
             phases = [p.lower() for p in re.findall(r"'(\w+)'", re.search(r"\n  %s: \[(.*?)\]," % mode, stops).group(1))]
             self.assertEqual(re.findall(r"'(\w+)'", listed), phases[:phases.index("implement")],
                              "%s: a run that stops before Implement has no fix, and one that reaches it has" % mode)
-        self.assertIn("if (BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop) && !a.model_path) {\n    ask('model_path',", src)
+        self.assertIn("const fixes = !!BEFORE_A_FIX[mode] && !BEFORE_A_FIX[mode].includes(stop);", src)
+        self.assertIn("if (fixes && !a.model_path) {\n    ask('model_path',", src)
         self.assertIn("const fix = (MODE === 'issue' || MODE === 'ci') && !!C.model_path;\n"
                       "  if ((MODE === 'feature' || MODE === 'perf' || fix) && !C.accuracy_script) {", src,
                       "a fix G2 will measure may start without the accuracy script")
@@ -688,13 +688,14 @@ class FixAccuracyTest(unittest.TestCase):
         """A stop before the fix lets a run start without one; the route can skip that stop's phase (an existing
         fix PR has no Diagnose), and the control file can lift it."""
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("function askModel(at) {", src)
+        self.assertIn("function askForFix(at) {\n  const lacks = Object.keys(FIX_NEEDS).filter((k) => !C[k]);", src)
+        self.assertRegex(src, r"const FIX_NEEDS = \{ model_path: [^}]*\};", "the model is not among what a fix needs")
         for at in ("Reproduce", "Diagnose", "Bisect"):
-            self.assertIn("if (!C.model_path) return askModel('%s');" % at, src, "a fix can start after %s without a model" % at)
+            self.assertIn("const lacking = askForFix('%s');\n" % at, src, "a fix can start after %s without a model" % at)
         self.assertRegex(src, r"if \(tri\.action === 'push_existing_pr'\) \{\n(?:\s*//.*\n)*\s*if \(stopHere\('Diagnose'\)\) \{",
                          "a stop after Diagnose does not hold for an existing fix PR, which has no Diagnose")
         for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
-            self.assertRegex(text, r"reaches its fix without\s+one|走到修复却还没有模型", "%s does not list the question" % name)
+            self.assertRegex(text, r"reaches its\s+fix without\s+one|走到修复却还没有模型", "%s does not list the question" % name)
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
         row = [line for line in fields.splitlines() if line.startswith("| `model_path` |")]
         self.assertEqual(len(row), 1)
@@ -725,11 +726,11 @@ class FixAccuracyTest(unittest.TestCase):
                            ("roles/director.md", "when the task has a `model_path`, render InferPilot's server template"),
                            ("roles/director.md", "the one template a run takes without the user's answer, and say so in `notes`"),
                            ("templates/task_definition.md", "It is the one case in which a template runs without the user's answer"),
-                           ("templates/task_definition.md", "it is not chosen for the user, but for the server G2 measures a fix on "
-                                                            "when the report or the job starts none"),
+                           ("templates/task_definition.md", "it is not chosen for the user, but for the server a fix is measured on "
+                                                            "(G2, G5) when the report or the job starts none"),
                            ("roles/director.md", "Return the one or the other as `server_script`"),
                            ("roles/director.md", "without one, skip them as well"),
-                           ("roles/director.md", "for the G2 of a fix whose baseline was measured on another commit"),
+                           ("roles/director.md", "for the G2 and the G5 of a fix whose baseline was measured on another commit"),
                            ("templates/validation_report.md", "the commit its baseline was measured on when that was not the base"),
                            ("roles/intake.md", "An issue or a ci task needs it too"),
                            ("knowledge/acceptance.md", "required when the fix changes code the server runs"),
@@ -742,6 +743,119 @@ class FixAccuracyTest(unittest.TestCase):
         self.assertEqual(len(row), 1, "knowledge/acceptance.md §2 has no Accuracy row")
         for stale in ("when the issue is an accuracy loss", "| no regression |"):
             self.assertNotIn(stale, row[0], "the profiles still leave a fix's accuracy to the kind of issue")
+
+
+class FixPerformanceTest(unittest.TestCase):
+    """The fix of an issue or of a CI failure is measured for speed as it is for accuracy, and on the same condition
+    (knowledge/validation_doctrine.md, G5 for a fix): when it changes code the server runs, it is no slower than the
+    base on the task's client. A performance problem is measured whatever its fix changes: its number comes back.
+    So such a task names its client unless it stops before the fix, and the roles and documents say so."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_an_issue_or_a_ci_task_that_can_reach_a_fix_names_its_client(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("if ((g4 || fixes) && !a.client_script) {\n", src, "a fix G5 will measure may start without a client")
+        self.assertIn("if ((g4 || fixes) && gaps.length) {\n    ask('workload',", src,
+                      "InferPilot's client would measure a fix on lengths or a concurrency nobody chose")
+        self.assertIn("const FIX_NEEDS = { model_path: 'the model', client_script: 'the client' };", src,
+                      "a run that reaches its fix without a client is not asked for one")
+        for mode in ("issue", "ci"):
+            for table in ("ROUTES", "STOP_PHASES"):
+                body = re.search(r"const %s = \{(.*?)\n\};" % table, src, re.S).group(1)
+                phases = re.findall(r"'(\w+)'", re.search(r"\n  %s: \[(.*?)\]," % mode, body).group(1))
+                self.assertEqual(phases[phases.index("Verify"):phases.index("Review") + 1], ["Verify", "Performance", "Review"],
+                                 "%s: %s has no Performance between Verify and Review" % (table, mode))
+        use = re.search(r"\n  whenToUse: '(.*)',\n", src).group(1)
+        self.assertIn("args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci "
+                      "task that can reach a fix", use)
+        self.assertNotIn("for a feature with a workload", use, "whenToUse still gives the client's old rule")
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `client_script` |")]
+        self.assertEqual(len(row), 1)
+        self.assertIn("| required unless `stop_after` ends the run before a fix: G5 measures the fix on it; with `stability` on, "
+                      "required either way | as for an issue |", row[0], "templates/task_definition.md: an issue's and a ci task's client")
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            row = [line for line in text.splitlines() if line.startswith("| `client_script` |")]
+            self.assertEqual(len(row), 1, name)
+            for said in ("`issue`", "`ci`", "`stop_after`", "G5"):
+                self.assertIn(said, row[0], "%s: the client_script row" % name)
+            self.assertRegex(text, r"a model or a client, when an issue or a ci run reaches its\s+fix without\s+one"
+                             r"|走到修复却还没有模型或 client", "%s does not list the question" % name)
+
+    def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_a_performance_problem_always(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const NOT_MEASURED = 'not run: no code the server runs changed';", "the run record does not say why G5 was not run"),
+                ("const unmeasured = (when) => when === 'fix' && C.server_code_changed === false;",
+                 "a fix is left unmeasured on anything but the verify engineer's word about its diff"),
+                ("if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;",
+                 "what the last Verify round says of the diff does not reach Performance, or a round that says nothing leaves a fix unmeasured"),
+                ("const issueClaim = perfIssue ? String(rep.perf_claim || '').trim() : NO_SLOWER;\n  const runPerf = perfIssue ? true : 'fix';",
+                 "an issue's fix is not measured on the right claim"),
+                ("const ciClaim = perfFailure ? String(cl.perf_claim || '').trim() : NO_SLOWER;", "a ci fix is not measured on the right claim"),
+                ("ciClaim, perfFailure ? true : 'fix');", "a performance failure is not measured whatever its fix changes"),
+                ("const unjudged = trusted && BEFORE_A_FIX[MODE] && claim === NO_SLOWER ? String(p.no_baseline || '').trim() : '';",
+                 "no baseline excuses more than a fix that claims no gain")):
+            self.assertIn(said, src, why)
+        for schema, field in (("VERIFY", "server_code_changed: bool,"), ("CLASSIFY", "performance: bool,"), ("CLASSIFY", "perf_claim: str,"),
+                              ("PERF", "no_baseline: str,")):
+            body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
+            self.assertIn(field, body, "%s does not take %s" % (schema, field))
+        note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
+        for said in ("when it changes code the server runs", "no slower than the base beyond the noise band", "One diff decides both gates",
+                     "has no G5 either", "the last commit that served it", "reported and not judged", "names its client as it names its model",
+                     "no template is offered for it", "A performance problem is measured whatever its fix changes",
+                     "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
+                     "stops the task at Performance for a human, and nothing is rolled back"):
+            self.assertIn(said, note[0])
+        for path, said in (("roles/verify_engineer.md", 'and the answer `"server_code_changed": false`'),
+                           ("roles/verify_engineer.md", "That one diff decides G5 as well"),
+                           ("roles/verify_engineer.md", "Read the diff in every round"),
+                           ("roles/perf_engineer.md", "**A fix (issue, ci) has no baseline from Setup:** measure both arms yourself"),
+                           ("roles/perf_engineer.md", "the baseline is the commit G2 measured against, which the ledger names"),
+                           ("roles/perf_engineer.md", "return `no_baseline` with the reason"),
+                           ("roles/perf_engineer.md", "**A performance problem is measured where it showed:**"),
+                           ("roles/perf_engineer.md", "a feature or a fix that is slower does not"),
+                           ("roles/ci_guardian.md", "`performance`: true when the test fails on a number it measures"),
+                           ("roles/ci_guardian.md", "Without one the task stops here"),
+                           ("roles/issue_triager.md", "`performance` makes the reported number the claim G5 judges the fix on, whatever the "
+                                                      "fix changes"),
+                           ("roles/director.md", "Nor does its speed (*G5 for a fix*): the performance engineer measures both arms after "
+                                                 "Verify"),
+                           ("roles/director.md", "for the G2 and the G5 of a fix whose baseline was measured on another commit"),
+                           ("roles/intake.md", "An issue or a ci task needs a client too, unless `stop_after` ends the run before a fix"),
+                           ("roles/intake.md", "offer no `template` for it"),
+                           ("roles/reviewer.md", "`server_code_changed` false means the run measured neither its accuracy nor its speed"),
+                           ("templates/task_definition.md", "So does an issue or a ci task that can reach a fix"),
+                           ("templates/task_definition.md", "G2 and G5 then serve the fix of a task that has a `model_path` with "
+                                                            "`server.sh`"),
+                           ("templates/ci_triage.md", "| performance problem: yes / no |"),
+                           ("templates/ci_triage.md", "for a performance problem the number the fix restores, whatever it changes"),
+                           ("templates/issue_triage.md", "its speed on the task's client against the same commit (G5)"),
+                           ("templates/validation_report.md", "for the G2 and the G5 of a fix"),
+                           ("templates/validation_report.md", "`not run: no code the server runs changed`, and no table"),
+                           ("knowledge/acceptance.md", "**A fix** (issue, ci) is measured too when it changes code the server runs, on the "
+                                                       "task's `client_script`"),
+                           ("knowledge/acceptance.md", "always when the failure is a performance problem: the number its test measures comes "
+                                                       "back"),
+                           ("knowledge/perf_evaluation.md", "The fix of an issue or of a CI failure is measured the same way when it changes "
+                                                            "code the server runs"),
+                           ("knowledge/issue_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
+                           ("knowledge/ci_triage.md", "Such a fix is measured for speed as well (G5 for a fix"),
+                           ("knowledge/ci_triage.md", "**A failure on a number is a performance problem,** whatever its class"),
+                           ("knowledge/pr_playbook.md", "So does a fix that changes code the server runs, the fix next to the base"),
+                           ("knowledge/dev_methodology.md", "nor is a fix that changes code the server runs slower than the base")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            modes = [line for line in text.splitlines() if re.match(r"\| `(issue|ci)` \|", line) and "Setup →" in line]
+            self.assertEqual(len(modes), 2, name)
+            for line in modes:
+                self.assertRegex(line, r"Verify → Performance[ （(]", "%s: a fix's Performance phase, and when it is skipped" % name)
+            self.assertRegex(text, r"its number must come back, whatever the fix changes|掉下去的数值都必须回来", name)
 
 
 class FeaturePerformanceTest(unittest.TestCase):
@@ -828,8 +942,8 @@ class FeaturePerformanceTest(unittest.TestCase):
                            ("knowledge/perf_evaluation.md", "or a slowdown beyond the noise band where no gain is claimed"),
                            ("knowledge/dev_methodology.md", "a feature that claims none is no slower than the baseline"),
                            ("knowledge/pr_playbook.md", "A feature that claims no gain gives the same table"),
-                           ("roles/perf_engineer.md", "for a feature that claims no gain or is measured with InferPilot's client, that it "
-                                                      "is no slower than the baseline beyond the noise band"),
+                           ("roles/perf_engineer.md", "that the change is no slower than the baseline beyond the noise band: a feature "
+                                                      "that claims no gain or is measured with InferPilot's client"),
                            ("roles/perf_engineer.md", "`no slower than the baseline` is met when the median lies no further below the "
                                                       "baseline than the noise band"),
                            ("roles/perf_engineer.md", "the claim still holds: a gain still beyond the noise band, no slowdown still none"),
@@ -847,7 +961,7 @@ class FeaturePerformanceTest(unittest.TestCase):
                            ("knowledge/validation_doctrine.md", "on the user's client and on InferPilot's alike"),
                            ("roles/perf_engineer.md", "A cost the user stated (`at most 5% below the baseline`) is met when the "
                                                       "median lies within that bound"),
-                           ("roles/perf_engineer.md", "`RUN_DIR/run.json` in `perf` and in `feature`"),
+                           ("roles/perf_engineer.md", "`RUN_DIR/run.json` in `perf`, in `feature`"),
                            ("templates/feature_spec.md", "a cost the user stated in `goal`: no more than it, on either client"),
                            ("roles/director.md", "the source's gain is never the claim on it: G5 judges there only that the feature is "
                                                  "no slower than the baseline"),

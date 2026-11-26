@@ -231,7 +231,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      The fix's accuracy (`validation_doctrine.md`, *G2 for a fix*) needs no baseline from you: nobody
      knows yet whether the fix will change code the server runs, and the verify engineer measures the
      base arm when it does. Return the `accuracy_script` all the same, whenever the task has a
-     `model_path`.
+     `model_path`. Nor does its speed (*G5 for a fix*): the performance engineer measures both arms
+     after Verify. Record the task's `client_script`, with its `workload` when it gives one, in
+     `RUN_DIR/run.json` as the fixed benchmark, as for a feature, and return the client the run uses
+     (the rendered one when the task names `template`): every measurement of the fix runs it
+     unchanged.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 
@@ -274,13 +278,16 @@ on the commit the run's last Verify round ran on. Change nothing.
    was given: the goal names data sets and guard workloads the run's Verify and Performance ran, and
    the task the issue or PR its triage and reply are about.
 4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
-   that `issue_triage.md` classifies `performance`, a `feature` whose spec or design states one, a
-   `perf` plan's gain); `perf_claim`: that claim, empty when there was none or the run directory does
-   not record it; `perf_cost` (`feature`): `true` when that claim is a cost the user stated, as
+   that `issue_triage.md` classifies `performance`, a `ci` failure that `ci_triage.md` gives as a
+   performance problem, a `feature` whose spec or design states one, a `perf` plan's gain);
+   `perf_claim`: that claim (for a performance problem, the number the fix must restore, as the
+   reproduction or the triage states it), empty when there was none or the run directory does not
+   record it; `perf_cost` (`feature`): `true` when that claim is a cost the user stated, as
    `RUN_DIR/feature_spec.md` has it, which stays the claim on InferPilot's client, and `false`
-   otherwise. A `feature` that states no claim is judged all the same, as no slower than the baseline
-   (`validation_doctrine.md`, *G5 for a feature*): InferPilot gives that claim, and there is none to
-   restore.
+   otherwise. A `feature` that states no claim, and a fix of a problem that is not one of performance,
+   are judged all the same, as no slower than the baseline (`validation_doctrine.md`, *G5 for a
+   feature*, *G5 for a fix*; such a fix when it changes code the server runs, which this run's Verify
+   says again): InferPilot gives that claim, and there is none to restore.
 5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
    the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
    on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
@@ -437,18 +444,18 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
 
 - `ready_for_review`: write `RUN_DIR/validation_report.md` (`templates/validation_report.md`); every
   number points at an artifact. Its *Before pushing* section is what the human runs before pushing
-  (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes `RUN_DIR/base`,
-  the lock release frees the machine, and the checkout may be on another branch by the time the human
-  runs it. It takes the machine's lock for `RUN_DIR/rerun` and checks every GPU idle before each arm's
-  servers start (`scripts/run_lock.py`, `scripts/gpu_status.py --check all`). For each test and
-  measurement the PR body cites, it makes each arm's tree again from its commit (the base commit and the
-  branch's head; for the G2 of a fix whose baseline was measured on another commit, that commit, as
-  the ledger names it, and the fix alone where it had no baseline: the base is the server that does
-  not start), runs every command of an arm (server, tests, reproduction, benchmark client) with that
-  tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under test*), measures as
-  the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per arm, the same rounds
-  in the same order) and gives the numbers to compare with, with the run's spread. Then it removes the
-  worktrees, releases the lock, and gives the PR body path and the push command.
+  (`pr_playbook.md` §Attribution), and it stands alone: the worktree removal below takes
+  `RUN_DIR/base`, the lock release frees the machine, and the checkout may be on another branch by the
+  time the human runs it. It takes the machine's lock for `RUN_DIR/rerun` and checks every GPU idle
+  before each arm's servers start (`scripts/run_lock.py`, `scripts/gpu_status.py --check all`). For
+  each test and measurement the PR body cites, it makes each arm's tree again from its commit (the base
+  commit and the branch's head; for the G2 and the G5 of a fix whose baseline was measured on another
+  commit, that commit, as the ledger names it, and the fix alone where it had no baseline: the base is
+  the server that does not start), runs every command of an arm (server, tests, reproduction, benchmark
+  client) with that tree first on `PYTHONPATH` and checks its import (`env_hygiene.md`, *The code under
+  test*), measures as the run did (`perf_evaluation.md` §3: the discarded warm-up, a fresh server per
+  arm, the same rounds in the same order) and gives the numbers to compare with, with the run's spread.
+  Then it removes the worktrees, releases the lock, and gives the PR body path and the push command.
 - Any other status (`blocked`, `stopped`, `awaiting_design_review`, `triaged`, `not_reproduced`,
   `fixed_on_main`, `diagnosed`, `handed_off`, `dropped`, `queued`): write `RUN_DIR/run_report.md` with what was
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
