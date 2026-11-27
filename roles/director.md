@@ -96,7 +96,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
    and return it as `gpu_ids`: the given one, or, when none was given, the first GPUs by HIP number, as
-   many as the task needs; step 0 found them all idle. `gpu_status.py` lists them by HIP number, the
+   many as the task needs; step 0 found them all idle. With `reported_on` (the model and launch
+   configuration the report puts the task's problem on; the result of an earlier run gives it, where
+   that run was set up for another one), the task needs what that configuration needs: a problem at
+   TP8 takes eight GPUs, whatever the run before this one chose. `gpu_status.py` lists them by HIP
+   number, the
    order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
@@ -110,7 +114,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
-   template's or the cookbook's flags. A report or a job that starts no server at all (a unit test, an
+   template's or the cookbook's flags. Where the report gives several commands, it is the one for the
+   problem `task` names, and with `reported_on` the one for that configuration. A report or a job
+   that starts no server at all (a unit test, an
    import that fails) leaves nothing to write it from: when the task has a `model_path`, render
    InferPilot's server template for it (below), the one template a run takes without the user's
    answer, and say so in `notes` for the report. Return the one or the other as `server_script`: G2

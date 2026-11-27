@@ -131,7 +131,7 @@ const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_
   'stop_after', 'resume_from', 'run_dir',
   'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
-  'image', 'image_ok', 'bisect_fixed', 'confirm_leads'];
+  'image', 'image_ok', 'bisect_fixed', 'confirm_leads', 'reported_on'];
 // '' is accepted for the enums so an undecided field costs no schema retry; pick() drops it.
 const TASK_DEF = S({
   mode: { type: 'string', enum: [...MODES, ''] },
@@ -487,6 +487,10 @@ const C = {
   output_script: String(A.output_script || '').trim(),
   harness: A.harness ? (typeof A.harness === 'string' ? A.harness : JSON.stringify(A.harness)) : '',
   goal: String(A.goal || ''),
+  // The model and launch configuration the report puts the task's problem on, where the task says: the result of
+  // a run that found its problem on another one sets it for the run after it (afterMismatch, next.start). Setup
+  // works before Triage and is given nothing else of the report: it chooses the GPUs and writes the launch for it.
+  reported_on: String(A.reported_on || '').trim(),
   held_out: HELD_OUT,
   guards: GUARDS,
   sweep: SWEEP,
@@ -791,7 +795,10 @@ const TRIAGE = S({
   action: { type: 'string', enum: ['reproduce', 'push_existing_pr', 'close_fixed', 'needs_info', 'not_amd', 'plan', 'duplicate'] },
   duplicate_of: str, // with duplicate: the open issue that has the failure, the original (#<n>)
   // a report with several problems: the ones this run does not take, each with the task that starts a run on it
-  other_problems: arr(S({ problem: str, task: str, priority: str }, ['problem'])),
+  // model: the model or launch configuration the report gives that problem, when it is not this run's
+  other_problems: arr(S({ problem: str, task: str, priority: str, model: str }, ['problem'])),
+  // the problem the task names is on another model or launch configuration than the task's own: which one
+  model_mismatch: str,
   reason: str,
   existing_prs: strs,
   triage_path: str,
@@ -1204,6 +1211,47 @@ async function finish(status, at) {
 const ENDED = { blocked: 'Blocked', handed_off: 'Handed over', triaged: 'Triaged', fixed_on_main: 'Fixed on main already',
   not_reproduced: 'Not reproduced', diagnosed: 'Diagnosed, with no fix to make here', no_gain: 'No measured gain to keep',
   dropped: 'Dropped, with no measured gain' };
+// The operator's settings, which the task definition holds none of: a run started from this one's result on the
+// same issue keeps the ones this run was given.
+const OPERATOR_KEYS = ['exp_root', 'max_fix_rounds', 'max_investigate_rounds', 'max_review_rounds', 'max_work_packages',
+  'agent_timeout_ms', 'agent_retries', 'review_model'];
+// What a run measures a fix with, the GPUs it is pinned to among it (a TP8 problem does not fit a run on two): a
+// problem on another model or launch configuration brings its own. The script that compares the outputs of a
+// model that answers no text questions is one model's as well.
+const MEASURED_WITH = ['model_path', 'server_script', 'client_script', 'accuracy_script', 'workload', 'harness', 'long_context_script',
+  'gpu_ids', 'output_script'];
+// The issue a task names, without the problem an earlier follow-up added to it ("<issue>: <problem>"): a
+// follow-up of a follow-up names one problem, not two. An issue is named by its URL, with whatever follows its
+// number there (a slash, a query, a comment's fragment), or as <owner>/<repo>#<n>, <repo>#<n> or #<n>.
+function issueOf(task) {
+  const s = String(task || '').trim();
+  const url = /^(https?:\/\/\S+?\/issues\/\d+)(?:[/?#]\S*)?(?=[\s:,;]|$)/.exec(s);
+  if (url) return url[1];
+  const ref = /^((?:[\w.-]+(?:\/[\w.-]+)?)?#\d+)(?=[\s:,;]|$)/.exec(s);
+  return ref ? ref[1] : s;
+}
+
+// The run stopped because the problem it takes is on another model or configuration than the task's (runIssue).
+// What the task measured with is cleared, so that the answer and the Intake give the problem's own: cleared
+// wherever the next run would find it, as a field and as an answer an earlier run was given, which the next run
+// merges back in. The words the Intake reads are the problem's configuration, not the request that set the task
+// up for another one; the rest of the definition goes as it was validated. Not apply_prs, which is the user's
+// word to apply someone else's code: it stays where the caller gave it, and one the Intake read into the old
+// request is not made the caller's by a rerun. A task without a model was asked for what it pins, not for a
+// model: the sentence names those inputs.
+function afterMismatch(out, at, last, report) {
+  const earlier = asObject(RAW.answers);
+  Object.assign(out.rerun_with, pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),
+    Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])),
+    { request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: the model, the launch and the workload of `
+      + "this task are that configuration's, not those of the run that stopped.", reported_on: R.model_mismatch });
+  out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), ...out.rerun_with.answers };
+  if (!R.questions.some((q) => q.field === 'model_path')) {
+    out.say = `The run stopped after ${at}, before anything was reproduced: ${last}. Give what that configuration needs in place of the `
+      + `task's ${R.questions.map((q) => q.field).join(', ')}, and run the task again: it starts over.${report}`;
+  }
+}
+
 function nextSteps(status, at) {
   const report = R.report_path ? ` The report: ${R.report_path}.` : '';
   // Where the run ended, not what a closing phase (the reply check) recorded after it.
@@ -1267,12 +1315,31 @@ function nextSteps(status, at) {
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    // The task's model is not the problem's: what the task measured with is cleared with it (afterMismatch).
+    if (R.model_mismatch) afterMismatch(out, at, last, report);
+  } else if (status === 'needs_input' && R.model_mismatch) {
+    // A task without a model, asked for what it pins, and none of that a field a fix needs (its GPUs, say).
+    out.ask = R.questions;
+    out.rerun_with = { answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    afterMismatch(out, at, last, report);
   }
-  // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
+  // The other problems of a report with several: each is offered as a run of its own, on this run's definition
+  // and with the operator's settings this run was given (where runs are kept, the budgets, the reviewer's model):
+  // it is the same work on the same issue. A problem the report puts on another model takes none of what this
+  // run measured with: its model, its scripts and its workload are asked for, as of any new task.
   if ((R.other_problems || []).length && !out.start) {
     const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
-    out.start = R.other_problems.map((p, i) => ({ rank: i + 1, task: p.problem,
-      args: { inferpilot_dir: INFERPILOT, ...def, mode: 'issue', task: p.task || `${def.task}: ${p.problem}` } }));
+    const issue = issueOf(def.task);
+    out.start = R.other_problems.map((p, i) => {
+      const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;
+      const task = p.task || `${issue}: ${p.problem}`;
+      // Only the arguments start the run: what the report says of the problem's model goes with them, as the words
+      // the Intake turns into that run's own model, scripts and workload.
+      const words = p.model ? { request: `${task}. The report puts this problem on ${p.model}: the model, the launch and the workload `
+        + 'of this task are that configuration\'s, not those of the run that offered it.', reported_on: p.model } : {};
+      return { rank: i + 1, task: p.problem, ...(p.model ? { model: p.model } : {}),
+        args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };
+    });
   }
   const user = [];
   if (verified) user.push(`post the verification comment on ${verified}, once you have re-run what it cites: ${R.pr.pr_body_path}`);
@@ -2558,13 +2625,44 @@ async function runIssue() {
   // A report with several problems is several tasks: the ones this run does not take are offered as runs of
   // their own (next.start), each on this run's definition with the issue and the problem's name as its task.
   const others = (tri.other_problems || []).filter((p) => p && String(p.problem || '').trim())
-    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim() }));
+    .map((p) => ({ problem: String(p.problem).trim(), task: String(p.task || '').trim(), priority: String(p.priority || '').trim(),
+      model: String(p.model || '').trim() }));
   if (others.length) R.other_problems = others;
   note('Triage', tri.action, `${tri.priority} ${tri.category || ''}: ${duplicateOf ? `duplicate of ${duplicateOf}; ` : ''}${tri.reason || ''}`);
   // What ends at Triage with a reply and no reproduction: a report that cannot be run as written, a cause outside
   // AMD code, a feature request, and a report of a failure that another open issue already has.
   if (['needs_info', 'not_amd', 'plan', 'duplicate'].includes(tri.action)) return finish('triaged', 'Triage');
   if (stopHere('Triage')) return finish('stopped', 'Triage');
+  // The problem this run takes is on another model or launch configuration than the task's own: reproduced and
+  // measured on the task's, it would show nothing. The run stops before Reproduce and asks for that problem's,
+  // with a model of its own or without: a task that stops before its fix needs no model, and can still pin two
+  // GPUs for a problem at TP8.
+  const elsewhere = String(tri.model_mismatch || '').trim();
+  // What the task pins besides a model. A task without a model has no model to be asked for (a reproduction that
+  // serves none, a distributed test): it is asked for the inputs that do not fit, each of them. One that pins
+  // nothing was set up by Setup alone, before the run knew which problem it takes: the GPUs Setup chose are the
+  // run's all the same, and Reproduce may use no others, so the run stops there too and asks for them.
+  const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);
+  if (elsewhere) {
+    R.model_mismatch = elsewhere;
+    const why = C.model_path
+      ? `the problem this run takes is on ${elsewhere}, and the task's model is ${C.model_path}: G2 and G5 measure on what the run is set up with`
+      : pinned.length ? `the problem this run takes is on ${elsewhere}, and the task is set up for another configuration (its ${
+        pinned.join(', ')}): reproduced on that, the problem would not show`
+        : `the problem this run takes is on ${elsewhere}, and Setup set the run up before it was known (GPUs ${C.gpu_ids}): reproduced `
+          + 'on that, the problem would not show';
+    note('Triage', 'needs_input', why);
+    // The value as the task gave it: a workload or a harness can be an object.
+    const given = (k) => JSON.stringify((typeof A[k] === 'string' ? A[k] : JSON.stringify(A[k])).slice(0, 120));
+    R.questions = C.model_path
+      ? [{ field: 'model_path', question: `Which model on this machine is ${elsewhere} (local path)? The task's scripts, `
+        + 'workload and GPUs are set up again for it.', why }]
+      : pinned.length ? pinned.map((k) => ({ field: k, question: `The task's ${k} (${given(k)}) is another `
+        + `configuration's. What should it be for ${elsewhere}? Leave it out to have the run set it up itself.`, why }))
+        : [{ field: 'gpu_ids', question: `Which GPUs should the run use for ${elsewhere} (HIP numbers)? Setup chose ${C.gpu_ids} `
+          + 'before the run knew which problem it takes. Leave it out to have Setup choose again for that configuration.', why }];
+    return finish('needs_input', 'Triage');
+  }
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
   // also for an existing fix PR.
