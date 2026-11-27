@@ -23,11 +23,14 @@ has to show on it. `evidence` names the commits. The run counts only in the envi
 that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and its node count.
 
 - **Which image is the newest is established, not assumed.** It is the newest tag of the lane's
-  variant (rocm10, rocm720 or rocm724) in the registry, and no older than the one the lane's latest
-  run on main pulled, which its log names. The image the tests run in must be that image, read
-  where they run (`$INFERPILOT_IMAGE` in the container, or `docker inspect` from the host: `director.md`,
-  Setup): one that only matches the failed job's can be as old as it, and Setup may have taken an
-  older one (`image_ok`).
+  variant in the registry, and no older than the one the lane's latest run on main pulled, which
+  its log names. The variant is the ROCm and the GPU of the tag together (`rocm720-mi35x`,
+  `rocm724-mi30x`): the registry has a build of each ROCm for each GPU family, and the newest tag
+  of the ROCm alone can be the other family's, which this lane never ran. `python3
+  <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names it. The image the tests
+  run in must be that image, read where they run (`$INFERPILOT_IMAGE` in the container, or `docker
+  inspect` from the host: `director.md`, Setup): one that only matches the failed job's can be as
+  old as it, and Setup may have taken an older one (`image_ok`).
 - **Every test of the task, on every lane it failed on.** A tracker cluster holds several tests, and
   one that passes says nothing of the others. `scan_ci.py` lists ten tests and three job links of a
   cluster (`n_tests` says how many it has): take the rest from the tracker's own state and from the

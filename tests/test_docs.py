@@ -2148,6 +2148,12 @@ class CiOnMainTest(unittest.TestCase):
                 ("knowledge/ci_triage.md", "is `flaky`, not passing"),
                 ("knowledge/ci_triage.md", "sets `stop_after=Classify`: it needs no model and no client"),
                 ("roles/ci_guardian.md", "**Which image is the newest is established, not assumed.**"),
+                # the variant is the ROCm and the GPU together: the newest tag of the ROCm alone can be the other GPU family's
+                ("roles/ci_guardian.md", "The variant is the ROCm and the GPU of the tag together (`rocm720-mi35x`, `rocm724-mi30x`)"),
+                ("roles/ci_guardian.md", "the newest tag of the ROCm alone can be the other family's, which this lane never ran"),
+                ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names it"),
+                ("knowledge/ci_triage.md", "the newest tag of the lane's variant in the registry (its ROCm and its GPU together, "
+                                           "`rocm720-mi35x`: the other GPU family has a build of its own)"),
                 ("roles/ci_guardian.md", "one that only matches the failed job's can be as old as it"),
                 ("roles/ci_guardian.md", "**Every test of the task, on every lane it failed on.**"),
                 ("roles/ci_guardian.md", "**A pass that holds.**"),
