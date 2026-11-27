@@ -1160,6 +1160,17 @@ class CiAccuracyProblemTest(unittest.TestCase):
                                              "sampling), measure both ways and give both scores, in `gates` and in the ledger"),
                 ("knowledge/validation_doctrine.md", "Both are measured whenever the fix changes the measurement, whether or not it says that the old "
                                                      "one was wrong"),
+                # a failing test that still fails ends the round, and the scores are given all the same: whoever decides next needs them
+                ("roles/verify_engineer.md", "A `failing_test` that still fails with the fix ends the round (step 2) and stays its blocking failure, "
+                                             "and the gates after it stay `not run`; this measurement is not one of them"),
+                ("roles/verify_engineer.md", "before you return, give the score the fix reached, both ways where the fix changes the measurement, in "
+                                             "`gates`, in the ledger and as that failure's `evidence`"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "fail 0.871 by the base\'s measurement (200 q), 0.902 by the fix\'s (500 q); the claim '
+                                             'is 0.93"`'),
+                ("roles/verify_engineer.md", "Only where there is no score to read (the server does not start with the fix, the test stops before it "
+                                             "measures) say that in its place"),
+                ("knowledge/validation_doctrine.md", "A fix with which the test still fails is measured all the same, both ways where it changes the "
+                                                     "measurement"),
                 # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
                 ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
                 ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
