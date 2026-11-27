@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRuntime, scriptBody } from '../runtime/engine.mjs';
-import { CMD, DEFAULTS, MODE_DEFAULTS, ROLE_RE, RUN, WP, headAfter, parseInputs, soundG2, withKernelHandoff } from './fixtures/answers.mjs';
+import { BASELINE, CMD, DEFAULTS, MODE_DEFAULTS, ROLE_RE, RUN, WP, headAfter, parseInputs, soundG2, withKernelHandoff } from './fixtures/answers.mjs';
 
 const INFERPILOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(INFERPILOT, 'inferpilot.js');
@@ -243,7 +243,7 @@ const scenarios = [
       'confirm_skipped stays empty when the task never asked for confirmation');
     const atSetup = await run({ mode: 'feature', task: 't', confirm_leads: true, stop_after: 'Setup' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: 'ok', branch: 'inferpilot/task',
-        worktree: `${RUN}/wt`, gpu_ids: '0,1', leads: [lead] }),
+        worktree: `${RUN}/wt`, gpu_ids: '0,1', ...BASELINE, leads: [lead] }),
     });
     const ssp = atSetup.calls.find((c) => c.key === 'issue_triager:spinoff');
     check(ssp && ssp.ins.confirm_leads === false && (ssp.ins.confirm_skipped || []).some((x) => x.includes('Setup')),
@@ -436,8 +436,18 @@ const scenarios = [
       // Setup measured a feature's baseline on the task's base: scores of any other commit are not that baseline.
       ['a baseline of another commit than the one Setup measured', numbers({ base_commit: 'aaa1111' }),
         "the baseline it names is aaa1111, and the one Setup measured is the task's base, base0f1e2d3c"],
-      ['more than a point below the baseline', numbers({}, [gsm8k({ fix: 0.84, base: 0.89 })]),
-        "gsm8k: 0.84 is more than a point below the baseline's 0.89, and G2 is not among the round's failures that do not block"],
+      ['more than a point below the baseline', numbers({}, [gsm8k({ fix: 0.84 })]),
+        "gsm8k: 0.84 is more than a point below the baseline's 0.895, and G2 is not among the round's failures that do not block"],
+      // The baseline of a feature is Setup's measurement, set by set: the round copies it. A score of the baseline
+      // that is not the one Setup recorded hides a loss as easily as it shows one; a set Setup measured is not left
+      // out; and a baseline Setup did not measure is none.
+      ["a baseline score that is not Setup's", numbers({}, [gsm8k({ fix: 0.84, base: 0.85 })]), "gsm8k: it gives the baseline's score as 0.85, and Setup measured 0.895"],
+      ['a baseline of a set Setup did not measure', numbers({}, [gsm8k(), { set: 'gpqa_diamond', fix: 0.41, base: 0.42, questions: 198, answered: 198, base_answered: 198 }]),
+        'gpqa_diamond: Setup measured no baseline of it, and the round gives one (0.42)'],
+      // A set of G2's is reported under G2 or under an item of the acceptance matrix. Under another gate of the run,
+      // that gate's failure, which says nothing of accuracy, would excuse the loss.
+      ['a set reported under another gate of the run', numbers({}, [gsm8k({ fix: 0.84, gate: 'G4' })]),
+        "gsm8k: it is reported under G4, which is no gate of accuracy: a set is G2's, or an item of the acceptance matrix's"],
       // A feature always has the baseline Setup measured: only a fix can be without one.
       ['no baseline', numbers({ base_commit: '' }, [gsm8k(noBase)]), 'gsm8k: it gives no score of the baseline, which Setup measured'],
       ['no baseline, with a reason', numbers({ base_commit: '', no_baseline: unserved }, [gsm8k(noBase)]),
@@ -476,20 +486,48 @@ const scenarios = [
     check(refusedFor(beyond, "gsm8k: 0.87 is more than 2 points below the baseline's 0.895")
       && refusedFor(unnamed, "gsm8k: 0.876 is more than a point below the baseline's 0.895"),
       `beyond its budget, or with none named, the set is not accepted: ${why(beyond)} / ${why(unnamed)}`);
-    // A task's own accuracy script measures what it measures: its sets and their sizes are not the harness's.
+    // A task's own accuracy script measures what it measures: its sets and their sizes are not the harness's, and
+    // Setup's record of the baseline says which they are.
     const theirs = { ...feature, accuracy_script: '/s/accuracy.sh' };
-    const own = await run(theirs, round(numbers({}, [{ set: 'inhouse_qa', fix: 0.71, base: 0.712, questions: 100, answered: 100, base_answered: 100 }])));
-    const ownPart = await run(theirs, round(numbers({}, [gsm8k({ questions: 200, answered: 200, base_answered: 200 })])));
+    const measured = (sets) => ({ 'director:setup': () => ({ ...DEFAULTS['director:setup'](), baseline_accuracy: sets }) });
+    const own = await run(theirs, { ...measured([{ set: 'inhouse_qa', score: 0.712, questions: 100 }]),
+      ...round(numbers({}, [{ set: 'inhouse_qa', fix: 0.71, base: 0.712, questions: 100, answered: 100, base_answered: 100 }])) });
+    const ownPart = await run(theirs, { ...measured([{ set: 'gsm8k', score: 0.895, questions: 200 }]),
+      ...round(numbers({}, [gsm8k({ questions: 200, answered: 200, base_answered: 200 })])) });
     check(own.result.status === 'ready_for_review' && ownPart.result.status === 'ready_for_review',
       `with the task's own accuracy script the sets are its own: ${ended(own)}, ${ended(ownPart)}`);
+    const otherSize = await run(theirs, { ...measured([{ set: 'inhouse_qa', score: 0.712, questions: 100 }]),
+      ...round(numbers({}, [{ set: 'inhouse_qa', fix: 0.71, base: 0.712, questions: 80, answered: 80, base_answered: 80 }])) });
+    check(refusedFor(otherSize, "inhouse_qa: 80 questions, and Setup's baseline has 100"),
+      `and a set is as large as it was for the baseline: ${ended(otherSize)}, ${why(otherSize)}`);
     // A set that misses under a gate of its own, which the round lists among its failures as one that does not
     // block (a report-only item of the acceptance matrix): the round is accepted as it was. Not listed, it is not.
     const second = { set: 'simple_qa', gate: 'ACC-3', fix: 0.30, base: 0.36, questions: 4326, answered: 4326, base_answered: 4326 };
-    const reportOnly = await run(feature, round(numbers({}, [gsm8k(), second]), { all_pass: false, failures: [{ gate: 'ACC-3', blocking: false }] }));
+    const both3 = measured([...BASELINE.baseline_accuracy, { set: 'simple_qa', score: 0.36, questions: 4326 }]);
+    const reportOnly = await run(feature, { ...both3, ...round(numbers({}, [gsm8k(), second]), { all_pass: false, failures: [{ gate: 'ACC-3', blocking: false }] }) });
     check(reportOnly.result.status === 'ready_for_review', `a miss the round lists as one that does not block is its own report: ${ended(reportOnly)}`);
-    const unlisted = await run(feature, round(numbers({}, [gsm8k(), second])));
+    const unlisted = await run(feature, { ...both3, ...round(numbers({}, [gsm8k(), second])) });
     check(refusedFor(unlisted, "simple_qa: 0.3 is more than a point below the baseline's 0.36, and ACC-3 is not among the round's failures that do not block"),
       `the same miss, not listed, is not accepted: ${ended(unlisted)}, ${why(unlisted)}`);
+    // A failure of another gate that does not block (a G4 the baseline shares) excuses no set, whatever the set says
+    // its gate is: the loss is refused with the stability failure listed.
+    const borrowed = await run(feature, round(numbers({}, [gsm8k({ fix: 0.84, gate: 'G4' })]), { all_pass: false, failures: [{ gate: 'G4', blocking: false }] }));
+    check(refusedFor(borrowed, 'gsm8k: it is reported under G4, which is no gate of accuracy'),
+      `a stability failure that does not block excuses no loss of accuracy: ${ended(borrowed)}, ${why(borrowed)}`);
+    // Every set Setup measured the baseline on is in the round's numbers: one that is left out was not compared.
+    const dropped = await run(feature, { ...both3, ...round(numbers()) });
+    check(refusedFor(dropped, 'Setup measured the baseline on simple_qa as well, and the round gives no numbers of it'),
+      `a set of the baseline that the round leaves out is not accepted: ${ended(dropped)}, ${why(dropped)}`);
+    // A baseline that comes back from Setup without its commit or its accuracy leaves a round nothing to be held
+    // to: the run stops at Setup, before the work.
+    for (const [what, lacking, said] of [['its commit', { base_commit: '' }, 'the commit it is on (base_commit)'],
+      ['its accuracy', { baseline_accuracy: [] }, 'its accuracy, set by set (baseline_accuracy)'],
+      ['a score that is a percentage', { baseline_accuracy: [{ set: 'gsm8k', score: 89.5, questions: 1319 }] }, 'its accuracy, set by set (baseline_accuracy)']]) {
+      const bare = await run(feature, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), ...lacking }) });
+      check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Setup' && !bare.keys.includes('implementer:implement')
+        && bare.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.startsWith(`Setup measured a baseline and did not return ${said}`)),
+        `a feature's Setup without ${what} of the baseline stops the run there: ${ended(bare)}`);
+    }
     // A round that fails is not held to its numbers: its failure is investigated, as before.
     const failing = await run(feature, { 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, left_running: '', g2: undefined,
       failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 against 0.89' }] } : DEFAULTS['verify_engineer:verify']()) });
@@ -497,7 +535,7 @@ const scenarios = [
       `a failing round goes to the investigator whatever its numbers: ${ended(failing)}`);
     // A blocking failure is a failure whatever all_pass says: an answer that gives both, with a five-point loss, is
     // not accepted over the gate it reports as failed, nor stopped as a pass the numbers refuse. It is investigated.
-    const lost = numbers({}, [gsm8k({ fix: 0.84, base: 0.89 })]);
+    const lost = numbers({}, [gsm8k({ fix: 0.84 })]);
     const both = await run(feature, { 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: true, left_running: '', g2: lost,
       gates: { G2: 'fail 0.84 vs 0.89 (1319 q)' }, failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 against 0.89' }] }
       : DEFAULTS['verify_engineer:verify']()) });
@@ -512,6 +550,12 @@ const scenarios = [
       failures: [{ gate: 'G2', blocking: true, evidence: '32 requests rejected' }] } : DEFAULTS['verify_engineer:verify']()) });
     check(unanswered.result.status === 'ready_for_review' && unanswered.keys.includes('investigator:investigate'),
       `a set without a score is reported, and its failure is investigated: ${ended(unanswered)}, ${why(unanswered)}`);
+    // So it is where the harness ended without its report, and there is no count of answers to give either.
+    const noReport = await run(feature, { 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, left_running: '',
+      g2: { commit: 'c_WP2', sets: [{ set: 'gsm8k' }] }, gates: { G2: 'fail: evalscope ended without a report' },
+      failures: [{ gate: 'G2', blocking: true, evidence: 'no report under RESULT_ROOT' }] } : DEFAULTS['verify_engineer:verify']()) });
+    check(noReport.result.status === 'ready_for_review' && noReport.keys.includes('investigator:investigate'),
+      `a set without its counts is reported, and its failure is investigated: ${ended(noReport)}, ${why(noReport)}`);
 
     // A fix is held to them where gsm8k is put to it: when it changes code the server runs, on a model that answers
     // text questions. The commit is the fix's.
@@ -525,7 +569,9 @@ const scenarios = [
     // A fix's base can be the server that does not start. It is then compared with the last commit that served the
     // configuration, which is not the task's base, or has no baseline at all: the answer says why, and the score
     // is reported and not judged.
-    const served = await run(issue, round(numbers({ commit: 'c_WP1', base_commit: 'aaa1111' })));
+    // Its baseline is the round's own measurement: Setup measures none for a fix, and what a Setup returns of one is
+    // not what the fix is held to.
+    const served = await run(issue, round(numbers({ commit: 'c_WP1', base_commit: 'aaa1111' }, [gsm8k({ base: 0.9 })])));
     const alone = await run(issue, round(numbers({ commit: 'c_WP1', base_commit: '', no_baseline: unserved }, [gsm8k(noBase)])));
     check(served.result.status === 'ready_for_review' && alone.result.status === 'ready_for_review',
       `a fix compared with the last commit that served, or with no baseline and the reason: ${ended(served)}, ${ended(alone)}`);
@@ -957,14 +1003,14 @@ const scenarios = [
   ['setup: the GPUs Setup pins reach every later role; the user\'s GPUs win', async () => {
     const picked = await run({ mode: 'feature', task: 't' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', worktree: `${RUN}/wt`, gpu_ids: '4,5',
-        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+        ...BASELINE, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     const later = picked.calls.filter((c) => !['director:setup', 'intake:define'].includes(c.key));
     check(later.length > 5 && later.every((c) => c.ins.gpu_ids === '4,5'), 'every role after Setup sees gpu_ids=4,5');
     check(later[0].prompt.includes('HIP_VISIBLE_DEVICES'), 'roles are told to export HIP_VISIBLE_DEVICES');
     const given = await run({ mode: 'feature', task: 't', gpu_ids: '2' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', gpu_ids: '6,7',
-        accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+        ...BASELINE, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     check(String(given.calls.find((c) => c.key === 'verify_engineer:verify').ins.gpu_ids) === '2', 'the user\'s GPUs win');
     const none = await run({ mode: 'issue', task: 'i' }, {
@@ -4631,6 +4677,17 @@ const scenarios = [
     check(stale.result.status === 'blocked' && stale.result.stopped_at === 'Verify'
       && stale.result.phases.some((p) => p.phase === 'Verify' && /its scores are of c_\S+, and the commit under verification is revert_of_/.test(p.summary)),
       `scores of the last verified package are not those of the branch after a revert: ${stale.result.status} at ${stale.result.stopped_at}`);
+    // A revert that leaves the worktree clean and names no commit leaves the branch somewhere the run does not know:
+    // the round after it cannot be placed, whatever commit its scores name, and is not accepted.
+    const nowhere = await run({ mode: 'feature', task: 't', ...CMD, gpu_ids: '3' }, {
+      ...withKernelHandoff('decode hot path'),
+      'verify_engineer:verify': (ins, n) => (n <= 2 ? { all_pass: false, failures: [{ gate: 'G3' }] } : { all_pass: true, failures: [], g2: soundG2(ins) }),
+      'investigator:investigate': () => ({ verdict: 'kernel_regression', kernel_handoffs: ['K-WP1'], counterexample: 'G3 needle at 128k' }),
+      'implementer:rollback': () => ({ wp: 'x', reset_to: '', clean: true }),
+    });
+    check(nowhere.result.status === 'blocked' && nowhere.result.stopped_at === 'Verify'
+      && nowhere.result.phases.some((p) => p.phase === 'Verify' && p.summary.includes('the run does not know which commit the task branch is at')),
+      `a round after a rollback that named no commit is not accepted: ${nowhere.result.status} at ${nowhere.result.stopped_at}`);
   }],
   ['kernel: a kernel_regression that names no integrated kernel stops', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
@@ -4746,7 +4803,7 @@ const scenarios = [
     const rendered = { server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
       accuracy_script: `${RUN}/scripts/accuracy.sh` };
     const setup = (out) => ({ 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task',
-      worktree: `${RUN}/wt`, gpu_ids: '0,1', ...out }) });
+      worktree: `${RUN}/wt`, gpu_ids: '0,1', ...BASELINE, ...out }) });
     const whole = '{"isl":8000,"osl":1000,"conc":32}';
     const took = await run({ mode: 'feature', task: 't', workload: whole, server_script: 'template', client_script: 'template',
       harness: { CONTEXT_LENGTH: 8192 } }, setup(rendered));
@@ -4806,7 +4863,7 @@ const scenarios = [
       `both questions offer the templates, the client's with no caveat: ${JSON.stringify(none.result.questions)}`);
     const r = await run({ mode: 'perf', task: 'p', server_script: 'template', client_script: 'template' }, {
       'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', branch: 'inferpilot/task', worktree: `${RUN}/wt`,
-        gpu_ids: '0,1', server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
+        gpu_ids: '0,1', ...BASELINE, server_script: `${RUN}/scripts/server.sh`, client_script: `${RUN}/scripts/perf.sh`,
         accuracy_script: `${RUN}/scripts/accuracy.sh` }),
     });
     const perf = r.calls.find((c) => c.key === 'perf_engineer:perf_eval');

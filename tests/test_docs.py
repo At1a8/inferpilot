@@ -991,10 +991,11 @@ class G2NumbersTest(unittest.TestCase):
         self.assertIn("g2: S({ commit: str, base_commit: str, no_baseline: str, sets: arr(G2_SET) }, ['commit', 'sets']),", body,
                       "the Verify answer has no place for G2's numbers")
         for line, broken in (
-                # the change's score is asked of an accepted round, not of every answer: a set with a question unanswered has none
+                # the scores and the counts are asked of an accepted round, not of every answer: a set with a question unanswered
+                # has no score, and a harness that ended without its report no count
                 ("const G2_SET = S({ set: str, gate: str, fix: num, base: num, questions: num, answered: num, base_answered: num, budget: num },\n"
-                 "  ['set', 'questions', 'answered']);",
-                 "a set's numbers lack the questions or the answers, or a round with an unanswered set cannot report its failure"),
+                 "  ['set']);", "a round whose set has no score or no count cannot report its failure"),
+                ("if (!s || !(Number.isInteger(asked) && asked > 0)) return", "an accepted round need not say how many questions a set has"),
                 ("const G2_POINT = 0.01;", "the bound is no longer a point"),
                 ("if (!g2 || typeof g2 !== 'object' || !Array.isArray(g2.sets) || !g2.sets.length) return 'it gives no scores (g2)';",
                  "a round without numbers is accepted on its words"),
@@ -1004,11 +1005,33 @@ class G2NumbersTest(unittest.TestCase):
                  "the run does not follow the branch through a package's commit and a rollback"),
                 ("const r = await callRole(role, sub, ins, schema, label, opts);\n  if (role === 'implementer') branchMoved(sub, r);",
                  "an answer of the implementer's does not move the branch's tip"),
-                ("if (branchTip && !sameCommit(commit, branchTip)) return `its scores are of ${commit}, and the commit under verification is ${branchTip}`;",
+                ("if (!branchTip) return `the run does not know which commit the task branch is at",
+                 "a round is accepted where a rollback named no commit, on whatever commit its scores name"),
+                ("if (!sameCommit(commit, branchTip)) return `its scores are of ${commit}, and the commit under verification is ${branchTip}`;",
                  "another commit's scores are taken for the change's"),
                 # a feature's baseline is the one Setup measured; only a fix may have another, or none
-                ("if (!fix && baseCommit && setupBase && !sameCommit(baseCommit, setupBase)) {",
+                ("if (!fix && !setupBase) return", "a feature is accepted where Setup named no commit of the baseline"),
+                ("if (!fix && baseCommit && !sameCommit(baseCommit, setupBase)) {",
                  "a feature is compared with a baseline Setup did not measure, or a fix cannot be compared with the last commit that served"),
+                # Setup's record of the baseline: every set it measured, each with the score it returned
+                ("baseline_accuracy: arr(S({ set: str, score: num, questions: num }, ['set', 'score'])),",
+                 "Setup cannot return the accuracy of the baseline"),
+                ("const measured = fix ? [] : (C.baseline_accuracy || []);", "a fix is held to a baseline Setup does not measure for it, or a feature to none"),
+                ("if (!fix && !measured.length) return", "a feature is accepted where Setup returned no accuracy of the baseline"),
+                ("const missing = measured.map((b) => b.set).filter((set) => !names.includes(set));\n  if (missing.length) return",
+                 "a set Setup measured the baseline on is left out of the round's numbers"),
+                ("if (!fix && !setup) return `${name}: Setup measured no baseline of it, and the round gives one (${s.base})`;",
+                 "a baseline Setup did not measure is compared with"),
+                ("const G2_SAME = 0.0005;", "a baseline score that is points off counts as Setup's"),
+                ("if (setup && Math.abs(s.base - setup.score) > G2_SAME) return", "the baseline's score need not be the one Setup measured"),
+                ("if (setup && setup.questions && setup.questions !== asked) return", "a set may be smaller than it was for the baseline"),
+                # a baseline without its commit or its accuracy stops a feature at Setup, before the work
+                ("? [!C.base_commit && 'the commit it is on (base_commit)', !C.baseline_accuracy.length && 'its accuracy, set by set (baseline_accuracy)']"
+                 ".filter(Boolean) : [];", "a feature goes on from a Setup that leaves G2 nothing to hold the change to"),
+                # a set is G2's or an item of the acceptance matrix's, never another gate of the run
+                ("const NOT_ACCURACY = /^(G[013-9]|G\\d\\d+|issue_repro|failing_test|accuracy_claim|(COR|PRF)-.*)$/i;",
+                 "a set can be reported under a gate that says nothing of accuracy"),
+                ("if (NOT_ACCURACY.test(gate)) return", "a stability failure that does not block excuses a loss of accuracy"),
                 ("if (!fix && noBase) return", "a feature is accepted without the baseline Setup measured"),
                 ("if (!fix) return `${name}: it gives no score of the baseline, which Setup measured`;", "a feature's set is accepted without a baseline score"),
                 ("if (s.base_answered != null) {", "a baseline that was cut short passes for a fix without one"),
@@ -1074,8 +1097,27 @@ class G2NumbersTest(unittest.TestCase):
                 ("knowledge/validation_doctrine.md", "**G2 is accepted on its numbers.**"),
                 ("knowledge/validation_doctrine.md", "can stand over a set that was cut short, over another commit's scores, or over a percentage"),
                 ("knowledge/validation_doctrine.md", "So the verify engineer returns G2's numbers apart from its words (`g2`)"),
-                ("knowledge/validation_doctrine.md", "The commit is the one the task branch is at, and not the baseline's"),
-                ("knowledge/validation_doctrine.md", "The baseline of a feature or a performance change is the one Setup measured, on the task's base"),
+                ("knowledge/validation_doctrine.md", "The commit is the one the task branch is at, which the run follows through every package and "
+                                                     "rollback, and not the baseline's"),
+                ("knowledge/validation_doctrine.md", "The baseline of a feature or a performance change is the one Setup measured: on the task's base, "
+                                                     "every set Setup measured, each with the score Setup returned"),
+                ("knowledge/validation_doctrine.md", "A Setup that returns neither stops such a task before the work"),
+                ("knowledge/validation_doctrine.md", "G2, or an item of the acceptance matrix, never another gate of the run, whose failure says nothing "
+                                                     "of accuracy"),
+                ("roles/director.md", "Return the accuracy as well (`baseline_accuracy`: each set with its score as a fraction of 1, 0.901 and "
+                                      "never 90.1, and the number of questions it has), measured now or restored"),
+                ("roles/director.md", "InferPilot holds what a Verify round says of the baseline to it, set by set, and stops a feature or a perf "
+                                      "task here whose baseline comes back without it or without `base_commit`"),
+                ("roles/director.md", 'A feature or a perf task adds `"baseline_accuracy": [{"set": "gsm8k", "score": 0.901, "questions": 1319}]`, '
+                                      "one entry for each set the baseline was measured on (step 4)"),
+                ("roles/verify_engineer.md", "For a feature or a performance change the baseline's numbers are Setup's, as `RUN_DIR/baseline.json` has "
+                                             "them: give every set it has, each with the score recorded there, and measure no baseline of your "
+                                             "own in its place"),
+                ("roles/verify_engineer.md", "InferPilot was given the same record, and holds `base` to it"),
+                ("roles/verify_engineer.md", "Where the harness ended without its report there is no count either: give the set by its name, and "
+                                             "report the failure"),
+                ("roles/verify_engineer.md", "It is never another gate of the run's (G3, G4, the fix's own gates): a stability failure that does not "
+                                             "block excuses no loss of accuracy"),
                 ("knowledge/validation_doctrine.md", "With InferPilot's harness gsm8k is among the sets, and every set has all its questions: a part of a "
                                                      "set is a smoke test"),
                 ("knowledge/validation_doctrine.md", "And no set is further below its baseline than its budget, unless the round lists that set's gate "

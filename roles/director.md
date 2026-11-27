@@ -228,7 +228,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      when repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
-     cache keeps it.
+     cache keeps it. Return the accuracy as well (`baseline_accuracy`: each set with its score as a
+     fraction of 1, 0.901 and never 90.1, and the number of questions it has), measured now or
+     restored: InferPilot holds what a Verify round says of the baseline to it, set by set, and stops
+     a feature or a perf task here whose baseline comes back without it or without `base_commit`.
    - `perf`, and every feature: the run's `client_script`, with the task's `workload` when it gives
      one, is the fixed benchmark. Record them in `RUN_DIR/run.json` as given and, for a client without
      a `workload`, the scenarios it runs (its lengths and concurrencies, as its script and the
@@ -279,7 +282,9 @@ Return:
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
-An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4).
+An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4). A feature or a
+perf task adds `"baseline_accuracy": [{"set": "gsm8k", "score": 0.901, "questions": 1319}]`, one entry
+for each set the baseline was measured on (step 4).
 A task on the newest image of its variant adds `"import_rejected"` where the worktree rejects a
 package of that image (step 3), whatever its mode: the package and its version, and the import
 that fails.

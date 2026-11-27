@@ -17,11 +17,15 @@ export const soundG2 = (ins, head) => ({ commit: head || (((ins && ins.verified_
 export const headAfter = (key, ans, head) => (key === 'implementer:rollback' ? String((ans && ans.reset_to) || '')
   : key === 'implementer:implement' && ans && ans.commit ? String(ans.commit) : head);
 
+// What Setup returns of the baseline it measured for a feature or a perf task: the commit it is on, and its
+// accuracy set by set, which G2 holds a round's numbers to. soundG2 gives the same baseline.
+export const BASELINE = { base_commit: 'base0f1e2d3c', baseline_accuracy: [{ set: 'gsm8k', score: 0.895, questions: 1319 }] };
+
 // Answers every role gives unless a scenario overrides them.
 export const DEFAULTS = {
   'intake:define': (ins) => ({ status: 'ready', task_def: ins.given || {}, provenance: {}, assumptions: [], questions: [], summary: 'as given' }),
   'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
-    base_commit: 'base0f1e2d3c',
+    ...BASELINE,
     server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': (ins) => ({ report_path: `${RUN}/run_report.md`, summary: 'done',
