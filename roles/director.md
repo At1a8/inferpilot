@@ -235,7 +235,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      leave the field out for such a model: without it the run takes the model for one that
      answers text questions, and finds out at Verify, after the fix is written. Say what you
      find also where the task gives `text_model`: that is the user's word, which stands in
-     yours until Verify launches the model, and the run record says where the two differ.
+     yours until Verify launches the model, and the run record says where the two differ. It is
+     among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the
+     rest, so that a retry of the task is matched on it too, and judge the model as if it were
+     not there.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 

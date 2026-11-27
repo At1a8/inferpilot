@@ -1484,6 +1484,9 @@ function askForFix(at) {
 // the run (nothing was created in either case).
 async function setup(requireBaseline) {
   enter('Setup');
+  // The caller's word on the model goes to Setup with the rest of the task: the run's record of its inputs has
+  // it, and a retry is matched on it. Setup still says what it finds itself (below).
+  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null) C.text_model = MODEL_WORD;
   const s = await call('director', 'setup', inputs({ require_baseline: requireBaseline, image: IMAGE_WANTED,
     image_ok: IMAGE_OK }), SETUP);
   if (s && s.lock === 'skipped') return { ask: s.image || {} };
@@ -1510,6 +1513,7 @@ async function setup(requireBaseline) {
   const setupSays = s.text_model !== false;
   if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;
   wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;
+  if (wordAgainstSetup) C.text_model_unconfirmed = true; // for the verify engineer, until a round says what the server showed
   if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null && MODEL_WORD !== setupSays) {
     note('Setup', 'text_model', `the task says that the model ${MODEL_WORD ? 'answers' : 'answers no'} text questions (text_model), and Setup `
       + `took it for one that ${setupSays ? 'answers them' : 'answers none'}: the task's word stands until Verify launches the model`);
@@ -1850,6 +1854,8 @@ async function verifyLoop(extraGates, existing) {
     // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
     // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
+    // Whoever launched the model has said what it is: the user's word on it is confirmed, or corrected (below).
+    if (typeof v.text_model === 'boolean') delete C.text_model_unconfirmed;
     // Setup says what the model is, and no fix for one that answers no text questions starts without the task's
     // output comparison (outputsLacking). The verify engineer, who has the server, has the last word either way,
     // for the later rounds and the report; a round that does not say leaves what is known. A round that finds
@@ -1894,31 +1900,20 @@ async function verifyLoop(extraGates, existing) {
       return { ok: false, reason: why };
     }
     // The user's word made the model one that answers text questions where Setup took it for one that answers
-    // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. A round is accepted
-    // there only with the G2 that bears the word out: gsm8k was put to the model, and the round gives its scores
-    // (verify_engineer.md). The fix's and the baseline's for a comparison ("pass 0.893 vs 0.895 (1319 q)"), or the
-    // fix's alone where it has no baseline, in the form the role documents: the score first, then the count of
-    // questions or a comma ("0.893 (1319 q), no baseline: ..."). A score stands alone: a number with a decimal
-    // point or a per cent sign that is no part of a longer one, so a version (v0.5.23) and a duration with its
-    // unit (12.5 min) are none, wherever they stand. A word without a score is no result either: not a bare
-    // "pass", not "no baseline: gsm8k could not start". And a comparison that failed is the
-    // round's failure to list: it counts only where the round lists it as one that does not block, a known issue
-    // of the baseline. Listed as blocking, the round is not accepted in the first place; not listed at all, the
-    // round contradicts itself. Not on a G2 the round left out or did not run either: the fix would have neither
-    // gsm8k nor a comparison behind it.
-    const SCORE = String.raw`(?<![\w.])(?:\d*\.\d+|\d+(?:\.\d+)?\s*%)(?!\w|\.\d)`;
-    const versus = new RegExp(`^(pass|fail)\\b[^;]*?${SCORE}\\s+vs\\.?\\s+${SCORE}`, 'i').exec(compared);
-    const alone = new RegExp(`^\\s*${SCORE}\\s*[(,][^;]*\\bno baseline\\b`, 'i').test(compared);
-    const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);
-    const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));
+    // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. Whoever launches
+    // the model says which it is: the verify engineer is told that the word is not confirmed yet
+    // (text_model_unconfirmed), and a round is accepted there only once a round's answer has said text_model, as
+    // the server showed it, and with a G2 that ran. Said false, the task lacks its output comparison (above).
+    // What G2's words say beyond that is the verify engineer's report, as for any fix: the run reads no scores
+    // out of prose, which cannot show that a measurement was complete, or the fix's own.
+    const ranG2 = !!compared && !/^(not[ _-]?run|skip)/i.test(compared);
     if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))
-      && !scored) {
+      && (C.text_model_unconfirmed || !ranG2)) {
       await refused(); // a pass that is refused is asked what it left running, like the others (above)
       const why = 'the task says that the model answers text questions (text_model) where Setup took it for one that answers none, and the '
-        + `round was accepted without gsm8k's result on it: G2 is ${compared ? `"${compared}"` : 'not reported'}`
-        + `${versus ? ', a comparison that failed and that the round does not list among its failures' : ''}. The word stands only with `
-        + "gsm8k's scores, the fix's and the baseline's, or the fix's alone where it has no baseline; where the model answers none after all, "
-        + 'name its output comparison (output_script)';
+        + `round was accepted ${C.text_model_unconfirmed ? 'without saying which the server showed (text_model)' : "without gsm8k's result on it"}`
+        + `: G2 is ${compared ? `"${compared}"` : 'not reported'}. The word stands once the verify engineer, who launches the model, has `
+        + 'said the same and put gsm8k to it; where the model answers none after all, name its output comparison (output_script)';
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }

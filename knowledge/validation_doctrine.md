@@ -85,9 +85,10 @@ Notes per gate:
   else runs. Setup judges by the model's files and the command that serves it, and can be wrong:
   the question comes with a second one, whether the model answers text questions after all, and
   the user's word (`text_model`) stands in Setup's place, either way. The verify engineer, who
-  launches the model, has the last word, and a round on the user's word that the model answers
-  text questions is accepted only with gsm8k's result on it: left out, the fix would have neither
-  gsm8k nor a comparison behind it. The comparison runs on the condition gsm8k runs on for any
+  launches the model, has the last word, and has to say it: a round on the user's word that the
+  model answers text questions is accepted only once a round has said the same of the server, and
+  with gsm8k's result on it. Left out, the fix would have neither gsm8k nor a comparison behind
+  it. The comparison runs on the condition gsm8k runs on for any
   other fix, by the fix's files and after the reproduction or the failing test, and against the same
   baseline: the base, or the last commit that served the configuration where the base cannot. Where
   the failure being fixed is in these very outputs (the base's images are the black ones), the base

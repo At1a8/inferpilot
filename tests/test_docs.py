@@ -1763,19 +1763,20 @@ class ModelWordTest(unittest.TestCase):
                  "an Intake that takes the model for the wrong kind stops the run before Setup hears the user's word"),
                 # on the word alone no comparison was asked for: the round is accepted only with gsm8k's result
                 ("  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;", "the run does not know that the word stands against Setup's"),
-                # a result has its scores, and a comparison that failed is the round's failure to list
-                ("    const SCORE = String.raw`(?<![\\w.])(?:\\d*\\.\\d+|\\d+(?:\\.\\d+)?\\s*%)(?!\\w|\\.\\d)`;",
-                 "a digit in a word, or a part of a version, counts as a score"),
-                ("    const versus = new RegExp(`^(pass|fail)\\\\b[^;]*?${SCORE}\\\\s+vs\\\\.?\\\\s+${SCORE}`, 'i').exec(compared);",
-                 "a verdict without both scores counts as gsm8k's result"),
-                ("    const alone = new RegExp(`^\\\\s*${SCORE}\\\\s*[(,][^;]*\\\\bno baseline\\\\b`, 'i').test(compared);",
-                 "a G2 that did not run, or a number that is no leading score, counts as the fix's score without a baseline"),
-                ("    const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);\n"
-                 "    const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));",
-                 "a comparison that failed is accepted where the round lists no failure for it"),
+                # whoever launches the model says which it is: the verify engineer is told while the word is unconfirmed
+                ("  if (wordAgainstSetup) C.text_model_unconfirmed = true;", "the verify engineer is not told that the user's word stands "
+                                                                              "against Setup's"),
+                ("    if (typeof v.text_model === 'boolean') delete C.text_model_unconfirmed;", "the verify engineer's word on the model settles "
+                                                                                                 "nothing"),
+                # a round is accepted only once one has said it, and with a G2 that ran; no scores are read out of prose
+                ("    const ranG2 = !!compared && !/^(not[ _-]?run|skip)/i.test(compared);", "a G2 that did not run counts as gsm8k's result"),
                 ("    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))\n"
-                 "      && !scored) {\n      await refused();", "a fix is accepted on the user's word with neither gsm8k nor a comparison behind "
-                                                                "it, or the round refused for it is not asked what it left running"),
+                 "      && (C.text_model_unconfirmed || !ranG2)) {\n      await refused();",
+                 "a fix is accepted on the user's word alone, with neither gsm8k nor a comparison behind it, or the round refused for it is "
+                 "not asked what it left running"),
+                # Setup is given the caller's word with the task, for its record of the run's inputs
+                ("  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null) C.text_model = MODEL_WORD;\n  const s = await call('director', 'setup',",
+                 "Setup does not get the caller's word, and its record of the task's inputs lacks it"),
                 ("R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];", "the question for the script does not offer the correction"),
                 ("if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());",
                  "a run whose stop before the fix was lifted is not offered the correction"),
@@ -1805,18 +1806,21 @@ class ModelWordTest(unittest.TestCase):
                 ("roles/intake.md", "InferPilot reads it only where the caller gave it, and takes none from the definition you return"),
                 ("roles/intake.md", "With `text_model: true` in `given` or `answers`, ask for no `output_script`, whatever you make of the "
                                     "model's files"),
-                ("roles/verify_engineer.md", "InferPilot accepts a round there only with gsm8k's scores in `gates`. A `pass` with both, the fix's "
-                                             "and the baseline's (`pass 0.893 vs 0.895 (1319 q)`), or the fix's score first with `no baseline` "
-                                             "after it, as written below (`0.893 (1319 q), no baseline: ...`)"),
-                ("roles/verify_engineer.md", "A `fail` with both scores counts only where `failures` lists G2 as one that does not block"),
-                ("roles/verify_engineer.md", "A verdict without its scores is no result"),
-                ("roles/verify_engineer.md", "Never leave G2 out or report it `not run` for a fix that changes code the server runs"),
+                ("roles/verify_engineer.md", "You are told so with `text_model_unconfirmed`: nobody who launched the model has said yet which "
+                                             "it is"),
+                ("roles/verify_engineer.md", "say `text_model` in your answer as the server showed it, `true` or `false`"),
+                ("roles/verify_engineer.md", "InferPilot accepts no round there until one has said it, and none whose G2 is left out or `not "
+                                             "run` for a fix that changes code the server runs"),
+                ("roles/verify_engineer.md", "Once you have said `true`, the fix is one for a text model like any other"),
                 ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
-                                                 "only with gsm8k's result on the model"),
+                                                 "only once the verify engineer has said the same of the model on its server, and with gsm8k's "
+                                                 "result"),
+                ("roles/director.md", "It is among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the rest, so "
+                                      "that a retry of the task is matched on it too, and judge the model as if it were not there"),
                 ("templates/task_definition.md", "The word is `true` or `false`, as a boolean or as that word; anything else is asked about"),
                 ("templates/task_definition.md", "what the Intake reads into a request, or a scan writes for a task it offers, is not taken for it"),
-                ("knowledge/validation_doctrine.md", "a round on the user's word that the model answers text questions is accepted only with "
-                                                     "gsm8k's result on it"),
+                ("knowledge/validation_doctrine.md", "a round on the user's word that the model answers text questions is accepted only once "
+                                                     "a round has said the same of the server, and with gsm8k's result on it"),
                 ("roles/director.md", "Say what you find also where the task gives `text_model`"),
                 ("README.md", "`issue` and `ci`: your word on what the model is, where Setup's is wrong"),
                 ("README.zh-CN.md", "Setup 把模型判断错了时，由你来说它是哪一类")):

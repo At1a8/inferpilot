@@ -1731,8 +1731,10 @@ const scenarios = [
     check(q2.field === 'text_model' && /^Or does the model answer text questions after all\? Say true, and no script is needed/.test(q2.question)
       && /Setup took \/models\/m for one that answers no text questions/.test(q2.why) && /the verify engineer, who launches the model, has the last word/.test(q2.why)
       && eqList(q2.options, ['true']), `the user is offered the word that corrects Setup: ${JSON.stringify(q2)}`);
-    // A round on the user's word against Setup's gives gsm8k's scores (below): these runs' rounds do.
-    const gsm8kRan = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' } }) };
+    // A round on the user's word against Setup's says what the server showed and gives gsm8k's result (below): these
+    // runs' rounds do.
+    const gsm8kRan = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: true,
+      gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' } }) };
     for (const [how, word] of [['an answer', { answers: { text_model: 'true' } }], ['an answer given as a boolean', { answers: { text_model: true } }],
       ['a field of the task', { text_model: true }], ['a field given as a word', { text_model: ' True ' }]]) {
       const corrected = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, ...word }, { ...noText, ...gsm8kRan });
@@ -1783,35 +1785,26 @@ const scenarios = [
     check(wrongWord.result.status === 'blocked' && wrongWord.result.stopped_at === 'Verify'
       && /Name the script \(output_script\)/.test(wrongWord.result.next.say),
       `a word the server contradicts does not get the fix past Verify: ${wrongWord.result.status} at ${wrongWord.result.stopped_at}`);
-    // On the user's word alone the run asked for no output comparison. A round is accepted there only with gsm8k's
-    // result on the model, which bears the word out: not with G2 left out or not run, which would leave the fix
-    // with neither gsm8k nor a comparison behind it.
-    const onWord = (gates, more = {}) => run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
-      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass', ...gates }, ...more }) });
-    const known = { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-3' }] };
-    for (const [said, gates, more] of [['leaves G2 out', {}, {}], ['says G2 did not run', { G2: 'not run: the fix changes one line' }, {}],
-      ['says it skipped G2, with a number', { G2: 'skipped: 1319 questions would take too long, no baseline' }, {}],
-      // a result has its scores: a word with a digit in it is none, nor is a verdict alone
-      ['names no score where gsm8k did not start', { G2: 'no baseline: gsm8k could not start' }, {}],
-      ['names a version where gsm8k did not start', { G2: 'no baseline: gsm8k could not start on the v0.5.23 image' }, {}],
-      // the score comes first and stands alone: a version or a duration before "no baseline" is none
-      ['names a version before the words', { G2: 'gsm8k could not start on the v0.5.23 image, no baseline' }, {}],
-      ['names a duration before the words', { G2: 'after 12.5 min gsm8k had not started, no baseline' }, {}],
-      ['begins with a duration', { G2: '12.5 min in, gsm8k had not started: no baseline' }, {}],
-      ['begins with a version', { G2: '0.5.23, the image, did not start gsm8k: no baseline' }, {}],
-      ['compares two versions', { G2: 'pass 0.5.23 vs 0.5.24 (the images)' }, {}],
-      ['gives a number that is not first', { G2: 'gsm8k stopped at a loss of 0.5, no baseline' }, {}],
-      ['says pass and gives no score', { G2: 'pass' }, {}], ['says pass with one score', { G2: 'pass 0.893 (1319 q)' }, {}],
-      ['counts the questions and gives no score', { G2: '1319 questions ran, no baseline: the base does not start' }, {}],
-      ['says fail and gives no score, as a known issue', { G2: 'fail (KI-3)' }, known],
-      // a comparison that failed is the round's failure to list: accepted without it, a regression would pass unseen
-      ['reports a comparison that failed and lists no failure', { G2: 'fail 0.701 vs 0.901 (1319 q)' }, {}]]) {
-      const unscored = await onWord(gates, more);
-      const whyNot = (unscored.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
-      check(unscored.result.status === 'blocked' && unscored.result.stopped_at === 'Verify' && !unscored.keys.includes('perf_engineer:perf_eval')
+    // On the user's word alone the run asked for no output comparison. Whoever launches the model says which it
+    // is: the verify engineer is told that the word is not confirmed, and a round is accepted only once one has
+    // said text_model, as the server showed it, and with a G2 that ran. Left out, the fix would have neither
+    // gsm8k nor a comparison behind it.
+    const onWord = (answer) => run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, ...answer }) });
+    const scores = { issue_repro: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' };
+    for (const [said, answer, why] of [
+      ['gives gsm8k\'s scores and does not say what the model is', { gates: scores }, /accepted without saying which the server showed \(text_model\): G2 is "pass 0\.893/],
+      ['says what the model is and leaves G2 out', { text_model: true, gates: { issue_repro: 'pass' } }, /accepted without gsm8k's result on it: G2 is not reported/],
+      ['says what the model is and that G2 did not run', { text_model: true, gates: { issue_repro: 'pass', G2: 'not run: the fix changes one line' } },
+        /accepted without gsm8k's result on it: G2 is "not run/],
+      ['says what the model is and that it skipped G2', { text_model: true, gates: { issue_repro: 'pass', G2: 'skipped: 1319 questions would take too long' } },
+        /accepted without gsm8k's result on it: G2 is "skipped/]]) {
+      const unsaid = await onWord(answer);
+      const whyNot = (unsaid.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(unsaid.result.status === 'blocked' && unsaid.result.stopped_at === 'Verify' && !unsaid.keys.includes('perf_engineer:perf_eval')
         && /the task says that the model answers text questions \(text_model\) where Setup took it for one that answers none/.test(whyNot)
-        && /accepted without gsm8k's result on it: G2 is ("|not reported)/.test(whyNot),
-        `on the user's word against Setup's, a round that ${said} is not accepted: ${unscored.result.status} at ${unscored.result.stopped_at}, ${whyNot}`);
+        && why.test(whyNot),
+        `on the user's word against Setup's, a round that ${said} is not accepted: ${unsaid.result.status} at ${unsaid.result.stopped_at}, ${whyNot}`);
     }
     // Such a round is refused like any other pass the run does not accept: one that does not say what it left
     // running is asked first, and no lead is confirmed on GPUs it may still hold.
@@ -1827,16 +1820,35 @@ const scenarios = [
       && (spWord.ins.confirm_skipped || []).some((x) => /Verify round 0 did not say whether what it started has stopped/.test(x)),
       `a round refused on the user's word is asked what it left running before a lead is confirmed: ${refusedOnWord.result.status} at ${
         refusedOnWord.result.stopped_at}, ${JSON.stringify(spWord && [spWord.ins.confirm_leads, spWord.ins.confirm_skipped])}`);
-    for (const [said, gates, more] of [['a pass against the baseline', { G2: 'pass 0.893 vs 0.895 (1319 q)' }, {}],
-      ['the score where the fix has no baseline', { G2: '0.893 (1319 q), no baseline: the base does not start on this configuration' }, {}],
-      ['scores given in per cent', { G2: 'pass 89.3% vs 89.5% (1319 q)' }, {}],
-      ['the score in per cent where the fix has no baseline', { G2: '89.3% (1319 q), no baseline: the base does not start on this configuration' }, {}],
-      ['the score and a comma', { G2: '0.893, no baseline: the base does not start on this configuration' }, {}],
-      ['a miss the baseline shares, listed as one that does not block', { G2: 'fail 0.851 vs 0.853 (1319 q), KI-3' }, known]]) {
-      const scoredRun = await onWord(gates, more);
-      check(scoredRun.result.status === 'ready_for_review', `with ${said} the word is borne out, and the round is judged as any other: ${
-        scoredRun.result.status} at ${scoredRun.result.stopped_at}`);
+    // Once the verify engineer has said the same of the model, the fix is one for a text model like any other: the
+    // run reads no scores out of G2's words, so a score of exactly 0 or 1, per cent, or a miss the baseline shares
+    // is judged as for any fix.
+    const known = { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-3' }] };
+    for (const [said, g2, more] of [['a pass against the baseline', 'pass 0.893 vs 0.895 (1319 q)', {}],
+      ['the score where the fix has no baseline', '0.893 (1319 q), no baseline: the base does not start on this configuration', {}],
+      ['whole-number scores', 'pass 1 vs 1 (1319 q)', {}], ['a score of 0 without a baseline', '0 (1319 q), no baseline: the base does not start', {}],
+      ['scores in per cent', 'pass 89.3% vs 89.5% (1319 q)', {}],
+      ['a miss the baseline shares, listed as one that does not block', 'fail 0.851 vs 0.853 (1319 q), KI-3', known]]) {
+      const confirmed = await onWord({ text_model: true, gates: { issue_repro: 'pass', G2: g2 }, ...more });
+      check(confirmed.result.status === 'ready_for_review', `said by the verify engineer too, with ${said} the round is judged as any other: ${
+        confirmed.result.status} at ${confirmed.result.stopped_at}`);
     }
+    // The verify engineer is told that the word is not confirmed, until a round has said what the server showed:
+    // said in a round that failed, it holds for the rounds after it.
+    const twoRounds = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, text_model: true, all_pass: false, gates: { issue_repro: 'fail' },
+          failures: [{ gate: 'issue_repro', blocking: true, evidence: 'fails 3 of 3' }] }
+        : { ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: scores }) });
+    const told = twoRounds.calls.filter((c) => c.key === 'verify_engineer:verify').map((c) => c.ins.text_model_unconfirmed === true);
+    check(twoRounds.result.status === 'ready_for_review' && eqList(told, [true, false]),
+      `the verify engineer is told while the word is unconfirmed, and no longer once a round has said it: ${twoRounds.result.status}, ${told}`);
+    // Setup is given the caller's word with the task, for its record of the run's inputs, and still says what it finds.
+    const setupOf = (r) => (r.calls.find((c) => c.key === 'director:setup') || { ins: {} }).ins;
+    const worded2 = await onWord({ text_model: true, gates: scores });
+    const unworded = await run({ mode: 'issue', task: 'i' });
+    check(setupOf(worded2).text_model === true && !('text_model' in setupOf(unworded)) && !('text_model_unconfirmed' in setupOf(worded2)),
+      `Setup is given the caller's word, and none where the caller gave none: ${JSON.stringify([setupOf(worded2).text_model, setupOf(unworded).text_model])}`);
     // A fix that changes no code the server runs has no G2 to give, whoever said what the model is.
     const noCode = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
       'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false,
@@ -1845,7 +1857,9 @@ const scenarios = [
     // The rule is for the word that stands against Setup's: where the two agree, a round is judged as before.
     const agreed = await run({ mode: 'issue', task: 'i', text_model: true }, {
       'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass' } }) });
-    check(agreed.result.status === 'ready_for_review', `a word Setup agrees with changes nothing: ${agreed.result.status}`);
+    const agreedVerify = (agreed.calls.find((c) => c.key === 'verify_engineer:verify') || { ins: {} }).ins;
+    check(agreed.result.status === 'ready_for_review' && !('text_model_unconfirmed' in agreedVerify),
+      `a word Setup agrees with changes nothing: ${agreed.result.status}`);
     // The word goes both ways: a model Setup took for one that answers text questions, and the user says answers none.
     const saysNone = await run({ mode: 'issue', task: 'i', text_model: false });
     check(saysNone.result.status === 'needs_input' && saysNone.result.stopped_at === 'Setup'
