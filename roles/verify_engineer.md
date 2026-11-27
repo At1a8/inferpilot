@@ -389,18 +389,30 @@ did not run are `not run`.
 feature or a performance change, and for a fix whenever it changes code the server runs on a model
 that answers text questions. A round that ran no gsm8k has none (a fix to tests, documentation or
 CI files alone; an output comparison). `commit` is the commit the change's arm ran, the task
-worktree's `HEAD`, and `base_commit` the baseline's. Each entry of `sets` is one data set, gsm8k
-first: `fix` and `base` are its scores as fractions of 1 (0.895, never 89.5), `questions` how many
-the set has, `answered` and `base_answered` how many of them each arm answered. A set reported
-under a gate of its own (an item of the acceptance matrix) names it in `gate`; without one the set
-is G2's. The change's scores are this round's, of this commit: an earlier round's, or another
-commit's, are not. The baseline's come from the ledger only for the commit they were measured on.
-Where there is no baseline (the base does not start on this configuration), leave `base` and
-`base_answered` out, and say why in `no_baseline`: the score is then reported, not judged.
+worktree's `HEAD` as you read it there, and `base_commit` the baseline's: for a feature or a
+performance change the task's base, on which Setup measured it; for a fix the base, or the last
+commit that served the configuration where the base cannot. Each entry of `sets` is one data set,
+gsm8k first: `fix` and `base` are its scores as fractions of 1 (0.895, never 89.5), `questions` how
+many the set has, `answered` and `base_answered` how many of them each arm answered. With
+InferPilot's `accuracy.sh`, gsm8k is always among the sets, and each set has all its questions
+(gsm8k 1319, gpqa_diamond 198, simple_qa 4326): a run with `LIMIT` is a smoke test, not a result. A
+set where an arm left a question unanswered has no score: leave that arm's score out, give how many
+it answered, and report the failure. A set reported under a gate of its own (an item of the
+acceptance matrix) names it in `gate`; without one the set is G2's. `budget` is how far below its
+baseline the task lets the set fall, as a fraction (0.02 for two points): give it only where the
+user named another budget than a point for that set (`goal`, the acceptance matrix), never one of
+your own, and the run record says which set was judged on which. The change's scores are this
+round's, of this commit: an earlier round's, or another commit's, are not. The baseline's come from
+the ledger only for the commit they were measured on. Only a fix can be without a baseline (its
+base does not start on this configuration, and the run knows no commit that served it): leave
+`base` and `base_answered` out of every set then, and say why in `no_baseline`: the score is then
+reported, not judged. A baseline that ran and left questions unanswered is not that case.
 InferPilot holds a round it would accept to these numbers: every question answered on both arms,
-the commit the one under verification and not the baseline's, and no set more than a point below
-its baseline unless that set's gate is among `failures`. A round that passes in words and gives no
-sound numbers is not accepted: the run stops there for a human.
+the commit the one the task branch is at and not the baseline's, and no set further below its
+baseline than its budget unless that set's gate is among `failures` as one that does not block. A
+round that passes in words and gives no sound numbers is not accepted: the run stops there for a
+human. A blocking failure stands whatever `all_pass` says: such a round is not accepted, and the
+failure is investigated.
 
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
 `false` only when every file the fix changes is a test, a documentation file or a CI file. It adds

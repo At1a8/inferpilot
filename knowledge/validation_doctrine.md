@@ -57,11 +57,17 @@ Notes per gate:
   engineer returns G2's numbers apart from its words (`g2`): for each set the score on the change
   and on the baseline as fractions, how many questions the set has and how many of them each arm
   answered, and the commits that were measured. The run holds a round it would accept to them,
-  wherever gsm8k is put to the change: every question answered on both arms, the commit the one
-  under verification and not the baseline's, and no set more than a point below its baseline unless
-  the round lists that set's gate among its failures. A round that gives none has shown nothing,
-  and the run stops there for a human. Where there is no baseline (the base does not start on this
-  configuration), the answer says why, and the score is reported and not judged.
+  wherever gsm8k is put to the change. The commit is the one the task branch is at, and not the
+  baseline's. The baseline of a feature or a performance change is the one Setup measured, on the
+  task's base. With InferPilot's harness gsm8k is among the sets, and every set has all its
+  questions: a part of a set is a smoke test. Every question is answered on both arms. And no set
+  is further below its baseline than its budget, unless the round lists that set's gate among its
+  failures that do not block. The budget is a point, or the one the user named for the set, which
+  the round gives and the run record repeats. A round that gives no numbers has shown nothing, and
+  the run stops there for a human. A blocking failure stands whatever the round says of the whole:
+  it is investigated, and the round is not accepted. Only a fix can be without a baseline (the base
+  does not start on this configuration, and no commit is known that served it): the answer says
+  why, and the score is reported and not judged.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
   report was about, when it changes anything but tests, documentation and CI files: gsm8k (1319) on
   the fix and on the base, each once, with the run's launch script and model, the fix at most 1 point

@@ -7,9 +7,15 @@ export const CMD = { kernel_backend: 'command', kernel_backend_command: 'my-kern
 export const WP = (id, extra) => ({ id, goal: `goal of ${id}`, kind: 'framework', files: ['x.py'], test: `test ${id}`, depends_on: [], ...(extra || {}) });
 
 // G2's numbers of a sound Verify round: gsm8k whole on both arms, the change within a point of the baseline,
-// measured on the last commit the round is given as verified.
-export const soundG2 = (ins) => ({ commit: (((ins && ins.verified_work_packages) || []).at(-1) || {}).commit || 'c_head', base_commit: 'base0f1e2d3c',
-  sets: [{ set: 'gsm8k', fix: 0.893, base: 0.895, questions: 1319, answered: 1319, base_answered: 1319 }] });
+// measured on the commit the task branch is at. That is `head` where the caller follows the implementer's
+// answers, as the dry run does (headAfter); else the last package the round is given as verified, which is the
+// same commit until something is rolled back.
+export const soundG2 = (ins, head) => ({ commit: head || (((ins && ins.verified_work_packages) || []).at(-1) || {}).commit || 'c_head',
+  base_commit: 'base0f1e2d3c', sets: [{ set: 'gsm8k', fix: 0.893, base: 0.895, questions: 1319, answered: 1319, base_answered: 1319 }] });
+// The commit the task branch is at after an answer, as a verify engineer would read it in the worktree: the
+// implementer's commit, or where its rollback left the branch (a revert is a commit of its own).
+export const headAfter = (key, ans, head) => (key === 'implementer:rollback' ? String((ans && ans.reset_to) || '')
+  : key === 'implementer:implement' && ans && ans.commit ? String(ans.commit) : head);
 
 // Answers every role gives unless a scenario overrides them.
 export const DEFAULTS = {
@@ -24,7 +30,8 @@ export const DEFAULTS = {
   'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1'), WP('WP2', { depends_on: ['WP1'] })], gate_ok: true, needs_human_review: false, perf_claim: '+20% output tok/s at equal HBM' }),
   'architect:perf_plan': () => ({ work_packages: [WP('WP1')], handoffs: [{ id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/op_spec.md` }], perf_claim: '-5% TPOT', gate_ok: true }),
   'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', files_changed: ['x.py'], kernel_handoff: null }),
-  'implementer:rollback': () => ({ wp: 'x', reset_to: 'base', clean: true }),
+  // a reset goes back to an earlier commit; a revert (of an integrated kernel) is a commit of its own on top
+  'implementer:rollback': (ins) => ({ wp: 'x', reset_to: ins && ins.revert ? `revert_of_${ins.revert}` : 'base', clean: true }),
   'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
   // the call after a check on the latest main that left no answer also says what it could not put back in the image
   'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? { in_use: '', env_changed: '' } : { in_use: '' }),
