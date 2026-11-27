@@ -132,7 +132,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
      update-ref -d refs/inferpilot/restored/<slug>`), so an earlier retry's commits are not taken again;
      `RUN_DIR/failed/branch.bundle` alone means every commit was rolled back, and still holds them: say
-     so.
+     so. A branch of that name can also be left by a run of the task on another definition, which
+     step 1 does not match: the run that asked a question this one answers (a model, a script,
+     `text_model`). It is an earlier attempt's all the same: refresh its bundle and rename it in the
+     same way, so that `checkout -b` never meets it and nothing of it is lost.
    - A resume skips the phases before it, so its branch is the one it stopped with. When it is not in
      `framework_dir` (a preempted node, a job past its time limit, a replaced container), restore it
      from the bundle after the fetch: `git -C <framework_dir> fetch RUN_DIR/branch.bundle
@@ -312,7 +315,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      *G2 for a model that answers no text questions*): a run that can reach a fix without one
      stops after Setup and asks for it. Never write that test in the task's place, and never
      leave the field out for such a model: without it the run takes the model for one that
-     answers text questions, and finds out at Verify, after the fix is written.
+     answers text questions, and finds out at Verify, after the fix is written. Say what you
+     find also where the task gives `text_model`: that is the user's word, which stands in
+     yours until Verify launches the model, and the run record says where the two differ. It is
+     among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the
+     rest, so that a retry of the task is matched on it too, and judge the model as if it were
+     not there.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 
@@ -608,8 +616,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `run_state`, `atten
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
   review, approve, post or hand over); stopped at PR, each of `leak_scan_findings` (where it is and what it
   shows) and of `pr_work_packages` (what the branch still lacks). For `fixed_on_main`, say on which code
-  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, or the check on the
-  latest main before the pull request. Where neither names it, say that the change that fixed it is
+  it fails and on which it passes, and name the fix (`fixed_by`), whichever phase named it: Classify
+  for a CI job whose tests pass on main, Bisect for an issue, or the check on the latest main before
+  the pull request. Where none names it, say that the change that fixed it is
   not named, and give the range it lies in: from the commit the run began on to the main the check
   ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
