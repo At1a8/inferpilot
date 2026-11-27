@@ -46,13 +46,16 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    not start, the failure being fixed. With `resume_from:
    verify`, first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6): the
    branch head is the commit the run's last Verify round ran on, the checkout is clean, the task you are
-   given measures what the one `run.json` recorded did, and the run directory still records the verified
+   given measures what the one `run.json` recorded did, which still has its `task`, and the run
+   directory still records the verified
    work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
    (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
    was to judge (a `feature`'s with the spec's yes or no on whether it is a cost the user stated), and
-   `known_issues.json`, `handoffs.json` and `run_state.json`. Check that every script
-   the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`,
-   `output_script`, `long_context_script`) is still, byte for
+   `known_issues.json`, `handoffs.json` and `run_state.json`, every hand-off whole (step 6 there).
+   Check that every script
+   the task names by its path (`server_script`, `client_script`, `accuracy_script`,
+   `output_script`, `long_context_script`), one that lies in the run directory too (Spec's fallback
+   client, where the user took it), is still, byte for
    byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
    however the file at it was edited since, and an edited script would measure otherwise than the run
    did. A script with no copy there fails the check as well: nothing shows what the run ran. Check too
@@ -135,7 +138,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server is started from the
    run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts,
-   its `output_script` and its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the
+   its `output_script` and its `long_context_script` among them, and one that lies in the run
+   directory like any other (Spec's fallback client, where the user took it), to
+   `RUN_DIR/scripts/task/` for the
    record, which a run resumed from Verify holds them against, step 1), or InferPilot's template when
    the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
@@ -322,7 +327,9 @@ on the commit the run's last Verify round ran on. Change nothing.
    `REASONING_EFFORT` sends none, an unset one its default). The `task` and the `goal` stay the ones
    `run.json` has, whatever this run was given, and a run that had no goal has none now: the goal names
    data sets and guard workloads the run's Verify and Performance ran, and the task the issue or PR its
-   triage and reply are about.
+   triage and reply are about. A `run.json` without its `task` lost it, as every run has one: return
+   the definition as it is there, never with the task you were given in its place, and the resume
+   stops.
 4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
    that `issue_triage.md` classifies `performance`, a `ci` failure that `ci_triage.md` gives as a
    performance problem, a `feature` whose spec or design states one, a `perf` plan's gain);
@@ -354,7 +361,11 @@ on the commit the run's last Verify round ran on. Change nothing.
 6. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
    `RUN_DIR/handoffs.json`: `[]` for a file that holds an empty list, `null` for one that is missing or
    does not parse, which stops the resume. Verify judges a failure the baseline shares by the first, and
-   an integrated kernel is reverted to its `commit` by the second. `run_state`, as the report wrote it
+   an integrated kernel is reverted to its `commit` by the second. Give every entry as the file has it,
+   never leaving one out and never completing one: a hand-off without its `id`, or an integrated one
+   without the package and the commit that integrated it (`integrated_wp`, `commit`), stops the
+   resume, since without that commit a kernel that fails Verify would not be reverted. `run_state`, as
+   the report wrote it
    to `RUN_DIR/run_state.json`, in the same way: the object the file holds, as it is there (`{}` for an
    empty one), and `null` for a file that is missing or does not parse. It is what the run had
    established before Verify and the phases after it go by: the pull request it verified in place of

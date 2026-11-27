@@ -857,6 +857,13 @@ const scenarios = [
     const verifyDoc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'verify_engineer.md'), 'utf8'), 'verify').replace(/\s+/g, ' ');
     check(verifyDoc.includes('Each round\'s first Run log row, written before anything starts, is the round and the commit it runs on (`git -C <worktree> rev-parse HEAD`, the worktree clean)')
       && doc.includes('each round\'s first row in the ledger\'s Run log'), 'each Verify round records the commit it starts on, where a resume reads it');
+    // Verify again on the same commit would give G3 the directories of the round that had no result: what that
+    // round wrote there is no part of this one's count.
+    check(verifyDoc.includes('No run writes where an earlier one wrote: where a directory of that name is there already (a later round on the same '
+      + 'commit, or a round that a call without a result left unfinished, which a run resumed from Verify starts again), leave it as it is and '
+      + 'give this run `RUN_DIR/logs/g3_<arm>_c<n>_<run>-2`, and so on, as its `OUT_DIR`')
+      && verifyDoc.includes('what the earlier run wrote would be counted with this run\'s, or stand for what this run did not write'),
+      'a G3 run again on a commit writes in no directory an earlier run of it wrote to');
     const report = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'report').replace(/\s+/g, ' ');
     check(report.includes('it writes `RUN_DIR/run_report_<n>.md` instead') && report.includes('`run_report.md` stays the report of the run it resumed'),
       'a resume that stopped at Setup leaves the report it resumed from as it was');
@@ -873,6 +880,30 @@ const scenarios = [
     check(v && (v.ins.known_issues || []).some((k) => k.id === 'KI-009'), 'Verify knows the baseline failures the run proved');
     const rv = r.calls.find((c) => c.key === 'implementer:rollback' && c.ins.revert);
     check(rv && rv.ins.revert === 'c_K', `a kernel regression reverts the commit the run integrated: ${rv && JSON.stringify(rv.ins)}`);
+    // A hand-off is restored as the file has it or not at all: one without its id would be left out of the
+    // result and of the next report, and an integrated one without its commit would be reset, not reverted.
+    const resumedWith = (handoffs) => run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), known_issues: [ki], handoffs }) });
+    const stoppedFor = (x, what) => x.result.status === 'blocked' && x.result.stopped_at === 'Setup' && !x.keys.includes('verify_engineer:verify')
+      && x.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
+    const recorded = { id: 'O2', owner: 'hyperloom', source: 'plan', status: 'recorded' };
+    const without = (key) => Object.fromEntries(Object.entries(h).filter(([k]) => k !== key));
+    for (const [what, entry] of [['its id', without('id')], ['an id that says anything', { ...h, id: ' ' }],
+      ['the commit that integrated it', without('commit')], ['that commit, left empty', { ...h, commit: '' }],
+      ['the package that integrated it', { ...h, integrated_wp: null }]]) {
+      const partial = await resumedWith([recorded, entry]);
+      check(stoppedFor(partial, 'handoffs.json holds a hand-off without its id, or an integrated one without the package or the commit that integrated it'),
+        `a hand-off recorded without ${what} is neither left out nor rolled back another way: ${partial.result.status} at ${partial.result.stopped_at}`);
+    }
+    const pending = { id: 'K-WP2', wp: 'WP2', owner: 'kernel_workflow', source: 'implement', status: 'not_integrated' };
+    const kept = await resumedWith([h, pending, recorded]);
+    const back = kept.result.handoffs.map((x) => `${x.id}:${x.status}`);
+    check(kept.result.status === 'ready_for_review' && eqList(back, ['K-WP1:integrated', 'K-WP2:not_integrated', 'O2:recorded'])
+      && kept.result.known_issues.length === 1, `whole hand-offs come back as they were, one that needs no commit among them: ${back}`);
+    const said = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
+    check(said.includes('Give every entry as the file has it, never leaving one out and never completing one: a hand-off without its `id`, or an '
+      + 'integrated one without the package and the commit that integrated it (`integrated_wp`, `commit`), stops the resume'),
+      'the director returns a hand-off as its file has it');
   }],
   ['setup: a run resumed from Verify has its settings compared with their boundaries and as the harness renders them; the task and the goal stay the run\'s', async () => {
     const resumed = (mode, extra, args = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN, ...args }, {
@@ -941,6 +972,17 @@ const scenarios = [
     const reply = other.calls.find((c) => c.key === 'issue_triager:reply');
     check(other.calls.find((c) => c.key === 'verify_engineer:verify').ins.task === 'sglang#1: wrong logprobs'
       && reply && reply.ins.task === 'sglang#1: wrong logprobs', `the issue stays the one the run directory is about: ${reply && reply.ins.task}`);
+    // The result names the task and the goal the run worked on: its task definition is no longer the one given.
+    check(other.result.task_def.task === 'sglang#1: wrong logprobs' && other.calls.find((c) => c.key === 'director:resume').ins.task_def.task === 'sglang#2: a crash',
+      `the result's task definition names the run's issue, and the director was given this run's to hold against it: ${other.result.task_def.task}`);
+    check(goal.result.task_def.goal === 'no accuracy loss: also gpqa_diamond', `and the run's goal: ${goal.result.task_def.goal}`);
+    // Every run has a task, and Setup records it: a run.json without one lost it, and the task given now would
+    // take its place, with the triage record and the reproduction of another issue.
+    for (const [why, lost] of [['has no task', (ins) => Object.fromEntries(Object.entries(ins.task_def).filter(([k]) => k !== 'task'))],
+      ['has an empty one', (ins) => ({ ...ins.task_def, task: ' ' })], ['has null for it', (ins) => ({ ...ins.task_def, task: null })]]) {
+      const untasked = await resumed('issue', (ins) => ({ task_definition: lost(ins) }), { task: 'sglang#2: a crash' });
+      check(stoppedFor(untasked, 'run.json records no task'), `a run.json that ${why}: ${untasked.result.status} at ${untasked.result.stopped_at}`);
+    }
     const unchanged = await resumed('feature', () => ({}), { goal: 'as before' });
     check(unchanged.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed' && !p.summary.includes('not the run\'s')),
       'a goal that is the run\'s is not reported as another');
@@ -953,6 +995,11 @@ const scenarios = [
     check(nv && !nv.ins.goal && np && !np.ins.goal, `a run that had no goal is given none: ${nv && JSON.stringify(nv.ins.goal)}`);
     check(noGoal.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
       && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it (no goal)')), 'and the run says so');
+    check(!('goal' in noGoal.result.task_def) && noGoal.result.task_def.task === 't',
+      `nor does the result's task definition name the goal given now: ${JSON.stringify(noGoal.result.task_def.goal)}`);
+    const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
+    check(doc.includes('A `run.json` without its `task` lost it, as every run has one: return the definition as it is there, never with the task '
+      + 'you were given in its place, and the resume stops'), 'the director gives back a run.json without its task as it is');
   }],
   ['setup: a run resumed from Verify stops without the records Verify and Reply read; no package left is a state of its own', async () => {
     const resumed = (mode, extra) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
@@ -1019,13 +1066,19 @@ const scenarios = [
       `and is told that it is one: ${stoppedReport && JSON.stringify([stoppedReport.ins.resume_run_dir, stoppedReport.ins.stopped_at])}`);
     // A script edited in place keeps its path, so the settings compare equal: Setup holds each against the copy
     // the run kept, before its smoke, and renders nothing again from a harness file that may have changed too.
-    check(doc.includes('Check that every script the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`, '
-      + '`output_script`, `long_context_script`) is still, byte for byte, the copy the run\'s Setup put in `RUN_DIR/scripts/task/`')
+    check(doc.includes('Check that every script the task names by its path (`server_script`, `client_script`, `accuracy_script`, '
+      + '`output_script`, `long_context_script`), one that lies in the run directory too (Spec\'s fallback client, where the user took it), '
+      + 'is still, byte for byte, the copy the run\'s Setup put in `RUN_DIR/scripts/task/`')
       && doc.includes('A script with no copy there fails the check as well')
-      && doc.includes('copy the task\'s scripts, its `output_script` and its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, '
+      && doc.includes('copy the task\'s scripts, its `output_script` and its `long_context_script` among them, and one that lies in the run directory '
+        + 'like any other (Spec\'s fallback client, where the user took it), to `RUN_DIR/scripts/task/` for the record, '
         + 'which a run resumed from Verify holds them against')
       && doc.includes('what the file at it holds, Setup held against the run\'s copy before its smoke'),
-      'a script edited in place since the run is not the one the run measured with');
+      'a script edited in place since the run is not the one the run measured with, wherever it lies');
+    check(!doc.includes('from outside the run directory'), 'no script the task names is left out of that check for where it lies');
+    check(doc.includes('measures what the one `run.json` recorded did, which still has its `task`')
+      && doc.includes('`known_issues.json`, `handoffs.json` and `run_state.json`, every hand-off whole (step 6 there)'),
+      'and Setup looks for the task in run.json and for whole hand-offs before its smoke as well');
     check(doc.includes('Nor does it render or write again a script the run has (step 3): it goes on with those in `RUN_DIR/scripts/` as they are, '
       + 'the ones the run measured with') && doc.includes('a `harness` file, a cookbook page or a template changed since is not read for them'),
       'and what a harness file holds now is not rendered into the scripts the run measured with');
@@ -1036,6 +1089,13 @@ const scenarios = [
     check(stoppedFor(edited, 'client_script is not the copy in scripts/task') && !edited.keys.includes('director:resume')
       && edited.result.run_dir === RUN,
       `the stop says what Setup found, not what it did not get to: ${JSON.stringify(edited.result.phases.filter((p) => p.phase === 'Setup'))}`);
+    // Spec's fallback client lies in the run directory, and is the task's client all the same once the user took it.
+    const ownClient = `${RUN}/scripts/fallback_client.sh`;
+    const editedInRun = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN, client_script: ownClient }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', gpu_ids: '',
+        baseline: `client_script is not the copy in scripts/task: ${ownClient} was edited after the run` }) });
+    check(stoppedFor(editedInRun, `${ownClient} was edited after the run`) && !editedInRun.keys.includes('director:resume')
+      && !editedInRun.keys.includes('perf_engineer:perf_eval'), `nor is the fallback client the user took, edited where it lies: ${editedInRun.result.status}`);
     check(doc.includes('one that timed out is not cancelled, and its agent may still be running and start more servers, which idle GPUs do not show')
       && doc.includes('one that timed out was not cancelled, which is why Setup looked for what it left before its smoke')
       && !doc.includes('its servers went with the call'), 'a timed-out Verify is not taken for gone');

@@ -2189,8 +2189,16 @@ async function resumeVerify(claimOf) {
     && Array.isArray(rs.handoffs) && rs.handoffs.some((h) => h && h.owner === 'kernel_workflow');
   const saved = rs && rs.task_definition && typeof rs.task_definition === 'object' ? rs.task_definition : null;
   const changed = saved ? MEASURED.filter((k) => canon(saved[k], k) !== canon(GIVEN[k], k)) : [];
+  // Every run has a task, which Intake asks for and Setup records: a run.json without it lost it.
+  const untasked = !!saved && !(typeof saved.task === 'string' ? saved.task.trim() : saved.task);
   const restored = rs ? String(rs.perf_claim || '').trim() : '';
   const lost = rs ? ['known_issues', 'handoffs'].filter((k) => !Array.isArray(rs[k])) : [];
+  // A hand-off is held to what the report was given, as a package is: it has its id, and an integrated one the
+  // package and the commit that integrated it, by which a kernel that fails Verify is reverted (without the
+  // commit the rollback would reset the branch instead). One without them is one the file lost, not one to
+  // leave out: the result and the next report would no longer have it.
+  const whole = (h) => !!h && filled(h.id) && (h.status !== 'integrated' || (filled(h.integrated_wp) && filled(h.commit)));
+  const partial = !!rs && Array.isArray(rs.handoffs) && !rs.handoffs.every(whole);
   // What the run had established before Verify, as its report wrote it down. Only a key the file does not have
   // says that the run had none of it: every key it has is held to its form, one that is null too, which no
   // report was given. What the model is, every issue and ci run past its Setup knows: a file without it lost it.
@@ -2201,6 +2209,8 @@ async function resumeVerify(claimOf) {
     rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
       + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
     !saved && 'the run directory records no task definition (run.json)',
+    untasked && 'run.json records no task: the one this run was given would stand in for the run\'s, whose triage record, gate command '
+      + 'and reply are about its own',
     changed.length && `this run would measure otherwise than the one it resumes (${changed.join(', ')} not as its run.json has them); `
       + 'a changed task is verified in a run of its own',
     // A package without its name or its commit is one the run directory lost, not one to leave out: Verify and
@@ -2223,6 +2233,8 @@ async function resumeVerify(claimOf) {
       + 'the user stated (the row under the claim in feature_spec.md): taken for a gain, a cost would be held to a stricter claim than the run had',
     lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
       + 'and what a kernel regression reverts would be lost',
+    partial && 'handoffs.json holds a hand-off without its id, or an integrated one without the package or the commit that integrated it: '
+      + 'left out, the hand-off would be lost, and without that commit a kernel that fails Verify would not be reverted',
     !state && 'the run directory has no readable run_state.json: a pull request the run verified in place of a fix of its own, '
       + 'a score its fix was to restore, or a part of the task it left unchecked would be lost',
     garbled.length && `run_state.json does not hold ${garbled.join(', ')} as the report was given ${garbled.length > 1 ? 'them' : 'it'}`,
@@ -2234,8 +2246,8 @@ async function resumeVerify(claimOf) {
     return finish('blocked', 'Setup');
   }
   R.done = done;
-  R.known_issues.push(...rs.known_issues.filter((k) => k && typeof k === 'object'));
-  R.handoffs.push(...rs.handoffs.filter((h) => h && h.id));
+  R.known_issues.push(...rs.known_issues);
+  R.handoffs.push(...rs.handoffs);
   // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   // What the run had established goes on as it was: the roles after Verify read it in their inputs, the PR
@@ -2254,8 +2266,10 @@ async function resumeVerify(claimOf) {
   // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
   // Performance ran, and the task the issue or PR its triage, reproduction and reply are about. A goal
   // run.json does not have is the run's too: it had none, and this run's would add what it never measured.
-  const own = ['task', 'goal'].filter((k) => (k === 'goal' || k in saved) && canon(saved[k]) !== canon(C[k]));
+  const own = ['task', 'goal'].filter((k) => canon(saved[k]) !== canon(C[k]));
   for (const k of own) C[k] = typeof saved[k] === 'string' ? saved[k] : saved[k] ? JSON.stringify(saved[k]) : '';
+  // The result names them as well: the task definition it returns is the one the run worked on.
+  R.task_def = pick({ ...R.task_def, ...Object.fromEntries(own.map((k) => [k, C[k]])) }, TASK_KEYS);
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: `
     + `${done.map((d) => d.wp).join(', ') || 'no work package left, its kernel integration reverted'}`
     + `${own.length ? `; the ${own.join(' and the ')} it was given ${own.length > 1 ? 'are' : 'is'} not the run's, which `

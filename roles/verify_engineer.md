@@ -221,7 +221,12 @@ clock can start before your session does.
        run unchanged on both arms, each run in a directory of its own that you make first: `mkdir -p
        RUN_DIR/logs/g3_<arm>_c<n>_<run>`, then `PORT=<port> OUT_DIR=RUN_DIR/logs/g3_<arm>_c<n>_<run>
        CONCURRENCY=<n> bash <long_context_script>`, at two or more concurrencies, at least 4 runs each
-       (6 when an intermittent failure is being judged), the prefix cache flushed between runs. Never
+       (6 when an intermittent failure is being judged), the prefix cache flushed between runs. No run
+       writes where an earlier one wrote: where a directory of that name is there already (a later
+       round on the same commit, or a round that a call without a result left unfinished, which a run
+       resumed from Verify starts again), leave it as it is and give this run
+       `RUN_DIR/logs/g3_<arm>_c<n>_<run>-2`, and so on, as its `OUT_DIR`: what the earlier run wrote
+       would be counted with this run's, or stand for what this run did not write. Never
        write a long-context test of your own, and never change the task's: its prompts, their lengths,
        the needles, the seed and the scoring are the user's. A script that does not read
        `CONCURRENCY` runs at its own, and `gates` says that G3 ran at one concurrency. Count the passes
