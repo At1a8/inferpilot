@@ -99,7 +99,9 @@ before Reproduce and asks for them. So it does where the task names the issue al
 of the report is on the run's model and configuration: the most urgent of all is taken then, and
 the run asks for what that one is on. A task without a model, one that stops before its fix, takes
 the most urgent problem of all; what it pins all the same (its GPUs, its scripts) has to fit that
-problem, or the run stops before Reproduce in the same way.
+problem, or the run stops before Reproduce in the same way. It is then asked for those inputs, each
+of them, and not for a model: a reproduction that serves none has none to give. A task that names
+no model and pins nothing is asked nothing, and reproduces the problem as reported.
 
 ## 5. Reproduction
 

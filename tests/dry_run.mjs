@@ -2064,16 +2064,43 @@ const scenarios = [
       && !set.ins.workload, `and is set up on the answer and on what the Intake derives for it: ${set && JSON.stringify([set.ins.model_path,
         set.ins.client_script, set.ins.gpu_ids, set.ins.workload])}`);
     // A task that stops before its fix needs no model, and can still pin what does not fit the problem: two GPUs
-    // for one at TP8. It stops before Reproduce all the same.
+    // for one at TP8. It stops before Reproduce all the same, and is asked for what it pins, not for a model it
+    // has no use for (a reproduction that serves none, a distributed test).
     const pinned = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
       stop_after: 'Reproduce' }, mismatch);
     const pinnedAgain = pinned.result.next.rerun_with || {};
+    const pinnedAsk = pinned.result.next.ask || [];
     check(pinned.result.status === 'needs_input' && pinned.result.stopped_at === 'Triage' && !pinned.keys.includes('issue_triager:reproduce')
-      && (pinned.result.next.ask || [])[0].field === 'model_path',
-      `a run that stops at Reproduce without a model stops for the mismatch too: ${pinned.result.status} at ${pinned.result.stopped_at}`);
-    check(/the task is set up for another configuration \(its gpu_ids\): reproduced on that, the problem would not show/.test(pinned.result.next.ask[0].why)
-      && pinnedAgain.gpu_ids === '' && pinnedAgain.stop_after === 'Reproduce' && !('model_path' in pinnedAgain),
-      `it says what does not fit, and the rerun clears it and stops where the task said: ${pinned.result.next.ask[0].why} | ${JSON.stringify(pinnedAgain)}`);
+      && eqList(pinnedAsk.map((q) => q.field), ['gpu_ids']),
+      `a run that stops at Reproduce without a model stops for the mismatch too, and is asked for what it pins: ${pinned.result.status} at ${
+        pinned.result.stopped_at}, asks ${JSON.stringify(pinnedAsk.map((q) => q.field))}`);
+    check(/the task is set up for another configuration \(its gpu_ids\): reproduced on that, the problem would not show/.test(pinnedAsk[0].why)
+      && /^The task's gpu_ids \("0,1"\) is another configuration's\. What should it be for DeepSeek-V4\.1, --tp-size 8\?/.test(pinnedAsk[0].question)
+      && /Give what that configuration needs in place of the task's gpu_ids, and run the task again/.test(pinned.result.next.say)
+      && pinnedAgain.gpu_ids === '' && pinnedAgain.answers.gpu_ids === null && pinnedAgain.stop_after === 'Reproduce'
+      && !('model_path' in pinnedAgain) && !('model_path' in pinnedAgain.answers),
+      `it says what does not fit, and the rerun clears it and stops where the task said: ${pinnedAsk[0].question} | ${pinned.result.next.say} | ${
+        JSON.stringify(pinnedAgain)}`);
+    const both = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '/s/client_tp2.sh',
+      gpu_ids: '0,1', stop_after: 'Reproduce' }, mismatch);
+    check(eqList((both.result.next.ask || []).map((q) => q.field), ['client_script', 'gpu_ids'])
+      && /in place of the task's client_script, gpu_ids/.test(both.result.next.say),
+      `each input it pins is asked about: ${JSON.stringify((both.result.next.ask || []).map((q) => q.field))}`);
+    // With the answer the run is set up for the problem, and reproduces it.
+    const fitted = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
+      ...pinnedAgain, answers: { ...pinnedAgain.answers, gpu_ids: '0,1,2,3,4,5,6,7' } });
+    const fittedSetup = fitted.calls.find((c) => c.key === 'director:setup');
+    check(fitted.result.status === 'stopped' && fitted.result.stopped_at === 'Reproduce' && fitted.keys.includes('issue_triager:reproduce')
+      && fittedSetup && fittedSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `with the answer the run takes the GPUs the problem needs and reproduces it: ${fitted.result.status} at ${fitted.result.stopped_at}, ${
+        fittedSetup && fittedSetup.ins.gpu_ids}`);
+    // A task that names no model and pins nothing has nothing that could be another configuration's: it is
+    // asked nothing, and reproduces the problem as reported.
+    const free = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce' }, mismatch);
+    check(free.result.status === 'stopped' && free.result.stopped_at === 'Reproduce' && free.keys.includes('issue_triager:reproduce')
+      && !free.result.model_mismatch && !(free.result.next.ask || []).length
+      && free.result.phases.some((p) => p.phase === 'Triage' && /pins no script, workload or GPU that could be another configuration's/.test(p.summary)),
+      `a task that pins nothing is asked nothing, and the run record says why it went on: ${free.result.status} at ${free.result.stopped_at}`);
     // A run that stops at Triage has triaged, which is all it was asked: a mismatch stops nothing there.
     const bare = await run({ mode: 'issue', task: 'i', model_path: '', client_script: '', stop_after: 'Triage' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1',
