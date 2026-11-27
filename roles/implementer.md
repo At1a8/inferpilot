@@ -61,7 +61,11 @@ step 3, which records the tip.
      end takes it from there.
    - `kernel` packages from the Kernel phase (ids `K-...`): apply the back end's verified patch at the
      plug-in point the package names; do not re-tune it.
-   - `apply_pr`: fetch the PR (`git fetch origin pull/<n>/head`), cherry-pick onto the task branch,
+   - `apply_pr`: where the package names the repository the PR is in (`repo`), check first that
+     `origin` is that repository (`git -C <worktree> remote get-url origin`). Where it is another,
+     fetch nothing and return `blocked`, naming both: the user's word was for that repository's PR,
+     and `origin`'s PR of the same number is another one, whose code nobody asked to run. Then
+     fetch the PR (`git fetch origin pull/<n>/head`), cherry-pick onto the task branch,
      resolve conflicts following upstream's intent, keep the author's commits intact. Write the head
      you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit.
      Where the package names a head and the PR has moved since, say so in `notes`, and go on with what

@@ -3474,6 +3474,23 @@ const scenarios = [
       && raised.result.phases.some((p) => p.verdict === 'priority' && p.summary === 'P1 while #40872 was open, P0 without a usable one: the run goes on as P0')
       && raised.calls.find((c) => c.key === 'investigator:diagnose').ins.priority === 'P0',
       `a failure that was P1 only for its open fix PR is P0 once that PR has failed, and gets its workaround: ${ended(raised)}, ${raised.result.priority}`);
+    // The triage's priority holds while another pull request it lists as a fix is open: a second candidate of this
+    // repository, which this run did not verify, or a component's own, which the run cannot apply. One that is
+    // not open is none, and neither is a pull request the task names that the triage does not find to fix the
+    // problem (fixes: false): it was looked up, and nothing more.
+    const alsoListed = (more) => { const d = downgraded('P0'); return { ...d, 'issue_triager:triage': () => ({ ...d['issue_triager:triage'](), existing_prs: ['#40872', ...more] }) }; };
+    const aiterFix = { pr: 'ROCm/aiter#812', repo: 'ROCm/aiter', author: 'bob', association: 'MEMBER', head: '8120001', state: 'open' };
+    for (const [what, more, priority] of [
+      ['another candidate of this repository is open', ['#40901'], 'P1'],
+      ['a fix is open in the component', [aiterFix], 'P1'],
+      ["the component's pull request has merged", [{ ...aiterFix, state: 'merged' }], 'P0'],
+      ["the component's open pull request is only what the task names, and no fix by the triage's reading", [{ ...aiterFix, fixes: false }], 'P0'],
+      ["the other open one of this repository is only what the task names", [{ pr: '#40901', state: 'open', fixes: false }], 'P0'],
+    ]) {
+      const left = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, alsoListed(more));
+      check(left.result.priority === priority && fellBack(left, 'Verify') && left.result.status === (priority === 'P0' ? 'ready_for_review' : 'diagnosed'),
+        `after the pull request failed, where ${what}, the problem is ${priority}: ${left.result.priority}, ${ended(left)}`);
+    }
     for (const without of ['P1', '', undefined]) {
       const kept = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, downgraded(without));
       check(kept.result.status === 'diagnosed' && kept.result.priority === 'P1' && !kept.result.phases.some((p) => p.verdict === 'priority'),
@@ -3700,6 +3717,50 @@ const scenarios = [
           && t.endsWith('Not verified in this run, which takes one: #40901')),
         `named by ${how}, it is verified, and the other is named: ${ended(yes)}, ${JSON.stringify(notes(yes, 'Reproduce'))}`);
     }
+    // The repository the triage places the pull request in goes with its package: the implementer fetches by the
+    // number from origin, and has to find origin to be that repository first. One that finds another applies
+    // nothing, and the run stops for a human: that is no failure of the pull request, and nothing is written to it.
+    const placed = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage([theirs]));
+    const bare = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage(['#40872']));
+    check(applied(placed).repo === 'sgl-project/sglang' && !('repo' in applied(bare)),
+      `the package names the repository its pull request is in, where the triage gave one: ${JSON.stringify([applied(placed).repo, applied(bare).repo])}`);
+    const misplaced = await run({ mode: 'issue', task: 'i', apply_prs: ['ROCm/aiter#777'] }, { ...triage([{ ...theirs, pr: '#777', repo: 'ROCm/aiter' }]),
+      'implementer:implement': (ins) => (ins.work_package.kind === 'apply_pr' && ins.work_package.repo !== 'sgl-project/sglang'
+        ? { wp: 'WP1', status: 'blocked', notes: `origin is sgl-project/sglang, and the package names ${ins.work_package.repo}#777: not fetched` }
+        : DEFAULTS['implementer:implement'](ins)) });
+    check(misplaced.result.status === 'blocked' && misplaced.result.stopped_at === 'Implement' && applied(misplaced).repo === 'rocm/aiter'
+      && !misplaced.keys.includes('pr_engineer:comment') && !misplaced.keys.includes('test_engineer:unit') && !misplaced.result.existing_pr_result,
+      `a pull request the triage places in another repository under this one's number is not fetched from origin: ${ended(misplaced)}`);
+    // Setup says which repository the checkout's origin is, and the run places pull requests by it before any
+    // package is made. One returned under this repository's number and placed in another is that repository's: it
+    // is not applied, whatever word names it. One returned by its number alone is origin's, so a word that names
+    // origin is a word for it, and nothing is asked; a word that names another repository is not.
+    const origin = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), origin_repo: 'https://github.com/sgl-project/sglang.git' }) };
+    const elsewhere777 = await run({ mode: 'issue', task: 'i', apply_prs: ['ROCm/aiter#777'] }, { ...origin, ...triage([{ ...theirs, pr: '#777', repo: 'ROCm/aiter' }]) });
+    check(elsewhere777.result.status === 'ready_for_review' && applied(elsewhere777).kind !== 'apply_pr' && elsewhere777.keys.includes('investigator:diagnose')
+      && notes(elsewhere777, 'Reproduce').some((t) => t.startsWith('rocm/aiter#777: named as a fix, but not as a pull request of this repository'))
+      && notes(elsewhere777, 'Reproduce').some((t) => t.includes('ROCm/aiter#777: the triage did not find it as a pull request of this repository')),
+      `a pull request placed in another repository than origin is not applied under origin's number: ${ended(elsewhere777)}, ${
+        JSON.stringify(notes(elsewhere777, 'Reproduce'))}`);
+    const byUrl = 'https://github.com/sgl-project/sglang/pull/40872';
+    const known = await run({ mode: 'issue', task: 'i', apply_prs: [byUrl] }, { ...origin, ...triage(['#40872']) });
+    check(known.result.status === 'ready_for_review' && applied(known).kind === 'apply_pr' && applied(known).repo === 'sgl-project/sglang',
+      `with origin known, a word that names it is a word for the pull request the triage gave by its number: ${ended(known)}`);
+    const notOrigin = await run({ mode: 'issue', task: 'i', apply_prs: ['https://github.com/ROCm/aiter/pull/40872'] }, { ...origin, ...triage(['#40872']) });
+    check(notOrigin.result.status === 'ready_for_review' && applied(notOrigin).kind !== 'apply_pr'
+      && notes(notOrigin, 'Reproduce').some((t) => t.includes('ROCm/aiter#40872: the triage did not find it as a pull request of this repository')),
+      `and a word that names another repository is not: ${ended(notOrigin)}, ${JSON.stringify(notes(notOrigin, 'Reproduce'))}`);
+    // The reproduction is told which pull requests the user's own word names: a reporter's commit that is a pull
+    // request's head is its author's code, and that arm runs only for one of these. What the Intake read into a
+    // request is not that word, and "none" names none.
+    const word = (r) => (r.calls.find((c) => c.key === 'issue_triager:reproduce') || { ins: {} }).ins.approved_prs;
+    const readOnly = await run({ mode: 'issue', task: 'i', request: 'the crash at TP8; someone opened 40872 for it', stop_after: 'Reproduce' },
+      { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, mode: 'issue', task: 'i', apply_prs: ['#40872'] } }),
+        ...triage([theirs]) });
+    const refusedAll = await run({ mode: 'issue', task: 'i', apply_prs: 'none' }, triage([theirs]));
+    const ranIt = (r) => r.keys.includes('issue_triager:reproduce');
+    check(eqList(word(placed), ['#40872']) && ranIt(readOnly) && !(word(readOnly) || []).length && ranIt(refusedAll) && !(word(refusedAll) || []).length,
+      `the reproduction knows the user's word, and takes no reading or "none" for it: ${JSON.stringify([word(placed), word(readOnly), word(refusedAll)])}`);
     // The triager is given what the task names, to look it up, as Classify is.
     const named = await run({ mode: 'issue', task: 'i', apply_prs: ['https://github.com/sgl-project/sglang/pull/40872'] }, triage([theirs]));
     const tr = named.calls.find((c) => c.key === 'issue_triager:triage');
@@ -3805,6 +3866,13 @@ const scenarios = [
     check(unlisted === 'P0 (noted)' && shut === 'P0 (noted)' && declined === 'P1' && verified === 'P1' && elsewhere === 'P1' && goneElsewhere === 'P0 (noted)',
       `the priority without a usable fix PR is taken where none is open after all, and not where one is: ${
         [unlisted, shut, declined, verified, elsewhere, goneElsewhere]}`);
+    // The triage returns what the task names as well, looked up, whether or not it fixes the problem. One it does
+    // not find to fix it (fixes: false) is open and no fix: it keeps no priority, in a component's repository or
+    // in this one, where the user then declines it.
+    const [lookedUp, declinedLookup] = [await priorities([{ ...aiter, fixes: false }], { apply_prs: ['ROCm/aiter#812'] }),
+      await priorities([{ ...theirs, fixes: false }], { apply_prs: 'none' })];
+    check(lookedUp === 'P0 (noted)' && declinedLookup === 'P0 (noted)',
+      `a pull request that was only looked up for the task keeps no priority: ${[lookedUp, declinedLookup]}`);
 
     // A run that stops before its fix applies nothing, and is not asked.
     for (const stop of ['Triage', 'Reproduce', 'Diagnose']) {
@@ -3974,6 +4042,9 @@ const scenarios = [
     check(eqList(r.phases, ['Setup', 'Classify', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
     check(applied(r).kind === 'apply_pr' && applied(r).goal.startsWith('apply the existing fix #50220 at abc1234 ')
       && /failing test passes on every lane/.test(applied(r).test), `the pull request is applied at its head, not a fix planned: ${JSON.stringify(applied(r))}`);
+    // The repository the classification places it in goes with the package: the implementer fetches by the number
+    // from origin, and only where origin is that repository.
+    check(applied(r).repo === 'sgl-project/sglang', `the package names the repository the pull request is in: ${JSON.stringify(applied(r).repo)}`);
     const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(ve && ve.ins.extra_gates.length === 1 && ve.ins.extra_gates[0].gate === 'failing_test' && ve.ins.extra_gates[0].cmd === 'pytest test_x.py',
       `the failing test is the gate it must pass: ${JSON.stringify(ve && ve.ins.extra_gates)}`);
@@ -4113,6 +4184,17 @@ const scenarios = [
       && !unplaced.result.phases.some((ph) => /did not find it/.test(ph.summary)),
       `a pull request the classification does not place in the repository the word names is asked about, not applied: ${ended(unplaced)}, ${uq.question}`);
 
+    // With the repository of origin known from Setup, a pull request that came back without one is origin's: the
+    // word that names origin is a word for it, and the run asks nothing. One placed elsewhere is not applied.
+    const atOrigin = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), origin_repo: 'sgl-project/sglang' }) };
+    const resolved = await run({ mode: 'ci', task: 'c', apply_prs: ['https://github.com/sgl-project/sglang/pull/50231'] },
+      { ...atOrigin, ...classified({ existing_prs: [{ ...theirs, repo: undefined }] }) });
+    check(resolved.result.status === 'ready_for_review' && applied(resolved).kind === 'apply_pr' && applied(resolved).repo === 'sgl-project/sglang',
+      `with origin known, the pull request returned without a repository is the one the word names: ${ended(resolved)}`);
+    const displaced = await run({ mode: 'ci', task: 'c', apply_prs: ['ROCm/aiter#50231'] },
+      { ...atOrigin, ...classified({ existing_prs: [{ ...theirs, repo: 'ROCm/aiter' }] }) });
+    check(displaced.result.status === 'ready_for_review' && displaced.keys.includes('ci_guardian:bisect') && applied(displaced).kind !== 'apply_pr',
+      `one the classification places in another repository under this one's number is not applied: ${ended(displaced)}`);
     // An answer decides when it names a pull request or says none. Any other ("not sure", both at once) decides
     // nothing: taken for "none", it would send the run to a fix of its own without a word. The run asks again.
     for (const [word, said] of [['not sure', '"not sure"'], [['none', '#50231'], '"none, #50231"'], ['#50231 if it is safe', '"#50231 if it is safe"'],
@@ -4271,22 +4353,37 @@ const scenarios = [
     const halted = await run({ ...task, stop_after: 'Verify' }, { ...existing, 'verify_engineer:verify': () => failing('failing_test') });
     check(halted.result.status === 'stopped' && halted.result.stopped_at === 'Verify' && !!comment(halted) && !halted.keys.includes('ci_guardian:bisect'),
       `a stop after the phase it failed in holds before the bisect: ${ended(halted)}`);
-    // An accuracy problem: the pull request is held to the score coming back. A score that was measured and is
-    // short of the claim is what it did not pass, and it gets its comment. One the round left out or did not run
-    // was not measured: nothing shows that the pull request failed, and the run stops for a human.
+    // An accuracy problem: the pull request is held to the score coming back. A round that is accepted without
+    // it (the gate left out, not run, or given as failed in words, with or without a score, where the round
+    // lists no blocking failure for it) is an answer at odds with itself: the run reads no score out of the
+    // words, nothing shows that the pull request failed, and the run stops for a human.
     const scored = { 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), existing_prs: [mine], accuracy: true,
       accuracy_claim: 'GSM8K back to 0.93 on GLM-5.3-Flash in test_gsm8k' }) };
     const claim = (said) => ({ ...scored, 'verify_engineer:verify': (ins, k) => (k === 1 ? { ...pass(), gates: { G2: 'pass', ...(said ? { accuracy_claim: said } : {}) } }
       : { ...pass(), gates: { G2: 'pass', accuracy_claim: 'pass 0.936, the claim is 0.93' } }) });
-    for (const said of ['', 'not run: the test was skipped', 'fail: no score, the test stopped before it measured']) {
-      const unmeasured = await run(task, claim(said));
-      check(unmeasured.result.status === 'blocked' && unmeasured.result.stopped_at === 'Verify' && !comment(unmeasured)
-        && !unmeasured.keys.includes('ci_guardian:bisect') && !unmeasured.result.existing_pr_result,
-        `a claim that was ${said ? `not measured ("${said}")` : 'left out'} is no failure of the pull request: ${ended(unmeasured)}`);
+    for (const said of ['', 'not run: the test was skipped', 'fail: no score, the test stopped before it measured', 'fail 0/200 questions answered; no score',
+      'fail 0.90, the claim is 0.93']) {
+      const unshown = await run(task, claim(said));
+      check(unshown.result.status === 'blocked' && unshown.result.stopped_at === 'Verify' && !comment(unshown)
+        && !unshown.keys.includes('ci_guardian:bisect') && !unshown.keys.includes('implementer:rollback') && !unshown.result.existing_pr_result,
+        `a round accepted with the claim ${said ? `"${said}"` : 'left out'} is no failure of the pull request: ${ended(unshown)}`);
     }
-    const short = await run(task, claim('fail 0.90, the claim is 0.93'));
-    check(short.result.status === 'ready_for_review' && fellBack(short, 'Verify') && short.result.existing_pr_result.why === 'the accuracy claim is not met',
-      `a score that was measured short of the claim is the pull request's: ${ended(short)}, ${JSON.stringify(short.result.existing_pr_result)}`);
+    // A score short of the claim is a blocking failure of its gate. That one is investigated, and placed: in the
+    // pull request, which then gets its comment and the run its own fix, or in what the run added on top of it,
+    // which is not the pull request's to answer for.
+    const miss = (found) => ({ ...scored,
+      'verify_engineer:verify': (ins, k) => (k === 1 ? { ...failing('accuracy_claim'), gates: { G2: 'pass', accuracy_claim: 'fail 0.90 (200 q), the claim is 0.93' } }
+        : { ...pass(), gates: { G2: 'pass', accuracy_claim: 'pass 0.936, the claim is 0.93' } }),
+      'investigator:investigate': () => ({ verdict: 'fix_needed', summary: 'the patch rounds the logits it rescales', work_packages: [WP('FIX1')], ...found }) });
+    const short = await run(task, miss({}));
+    check(short.result.status === 'ready_for_review' && fellBack(short, 'Verify') && short.keys.includes('investigator:investigate')
+      && short.result.existing_pr_result.why.startsWith('accuracy_claim'),
+      `a score reported short of the claim, as a blocking failure, is investigated and is the pull request's: ${ended(short)}, ${
+        JSON.stringify(short.result.existing_pr_result)}`);
+    const added = await run(task, miss({ in_additions: true }));
+    check(added.result.status === 'ready_for_review' && !comment(added) && !added.keys.includes('ci_guardian:bisect') && !added.result.existing_pr_result
+      && added.keys.includes('investigator:investigate'),
+      `one the investigator places in what the run added is repaired there, and is not the pull request's: ${ended(added)}`);
     // One that passes is verified as before: a comment for it, no bisect, nothing of the run's own.
     const fine = await run(task, existing);
     check(fine.result.status === 'ready_for_review' && !comment(fine) && !fine.keys.includes('ci_guardian:bisect') && !fine.result.existing_pr_result

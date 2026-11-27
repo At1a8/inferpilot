@@ -620,12 +620,33 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("if (tried !== EXISTING_FAILED) return tried;\n    // The existing fix did not pass: its comment is drafted, the task branch is "
                  "back at the base, and the run goes\n    // on to a fix of its own from here, as for an issue nobody had opened a pull request "
                  "for.\n    withoutUsablePr(`${prs} was open`);", "a failure that was P1 only for its open fix PR stays P1 once that PR has failed"),
-                ("if (!theirs.foreign.some((p) => p.state === 'open')) withoutUsablePr('the triage took a fix PR for open');",
-                 "a problem triaged with a fix open keeps that priority where none is open, or loses it for a component's open fix"),
+                # the triage's priority holds while a pull request it lists as a fix is open and has not failed here
+                ("if ([...theirs.others, ...theirs.foreign].some((p) => p.state === 'open' && p.fixes)) return;",
+                 "the priority changes while another fix is open, or a pull request that was only looked up keeps it"),
+                ("fixes: p.fixes !== false }))", "a pull request the triage does not find to fix the problem counts as an open fix"),
+                ("      + `requests the run may apply (apply_prs: ${theirs.said.join(', ')}), and none of these. The run fixes the problem itself`);\n"
+                 "    withoutUsablePr('the triage took a fix PR for open');",
+                 "a problem whose only open pull requests were declined and are no fixes keeps the priority of one with a fix open"),
+                ("      + 'repository to apply: the run fixes the problem itself');\n"
+                 "    // The triage set the priority as for a problem with an open fix, and returned none of this repository that is\n"
+                 "    // open: the problem has the priority it has without one, unless a fix is open in another repository.\n"
+                 "    withoutUsablePr('the triage took a fix PR for open');",
+                 "a problem triaged with a fix open keeps that priority where none is open"),
                 # only a score that was measured short of the claim is the pull request's failure
-                ("return /^fail\\s+\\.?\\d/i.test(claimGate) ? theirs('the accuracy claim is not met')\n"
-                 "        : { ok: false, reason: 'the accuracy claim was not measured' };",
-                 "a claim that was not run gets someone else's pull request a failure comment"),
+                # no score is read out of the words of an accepted round: it attributes nothing
+                ("return { ok: false, reason: 'the round was accepted without the score the fix must restore' };",
+                 "an accepted round without the score gets someone else's pull request a failure comment"),
+                # the repository goes with the package, and the user's own word with the reproduction
+                ("const placedIn = (p) => (p.repo ? { repo: p.repo } : {});", "the implementer is not told which repository the pull request is in"),
+                # Setup says which repository origin is, and a pull request is placed by it before any package is made
+                ("origin_repo: str,", "Setup cannot say which repository the checkout fetches from"),
+                ("C.origin_repo = repoName(s.origin_repo);", "the run does not keep which repository origin is"),
+                ("return p.repo && p.repo !== origin ? { ...p, pr: `${p.repo}${p.pr}` } : { ...p, repo: origin };",
+                 "a pull request placed in another repository is fetched from origin under its number, or a bare number is placed nowhere"),
+                ("files: [], depends_on: [], ...placedIn(theirs.apply) };", "an issue's package names no repository"),
+                ("files: [], depends_on: [], ...placedIn(fix.apply) };", "a ci task's package names no repository"),
+                ("approved_prs: MODE === 'issue' ? namedPrs().said.map((p) => prRef(p)).filter(Boolean) : [],",
+                 "the reproduction is told the Intake's reading for the user's word, or nothing"),
                 ("${status === 'ready_for_review' ? \"; once the run's own pull request is open, add its link to that comment\" : ''}",
                  "the user is told to link a pull request the run does not have"),
                 ("const ver = await verifyLoop(extraGates, existing);\n  if (!ver.ok) return failed(ver, 'Verify');",
@@ -715,12 +736,32 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("roles/issue_triager.md", "`named_prs` (the pull requests the task or the request names for the run to verify, or none)"),
                 ("roles/issue_triager.md", "each as the CI guardian gives one (`ci_guardian.md`, PHASE=classify step 4)"),
                 ("roles/issue_triager.md", "Your `push_existing_pr` says that such a pull request is open, not that the run may apply it"),
-                ("roles/issue_triager.md", "Always give the repository: a task can name its pull request by a URL, which says where it is, and the "
-                                           "run does not hold such a word against a bare number, which may be another repository's: it asks "
-                                           "the user again"),
-                ("knowledge/issue_triage.md", "Where the triage took a fix for open and none is open after all (it returned none, or only one that "
-                                              "is closed), the problem has the priority it has without one, as after a pull request that did "
-                                              "not pass; one that is open in another repository keeps it, though the run cannot apply it"),
+                ("roles/issue_triager.md", "Always give the repository: a task can name its pull request by a URL, which says where it is"),
+                ("roles/issue_triager.md", "The run takes a bare number for a pull request of the checkout's `origin`, from which it is fetched, "
+                                           "and applies none you place in another repository; where it does not know which repository `origin` "
+                                           "is, it does not hold such a word against a bare number, and asks the user again"),
+                ("knowledge/issue_triage.md", "The priority the triage gave holds while a pull request it lists as a fix is open and has not failed "
+                                              "this run's verification: another one of this repository, which the run did not verify, or one in "
+                                              "another repository (a component's), which the run cannot apply"),
+                ("knowledge/issue_triage.md", "Where none is left (none was open after all, or the one verified did not pass and no other is "
+                                              "open), the problem has the priority it has without one"),
+                ("knowledge/issue_triage.md", "One the user declines is still open, and keeps it"),
+                ("knowledge/issue_triage.md", "one the triage does not itself find to fix it (`fixes: false`) keeps no priority"),
+                ("knowledge/issue_triage.md", "The word covers the reproduction as well: a reporter's commit that is on no main and no release, a "
+                                              "pull request's head or a fork's branch, is its author's code, and that arm runs only where the "
+                                              "task names that pull request"),
+                ("roles/issue_triager.md", "One of them that your reading of its diff does not find to fix this problem is returned all the same, "
+                                           "marked `\"fixes\": false`: the run still verifies it on the user's word, and does not count it as an "
+                                           "open fix where it decides the priority"),
+                ("roles/issue_triager.md", "`approved_prs` (the pull requests the user's own word names for the run to apply, or none)"),
+                ("roles/issue_triager.md", "The reporter's commit runs here only where it is the repository's own: on main or on a release"),
+                ("roles/issue_triager.md", "run that arm only where the commit is the head of a pull request in `approved_prs` (the ones the user's "
+                                           "own word names), else skip it, say so in `evidence`, and leave `reproduced_on_reporter` out"),
+                ("roles/implementer.md", "where the package names the repository the PR is in (`repo`), check first that `origin` is that "
+                                         "repository (`git -C <worktree> remote get-url origin`)"),
+                ("roles/implementer.md", "Where it is another, fetch nothing and return `blocked`, naming both: the user's word was for that "
+                                         "repository's PR, and `origin`'s PR of the same number is another one, whose code nobody asked to "
+                                         "run"),
                 ("roles/issue_triager.md", "Look up each pull request in `named_prs` as well, whether or not your own search found it, and return it "
                                            "with its `state` as the API gives it now"),
                 ("templates/task_definition.md", "so the run applies one only when it is named here, whoever wrote it | | optional | optional | "
@@ -737,7 +778,8 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("roles/issue_triager.md", "Say that the fix now offered is another one only for `ready_for_review`, where the run has one"),
                 ("roles/issue_triager.md", "for any other ending say what the run reached after it (a diagnosis, a stop), and promise no fix"),
                 ("roles/issue_triager.md", "return `priority_without_pr` as well, the priority it has when no usable fix PR exists: the run takes "
-                                           "it when that pull request does not pass verification, or is not open after all"),
+                                           "it when no pull request you list as a fix is left open (none was open after all, or the one it "
+                                           "verified did not pass and no other is)"),
                 ("roles/issue_triager.md", '"priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>"'),
                 ("roles/director.md", "With `existing_pr_result`, say that the run first verified that pull request"),
                 ("roles/director.md", "only `ready_for_review` has a pull request to link from that comment, and the comment itself promises none"),
@@ -824,12 +866,19 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("roles/investigator.md", "Leave it out where a control was interrupted, ended another way or was not run"),
                 ("knowledge/issue_triage.md", "Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that fails"),
                 ("knowledge/issue_triage.md", "And only what is shown to be the pull request's counts against it"),
-                ("knowledge/issue_triage.md", "a trusted measurement that is slower on the task's client or on a guard workload, a score measured "
-                                              "short of the one the fix must restore"),
-                ("knowledge/issue_triage.md", "A comparison that decided nothing, a score that was not measured, a package blocked for another "
-                                              "reason and an answer that never came prove nothing"),
-                ("knowledge/ci_triage.md", "Where the pull request of that number came back without its repository, the word is held neither for "
-                                           "it nor against it: the run asks, and the number is the answer"),
+                ("knowledge/issue_triage.md", "A comparison that decided nothing, a round accepted without the score the fix must restore, a "
+                                              "package blocked for another reason and an answer that never came prove nothing"),
+                ("knowledge/issue_triage.md", "unless another pull request the triage lists as a fix is still open, since only a P0 gets a "
+                                              "workaround here for a component's defect"),
+                ("knowledge/ci_triage.md", "A pull request is fetched from the checkout's `origin` by its number, and Setup says which repository "
+                                           "that is: one returned under such a number and placed in another repository is not applied, and one "
+                                           "returned without a repository is origin's"),
+                ("knowledge/ci_triage.md", "Only where Setup did not say is a word that names its repository held neither for nor against a pull "
+                                           "request that came back without one: the run asks, and the number is the answer"),
+                ("roles/director.md", "Return the repository `origin` is as well (`origin_repo`: `<owner>/<repo>`, from `git -C <framework_dir> "
+                                      "remote get-url origin`): a pull request is fetched from it by its number, and InferPilot applies none "
+                                      "that a triage or a classification places in another repository"),
+                ("roles/director.md", '"origin_repo": "<owner>/<repo>", "gpu_ids": "0,1,2,3",'),
                 ("knowledge/issue_triage.md", "Nothing is rolled back next to a call that may still be running"),
                 ("knowledge/issue_triage.md", "A stop named for the phase the pull request failed in holds as well"),
                 ("knowledge/issue_triage.md", "That fix has the priority the problem has without a usable fix PR"),

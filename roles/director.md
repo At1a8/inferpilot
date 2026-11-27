@@ -65,7 +65,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      attempt resolves the base's full SHA after the fetch (`git -C <framework_dir> rev-parse <base>`)
      and writes it to `run.json` as `base_commit`; a retry does so only after the earlier branch is
      taken care of (next item). Return it (`base_commit`): a rollback of the whole task has to come
-     back to that commit, and InferPilot builds nothing on a branch that is elsewhere.
+     back to that commit, and InferPilot builds nothing on a branch that is elsewhere. Return the
+     repository `origin` is as well (`origin_repo`: `<owner>/<repo>`, from `git -C <framework_dir>
+     remote get-url origin`): a pull request is fetched from it by its number, and InferPilot applies
+     none that a triage or a classification places in another repository.
    - A retry runs every phase again, Reproduce and the baseline included, and they must not see the
      earlier attempt's fix: its branch starts from the base like a new one. Before the `checkout -b`,
      when the earlier branch is still in `framework_dir`, refresh `RUN_DIR/branch.bundle` from it
@@ -274,7 +277,7 @@ Return:
 {"lock": "acquired | busy", "run_dir": "/abs/RUN_DIR", "baseline_status": "pass | fail | skip",
  "baseline": "<suites, runs, spread; or why it failed or was skipped>",
  "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "base_commit": "<full sha>",
- "gpu_ids": "0,1,2,3",
+ "origin_repo": "<owner>/<repo>", "gpu_ids": "0,1,2,3",
  "server_script": "/abs/RUN_DIR/scripts/server.sh", "client_script": "/abs/RUN_DIR/scripts/perf.sh",
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
