@@ -30,6 +30,13 @@ stay on the side ref) and write the package from step 1. Once they apply, a `ker
 speed matters still returns its hand-off (step 3): reuse `RUN_DIR/handoffs/K-<wp>/` when the earlier
 attempt left it and its paths exist, else write it. Then go on from step 4: the test engineer checks
 the commits like any other. Commits no package of this attempt names stay on the side ref.
+An `apply_pr` package is taken from the ref in two parts, since what the run added is exported
+apart from the PR's commits (step 3) and a cherry-pick gives every commit a new name. The earlier
+attempt's ledger names the tip it called "the PR as applied": first the commits up to that one,
+the author's; then write this attempt's tip in the ledger (`git rev-parse HEAD`, "the PR as
+applied"); then the commits after it, the run's additions. Where the earlier ledger names no such
+tip, or the ref does not hold it, take nothing from the ref for this package: apply the PR from
+step 3, which records the tip.
 
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:

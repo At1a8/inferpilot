@@ -2208,8 +2208,8 @@ const scenarios = [
   ['ci: an open pull request that already fixes the failure is verified on the user\'s word, not fixed a second time', async () => {
     const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
     const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
-    const mine = { pr: '#50220', author: 'alice', association: 'MEMBER', head: 'abc1234', state: 'open' };
-    const theirs = { pr: '#50231', author: 'mallory', association: 'CONTRIBUTOR', head: 'def5678', state: 'open' };
+    const mine = { pr: '#50220', repo: 'sgl-project/sglang', author: 'alice', association: 'MEMBER', head: 'abc1234', state: 'open' };
+    const theirs = { pr: '#50231', repo: 'sgl-project/sglang', author: 'mallory', association: 'CONTRIBUTOR', head: 'def5678', state: 'open' };
     const applied = (r) => (r.calls.find((c) => c.key === 'implementer:implement') || { ins: {} }).ins.work_package || {};
     const r = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ existing_prs: [mine] }));
     check(r.result.status === 'ready_for_review' && !r.keys.includes('ci_guardian:bisect'), `no culprit is searched for: ${ended(r)}`);
@@ -2253,7 +2253,7 @@ const scenarios = [
     check(answered.result.status === 'ready_for_review' && applied(answered).goal.includes('#50231'), `the answer to the question does the same: ${ended(answered)}`);
     // The question asks for the number: a bare number, "PR 50231" and the pull request's URL all name it.
     for (const word of ['50231', ' #50231 ', 'PR 50231', 'pr #50231', 'https://github.com/sgl-project/sglang/pull/50231',
-      'https://github.com/sgl-project/sglang/pull/50231/files']) {
+      'https://github.com/sgl-project/sglang/pull/50231/files', 'https://github.com/SGL-Project/SGLang/pull/50231', 'sgl-project/sglang#50231']) {
       const bare = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
       check(bare.result.status === 'ready_for_review' && applied(bare).goal.includes('#50231 at def5678') && !bare.keys.includes('ci_guardian:bisect'),
         `the answer ${JSON.stringify(word)} names the pull request: ${ended(bare)}, ${applied(bare).goal}`);
@@ -2297,7 +2297,9 @@ const scenarios = [
     // is at, is applied. A closed or a merged one is not reported as an open fix, and no revision is guessed.
     const told = (x) => (x.calls.find((c) => c.key === 'ci_guardian:classify') || { ins: {} }).ins.named_prs;
     check(eqList(told(allowed), ['#50231']) && eqList(told(r), ['#50220']) && told(refused) === undefined && eqList(told(inferred), ['#50231'])
-      && eqList(told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'https://github.com/sgl-project/sglang/pull/777' } }, classified({}))), ['#777']),
+      && eqList(told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'https://github.com/sgl-project/sglang/pull/777' } }, classified({}))),
+        ['sgl-project/sglang#777'])
+      && told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'not sure' } }, classified({}))) === undefined,
       `Classify is given the pull requests the task or the request names: ${JSON.stringify([told(allowed), told(r), told(refused), told(inferred)])}`);
     const pointed = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] },
       classified({ existing_prs: [{ pr: '#777', author: 'carol', association: 'NONE', head: '7770001', state: 'open' }] }));
@@ -2318,6 +2320,57 @@ const scenarios = [
         `a named pull request that is not open with a known head (${why}) is not applied, and the run fixes the failure itself: ${ended(gone)}, ${
           JSON.stringify(gone.result.phases.filter((p) => p.phase === 'Classify').map((p) => p.summary))}`);
     }
+    // A word that names its repository keeps it. Its number alone names another pull request in the framework's
+    // repository, and a word given for aiter's #777 must not run sglang's #777 next to the keys: Classify is told
+    // the repository, and only a pull request it places there is the one the word names.
+    const unrelated = { pr: '#777', repo: 'sgl-project/sglang', author: 'dave', association: 'NONE', head: '7770002', state: 'open' };
+    for (const word of ['https://github.com/ROCm/aiter/pull/777', 'ROCm/aiter#777', 'https://github.com/ROCm/aiter/pull/777/files']) {
+      const other = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [unrelated] }));
+      check(other.result.status === 'ready_for_review' && other.keys.includes('ci_guardian:bisect') && applied(other).kind !== 'apply_pr'
+        && !other.result.pr.comment_for && eqList(told(other), ['ROCm/aiter#777'])
+        && other.result.phases.some((p) => p.phase === 'Classify'
+          && p.summary === 'named for verification, and not applied: ROCm/aiter#777: the classification did not find it as a pull request of this repository'),
+        `a word for another repository's pull request (${word}) does not run the framework's pull request of that number: ${ended(other)}, ${
+          JSON.stringify(other.result.phases.filter((p) => p.phase === 'Classify').map((p) => p.summary))}`);
+    }
+    // The repository's name is compared without regard to case, as GitHub reads it, whichever side writes it how.
+    const cased = await run({ mode: 'ci', task: 'c', apply_prs: ['https://github.com/sgl-project/sglang/pull/50231'] },
+      classified({ existing_prs: [{ ...theirs, repo: 'SGL-Project/SGLang' }] }));
+    check(cased.result.status === 'ready_for_review' && applied(cased).goal.includes('#50231 at def5678'),
+      `a repository the classification writes in other letters is the same repository: ${ended(cased)}`);
+    // Returned under its full name, as Classify is told to return it, it is one of another repository: not applied either.
+    const elsewhere = await run({ mode: 'ci', task: 'c', apply_prs: ['ROCm/aiter#777'] },
+      classified({ existing_prs: [{ pr: 'ROCm/aiter#777', repo: 'ROCm/aiter', author: 'carol', head: '7770001', state: 'open' }] }));
+    check(elsewhere.result.status === 'ready_for_review' && elsewhere.keys.includes('ci_guardian:bisect') && applied(elsewhere).kind !== 'apply_pr',
+      `nor is the other repository's own pull request applied to this tree: ${ended(elsewhere)}`);
+    // Where the word names a repository and the classification does not say which one a pull request is in, it is not that one.
+    const unplaced = await run({ mode: 'ci', task: 'c', apply_prs: ['https://github.com/sgl-project/sglang/pull/50231'] },
+      classified({ existing_prs: [{ ...theirs, repo: undefined }] }));
+    check(unplaced.result.status === 'ready_for_review' && unplaced.keys.includes('ci_guardian:bisect') && applied(unplaced).kind !== 'apply_pr',
+      `a pull request the classification does not place in the repository the word names is not applied: ${ended(unplaced)}`);
+
+    // An answer decides when it names a pull request or says none. Any other ("not sure", both at once) decides
+    // nothing: taken for "none", it would send the run to a fix of its own without a word. The run asks again.
+    for (const [word, said] of [['not sure', '"not sure"'], [['none', '#50231'], '"none, #50231"'], ['#50231 if it is safe', '"#50231 if it is safe"'],
+      ['no', '"no"']]) {
+      const vague = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      const vq = (vague.result.next.ask || [])[0] || {};
+      check(vague.result.status === 'needs_input' && vague.result.stopped_at === 'Classify' && !vague.keys.includes('ci_guardian:bisect')
+        && !vague.keys.includes('implementer:implement') && vq.field === 'apply_prs' && eqList(vq.options, ['#50231', 'none'])
+        && (vq.question || '').includes(`${said} does not say which: it names no pull request, or one and "none" at once.`)
+        && vague.result.next.rerun_with.answers.apply_prs === null,
+        `an answer that names no pull request and does not say none (${said}) is asked about again: ${ended(vague)}, ${vq.question}`);
+    }
+    for (const word of ['none', 'None', '"none"', ['none']]) {
+      const no = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      check(no.result.status === 'ready_for_review' && no.keys.includes('ci_guardian:bisect') && applied(no).kind !== 'apply_pr',
+        `${JSON.stringify(word)} is the word for a fix of the run's own: ${ended(no)}`);
+    }
+    // With no open pull request to choose from, such an answer has nothing to decide: the run fixes the failure.
+    const nothing = await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'not sure' } }, classified({}));
+    check(nothing.result.status === 'ready_for_review' && nothing.keys.includes('ci_guardian:bisect') && !(nothing.result.next.ask || []).length,
+      `where no pull request is open, nothing is asked: ${ended(nothing)}`);
+
     // Nor is one the classification found itself asked about when it is not open with a head.
     const stale = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ ...theirs, state: 'closed' }, { ...mine, head: '' }] }));
     check(stale.result.status === 'ready_for_review' && stale.keys.includes('ci_guardian:bisect') && !(stale.result.next.ask || []).length,
@@ -2565,13 +2618,18 @@ const scenarios = [
     // with the task, so that the run started from it asks. A perf task's candidates are the task itself.
     const offers = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
       { rank: 1, task: 'rocm720 unit lane red', type: 'ci', priority: 'P0', source: 'ci',
-        task_def: { mode: 'ci', task: 'https://github.com/sgl-project/sglang/actions/runs/1', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#50231'] } },
+        task_def: { mode: 'ci', task: 'https://github.com/sgl-project/sglang/actions/runs/1', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#50231'],
+          // what is no field of a task definition: an answer or a request here would stand for the user's word in the run it starts
+          answers: { apply_prs: '#50231' }, request: 'the red lane; verify 50231 for it', approved_by: 'the scan' } },
       { rank: 2, task: 'A/B two decode PRs', type: 'perf', priority: 'P2', source: 'upstream',
         task_def: { mode: 'perf', task: 'decode throughput', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#46329'] } }] }) });
     const [ciOffer, perfOffer] = offers.result.next.start || [];
     check(ciOffer && ciOffer.args.mode === 'ci' && !('apply_prs' in ciOffer.args) && ciOffer.args.framework_dir === '/sgl-workspace/sglang'
       && perfOffer && eqList(perfOffer.args.apply_prs, ['#46329']),
       `a ci task a scan offers names no pull request to apply: ${JSON.stringify(offers.result.next.start)}`);
+    check(eqList(Object.keys(ciOffer.args).sort(), ['framework_dir', 'inferpilot_dir', 'mode', 'task']),
+      `and carries the fields of a task definition and nothing else, no answer and no request, so that the run it starts asks (the ci scenario): ${
+        JSON.stringify(Object.keys(ciOffer.args))}`);
     const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
     check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
       && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,

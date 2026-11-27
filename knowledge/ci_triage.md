@@ -76,13 +76,18 @@ classification says of the author is no proof that the author can put code on ma
 with the repository (a member of its organisation, a collaborator) can come without write access, a
 model read it, and the run has no way of its own to look the permission up. What the Intake read
 into a request in plain words is a reading too, and is asked about: only a field or an answer the
-caller gave counts. A task a scan offers names no pull request to apply.
+caller gave counts. A task a scan offers names no pull request to apply: it is taken by the fields
+of a task definition, and an answer or a request a model wrote next to them goes no further. The
+word has to decide: it names a pull request, or it says `none`. Any other answer, or both at once,
+is asked about again, since taken for `none` it would send the run to a fix of its own.
 
 What the user names is looked up like any other: the classification is given it (`named_prs`), and
-the run applies only a pull request found open, with the commit its branch is at. One that is
-closed, merged or not found is not applied, the triage record says why, and the run goes on to a fix
-of its own. One pull request is verified in a run: several applied together would show nothing of
-each, and the others are named in the triage record.
+the run applies only a pull request found open, with the commit its branch is at. A word that names
+its repository (a URL, `<owner>/<repo>#<n>`) keeps it: it is a word for a pull request the
+classification places in that repository, and never for the framework's pull request of the same
+number. One that is closed, merged or not found is not applied, the triage record says why, and the
+run goes on to a fix of its own. One pull request is verified in a run: several applied together
+would show nothing of each, and the others are named in the triage record.
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a

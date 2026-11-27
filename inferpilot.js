@@ -192,11 +192,21 @@ function namedPrs() {
   const said = field.length ? field : prWords(asObject(RAW.answers).apply_prs);
   return { said, read: said.length ? [] : prWords(A.apply_prs) };
 }
-// A pull request of the framework's repository, however it is written: #50231, 50231, PR 50231 or its URL. The
-// repository of a URL is Classify's to check: it returns a pull request of another one under its full name.
-const prNumber = (p) => {
-  const m = /^(?:pr\s*|pull request\s*)?#?(\d+)$/i.exec(p) || /^https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#]\S*)?$/i.exec(p);
-  return m ? `#${m[1]}` : '';
+// A pull request as a task names it: #50231, 50231, PR 50231, <owner>/<repo>#50231 or its URL. A word that names
+// its repository keeps it (<owner>/<repo>#<n>), through the lookup and the choice: its number alone names
+// another pull request in the framework's repository, and a word given for the one would run the other. The
+// run does not know which repository is the framework's: Classify does, and says where each pull request is.
+const prRef = (p) => {
+  const bare = /^(?:pr\s*|pull request\s*)?#?(\d+)$/i.exec(p);
+  if (bare) return `#${bare[1]}`;
+  const m = /^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)(?:[/?#]\S*)?$/i.exec(p) || /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(p);
+  return m ? `${m[1]}#${m[2]}` : '';
+};
+// Whether a pull request Classify returned (pr: #<n>, repo: where it is) is the one a reference names.
+const samePr = (ref, p) => {
+  const at = ref.lastIndexOf('#');
+  const repo = ref.slice(0, at).toLowerCase();
+  return p.pr === ref.slice(at) && (!repo || p.repo === repo);
 };
 const TASK_PROMPTS = {
   feature: 'Which upstream PR, design or paper should be brought to AMD (URL)?',
@@ -478,7 +488,7 @@ const C = {
   run_dir: '',
   resume_run_dir: String(A.run_dir || ''),
   // ci: the pull requests the task or the request names for verification, for Classify to look up (existingFix)
-  named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prNumber(p) || p).filter((p) => !/^none$/i.test(p)) : [],
+  named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],
   branch: String(A.branch || ''),
   worktree: String(A.worktree || ''),
 };
@@ -804,8 +814,9 @@ const CLASSIFY = S({
   // open pull requests that already fix this failure, the likeliest first: the run verifies one in place of
   // finding the culprit and writing a fix of its own. pr: #<n>; association: the author's, as GitHub gives it
   // (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, ...), for the user to read; head: the commit its branch is at;
-  // state: open, closed, merged or not_found, also for the ones the task names (named_prs), which are looked up
-  existing_prs: arr(S({ pr: str, author: str, association: str, head: str, state: str }, ['pr'])),
+  // state: open, closed, merged or not_found, also for the ones the task names (named_prs), which are looked up;
+  // repo: the <owner>/<repo> the pull request is in, which a word that names its repository is matched with
+  existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str }, ['pr'])),
   window: str,
   // the test fails on a number it measures (a throughput, a latency, a speed threshold), not on an error:
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
@@ -1150,9 +1161,10 @@ function nextSteps(status, at) {
         : ` The daily report is shared: ${R.daily_report_url}.`;
     out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.${shared}${report}`;
     // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
-    // with the task, so that the run started from it asks.
-    const offered = (def) => (String(def.mode).trim().toLowerCase() === 'ci'
-      ? Object.fromEntries(Object.entries(def).filter(([k]) => k !== 'apply_prs')) : def);
+    // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
+    // fields and no further: an answer or a request it put next to them would stand for the user's word.
+    const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
+      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
       .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
@@ -2166,31 +2178,37 @@ function existingFix(found) {
   const { said, read } = namedPrs();
   const isPr = (p) => /^#\d+$/.test(p);
   const named = (Array.isArray(found) ? found : []).filter((p) => p && typeof p === 'object')
-    .map((p) => ({ pr: String(p.pr || '').trim(), author: String(p.author || '').trim(),
+    .map((p) => ({ pr: String(p.pr || '').trim(), repo: String(p.repo || '').trim().toLowerCase(), author: String(p.author || '').trim(),
       association: String(p.association || '').trim().toUpperCase(), head: String(p.head || '').trim(),
       state: String(p.state || '').trim().toLowerCase() }))
     .filter((p) => p.pr);
   const here = named.filter((p) => isPr(p.pr));
   const usable = here.filter((p) => p.state === 'open' && p.head);
-  const numbers = (words) => [...new Set(words.map(prNumber).filter(Boolean))];
-  const byUser = numbers(said);
-  const seems = numbers(read); // what the Intake read into the request: asked about, first among the candidates
-  const apply = byUser.map((pr) => usable.find((p) => p.pr === pr)).find(Boolean) || null;
+  const refs = (words) => [...new Set(words.map(prRef).filter(Boolean))];
+  const byUser = refs(said);
+  const seems = refs(read); // what the Intake read into the request: asked about, first among the candidates
+  // The user's word decides when it names a pull request or says none, and one of the two only. Any other
+  // answer ("not sure", a sentence) decides nothing: taken for "none", it would send the run to a fix of its own.
+  const none = said.some((w) => /^"?none"?$/i.test(w));
+  const decided = none ? !byUser.length : byUser.length > 0;
+  const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;
   // What the task or the request names and the run cannot apply, each with why.
-  const refused = (byUser.length ? byUser : seems).filter((pr) => !usable.some((p) => p.pr === pr)).map((pr) => {
-    const p = here.find((x) => x.pr === pr);
-    return `${pr}: ${!p ? 'the classification did not find it as a pull request of this repository'
+  const refused = (byUser.length ? byUser : seems).filter((ref) => !usable.some((p) => samePr(ref, p))).map((ref) => {
+    const p = here.find((x) => samePr(ref, x));
+    return `${ref}: ${!p ? 'the classification did not find it as a pull request of this repository'
       : p.state !== 'open' ? `it is ${p.state || 'not said to be open'}` : 'the commit its branch is at is not known'}`;
   });
-  const candidates = [...seems.map((pr) => usable.find((p) => p.pr === pr)).filter(Boolean), ...usable.filter((p) => !seems.includes(p.pr))];
+  const first = usable.filter((p) => seems.some((ref) => samePr(ref, p)));
+  const candidates = [...first, ...usable.filter((p) => !first.includes(p))];
   const others = candidates.filter((p) => p !== apply);
   const out = { apply, others, said, refused, foreign: named.filter((p) => !isPr(p.pr)), ask: null };
-  if (!said.length && candidates.length) {
+  if (!decided && candidates.length) {
     const who = candidates.map(describePr).join(', ');
-    const confirm = seems.filter((pr) => candidates.some((p) => p.pr === pr));
+    const confirm = first.map((p) => p.pr);
     out.ask = { who, question: { field: 'apply_prs',
       question: `${who}: open, and said to fix this failure. Verifying a pull request runs its code and its tests on this machine, next `
         + 'to the keys the agents hold, so the run applies one only on your word. '
+        + `${said.length ? `${JSON.stringify(said.join(', '))} does not say which: it names no pull request, or one and "none" at once. ` : ''}`
         + `${confirm.length ? `The request seems to name ${confirm.join(', ')}: say so here to confirm it. ` : ''}`
         + 'Which one should the run verify? Its number, or "none" to have the run fix the failure itself.',
       why: "a pull request is someone else's code: it runs on this machine only on your word",
