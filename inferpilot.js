@@ -979,6 +979,17 @@ const PR = S({
   push_command: str,
   work_packages: WPS, // what the branch still lacks; implemented, verified and reviewed like a finding
 }, ['branch', 'lint_pass', 'feature_off_final', 'content_unchanged', 'pr_body_path', 'leak_scan_findings', 'launch_checked']);
+// A fix (issue, ci), before its pull request: its gate run again on the latest main without the fix. on_main:
+// fails (as when the run began), passes (main has fixed the failure since: fixed_by names the pull request or
+// commit, when one shows), inconclusive (the runs decided nothing). main is the commit it ran on, main_import
+// where the framework was imported from in those runs, test_path the file a failing test was collected from,
+// evidence the runs and what they show, left_running what the check started and could not stop: '' when all of it
+// is stopped, and required, since an answer that does not say is not one that says nothing is left.
+const RECHECK = S({ on_main: { type: 'string', enum: ['fails', 'passes', 'inconclusive'] }, main: str, main_import: str,
+  test_path: str, fixed_by: str, evidence: str, left_running: str }, ['on_main', 'left_running']);
+// The call that cleans up after a check on the latest main that left no answer: it also says what it could not
+// put back in the image. Required, so that an answer that leaves it out is no answer, and never a clean image.
+const RECHECK_CLEANUP = S({ in_use: str, env_changed: str }, ['in_use', 'env_changed']);
 const K_PACKAGE = S({
   task_dir: str,
   mode: { type: 'string', enum: ['optimize', 'author'] },
@@ -1888,10 +1899,119 @@ function stoppedUnmeasured() {
   return { ok: false, stopped: true, at: 'Verify' };
 }
 
+// A fix was verified against the commit the run began on, and main has moved since. Before a pull request is
+// prepared, the fix's gate (the reproduction, the failing test) runs again on the latest main without the fix:
+// where it no longer fails, there is nothing to propose, and the run ends as fixed on main. It is the verify
+// engineer's to run: only its numbers, the test engineer's and the performance engineer's count (guardrails.md).
+// Dropping a verified fix needs proof, so "passes" counts only with the commit it ran on, the runs it rests on,
+// and the code under test taken from that commit's worktree: the framework, and for a failing test the test
+// file, since a gate written for the task worktree can run the fixed tree and pass. Anything less prepares the
+// pull request, and the run record says what the check showed.
+// Returns { fixed: true } (no pull request), { stop: reason } (the check may still hold the GPUs), or {}.
+// claim: the number a performance problem's fix must restore, which main has to reach as well.
+// The check first records the image's packages, and the record is this invocation's: a retry of the task can
+// reuse the run directory in another container, whose image an earlier record does not describe, and restoring
+// from that one would put the old image's versions into the new one. The check and the call that cleans up
+// after it are given the same path, which holds across the check's own retries and no further.
+const RECHECK_ENV_ID = Date.now().toString(36);
+async function recheckOnMain(extraGates, claim) {
+  enter('PR');
+  const label = 'verify_engineer:recheck';
+  const envRecord = `${C.run_dir}/recheck_env.${RECHECK_ENV_ID}.txt`;
+  // The check runs the fix's gate again: it has at least the time the run granted the reproduction (a Verify
+  // round's grant is the verify engineer's own already; never past a timeout the user gave, under which nothing
+  // is granted).
+  const granted = GRANTED_MS['issue_triager:reproduce'] || 0;
+  if (granted > timeoutFor('verify_engineer', 'recheck')) GRANTED_MS[label] = granted;
+  // Like a Verify round, the call is one session: an answer that cannot be used goes to the next attempt, which
+  // has a limit of its own, not to a second session under what is left of the first's.
+  const rc = await call('verify_engineer', 'recheck',
+    inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('verify_engineer', 'recheck')),
+      env_record: envRecord }),
+    RECHECK, label, ONE_SESSION);
+  const stopped = (why, left) => {
+    note('PR', 'fail', why);
+    leftRunning.push(left);
+    return { stop: why };
+  };
+  const kept = `The fix is verified and on ${C.branch || 'its branch'}`;
+  if (!rc) {
+    // A call that timed out is not cancelled and may launch again: nothing else is started next to it. One that
+    // ended without an answer may have left its servers: they are stopped and the GPUs checked before the PR
+    // phase starts its own.
+    if (TIMED_OUT_CALLS.has(label)) {
+      return stopped('the check on the latest main timed out and may still be running on the GPUs: no pull request is prepared next to it. '
+        + `${kept}; stop the check, then run the task again`, 'the check on the latest main timed out and may have left its servers running');
+    }
+    const gpus = await call('verify_engineer', 'gpus', inputs({ round: 'recheck', env_record: envRecord }), RECHECK_CLEANUP,
+      'verify_engineer:gpus#recheck');
+    // No answer, or one that does not say whether the image is as it was recorded: neither is a clean image.
+    if (!gpus) {
+      ATTENTION.push({ call: label, issue: 'returned no answer and may have left its servers running, or the image changed: stop them, and '
+        + `compare the image's packages with ${envRecord}, before reusing its GPUs` });
+      return stopped('the check on the latest main returned nothing, and what it left on the GPUs and in the image could not be stopped '
+        + `or checked: no pull request is prepared next to it. ${kept}`, 'the check on the latest main may have left its servers running');
+    }
+    // The check installs nothing in place, and one that left no answer cannot say that it did not: the same call
+    // compares the image's packages with the record the check wrote first, and puts back what differs. What it
+    // could not put back leaves an image other than the one the fix was verified in: the pull request's checks
+    // are not run in it.
+    const changed = String(gpus.env_changed || '').trim();
+    if (changed) {
+      ATTENTION.push({ call: label, issue: `left the image's environment changed, and it could not be put back: ${changed}. `
+        + 'Restore it before anything else runs in this image' });
+      return stopped(`the check on the latest main returned nothing and left the image's environment changed (${changed}): no pull request `
+        + `is prepared in an image other than the one the fix was verified in. ${kept}; restore the image, then run the task again`,
+      `the check on the latest main left the image's environment changed: ${changed}`);
+    }
+    const inUse = String(gpus.in_use || '').trim();
+    note('PR', 'recheck', 'the gate was not run again on the latest main: the verify engineer returned nothing; what it left was stopped'
+      + `${inUse ? `, and another job uses a pinned GPU: ${inUse}` : ''}`);
+    return {};
+  }
+  // What the check started and could not stop is still on the GPUs: the PR phase starts nothing next to it.
+  const left = String(rc.left_running || '').trim();
+  if (left) {
+    ATTENTION.push({ call: label, issue: `could not stop what it started: ${left}. Stop it before reusing its GPUs` });
+    return stopped(`the check on the latest main could not stop what it started (${left}): no pull request is prepared next to it. `
+      + `${kept}; stop it, then run the task again`, `the check on the latest main left running: ${left}`);
+  }
+  const sha = String(rc.main || '').trim();
+  const at = sha ? `main at ${sha}` : 'the latest main';
+  const evidence = String(rc.evidence || '').trim();
+  const shown = evidence ? `. ${evidence}` : '';
+  // The whole answer goes to the report and the reply, which a note's 600 characters would cut.
+  C.recheck = R.recheck = { on_main: rc.on_main, main: sha, main_import: String(rc.main_import || '').trim(),
+    test_path: String(rc.test_path || '').trim(), fixed_by: String(rc.fixed_by || '').trim(), evidence };
+  if (rc.on_main === 'passes') {
+    const inTree = (p) => p.startsWith(`${C.run_dir}/recheck/`) && !/(^|\/)\.\.(\/|$)/.test(p);
+    const imp = R.recheck.main_import;
+    const test = R.recheck.test_path;
+    const ownTest = (extraGates || []).some((g) => g.gate === 'failing_test');
+    const lacks = [!sha && 'the commit of main it ran on', !evidence && 'the runs it rests on',
+      !inTree(imp) && `the framework imported from the worktree of that commit (it was imported from ${imp || 'a path the check did not record'})`,
+      ownTest && !inTree(test) && `the failing test collected from that worktree (it was collected from ${test || 'a path the check did not record'})`]
+      .filter(Boolean);
+    if (!lacks.length) {
+      const by = R.recheck.fixed_by;
+      if (by) C.fixed_by = R.fixed_by = by;
+      note('PR', 'fixed_on_main', `${at} no longer fails without the fix${by ? `: fixed by ${by}` : ''}; no pull request is prepared${shown}`);
+      return { fixed: true };
+    }
+    R.recheck.on_main = C.recheck.on_main = 'inconclusive';
+    note('PR', 'recheck', `the check says ${at} passes without the fix, but not with what dropping a verified fix needs: `
+      + `${lacks.join('; ')}. Not counted: the pull request is prepared${shown}`);
+    return {};
+  }
+  note('PR', 'recheck', rc.on_main === 'fails' ? `${at} still fails without the fix${shown}`
+    : `the check on ${at} decided nothing: the pull request is prepared${shown}`);
+  return {};
+}
+
 // The PR engineer changes no code: the branch it hands over must be the tree Verify and Review passed.
 // What it finds missing comes back as work packages.
 async function preparePR(round) {
-  enter('PR');
+  if (PHASE !== 'PR') enter('PR'); // a fix's phase began with the check on the latest main
   const pr = await call('pr_engineer', 'pr', inputs({ round }), PR, `pr_engineer#${round}`);
   const leaks = (pr && pr.leak_scan_findings) || [];
   const wps = (pr && pr.work_packages) || [];
@@ -2008,6 +2128,12 @@ async function deliver(wps, extraGates, perfClaim, runPerf) {
   const rev = await reviewLoop(extraGates, perfClaim, runPerf);
   if (!rev.ok) return ended(rev, rev.at);
   if (stopHere('Review')) return finish('stopped', 'Review');
+
+  if (BEFORE_A_FIX[MODE] && (extraGates || []).length) {
+    const rc = await recheckOnMain(extraGates, runPerf === true ? perfClaim : '');
+    if (rc.fixed) return finish('fixed_on_main', 'PR');
+    if (rc.stop) return finish('blocked', 'PR');
+  }
 
   // What the PR engineer finds missing goes back through Implement, Verify and Review, once.
   for (let round = 0; ; round++) {

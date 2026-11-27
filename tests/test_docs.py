@@ -535,6 +535,138 @@ class LongContextScriptTest(unittest.TestCase):
             self.assertIn(said, row[0], "%s: the long_context_script row" % name)
 
 
+class RecheckOnMainTest(unittest.TestCase):
+    """A fix is verified against the commit its run began on, and main moves meanwhile. Before the pull request
+    is prepared, the fix's gate runs again on the latest main without the fix (roles/verify_engineer.md,
+    PHASE=recheck): a failure main no longer shows gets no pull request, and the run ends as fixed on main. A
+    verified fix is dropped only on proof; a check that decides less prepares the pull request."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_checks_before_the_first_pr_round_and_drops_a_fix_only_on_proof(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const RECHECK = S({ on_main: { type: 'string', enum: ['fails', 'passes', 'inconclusive'] }, main: str, main_import: str,",
+                 "the check cannot say that it decided nothing"),
+                ("test_path: str, fixed_by: str, evidence: str, left_running: str }, ['on_main', 'left_running']);",
+                 "an answer that does not say what is left running is taken for one that says nothing is"),
+                # only the test, the verify and the performance engineer produce numbers that count (guardrails.md)
+                ("const rc = await call('verify_engineer', 'recheck',", "the check is run by a role whose numbers do not count"),
+                ("inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('verify_engineer', 'recheck')),\n"
+                 "      env_record: envRecord }),", "the check is not given the fix's gate, the number to restore, its limit or where to record the image"),
+                # the record of the image's packages is this invocation's, and the cleanup after the check is given the same one
+                ("const RECHECK_ENV_ID = Date.now().toString(36);", "a retry of the task in another container restores the old image's packages"),
+                ("const envRecord = `${C.run_dir}/recheck_env.${RECHECK_ENV_ID}.txt`;", "the record is not this invocation's"),
+                ("RECHECK, label, ONE_SESSION);", "an answer that cannot be used is asked for again under what is left of the same limit"),
+                ("const rc = await recheckOnMain(extraGates, runPerf === true ? perfClaim : '');", "main is not held to the number a performance problem must restore"),
+                ("const granted = GRANTED_MS['issue_triager:reproduce'] || 0;", "a reproduction that was granted more time is run again with less"),
+                ("const left = String(rc.left_running || '').trim();", "the pull request is prepared next to what the check could not stop"),
+                ("const inTree = (p) => p.startsWith(`${C.run_dir}/recheck/`) && !/(^|\\/)\\.\\.(\\/|$)/.test(p);",
+                 "a gate that ran the fixed tree passes for main"),
+                ("ownTest && !inTree(test) &&", "a failing test collected from the task worktree passes for main's"),
+                ("const lacks = [!sha && 'the commit of main it ran on', !evidence && 'the runs it rests on',", "a bare answer drops a verified fix"),
+                ("C.recheck = R.recheck = {", "the report and the reply have only a note's 600 characters of the check"),
+                ("if (TIMED_OUT_CALLS.has(label)) {", "the pull request is prepared next to a check that may still be running"),
+                ("const gpus = await call('verify_engineer', 'gpus', inputs({ round: 'recheck', env_record: envRecord }), RECHECK_CLEANUP,\n"
+                 "      'verify_engineer:gpus#recheck');", "what a check without an answer left on the GPUs is not stopped, or its record is not "
+                                                           "the one the cleanup reads"),
+                ("const GPU_CHECK = S({ in_use: str }, ['in_use']);", "an ordinary GPU check is asked about the image"),
+                ("const RECHECK_CLEANUP = S({ in_use: str, env_changed: str }, ['in_use', 'env_changed']);",
+                 "a cleanup that does not say whether the image changed is taken for a clean image"),
+                ("const changed = String(gpus.env_changed || '').trim();\n    if (changed) {", "the pull request is prepared in an image the check left changed"),
+                ("if (rc.fixed) return finish('fixed_on_main', 'PR');", "a fix main no longer needs still gets a pull request"),
+                ("if (rc.stop) return finish('blocked', 'PR');", "the run goes on next to a check that may hold the GPUs"),
+                ("if (PHASE !== 'PR') enter('PR');", "the PR phase is entered twice")):
+            self.assertIn(said, src, why)
+        self.assertLess(src.index("const rc = await recheckOnMain(extraGates, "), src.index("const pr = await preparePR(round);"),
+                        "the check comes after the first pull request round")
+        self.assertIn("only the test engineer, the verify engineer and the performance engineer produce numbers that count",
+                      self.flat("knowledge/guardrails.md"))
+        self.assertNotIn("PHASE=recheck", (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8"),
+                         "the PR engineer, whose numbers do not count, still has the check")
+
+    def test_the_documents_say_it(self):
+        role = (ROOT / "roles" / "verify_engineer.md").read_text(encoding="utf-8")
+        self.assertIn("\n## PHASE=recheck (issue, ci: before the pull request)\n", role)
+        phase = " ".join(role[role.index("## PHASE=recheck"):].split())
+        for said in ("A failure that main no longer shows needs no pull request", "changes nothing",
+                     "so `passes` is said only on proof; anything short of it is `inconclusive`",
+                     "a throwaway worktree of the latest main, without the fix",
+                     "A `RUN_DIR/recheck` an earlier call left behind is removed first",
+                     # the fetch is the framework's, not that of the directory the call runs in
+                     "Then `git -C <framework_dir> fetch origin`",
+                     "a bare fetch there leaves `origin/main` of the framework where it was",
+                     # an earlier attempt may have left a server that reads the tree
+                     "Before removing it, stop what that call launched",
+                     "Stop every launch whose log is under `RUN_DIR/logs/recheck/`",
+                     "Where you cannot confirm that nothing of it still runs, leave the tree as it is, run nothing, and answer `inconclusive` "
+                     "with `left_running` naming what is left",
+                     "The log of each launch goes in `RUN_DIR/logs/recheck/`",
+                     # the image is the one the fix was verified in, before the check and after it
+                     "First write the image's packages to `env_record`",
+                     "an earlier attempt of this check wrote it in this invocation of the run",
+                     "A `RUN_DIR/recheck_env.*.txt` under another name is an earlier invocation's",
+                     "it describes another image, so leave it alone, and never restore from it",
+                     "Put the change into effect for these runs in a directory of the check's own",
+                     "Never in place: this call changes nothing, the pull request is checked in this image after it",
+                     "Where main's change must replace a package of the image, or cannot be put into effect at all, answer `inconclusive`",
+                     "Then compare the image's packages with `env_record`",
+                     "one you cannot put back goes in `left_running` too",
+                     # the gate was written for the task worktree, which has the fix
+                     "Point the gate at that tree, and at nothing else",
+                     "set `TREE` to the recheck worktree", "replace every path of the task worktree in the command itself",
+                     "prints where the framework was imported from (sglang: `sglang.__file__`): return that path as `main_import`",
+                     "For a failing test, return the file it was collected from as `test_path`",
+                     "InferPilot counts `passes` only when both lie in `RUN_DIR/recheck`",
+                     # main's own environment
+                     "Main runs in the environment its own files call for",
+                     "where main has changed a dependency declaration or the Dockerfile since `<base>`, that may be its fix",
+                     # an intermittent failure
+                     "as many times as the base needed to show the failure (the ledger has the counts), at least 6 for a failure that did "
+                     "not show on every run there",
+                     "one clean run after an intermittent failure is not evidence",
+                     "keep a quarter of the time to it, at most 15 minutes, for step 6",
+                     # a failure that main hides is not fixed
+                     "The failing test was collected and ran, not skipped, deselected or marked as expected to fail",
+                     "A number reaches `claim` and a score `accuracy_claim`, as the run established them",
+                     "not a threshold main has lowered since",
+                     "a test main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed",
+                     "A run that fails another way (an import error, a server that stops for another reason)",
+                     # what the reply is checked against, and what is left behind
+                     "Write the same in the ledger (`RUN_DIR/experiment_ledger.md`)",
+                     "keep each run's log under `RUN_DIR/logs/`, not in the worktree",
+                     "What you could not stop goes in `left_running`, whatever the answer, and an empty string when all of it stopped",
+                     "Remove the worktree once everything you started has stopped",
+                     '"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>"',
+                     '"left_running": ""'):
+            self.assertIn(said, phase)
+        for path, said in (("knowledge/pr_playbook.md", "A fix (issue, ci) is checked against main once more before its PR is prepared"),
+                           ("knowledge/pr_playbook.md", "no PR is prepared, and the run ends as fixed on main"),
+                           ("knowledge/pr_playbook.md", "A verified fix is dropped only on proof"),
+                           ("knowledge/pr_playbook.md", "A check that decides less than that prepares the PR"),
+                           ("roles/director.md", "or the check on the latest main before the pull request"),
+                           # bisect_fixed is an issue's: a ci task is given the range, and no run that does not exist
+                           ("roles/director.md", "Where neither names it, say that the change that fixed it is not named, and give the range it "
+                                                 "lies in"),
+                           ("roles/director.md", "For an issue, give the `bisect_fixed` run that would name it; a ci task has no such run, so offer "
+                                                 "none"),
+                           ("roles/verify_engineer.md", "With `round: recheck`, look at the image's environment as well, once the launches have "
+                                                        "stopped"),
+                           ("roles/verify_engineer.md", "`env_changed` names what you could not put back"),
+                           ("roles/verify_engineer.md", "`env_record` is this invocation's record, and the only one that counts"),
+                           ("roles/verify_engineer.md", "Never compare with that one, and never restore from it"),
+                           ("roles/verify_engineer.md", "Give it in every answer to this round, the empty string included: an answer without it is "
+                                                        "taken for no answer, and the run stops"),
+                           ("roles/director.md", "say that its branch was not proposed, and where it is"),
+                           ("roles/issue_triager.md", "main fixed it while the run worked on a fix of its own, which is not offered"),
+                           ("roles/verify_engineer.md", "`recheck` when it follows a check on the latest main that left no answer"),
+                           ("README.md", "before the PR of a fix, runs its gate again on the latest main without the fix"),
+                           ("README.zh-CN.md", "修复提 PR 之前，在最新的 main 上不带修复重跑一次它的 gate")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class LongGatesTest(unittest.TestCase):
     """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
     and hands to every role. G4 is the task's performance client run back to back for more than 48 hours

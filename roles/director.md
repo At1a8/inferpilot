@@ -398,8 +398,13 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
   review, approve, post or hand over); stopped at PR, each of `leak_scan_findings` (where it is and what it
   shows) and of `pr_work_packages` (what the branch still lacks). For `fixed_on_main`, say on which code
-  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
-  `bisect_fixed` run that would.
+  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, or the check on the
+  latest main before the pull request. Where neither names it, say that the change that fixed it is
+  not named, and give the range it lies in: from the commit the run began on to the main the check
+  ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
+  `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
+  at PR, the run had verified a fix of its own before main moved: say that its branch was not
+  proposed, and where it is.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
