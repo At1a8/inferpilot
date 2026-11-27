@@ -795,6 +795,10 @@ const SETUP = S({
   // that gsm8k cannot be put to it and G2 is the task's own output comparison; left out, it counts as one that does
   text_model: bool,
   notes: str,
+  // a ci task on the newest image of its variant: the package of the image the worktree rejects, and the import
+  // that fails. Setup skips the baseline for it, and Classify is given it (director.md, step 3). No other task
+  // goes on with it.
+  import_rejected: str,
 }, ['lock', 'run_dir', 'baseline_status', 'gpu_ids']);
 // workload_gap: the task's client does not run the scenarios the source measured its gain on; the run asks.
 // perf_cost: perf_claim is a cost the user stated (a bound), not a gain: it is the claim on any client.
@@ -1647,6 +1651,10 @@ async function setup(requireBaseline) {
     note('Setup', 'fail', (s && s.baseline_status === 'fail' && s.baseline) || 'the director returned no run directory');
     return false;
   }
+  // What the worktree rejects of the newest image is kept whole in the result, before any check below can stop the
+  // run: a Setup that also lacks a script or a GPU set stops on that, and the rejection is still the diagnosis.
+  const rejected = String(s.import_rejected || '').trim();
+  if (rejected) R.import_rejected = rejected;
   // GPUs and scripts the user gave win; otherwise every later role uses the ones Setup pinned or rendered.
   const own = (v) => (isTemplate(v) ? '' : String(v || ''));
   C.base_commit = String(s.base_commit || '').trim();
@@ -1689,9 +1697,20 @@ async function setup(requireBaseline) {
       + "InferPilot's server template, and G2 has nothing to serve the fix with");
     return false;
   }
+  // A ci task whose worktree rejects a package of its lane's newest image goes on to Classify: the guardian is
+  // given what was rejected, and makes the lane's own environment before it judges main (director.md, step 3).
+  // No other task goes on from such a Setup, whatever baseline it reports: nothing of it would run in that
+  // image, and a server that does not start there would read as a problem that is gone.
+  // The result has it whole (above): a note keeps 600 characters, so it names the rejection first.
+  if (rejected && MODE !== 'ci') {
+    note('Setup', 'fail', `the newest image does not run the worktree: ${rejected}`);
+    return false;
+  }
+  if (rejected) C.import_rejected = rejected;
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
   note('Setup', ok ? 'pass' : 'fail',
-    `baseline ${s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`);
+    `${rejected ? `the worktree rejects a package of the newest image, which Classify judges: ${rejected}; ` : ''}baseline ${
+      s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`);
   return ok;
 }
 

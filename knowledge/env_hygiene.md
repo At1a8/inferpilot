@@ -69,7 +69,10 @@ belongs to a host user, and the rules below are about those.
   images are for reinforcement learning). A container keeps its image, so Setup checks it first
   (`latest_image.py --compare`) and an older or different one stops the run, before anything exists,
   until the user answers `image_ok`. Compiled packages too old for the worktree fail at import or startup: that is
-  an environment failure that names the newer image, not a framework bug to fix.
+  an environment failure that names the newer image, not a framework bug to fix. On the newest image
+  of its variant it is neither: the worktree and its newest image disagree. A ci task goes on to
+  Classify, which makes the lane's own environment before it judges main; any other task stops at
+  Setup and says so, since nothing of it would run in that image.
 
 ## Servers
 

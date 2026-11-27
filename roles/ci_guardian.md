@@ -86,7 +86,19 @@ Then:
    the tests its latest scan saw fail are failing now (`n_failing`; `broken`, `flaky`, `new`): a
    `no longer failing` entry is history, which the tracker keeps for some days.
 2. Classify it with `ci_triage.md` §2: `code_regression`, `dependency_bump`, `test_bug`, `flaky`,
-   `infrastructure`. For `flaky`, rerun the test enough times to state a rate.
+   `infrastructure`. For `flaky`, rerun the test enough times to state a rate. With
+   `import_rejected`, Setup found that main rejects a package of the lane's newest image at import,
+   and did not stop the run for it (`director.md`, Setup step 3). That is not yet a failure of
+   main: the lane's setup step may replace that package before its tests run. Make the lane's
+   environment first, with what its setup installs for the tree under test, in a directory of the
+   run's own and never in place, and run the tests in it. What fails there is main's, to classify
+   like any other failure. Every later run of the task needs that environment too, each for its own
+   tree and the base included: the unit checks, the fix's gate and the servers of G2 and G5 would
+   meet the rejected package on the image as it ships. Write in the triage record how it is made
+   for a given tree, so that the fix is verified in the lane's environment and not in the image's;
+   `failing_test_cmd` stays the test's own command. Where you cannot make it, this machine could
+   not be that lane (above): `on_main: "not_run"`, with the step that is missing in `evidence`. No
+   fix is planned for an import failure the lane does not have.
    - `performance`: true when the test fails on a number it measures (a throughput, a latency, a
      speed threshold), not on an error, whatever its class (`ci_triage.md` §2). Then `perf_claim` is
      the number the fix must restore — metric, workload and value, from the test's threshold or the
