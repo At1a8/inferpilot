@@ -1870,14 +1870,20 @@ class CiAccuracyProblemTest(unittest.TestCase):
         # The row itself, cell by cell: a sentence elsewhere in the template would not make the column right. The
         # same-pattern column holds the base's score as this run's verify engineer measured it, never "the score
         # that fell", which reads as the failed job's: another commit's, on another machine.
-        rows = [line for line in (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
-                if line.startswith("| accuracy claim (a CI failure on a score its test measures) |")]
-        self.assertEqual(len(rows), 1, "one row for the accuracy claim")
-        cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
+        lines = (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
+        at = [i for i, line in enumerate(lines) if line.startswith("| accuracy claim (a CI failure on a score its test measures) |")]
+        self.assertEqual(len(at), 1, "one row for the accuracy claim")
+        # The row's own table is the run of table lines it stands in: a blank line above the row would start
+        # another table, without these headings. Its headings are read whole, so that each cell is under its own.
+        top = at[0]
+        while top > 0 and lines[top - 1].startswith("|"):
+            top -= 1
+        self.assertEqual(lines[top], "| Gate | Suite | Baseline (same pattern) | Feature | Verdict | Artifact |",
+                         "the claim's row stands in the table of the correctness gates, under these headings in this order")
+        self.assertEqual(lines[top + 1].replace(" ", ""), "|---|---|---|---|---|---|", "and that table has six columns")
+        self.assertGreater(at[0], top + 1, "the row comes after the headings")
+        cells = [c.strip() for c in lines[at[0]].strip().strip("|").split("|")]
         self.assertEqual(len(cells), 6, "Gate | Suite | Baseline (same pattern) | Feature | Verdict | Artifact")
-        header = [line for line in (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
-                  if line.startswith("| Gate | Suite | Baseline (same pattern) |")]
-        self.assertEqual(len(header), 1, "the row sits in the table whose third column is the same-pattern baseline")
         suite, baseline, feature = cells[1], cells[2], cells[3]
         self.assertIn("the failing test's own measurement, as the test stood at the base", suite)
         for said in ("the score on the base by that measurement, as the verify engineer measured it in this run on this machine "
