@@ -797,12 +797,12 @@ const SETUP = S({
   run_dir: str,
   baseline_status: { type: 'string', enum: ['pass', 'fail', 'skip'] },
   baseline: str,
-  branch: str,
-  worktree: str,
-  base_commit: str, // the commit the task branch was made on: what a rollback of the whole task must come back to
   // a feature, a perf task: the accuracy of the baseline, set by set, as RUN_DIR/baseline.json has it: the score as
   // a fraction of 1 and how many questions the set has. G2 holds a round's numbers of the baseline to it (g2Unsound)
   baseline_accuracy: arr(S({ set: str, score: num, questions: num }, ['set', 'score'])),
+  branch: str,
+  worktree: str,
+  base_commit: str, // the commit the task branch was made on: what a rollback of the whole task must come back to
   gpu_ids: str, // the GPU set every later role uses
   // The scripts every later measurement runs: the task's own, or rendered from templates/harness/
   server_script: str,
@@ -1691,10 +1691,10 @@ async function setup(requireBaseline) {
   // Without an accuracy script of the task's, the run measures with InferPilot's harness, whose sets and their
   // numbers of questions it knows (g2Unsound). A script the task brings measures what it measures.
   ourAccuracy = !own(C.accuracy_script);
-  C.base_commit = String(s.base_commit || '').trim();
   C.baseline_accuracy = (Array.isArray(s.baseline_accuracy) ? s.baseline_accuracy : [])
     .filter((b) => b && String(b.set || '').trim() && isFraction(b.score))
     .map((b) => ({ set: String(b.set).trim().toLowerCase(), score: b.score, ...(Number(b.questions) > 0 ? { questions: Number(b.questions) } : {}) }));
+  C.base_commit = String(s.base_commit || '').trim();
   Object.assign(C, { run_dir: s.run_dir, branch: s.branch || C.branch, worktree: s.worktree || C.worktree,
     gpu_ids: String(C.gpu_ids || s.gpu_ids || '').trim(),
     server_script: own(C.server_script) || own(s.server_script),
