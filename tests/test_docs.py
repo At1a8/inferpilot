@@ -1084,9 +1084,18 @@ class FixAccuracyTest(unittest.TestCase):
         run again with the answers and the same arguments: with the stop it started with among them, it would stop
         before the fix again. The result hands on the stop as the control file last set it."""
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
-        self.assertIn("  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopAfterNow !== STOP_AFTER && stopAfterNow !== 'now') {\n"
-                      "    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopAfterNow) || '';", src,
-                      "a rerun after the control file moved the stop stops where the task first said")
+        self.assertIn("  const stopNow = liveStopAfter();\n"
+                      "  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopNow !== STOP_AFTER && stopNow !== 'now') {\n"
+                      "    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
+                      "a rerun after the control file moved the stop stops where the task first said, or the file is not read when the run ends")
+        # a rerun without a stop means it: not brought back by an earlier answer, nor by the request's words
+        self.assertIn("  if (out.rerun_with && out.rerun_with.stop_after === '' && asObject(RAW.answers).stop_after != null) {\n"
+                      "    out.rerun_with.answers = { ...(out.rerun_with.answers || {}), stop_after: null };", src,
+                      "a stop an earlier answer named comes back in the rerun")
+        self.assertIn("  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';", src,
+                      "a stop the request's words name comes back over one the caller cleared, or the cleared field beats an answer")
+        self.assertIn("An empty `stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops nowhere, "
+                      "whatever the request says of a stop", " ".join((ROOT / "roles" / "intake.md").read_text(encoding="utf-8").split()))
         flat = lambda path: " ".join((ROOT / path).read_text(encoding="utf-8").split())
         for path, said in (("README.md", "the arguments for running it again (`next.rerun_with`) carry `stop_after` as the file last set it"),
                            ("README.zh-CN.md", "再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值"),

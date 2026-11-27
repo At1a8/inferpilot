@@ -397,6 +397,10 @@ async function intakeStage(raw) {
   const request = String(raw.request || '').trim();
   const given = pick(raw, TASK_KEYS);
   const answers = pick(asObject(raw.answers), TASK_KEYS);
+  // A stop the caller set to nothing is the caller's word too: the result of a run whose stop was lifted hands
+  // that on (next.rerun_with), and the stop the request's words name, which the Intake reads again, does not
+  // come back over it. An answer does: an empty field is also how a value the run asked about makes room for one.
+  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';
   if (!request && missingFields({ ...answers, ...given }).length === 0) return { args: { ...raw, ...answers, ...given } };
   enter('Intake');
   const res = await call('intake', 'define', { request, given, answers, inferpilot_dir: INFERPILOT }, INTAKE, 'intake');
@@ -1288,9 +1292,18 @@ function nextSteps(status, at) {
   // The control file can move the stop while a run goes on, and that is the operator's last word on where the
   // task stops. The rerun a result offers goes by it, where the result names no stop of its own: a run started
   // with stop_after=Diagnose, whose stop was lifted and which then asked for what its fix needs, is not run
-  // again only to stop after Diagnose once more. "now" is no place to stop a run that starts over.
-  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopAfterNow !== STOP_AFTER && stopAfterNow !== 'now') {
-    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopAfterNow) || '';
+  // again only to stop after Diagnose once more. "now" is no place to stop a run that starts over. The file is
+  // read once more here: a run that ends inside a phase (Spec asks for another client) passed no boundary since
+  // the operator last wrote to it.
+  const stopNow = liveStopAfter();
+  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopNow !== STOP_AFTER && stopNow !== 'now') {
+    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';
+  }
+  // A rerun without a stop means it. A stop an earlier answer named would come back with the answers, which the
+  // runner merges: it is cleared there too. The request's words are overruled by the empty field itself, which
+  // the next run takes for the caller's word (intakeStage).
+  if (out.rerun_with && out.rerun_with.stop_after === '' && asObject(RAW.answers).stop_after != null) {
+    out.rerun_with.answers = { ...(out.rerun_with.answers || {}), stop_after: null };
   }
   return out;
 }

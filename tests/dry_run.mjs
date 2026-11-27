@@ -1437,6 +1437,47 @@ const scenarios = [
         `a result after a stop that did not move names none (${control ? JSON.stringify(control.control()) : 'no control file'}): ${
           unmoved.result.status} at ${unmoved.result.stopped_at}, ${JSON.stringify(unmoved.result.next.rerun_with)}`);
     }
+    // The file is read once more when the run ends: one that ends inside a phase passed no boundary since the
+    // operator last wrote to it. Spec asks for another client after the stop was cleared while it ran.
+    let atSpec = false;
+    const midPhase = await run({ mode: 'feature', task: 't', stop_after: 'Verify' }, {
+      'director:spec': () => {
+        atSpec = true;
+        return { ...DEFAULTS['director:spec'](), workload_gap: 'the source measures agentic sessions', fallback_client: 'template' };
+      },
+    }, { control: () => (atSpec ? { stop_after: '' } : {}) });
+    check(midPhase.result.status === 'needs_input' && midPhase.result.stopped_at === 'Spec' && midPhase.result.next.rerun_with.stop_after === '',
+      `a stop cleared while the last phase ran goes with the rerun: ${midPhase.result.status} at ${midPhase.result.stopped_at}, ${
+        JSON.stringify(midPhase.result.next.rerun_with)}`);
+    // A rerun without a stop means it, wherever the stop came from. One an earlier answer named is cleared in the
+    // answers the runner merges, and one the request's words name is not read back by the Intake over the empty field.
+    let seen = false;
+    const answeredStop = { mode: 'issue', task: 'i', model_path: '', answers: { stop_after: 'Diagnose' } };
+    const fromAnswer = await run(answeredStop, {
+      'issue_triager:reproduce': () => {
+        seen = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (seen ? { stop_after: '' } : {}) });
+    const handed = fromAnswer.result.next.rerun_with || { answers: {} };
+    check(fromAnswer.result.status === 'needs_input' && asked(fromAnswer) && handed.stop_after === '' && handed.answers.stop_after === null,
+      `a lifted stop that an answer had named is cleared in the answers too: ${JSON.stringify(handed)}`);
+    const afterAnswer = await run({ ...answeredStop, ...handed, answers: { ...answeredStop.answers, ...handed.answers, model_path: '/models/m' } });
+    check(afterAnswer.result.status === 'ready_for_review', `and the rerun goes on to its fix: ${afterAnswer.result.status} at ${afterAnswer.result.stopped_at}`);
+    const reads = { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, stop_after: 'Diagnose' } }) };
+    const worded = { mode: 'issue', task: 'i', request: 'the issue, and stop after the diagnosis' };
+    const stopsAsRead = await run(worded, reads);
+    const overruled = await run({ ...worded, stop_after: '' }, reads);
+    const intakeIns = (overruled.calls.find((c) => c.key === 'intake:define') || { ins: { given: {} } }).ins;
+    check(stopsAsRead.result.status === 'stopped' && stopsAsRead.result.stopped_at === 'Diagnose'
+      && overruled.result.status === 'ready_for_review' && intakeIns.given.stop_after === '',
+      `a stop the request's words name does not come back over a stop the caller cleared: ${stopsAsRead.result.status} at ${
+        stopsAsRead.result.stopped_at}, then ${overruled.result.status} at ${overruled.result.stopped_at}, the Intake given ${
+        JSON.stringify(intakeIns.given.stop_after)}`);
+    // An answer still wins over the empty field: that is how a stop the run asked about makes room for one.
+    const answeredAgain = await run({ ...worded, stop_after: '', answers: { stop_after: 'Reproduce' } }, reads);
+    check(answeredAgain.result.status === 'stopped' && answeredAgain.result.stopped_at === 'Reproduce',
+      `an answer for the stop wins over the cleared field: ${answeredAgain.result.status} at ${answeredAgain.result.stopped_at}`);
     // A result that names a stop of its own keeps it. A run the control file stopped says to run again without
     // a stop: the stop it moved to is where the run ended, and is not handed to the rerun to end there again.
     const halted = await run({ mode: 'issue', task: 'i' }, undefined, { control: () => ({ stop_after: 'Reproduce' }) });
