@@ -47,14 +47,24 @@ Inputs: `round`, `extra_gates`, `claim`, `verified_work_packages`, `known_issues
    both arms and enough runs, and, with `held_out` on, held at the held-out operating point; nothing was re-run until it
    passed without saying so. For a fix (issue, ci), `server_code_changed` false means the run
    measured neither its accuracy nor its speed (`validation_doctrine.md`, *G2 for a fix*, *G5 for a
-   fix*), and `claim` is empty: check it against the diff of step 1. A file the server runs among
-   the changed ones is a `blocker` finding and the verdict is `blocked`: the evidence was not
+   fix*), and `claim` is empty: check it against the diff of step 1. A changed file that is not a
+   test, a documentation file or a CI file is a `blocker` finding and the verdict is `blocked`,
+   whether or not the server runs it (*What a fix changes decides its gates*): the evidence was not
    produced, and no work package produces it.
 6. **Reward hacks.** Start from `reward_hacks.md`: for every entry that applies to this diff and its
    evidence, check its tell, and check each hack the performance engineer suspected. A confirmed hack
    is a `blocker` finding with `hack` set to its id (`new` when the list lacks it, described well
    enough to add); its work package's `test` is the check that kills it, and it must fail on the
-   current version.
+   current version. For an accuracy problem in CI (`accuracy_claim`: a test that failed on a score it
+   measures), read the score of the claim against the claim yourself: the `accuracy_claim` entry of
+   the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against the base. Check in
+   the diff whether the test still measures what it measured (the set, the number of questions, the
+   sampling). A score below the claim by the base's measurement, or a threshold lowered in the test
+   with no score at the claim, is hack C1, whatever the base scores and whatever the fix changes
+   (`validation_doctrine.md`, *G2 for an accuracy problem in CI*). A fix that changes the measurement
+   and meets the claim by the base's measurement all the same hides nothing: whether the measurement
+   is to change is a human's to say, so the verdict is `blocked` with both scores, not a work package
+   that takes the change out.
 7. **Verdict.**
    - `approve`: no blocker or major finding; minor ones are listed for the PR engineer.
    - `changes_requested`: each blocker or major finding becomes a work package whose `test` shows it

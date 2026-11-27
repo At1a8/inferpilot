@@ -64,19 +64,27 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 - **Accuracy Tests:** GSM8K on all 1319 questions with the feature at its default settings, next to the
   baseline measured with the same harness; name the model, hardware, TP, harness and sampling. A loss the
   validation found elsewhere gets one sentence; other suites only when the change targets them (NIAH for
-  a long-context feature). A fix that changes code the server runs gives the same two scores, the fix
-  next to the base (`validation_doctrine.md`, *G2 for a fix*); where the base cannot serve the
-  configuration, next to the last commit that served it, named, or alone, saying that it has no
-  baseline. A fix to tests, documentation or CI files alone says that it changes no code the server
-  runs, and gives no table; one for a model that answers no text questions says that instead.
+  a long-context feature). A fix that changes anything but tests, documentation and CI files gives
+  the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*), or, for a
+  model that answers no text questions, what the task's own test compared in their place: the
+  inputs, the measure and its tolerance, and how the fix's outputs stood against the baseline's (*G2
+  for a model that answers no text questions*); where the
+  base cannot serve the configuration, next to the last commit that served it, named, or alone,
+  saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
+  changes no code the server runs, and gives no table; one for a model that answers no text questions
+  says that instead. The fix of an accuracy problem in CI (a test that failed on a score it measures)
+  shows the score that fell and the score it restores, whatever it changes, a fix to the test alone
+  included: by the test's own measurement as it stood before the fix (the set, the number of
+  questions, the model, the sampling), with the claim and the command that measures it.
 - **Speed Tests and Profiling:** the baseline against the feature in one scenario (input and output
   lengths, concurrency, hardware, TP), the same harness and runs for both arms, absolute numbers and the
   change. Show every point of the scenario that was measured, not only the best one. Commands go in a
   collapsed `<details>` block. A feature that claims no gain gives the same table: a reviewer reads in
   it that the feature is no slower (`validation_doctrine.md`, *G5 for a feature*). So does a fix that
-  changes code the server runs, the fix next to the base (*G5 for a fix*); where the base cannot serve
-  the configuration, next to the last commit that served it, named, or alone, saying that it has no
-  baseline. The fix of a performance problem shows the number that fell and the number it restores.
+  changes anything but tests, documentation and CI files, the fix next to the base (*G5 for a fix*);
+  where the base cannot serve the configuration, next to the last commit that served it, named, or
+  alone, saying that it has no baseline. The fix of a performance problem shows the number that fell
+  and the number it restores.
   A fix to tests, documentation or CI files alone says that it changes no code the server runs, and
   gives no table.
 - **Checklist:** tick only what holds for this PR.
@@ -104,7 +112,12 @@ Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; r
   differs from the description's by more than run-to-run noise replaces it there. A PR nobody has
   re-run is not pushed.
 - The verification comment for an existing PR (the PR engineer's step 5) rewrites no description and
-  carries no attribution line; it is re-run before it is posted all the same.
+  carries no attribution line; it is re-run before it is posted all the same. It is for one PR: a
+  run verifies one (for an issue the first its triage lists, for a CI failure the one the user
+  names) and names the others without applying them, since several applied together would show
+  nothing of each. The run's result says to post the comment, and gives no push command: the run
+  has no PR of its own. What the run added on top of the PR is offered in the comment as patches
+  of its own (`RUN_DIR/patches_additions`), apart from the PR's commits.
 - A repository that asks for more disclosure of AI assistance gets it as well (vLLM: the "AI
   assistance was used" box of its PR template, its `/pr-checklist` skill, and a trailer such as
   `Co-authored-by:` on each commit).

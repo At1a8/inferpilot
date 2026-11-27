@@ -14,11 +14,11 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 |---|---|---|---|
 | `feature` | 把上游 PR 或设计移植到 AMD | Setup → Spec → Recon → Design → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 分支 + PR 描述 + 验证报告 |
 | `issue` | 一个 AMD 用户 issue | Setup → Triage → Reproduce → Diagnose（已有修复 PR 时跳过）→ Implement → (Kernel) → Verify → Performance（只改测试、文档或 CI 文件的修复跳过）→ Review → PR → (Spinoff) → Reply → Report | 修复 PR，或一个结论（已分诊、未复现、main 上已修复、已定位）；总会附一份回复草稿，并在结束时按运行结果重写 |
-| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance（跳过的条件同 issue）→ Review → PR → (Spinoff) → Report | 修复 PR，或把偶发 / 基础设施失败移交出去 |
+| `ci` | 一个变红的 AMD CI job 或 Failure Tracker 簇 | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance（跳过的条件同 issue）→ Review → PR → (Spinoff) → Report | 修复 PR；偶发 / 基础设施失败、或本机配不出那条 lane 的环境时移交出去；main 在那条 lane 自己的镜像上通过时不用修 |
 | `perf` | 针对某个模型和固定负载的系统级性能目标 | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 带实测收益的 PR，或放弃改动；kernel 级的工作交给 kernel 后端 |
 | `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（作为 issue 分享到 InferPilot 仓库，否则是一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
 
-括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel。issue 或 CI failure 的修复改了 server 会运行的代码时，Performance 要测它（G5：不比 base 慢）；只改测试、文档或 CI 文件的修复跳过这一步，除非问题本身就是性能问题（被分诊为 `performance` 的 issue，或某个测试因它测出的数值而失败的 CI failure）：这时无论修复改了什么，掉下去的数值都必须回来。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
+括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel。issue 或 CI failure 的修复改了 server 会运行的代码时，Performance 要测它（G5：不比 base 慢）；只改测试、文档或 CI 文件的修复跳过这一步，除非问题本身就是性能问题（被分诊为 `performance` 的 issue，或某个测试因它测出的数值而失败的 CI failure）：这时无论修复改了什么，掉下去的数值都必须回来。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect：运行去验证那个 PR，并给它起草一条评论，和 issue 的做法一样。那个 PR 的代码只有在你点名（`apply_prs`）之后才会在本机运行，任务里没说时运行会先问。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
 
 任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 以及 issue、CI 修复需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
 
@@ -259,6 +259,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `handoffs.json`、`known_issues.json` | report 时的 kernel 交接记录和基线自带的失败；从 Verify 续跑时据此恢复 |
+| `component_issue.md` | 根因在框架之外的 AMD 组件（aiter、MoRI、ROCm、PyTorch 的 ROCm 版）时，给那个组件的仓库起草的 issue（由你来提） |
 | `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
 
@@ -327,6 +328,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `server_script` | 你自己的启动 server 的脚本，用于 `model_path`。InferPilot 会设置 `PORT`、`HIP_VISIBLE_DEVICES`、`PYTHONPATH` 和 `EXTRA_ARGS`（特性的开关参数，baseline 时为空），脚本要把 `--port $PORT` 和 `$EXTRA_ARGS` 传给 server；`feature` 和 `perf` 必填（[`templates/task_definition.md`](templates/task_definition.md) §1.1）。没有的话可以回答 `template`：用 InferPilot 的 `templates/harness/server.sh`，按模型在 sglang cookbook 里的配方启动 |
 | `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`feature` 和 `perf` 必填：每个 feature 都要和 baseline 比性能（G5），声称了收益就验证这个收益，没有声称就验证没有变慢；`issue` 和 `ci` 也必填，除非 `stop_after` 让运行在修复之前停下：修复改了 server 会运行的代码时，要用它对照 base 测性能，不能变慢（G5）。没有的话，feature 和 perf 任务可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`，选它的任务要给出完整的 `workload`；feature 用它只判定有没有比 baseline 慢，不验证源 PR 的收益 |
 | `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
+| `output_script` | `issue` 和 `ci`，用于不回答文本问题的模型（diffusion、语音、embedding 模型），这类模型跑不了 gsm8k：你自己的输出测试脚本，修复改了 server 会运行的代码时，由它代替 gsm8k 作为 G2。脚本用同样的输入和 seed 请求 `PORT` 上的 server，把每个输出写到 `OUT_DIR`；设置了 `BASE_DIR`（它在 base 上那次运行的输出目录）时，把自己的输出和那里的输出比较，差异超过脚本自己的容差就以非零状态退出。脚本原样运行，base 和修复各跑一次。InferPilot 没有这种脚本的模板：模型是哪一类由 Setup 判断，能走到修复却没有给脚本的任务会在这时被问到（[`templates/task_definition.md`](templates/task_definition.md) §1.1） |
 | `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
 | `exp_root` | 运行目录放在哪里（默认 `<inferpilot_dir>/exp`，git 会忽略它）。放在宿主机挂载目录里时，运行目录比容器活得久，换一个新容器重试时能从 `RUN_DIR/branch.bundle` 取回任务的提交，不用再写一遍：容器可能中途消失时（会被抢占的节点、作业到了时间上限）就这样用 |
@@ -334,7 +336,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` 后端：GEAK checkout，其中的 kernel lane 作为外部程序运行 |
 | `kernel_backend_command` | `command` 后端：带 `{task_dir}`、`{out_dir}`、`{gpu_ids}`、`{budget}` 占位符的 shell 命令；用于 `geak` 时替换默认命令 |
 | `kernel_budget` | kernel 后端的优化轮数（默认 6），即命令里的 `{budget}` |
-| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR |
+| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR。`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`：验证 PR 会在本机运行它作者的代码，所以不论作者是谁，只有在这里点名的 PR 才会应用；没给时运行会先问 |
 | `sources`、`since` | `scan`：`ci`、`issues`、`upstream`（默认）以及 `hardware`、`perf` 中的任意几个；时间窗口的起点（默认为上一份日报） |
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
@@ -353,7 +355,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 除 `inferpilot_dir`、`request`、`answers`、`exp_root`、`review_model` 和各项预算外，其余参数都属于任务定义；每次已启动的运行，其结果都会记录所用的任务定义（`task_def`）、每个字段的来源（`provenance`）以及 intake 的假设（`assumptions`）。
 
-人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型或 client 时，会先问要用哪个，用的是 InferPilot 的 client 而 `workload` 只给了一部分时也会先问；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
+人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型或 client 时，会先问要用哪个，用的是 InferPilot 的 client 而 `workload` 只给了一部分时也会先问；这类运行的模型不回答文本问题时，Setup 之后会问比较输出的脚本（`output_script`）；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
 每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 

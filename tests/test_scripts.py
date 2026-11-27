@@ -2538,6 +2538,189 @@ class ScanCiTest(unittest.TestCase):
         self.assertEqual(top["statuses"], {"recurring": 1, "never-passed": 1})
         self.assertEqual(clusters[1]["statuses"], {"flaky": 1})
 
+    # The state as the bot writes it since version 3: counts in place of a status, the runs that failed, the
+    # fix PR its analysis names, and the tests that stopped failing in an archive of bare rows. A test stays in
+    # "active" for days after it stopped failing: what fails now is what the latest scan saw (last_seen).
+    V3 = {
+        "version": 3,
+        "active": {
+            "test/a.py::A.test_x": {"cluster": "enterContext on Python 3.10", "error": "AttributeError: enterContext",
+                                    "job_url": "https://ci/1", "first_seen": "2026-10-21", "last_seen": "2026-11-23",
+                                    "fix_pr": "[#49963](https://github.com/sgl-project/sglang/pull/49963)", "fail_runs": ["11", "12", "14"],
+                                    "variants": ["rocm720", "rocm724"], "failed": 3, "observed": 5, "streak": 2},
+            "test/b.py::B.test_y": {"cluster": "enterContext on Python 3.10", "first_seen": "2026-11-20", "last_seen": "2026-11-23",
+                                    "fix_pr": "", "fail_runs": ["12", "14"], "variants": ["rocm720"], "failed": 2, "observed": 2,
+                                    "streak": 2},
+            "test/c.py::C.test_z": {"cluster": "runner lost communication", "first_seen": "2026-11-01", "last_seen": "2026-11-02",
+                                    "fix_pr": "", "fail_runs": ["9"], "variants": ["rocm10"], "failed": 1, "observed": 7, "streak": 0},
+        },
+        "archive": [["test/d.py::D.test_w", "2026-10-23", "2026-10-24", 1, 14, "timed out"]],
+        "runs": {"9": ["2026-11-01T01:00:00Z", "rocm10"], "11": ["2026-11-10T01:00:00Z", "rocm720"],
+                 "12": ["2026-11-20T01:00:00Z", "rocm720"], "13": ["2026-11-21T01:00:00Z", "rocm720"],
+                 "14": ["2026-11-23T01:00:00Z", "rocm720"]},
+    }
+
+    def test_the_version_3_state_is_read_as_its_active_entries(self):
+        body = self.body(self.V3)
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state(body)), "counts")
+        entries = scan_ci.parse_state(body)
+        self.assertEqual(sorted(entries), sorted(self.V3["active"]),
+                         "the state's own keys (version, active, archive, runs) are not tests")
+        a, b, c = (entries[k] for k in sorted(entries))
+        self.assertEqual(a["status"], "broken (2 runs in a row, since 2026-11-20; failed 3 of 5 runs)")
+        self.assertEqual(b["status"], "broken (2 runs in a row, since 2026-11-20; failed 2 of 2 runs)",
+                         "failing every run counted says nothing of the runs before the first failure: it is not 'never passed'")
+        self.assertEqual(c["status"], "no longer failing (last seen 2026-11-02; failed 1 of 7 runs)")
+        self.assertEqual([e["failing_since"] for e in (a, b, c)], ["2026-11-20", "2026-11-20", ""],
+                         "a streak begins at its first run of the failures in a row, by when the runs started")
+        self.assertEqual([e["fix_prs"] for e in (a, b, c)], [["#49963"], [], []])
+        self.assertEqual(self.V3["active"]["test/a.py::A.test_x"].get("status"), None, "the state it was given is left as it was")
+
+    def test_what_fails_now_is_what_the_latest_scan_saw(self):
+        # The run of an image that is not run again keeps its streak: the bot lists such a test under "No longer
+        # failing", by its last_seen against the day of the scan, which the body's header gives.
+        state = json.loads(json.dumps(self.V3))
+        state["active"]["test/e.py::E.test_v"] = {"cluster": "enterContext on Python 3.10", "first_seen": "2026-11-10",
+                                                  "last_seen": "2026-11-20", "fail_runs": ["11", "12"], "variants": ["rocm720"],
+                                                  "failed": 2, "observed": 2, "streak": 2}
+        state["active"]["test/f.py::F.test_u"] = {"cluster": "new today", "first_seen": "2026-11-23", "last_seen": "2026-11-23",
+                                                  "fail_runs": ["14"], "variants": ["rocm720"], "failed": 1, "observed": 1, "streak": 1}
+        state["active"]["test/g.py::G.test_t"] = {"cluster": "comes and goes", "first_seen": "2026-11-10", "last_seen": "2026-11-23",
+                                                  "fail_runs": ["11", "14"], "variants": ["rocm720"], "failed": 2, "observed": 4, "streak": 1}
+        state["active"]["test/h.py::H.test_s"] = {"cluster": "comes and goes", "first_seen": "2026-11-23", "last_seen": "2026-11-23",
+                                                  "back_from": "2026-10-30", "fail_runs": ["14"], "variants": ["rocm720"],
+                                                  "failed": 1, "observed": 1, "streak": 1}
+        entries = scan_ci.parse_state(self.body(state))
+        e, f, g, h = (entries[k] for k in ("test/e.py::E.test_v", "test/f.py::F.test_u", "test/g.py::G.test_t", "test/h.py::H.test_s"))
+        self.assertEqual(e["status"], "no longer failing (last seen 2026-11-20; failed 2 of 2 runs)",
+                         "a streak the latest scan did not see is not a failure now")
+        self.assertEqual(e["failing_since"], "")
+        self.assertEqual((f["status"], f["failing_since"]), ("new (failed 1 of 1 runs, since 2026-11-23)", "2026-11-23"))
+        self.assertEqual((g["status"], g["failing_since"]), ("flaky (failed 2 of 4 runs)", ""))
+        self.assertEqual(h["status"], "flaky (failed 1 of 1 runs)", "one that came back from the archive is not new")
+        # The day of the scan is the body's, where it gives one: a tracker whose latest scan saw nothing fail.
+        later = "**Last auto-update:** 2026-11-25 08:00 UTC — 0 broken\n" + self.body(state)
+        self.assertEqual(scan_ci.snapshot_day(later, state["active"]), "2026-11-25")
+        self.assertEqual({scan_ci.status_head(x["status"]) for x in scan_ci.parse_state(later).values()}, {"no longer failing"})
+        self.assertEqual(scan_ci.snapshot_day(self.body(state), state["active"]), "2026-11-23", "else the latest day any entry was seen")
+        clusters = scan_ci.aggregate(entries)
+        self.assertEqual([(c["cluster"], c["n_failing"], c["n_tests"]) for c in clusters],
+                         [("enterContext on Python 3.10", 2, 3), ("comes and goes", 2, 2), ("new today", 1, 1),
+                          ("runner lost communication", 0, 1)], "what fails now comes first, then the larger cluster")
+
+    def test_a_cluster_shows_what_fails_now_before_its_history(self):
+        # Twelve entries the tracker only keeps, whose keys sort first, and two that fail now: the ten tests listed,
+        # the example error and the job links are the present failure's, not history's.
+        state = {"version": 3, "active": {}, "archive": [], "runs": {"14": ["2026-11-23T01:00:00Z", "rocm720"]}}
+        for i in range(12):
+            state["active"]["test/a%02d.py::T.test" % i] = {"cluster": "one cause", "error": "old error %d" % i, "job_url": "https://ci/old/%d" % i,
+                                                             "first_seen": "2026-11-01", "last_seen": "2026-11-10", "fail_runs": ["9"],
+                                                             "failed": 1, "observed": 3, "streak": 0}
+        for name in ("y", "z"):
+            state["active"]["test/%s.py::T.test" % name] = {"cluster": "one cause", "error": "the error of today (%s)" % name,
+                                                             "job_url": "https://ci/now/%s" % name, "first_seen": "2026-11-23",
+                                                             "last_seen": "2026-11-23", "fail_runs": ["14"], "failed": 1, "observed": 1, "streak": 1}
+        c = scan_ci.aggregate(scan_ci.parse_state(self.body(state)))[0]
+        self.assertEqual((c["n_tests"], c["n_failing"]), (14, 2))
+        self.assertEqual(c["tests"][:2], ["test/y.py::T.test", "test/z.py::T.test"], "the tests that fail now are listed first")
+        self.assertEqual(len(c["tests"]), 10)
+        self.assertEqual(c["example_error"], "the error of today (y)")
+        self.assertEqual(c["job_urls"][:2], ["https://ci/now/y", "https://ci/now/z"])
+        self.assertEqual(scan_ci.aggregate(self.ENTRIES)[0]["tests"], ["test/a.py::A.setUpClass", "test/b.py::B.test_x"],
+                         "the earlier form keeps its order")
+
+    def test_a_streak_whose_runs_the_state_no_longer_dates(self):
+        state = json.loads(json.dumps(self.V3))
+        state["runs"] = {"14": ["2026-11-23T01:00:00Z", "rocm720"]}
+        entries = scan_ci.parse_state(self.body(state))
+        self.assertEqual(entries["test/b.py::B.test_y"]["failing_since"], "2026-11-20",
+                         "every failure it records is in the streak: it began when the test was first seen")
+        self.assertEqual(entries["test/a.py::A.test_x"]["failing_since"], "", "it passed in between: no date is made up")
+        self.assertEqual(entries["test/a.py::A.test_x"]["status"], "broken (2 runs in a row; failed 3 of 5 runs)")
+        # One undated run inside the streak: the dated failures alone (11, 14) would reach into the earlier streak.
+        state = json.loads(json.dumps(self.V3))
+        del state["runs"]["12"]
+        a = scan_ci.parse_state(self.body(state))["test/a.py::A.test_x"]
+        self.assertEqual((a["failing_since"], a["status"]), ("", "broken (2 runs in a row; failed 3 of 5 runs)"),
+                         "the streak is runs 12 and 14; run 11 belongs to an earlier one, and its day is not the streak's")
+
+    def test_a_fix_in_another_repository_keeps_its_repository(self):
+        cell = ("[#49963](https://github.com/sgl-project/sglang/pull/49963), [ROCm/aiter#812](https://github.com/ROCm/aiter/pull/812), "
+                "ROCm/aiter#640 and #77")
+        self.assertEqual(scan_ci._fix_prs(cell, "sgl-project/sglang"), ["#77", "#49963", "ROCm/aiter#640", "ROCm/aiter#812"])
+        self.assertEqual(scan_ci._fix_prs("https://github.com/ROCm/aiter/pull/49963", "sgl-project/sglang"), ["ROCm/aiter#49963"],
+                         "the same number in another repository is another pull request")
+        state = json.loads(json.dumps(self.V3))
+        state["active"]["test/b.py::B.test_y"]["fix_pr"] = "[#812](https://github.com/ROCm/aiter/pull/812)"
+        top = scan_ci.aggregate(scan_ci.parse_state(self.body(state)))[0]
+        self.assertEqual(top["fix_prs"], ["#49963", "ROCm/aiter#812"])
+
+    def test_the_version_3_clusters_carry_the_variants_and_the_fix_prs(self):
+        clusters = scan_ci.aggregate(scan_ci.parse_state(self.body(self.V3)))
+        top = clusters[0]
+        self.assertEqual((top["cluster"], top["n_tests"], top["n_failing"]), ("enterContext on Python 3.10", 2, 2))
+        self.assertEqual(top["statuses"], {"broken": 2})
+        self.assertEqual(top["since"], "2026-11-20")
+        self.assertEqual((top["variants"], top["fix_prs"]), (["rocm720", "rocm724"], ["#49963"]))
+        self.assertEqual(clusters[1]["statuses"], {"no longer failing": 1})
+        self.assertEqual((clusters[1]["variants"], clusters[1]["fix_prs"], clusters[1]["n_failing"]), (["rocm10"], [], 0))
+        old = scan_ci.aggregate(self.ENTRIES)[0]
+        self.assertEqual((old["variants"], old["fix_prs"], old["n_failing"]), ([], [], 2), "the earlier form names neither, and all of it fails")
+
+    def test_a_state_in_another_form_is_not_read_as_entries(self):
+        # Version 2 kept its entries under "active" too, with day counts: read as counts, every test of it would
+        # be "failed 0 of 0 runs". A map of maps that is not keyed by tests was once taken for the bare form.
+        v2 = {"version": 2, "active": {"test/a.py::A.test_x": {"id": 3, "seen_days": 4, "streak_start": "2026-09-01", "status": "failed"}},
+              "archive": []}
+        for state in ({"version": 4, "tests": [{"name": "t"}]}, {"version": 3, "active": ["not", "a", "map"]}, ["a", "list"], v2,
+                      {"active": {"test/a.py::A.test_x": {"failed": 1, "observed": 1, "streak": 1}}}, {"tests": {}, "runs": {}}):
+            body = self.body(state)
+            self.assertEqual(scan_ci.state_form(scan_ci.read_state(body)), "unknown", state)
+            self.assertEqual(scan_ci.parse_state(body), {}, "its top-level keys were once taken for tests: %r" % (state,))
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state("no state here")), "none")
+        self.assertEqual(scan_ci.state_form(scan_ci.read_state(self.body({}))), "status", "an empty state has no entry, and is read")
+        # A marker with no JSON behind it is a state that could not be read, not a tracker without one.
+        cut = "<!-- ci-failure-tracker-state: {\"version\": 3, \"active\": {\"test/a.py::A.te"
+        self.assertIs(scan_ci.read_state(cut), scan_ci.MALFORMED)
+        self.assertEqual((scan_ci.state_form(scan_ci.read_state(cut)), scan_ci.parse_state(cut)), ("unknown", {}))
+        # Nor is a state that decodes to null: the marker is there, so the body carries a payload.
+        null = self.body(None)
+        self.assertIs(scan_ci.read_state(null), scan_ci.NULL_STATE)
+        self.assertEqual((scan_ci.state_form(scan_ci.read_state(null)), scan_ci.parse_state(null)), ("unknown", {}))
+        self.assertIs(scan_ci.read_state("no state here"), scan_ci.NO_STATE)
+
+    def test_main_says_which_form_it_read_and_what_it_could_not_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = {}
+            bodies = {"v3": self.body(self.V3), "old": self.body(self.ENTRIES), "other": self.body({"version": 4, "tests": []}),
+                      "cut": "<!-- ci-failure-tracker-state: {\"version\": 3, \"acti", "none": "a tracker with no state block",
+                      "null": self.body(None)}
+            for name, text in bodies.items():
+                body, res, md = (Path(tmp) / (name + ext) for ext in (".md", ".json", ".out.md"))
+                body.write_text(text)
+                with mock.patch.object(sys, "argv", ["scan_ci.py", "--file", str(body), "--out", str(res), "--md", str(md)]), \
+                        redirect_stderr(io.StringIO()):
+                    self.assertEqual(scan_ci.main(), 0)
+                out[name] = (json.loads(res.read_text())["trackers"][0], md.read_text())
+        v3, old, other, cut, none = (out[k][0] for k in ("v3", "old", "other", "cut", "none"))
+        self.assertEqual(out["null"][0]["state_form"], "unknown")
+        self.assertIn("is JSON null", out["null"][0]["unread"], "a null state is said so, not shown as a tracker without one")
+        self.assertEqual((v3["state_form"], v3["n_entries"], v3["n_failing"], v3["snapshot"], v3["n_archived"]),
+                         ("counts", 3, 2, "2026-11-23", 1))
+        self.assertEqual((old["state_form"], old["n_entries"]), ("status", 3))
+        self.assertNotIn("n_archived", old)
+        self.assertNotIn("n_failing", old)
+        self.assertEqual((other["state_form"], other["n_entries"], other["clusters"]), ("unknown", 0, []))
+        self.assertIn("does not read (version 4", other["unread"])
+        self.assertEqual((cut["state_form"], cut["n_entries"]), ("unknown", 0))
+        self.assertIn("is not JSON", cut["unread"], "a state that was cut short is said so, not shown as no failures")
+        self.assertIn("**Not read:**", out["cut"][1])
+        self.assertEqual(none["state_form"], "none")
+        self.assertNotIn("unread", none)
+        self.assertIn("**Not read:**", out["other"][1], "the report says so where the clusters would be")
+        self.assertIn("| #49963 |", out["v3"][1], "the report names the fix PR of a cluster")
+        self.assertIn("3 tests in 2 clusters, 2 of them failing at its latest scan (2026-11-23)", out["v3"][1])
+
     LOG = textwrap.dedent("""\
         2026-11-09T02:56:19.1234567Z \x1b[36;1m[server-test] FAILED during server startup: wan_lora\x1b[0m
         2026-11-09T03:40:01.0000000Z E   RuntimeError: Server exited early (code 1).
@@ -2597,6 +2780,43 @@ class ScanIssuesTest(unittest.TestCase):
         self.assertEqual(scan_issues.classify_kind("anything", ["ci-failure-tracker"]), "tracker")
         self.assertEqual(scan_issues.classify_kind("[AITER-Upgrade] PR readiness", []), "internal")
         self.assertEqual(scan_issues.classify_kind("[Bug] GLM 5.3 segfault on MI300", []), "user")
+
+    def test_one_issue_comes_with_the_report_itself(self):
+        # The search lists carry an issue's state; a triage reads what was reported: the body, and every comment in full.
+        issue = {"number": 7, "title": "[Bug] GLM 5.3 segfault on MI300", "html_url": "https://x/7", "user": {"login": "rep"},
+                 "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-02T00:00:00Z", "comments": 5, "labels": [],
+                 "body": "Crashes at 32k.\n" + "trace line\n" * 400}
+        comments = [{"user": {"login": "rep" if i % 2 else "dev"}, "author_association": "NONE", "created_at": "2026-11-0%dT00:00:00Z" % (i + 2),
+                     "body": "comment %d " % i + "x" * 900} for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "issue.json"
+            with mock.patch.object(scan_issues.gh, "get", return_value=issue), \
+                    mock.patch.object(scan_issues.gh, "paginate", return_value=comments), \
+                    mock.patch.object(scan_issues, "linked_prs", return_value=[]), \
+                    mock.patch.object(sys, "argv", ["scan_issues.py", "--issue", "7", "--with-comments", "--out", str(out)]), \
+                    redirect_stderr(io.StringIO()):
+                self.assertEqual(scan_issues.main(), 0)
+            row = json.loads(out.read_text())["issues"][0]
+        self.assertEqual(row["body"], issue["body"], "the report is there in full")
+        self.assertEqual([c["body"] for c in row["all_comments"]], [c["body"] for c in comments], "and every comment, uncut")
+        self.assertEqual(len(row["last_comments"]), 4, "the short list of the scan is as it was")
+        self.assertTrue(all(len(c["body"]) <= 600 for c in row["last_comments"]))
+
+    def test_one_issue_is_read_to_its_newest_comment(self):
+        # The default page budget stops at 2000 comments: for one issue it follows the comment count, so that the
+        # newest comment (a maintainer naming the original report, say) is not cut off.
+        issue = {"number": 7, "title": "[Bug] long thread on MI300", "html_url": "https://x/7", "user": {"login": "rep"},
+                 "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-02T00:00:00Z", "comments": 2001, "labels": [], "body": "b"}
+        comment = {"user": {"login": "dev"}, "author_association": "MEMBER", "created_at": "2026-11-02T00:00:00Z", "body": "c"}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "issue.json"
+            with mock.patch.object(scan_issues.gh, "get", return_value=issue), \
+                    mock.patch.object(scan_issues.gh, "paginate", return_value=[comment]) as paginate, \
+                    mock.patch.object(scan_issues, "linked_prs", return_value=[]), \
+                    mock.patch.object(sys, "argv", ["scan_issues.py", "--issue", "7", "--with-comments", "--out", str(out)]), \
+                    redirect_stderr(io.StringIO()):
+                self.assertEqual(scan_issues.main(), 0)
+        self.assertGreaterEqual(paginate.call_args.kwargs["max_pages"] * 100, 2001, "the pages asked for do not reach the newest comment")
 
     def test_cites_issue(self):
         self.assertTrue(scan_issues.cites_issue("Fixes #38849", 38849))

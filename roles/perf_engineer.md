@@ -79,17 +79,31 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
      `server_script`, the one G2 measured the fix on, and the task's `client_script`.
    - Where the base cannot serve the configuration because that is the failure being fixed, never
      launch it: the baseline is the last commit that served it, in a throwaway worktree. That is the
-     commit G2 measured against, which the ledger names. Where G2 measured none, as for a model that
-     answers no text questions, which it does not run on, the commit is still known: take it from the
-     triage record (`triage_path`) as G2 would have, the culprit's parent for a CI fix, the commit or
-     release the report says worked, and write it in the ledger, where the report's *Before pushing*
-     section finds it. Name the commit in `results` and `summary`. Only where the run knows no such
-     commit, measure the fix alone and return `no_baseline` with the reason: `claim_reproduced` is
-     false, its numbers are reported, and nothing is judged on them.
+     commit G2 measured against, which the ledger names. Where G2 measured none, the commit is still
+     known: take it from the triage record (`triage_path`) as G2 would have, the culprit's parent for
+     a CI fix, the commit or release the report says worked, and write it in the ledger, where the
+     report's *Before pushing* section finds it. Name the commit in `results` and `summary`. Only
+     where the run knows no such commit, measure the fix alone and return `no_baseline` with the
+     reason: `claim_reproduced` is false, its numbers are reported, and nothing is judged on them.
    - **A performance problem is measured where it showed:** the benchmark is the reproduction
      (`repro_cmd`) or the failing test (`failing_test_cmd`), on the workload `claim` names, run on the
      fix and on the base, which shows the number that fell. The claim holds when the fix's median
      reaches the number, whatever the fix changed: a threshold moved in a test restores nothing.
+   - **A fix is measured whatever file it changes,** tests, documentation and CI files apart
+     (`validation_doctrine.md`, *What a fix changes decides its gates*): never judge whether the
+     server runs it. One whose change takes effect outside the worktree (a new version of a package
+     the server runs: aiter, PyTorch, Triton, flashinfer; a package or an environment variable a
+     Dockerfile sets) is measured with each arm in the environment its tree calls for, as Verify
+     set them: the ledger has both, and how each is made. An environment of the arm's own (a
+     directory on its `PYTHONPATH`, a variable of its process) is given to every launch of that arm,
+     the warm-up, each round, the held-out point and the guards alike. One installed in place is
+     checked against the ledger's record before every launch, with every server of the other arm
+     stopped, and the image's state is put back once all of yours have stopped
+     (`RUN_DIR/env_restore.sh`). Give both environments in `results`. A change that cannot be put
+     into effect here leaves nothing measured: return `not_run` saying so (`<package> <version>
+     cannot be installed in this image`), never the fix's arm on the image's environment. A change
+     in a file this run's platform does not use (a version in the CUDA declaration, on a ROCm
+     image) is measured as it is, and `summary` says so.
 2. Check every server log for out-of-memory, retraction and watchdog messages; a run with any of them
    is not a performance number.
 3. `workload_unchanged`: every arm ran the fixed workload — `RUN_DIR/run.json` in `perf`, in

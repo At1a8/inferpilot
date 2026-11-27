@@ -10,7 +10,8 @@ For each issue: kind (user issue, roadmap, tracker, internal), age, reporter ass
 that cite the issue explicitly (with their state, and `closes` when one closes it with a GitHub keyword:
 Fixes, Closes or Resolves #N), replies from anyone but the reporter (with --with-comments), and the
 projected date of sglang's 60-day inactivity auto-close. It assigns no priority: that is the triager's
-judgement.
+judgement. With --issue the record also carries the report itself: its `body`, and with --with-comments
+every comment in full (`all_comments`), since a triage reads what was reported, not only its state.
 
   scan_issues.py --out issues.json [--md issues.md] [--with-comments] [--no-prs] [--limit N]
   scan_issues.py --issue 38849 --with-comments --out issue.json
@@ -212,17 +213,25 @@ def main() -> int:
         if "pull_request" in it:
             continue
         row = summarize(it, now)
+        if a.issue:
+            row["body"] = it.get("body") or ""  # the report itself: the search lists carry only its state
         if row["kind"] != "user" and not a.issue:
             excluded.append({k: row[k] for k in ("number", "title", "kind")})
             continue
         if not a.no_prs:
             row["linked_prs"] = linked_prs(a.repo, row["number"])
         if a.with_comments and row["comments"]:
-            comments = gh.paginate(f"/repos/{a.repo}/issues/{row['number']}/comments")
+            # One issue is read whole: as many pages as its comment count needs, so that the newest (a maintainer
+            # naming the original report, say) is not cut off. A scan of many keeps the default page budget.
+            pages = {"max_pages": row["comments"] // 100 + 2} if a.issue else {}
+            comments = gh.paginate(f"/repos/{a.repo}/issues/{row['number']}/comments", **pages)
             row["replies"] = reply_status(comments, row["reporter"])
             row["last_comments"] = [{"author": c["user"]["login"], "association": c.get("author_association", ""),
                                      "created_at": c["created_at"], "body": (c.get("body") or "")[:600]}
                                     for c in comments[-4:]]
+            if a.issue:
+                row["all_comments"] = [{"author": c["user"]["login"], "association": c.get("author_association", ""),
+                                        "created_at": c["created_at"], "body": c.get("body") or ""} for c in comments]
         elif a.with_comments:
             row["replies"] = reply_status([], row["reporter"])
         users.append(row)

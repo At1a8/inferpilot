@@ -68,7 +68,10 @@ clock can start before your session does; on the call that finishes a gate, `inc
    worktree path in the command replaced:
    - a package that **changes behaviour** (a feature, a fix): check out the parent
      (`git -C <worktree> worktree add RUN_DIR/t1-<wp> <commit>^`), bring in the test files the package adds, and run
-     the test against the old code: it must fail;
+     the test against the old code: it must fail. The old code is the tree before the package. For a
+     package of several commits (an `apply_pr` package keeps its author's), that is not `<commit>^`,
+     which can hold the change already, but the commit the package was made on: the last commit of
+     `verified_work_packages`, or `<base>` for the first package;
    - a package that **keeps behaviour** (a performance change, a kernel swap, a refactor, tests of
      existing code): the parent passes too, so check out `<commit>` and break the change in one way that
      matters (skip a step, return the input unchanged, shift an index, zero one output tile): the test
@@ -77,6 +80,17 @@ clock can start before your session does; on the call that finishes a gate, `inc
    `fails_without_change`: `parent` or `mutant` by the check that failed, `no` when the test passed
    where it should have failed (the package fails; say in `failure_summary` what the test misses),
    `n/a` only for a `docs` package.
+   A package whose change takes effect outside the worktree (what a dependency declaration names, a
+   package or an environment variable a Dockerfile sets; `validation_doctrine.md`, *What a fix
+   changes decides its gates*) is tested with every tree in the environment its own files call for:
+   the commit with the change in effect, a mutant of the commit in the same, the parent with what the
+   parent declares (the image's, where no earlier package changed it). Step 4 compares the same way.
+   Make each environment the tree's own where you can (a directory on its `PYTHONPATH`, a variable
+   of its process): nothing is then left behind, and a check you leave running for the finishing
+   call keeps its environment. One installed in place is recorded first (`RUN_DIR/env_restore.sh`,
+   the ledger) and put back only once every process you started has stopped; with a check still
+   running, say in your answer which environment is in place. Two trees in one environment show
+   nothing.
 4. **Feature off (G0 slice):** with the feature switch off, run the existing tests of the modules the
    package touched and, when the package touches the serving path, a short server smoke compared with
    the baseline in the ledger. Behaviour must be unchanged. A package without a switch (most fixes, a
@@ -85,7 +99,11 @@ clock can start before your session does; on the call that finishes a gate, `inc
    as an absolute pass.
    - **The tests:** run them on the commit as it is, and each one that fails again on the parent
      (`<commit>^` in a throwaway worktree, as in step 3; a run longer than one tool call goes through a
-     driver, as step 0 says of step 3's control), with the same command and environment. A failure is
+     driver, as step 0 says of step 3's control), with the same command and environment. The parent
+     is the tree before the package, here as in step 3: for a package of several commits (an
+     `apply_pr` package keeps its author's) it is the commit the package was made on, not
+     `<commit>^`, where a test an earlier commit of the package broke fails already and would pass
+     for unchanged. A failure is
      unchanged only when the test fails there the same way, the same test with the same error. One
      that passes on the parent is the package's, and so is one that fails there another way (an
      assertion there, a crash here). One the parent cannot run at all because of the failure the

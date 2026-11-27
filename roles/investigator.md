@@ -40,6 +40,13 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      a change in rate, which is the change's. InferPilot then reports G4 as failed with the known issue,
      without blocking the change. A control that ended another way first, or was interrupted, shows
      nothing about this failure: the verdict is `inconclusive`.
+     Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`,
+     `accuracy_claim`. The base fails it by definition, since that is the failure the task is to fix
+     (`validation_doctrine.md`, *Same-pattern baseline control*); failing with the fix as well, the fix
+     is incomplete or wrong. Return `fix_needed` with the repair when you can explain what the fix
+     misses, and `inconclusive` when you cannot, or when what is wrong may be the gate itself (a
+     threshold no commit ever met): that is a human's to say. InferPilot stops the run on
+     `baseline_bug` for such a gate, and records no known issue.
    - `kernel_regression`: the failure goes away with an integrated kernel reverted. Name its hand-offs
      in `kernel_handoffs` and describe the failing case in `counterexample` — gate, shapes, dtype,
      configuration and the command that shows it — so the kernel back end can be given it as a test.
@@ -67,10 +74,26 @@ Same method as above, starting from the reproduction. Also decide whether the ro
 side (`issue_triage.md` §2): if main shows the same failure on another platform, or the cause is in a
 third-party library, the verdict is `not_amd_side` with the evidence.
 
+**A root cause in an AMD component outside the framework** (aiter, MoRI, ROCm, the ROCm build of
+PyTorch; `issue_triage.md` §5): show it there, with the component's own call on the shapes and dtypes
+of the reproduction and no framework, or with that call replaced. Return `component` (`aiter`, `mori`,
+`rocm` or `pytorch_rocm`, and nothing for any other cause: a third-party library is `not_amd_side`; nor
+with `inconclusive`, where no experiment has shown it there yet: the run records none then), and draft
+the issue for its repository as `RUN_DIR/component_issue.md` (`component_issue_path`): that
+reproduction, the versions, the GPU, counts and short log excerpts, never paths or names of this
+machine (`guardrails.md`). Then by `priority`: for a P0, `work_packages` are the workaround in the
+framework, HIP-only and the smallest that serves the reported configuration, each with a comment that
+names what to remove once the component is fixed; for any other issue return none. Either way `summary`
+says what the reporter can do meanwhile (a version that works, a flag that avoids the path), or why no
+workaround serves: the reply and the report take it from there. Never change the component: it comes
+from the image (`env_hygiene.md`).
+
 Return:
 
 ```json
 {"verdict": "fix_needed | baseline_bug | not_amd_side | inconclusive",
  "root_cause": "<mechanism, file:function>",
+ "component": "<aiter | mori | rocm | pytorch_rocm, when the root cause is there>",
+ "component_issue_path": "/abs/RUN_DIR/component_issue.md",
  "work_packages": [ ... ], "known_issue": {}, "summary": "..."}
 ```
