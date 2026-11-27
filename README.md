@@ -421,8 +421,11 @@ the log.
 stops after that phase of the mode (`Collect` for this scan, `Verify` for a feature task),
 `{"stop_after": "now"}` after the phase now running, `{"stop_after": ""}` runs to the end. The log says
 when the stop moved, and when the run is already past that phase or the file holds no JSON object; a
-file already there when the run starts counts only once it changes. Only the runner reads a control
-file, on either backend; a run in Claude Code's Workflow tool keeps the `stop_after` it started with.
+file already there when the run starts counts only once it changes. A run that ends with questions
+after its stop moved hands the stop on: the arguments for running it again (`next.rerun_with`) carry
+`stop_after` as the file last set it, so the task is not run again only to stop where it first said.
+Only the runner reads a control file, on either backend; a run in Claude Code's Workflow tool keeps
+the `stop_after` it started with.
 
 **Stopping a run.** `kill <runner pid>` (SIGTERM; the log's first line gives the pid), or Ctrl-C on a
 runner started in the foreground, stops its agents and everything they started, servers started with

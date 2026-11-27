@@ -1516,6 +1516,48 @@ class FixAccuracyTest(unittest.TestCase):
             for said in ("`issue`", "`ci`", "`stop_after`", "gsm8k"):
                 self.assertIn(said, row[0], "%s: the model_path row" % name)
 
+    def test_the_rerun_after_a_moved_stop_stops_where_the_control_file_last_said(self):
+        """The control file can lift a stop before the fix, and the run then asks for what the fix lacks. The task is
+        run again with the answers and the same arguments: with the stop it started with among them, it would stop
+        before the fix again. The result hands on the stop as the control file last set it."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("  const stopNow = liveStopAfter();\n", src)
+        self.assertIn("  if (tasks && stopNow !== STOP_AFTER && stopNow !== 'now') {\n"
+                      "    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
+                      "a rerun after the control file moved the stop stops where the task first said, or the file is not read when the run ends")
+        # a rerun without a stop means it: not brought back by an earlier answer, nor by the request's words
+        self.assertIn("  if (rerun.stop_after !== '' || asObject(answers).stop_after == null) return rerun;\n"
+                      "  rerun.answers = { ...(typeof answers === 'string' ? asObject(answers) : {}), ...(rerun.answers || {}), stop_after: null };",
+                      src, "a stop an earlier answer named comes back in the rerun, or answers given as a string are lost with it")
+        self.assertIn("  return withoutAnsweredStop(rerun, RAW.answers);", src)
+        # the Intake's questions come before the run exists: their rerun hands the stop on as well
+        self.assertIn("rerun_with: intakeStopHandedOn({ ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) },\n"
+                      "          merged.stop_after, raw.answers, questions) },", src,
+                      "the rerun of the Intake's questions keeps the stop the task started with, or one an answer or the request gave")
+        self.assertIn("    || moved.toLowerCase() === String(stop || '').trim().toLowerCase()) return rerun;", src,
+                      "a stop that came from an answer or from the request counts as not moved when the operator clears it")
+        # the stop a rerun carries from the task's definition (after a model mismatch) is the task's own: the control file goes over it
+        self.assertIn("  const tasks = !('stop_after' in rerun) || (!!STOP_AFTER && String(rerun.stop_after || '').trim().toLowerCase() === "
+                      "STOP_AFTER);\n  if (tasks && stopNow !== STOP_AFTER && stopNow !== 'now') {", src,
+                      "the rerun after a model mismatch keeps the stop the task started with")
+        self.assertIn("  const asked = 'stop_after' in rerun || questions.some((q) => q.field === 'stop_after');", src,
+                      "a question about the stop itself is overruled by the control file")
+        # every result that offers a rerun goes through it: the two written where they arise as well
+        for said, why in (("  if (out.rerun_with) stopHandedOn(out.rerun_with);", "a result of nextSteps does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });", "the image question does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { rescan: true } }) } });", "a scan's question does not hand the stop on")):
+            self.assertIn(said, src, why)
+        self.assertIn("  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';", src,
+                      "a stop the request's words name comes back over one the caller cleared, or the cleared field beats an answer")
+        self.assertIn("An empty `stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops nowhere, "
+                      "whatever the request says of a stop", " ".join((ROOT / "roles" / "intake.md").read_text(encoding="utf-8").split()))
+        flat = lambda path: " ".join((ROOT / path).read_text(encoding="utf-8").split())
+        for path, said in (("README.md", "the arguments for running it again (`next.rerun_with`) carry `stop_after` as the file last set it"),
+                           ("README.zh-CN.md", "再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值"),
+                           ("templates/task_definition.md", "The run that follows the answers keeps the stop where the file put it "
+                                                            "(`next.rerun_with` carries it)")):
+            self.assertIn(said, flat(path), "%s does not say it" % path)
+
     def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_says_what_it_is_compared_with(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")

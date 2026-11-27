@@ -65,7 +65,8 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   stops before its fix (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none.
   Where the control file lifts that stop, the run asks before any code changes for what the fix
   lacks: the model, the client, and of a task that names InferPilot's client all the same, what its
-  `workload` leaves out.
+  `workload` leaves out. The run that follows the answers keeps the stop where the file put it
+  (`next.rerun_with` carries it): it is not run again only to stop before the fix once more.
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,
