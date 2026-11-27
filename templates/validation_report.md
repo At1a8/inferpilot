@@ -26,7 +26,7 @@
 | G0 | | | | | |
 | G1 | unit tests, each able to fail (parent commit, or a broken copy when the change keeps behaviour) | | | | |
 | G2 | | | | | |
-| accuracy claim (a CI failure on a score its test measures) | the failing test's own measurement, as the test stood at the base: set, questions, model, sampling | the score on the base by that measurement, as this run measured it on this machine (Classify's runs on main: the commit, each run's score), or `not measured`. Never the failed job's own score, which is another commit's on another machine: that one is named apart, with its commit and its lane | the score restored, and the claim | | |
+| accuracy claim (a CI failure on a score its test measures) | the failing test's own measurement, as the test stood at the base: set, questions, model, sampling | the score on the base by that measurement, as this run measured it on this machine: Classify's runs on the task worktree, which is at the base (the commit, each run's score), or `not measured`. Its runs on main are the base's only where the task began on that commit: main can have moved, and its test can measure another way. Never the failed job's own score, which is another commit's on another machine: that one is named apart, with its commit and its lane | the score restored, and the claim | | |
 | G3 | | | | | |
 | G4 | | | | | |
 
