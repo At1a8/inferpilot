@@ -351,8 +351,10 @@ use /workspace/inferpilot/inferpilot.js with mode=scan, inferpilot_dir=/workspac
 The scan changes no code. It writes the day's report on the framework since the last report (else the
 last 7 days): the AMD CI on main (every failing job, since when it fails and what its log says), the
 open AMD user issues under P0, P1 and P2, and the upstream changes AMD needs to follow. It ranks the
-tasks in them into `exp/scan_<time>/task_queue.md`, each with the task definition that starts it, and
-writes the report, without anything about this machine, to `exp/scan_<time>/daily_report.md`, which it
+tasks in them into `exp/scan_<time>/task_queue.md`, each with the task definition that starts it (within a
+rank the smaller effort first; a task that holds its GPUs 6 hours or more is marked long, to start apart
+from the queue, on a machine and with time of its own), and writes the report, without anything about this machine, to
+`exp/scan_<time>/daily_report.md`, which it
 shares as an issue in InferPilot's repository with `GITHUB_TOKEN` (step 1; when the token cannot write
 there, the file is yours to share). One report a day is enough: when one is less than 24 hours old, the scan asks before it starts again
 (answer `rescan`), and `upstream_repos` adds repositories to follow, such as vLLM. To take one task,

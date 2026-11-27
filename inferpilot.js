@@ -1051,9 +1051,14 @@ const LEARN = S({ updates: arr(S({ file: str, change: str }, ['file'])), skill_s
   notes: str }, ['updates']);
 const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'] }, run_dir: str, candidates_path: str,
   counts: obj, recent: obj, notes: str }, ['lock', 'run_dir', 'candidates_path']);
+// dispatch.md §6: a task of this many GPU hours or more is long, to start apart from the queue. The estimate
+// decides it even where the dispatcher's own mark disagrees with its numbers.
+const LONG_GPU_H = 6;
+const isLong = (t) => t.long === true || Number((t.effort || {}).gpu_h) >= LONG_GPU_H;
 const DISPATCH = S({
   queue_path: str,
-  top: arr(S({ rank: num, task: str, type: str, level: str, priority: str, source: str, task_def: obj }, ['task'])),
+  top: arr(S({ rank: num, task: str, type: str, level: str, priority: str, source: str,
+    effort: S({ agent_h: num, gpu_h: num }), long: bool, task_def: obj }, ['task'])),
   matrix_changes: num,
 }, ['queue_path', 'top']);
 
@@ -1277,14 +1282,17 @@ function nextSteps(status, at) {
       : R.daily_report_action === 'exists'
         ? ` That day's daily report was shared before this scan: ${R.daily_report_url}; this scan's stays at ${C.run_dir}/daily_report.md.`
         : ` The daily report is shared: ${R.daily_report_url}.`;
-    out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.${shared}${report}`;
+    const long = R.queue.filter((t) => t.long === true).length;
+    out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.`
+      + `${long ? ` ${long} of them ${long === 1 ? 'is' : 'are'} long (${LONG_GPU_H} GPU hours or more): start each apart from the queue, on a machine and with time of its own.` : ''}${shared}${report}`;
     // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
     // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
     // fields and no further: an answer or a request it put next to them would stand for the user's word.
     const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
       .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
-      .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
+      .map((t) => ({ rank: t.rank, task: t.task, ...(t.effort ? { effort: t.effort } : {}), long: t.long === true,
+        args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
     out.say = `The design waits for you: ${C.design_path || `${C.run_dir}/design.md`}. To go on with it, run again from `
       + `Implement in this run directory; to change it, say how and run the task again.${report}`;
@@ -3141,7 +3149,7 @@ async function runScan() {
     return finish('blocked', 'Dispatch');
   }
   C.queue_path = dp.queue_path;
-  R.queue = (dp.top || []).slice(0, 20);
+  R.queue = (dp.top || []).slice(0, 20).map((t) => (isLong(t) ? { ...t, long: true } : t));
   note('Dispatch', 'pass', `${(dp.top || []).length} ranked; ${dp.matrix_changes || 0} matrix change(s)`);
   return finish('queued', 'Dispatch');
 }

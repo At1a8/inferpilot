@@ -130,6 +130,23 @@ class ScanTemplatesTest(unittest.TestCase):
                     if not re.search(r"<[^<>]+> \Z", text[max(0, u.start() - 60):u.start()])]
             self.assertEqual(bare, [], name)
 
+    def test_the_long_threshold_is_the_same_where_the_ranking_is_written(self):
+        """dispatch.md §6 orders a rank by effort, says what a GPU hour is and names when a task is long; the
+        dispatcher, the queue template and inferpilot.js's LONG_GPU_H say the same number of GPU hours."""
+        rank = (ROOT / "knowledge" / "dispatch.md").read_text(encoding="utf-8").split("## 6. Ranking", 1)[1]
+        self.assertIn("then the smaller", rank)
+        self.assertIn("not hours times GPUs", re.sub(r"\s+", " ", rank))
+        found = {}
+        for name, path in (("dispatch.md", "knowledge/dispatch.md"), ("dispatcher.md", "roles/dispatcher.md"),
+                           ("task_queue.md", "templates/task_queue.md")):
+            text = re.sub(r"\s+", " ", (ROOT / path).read_text(encoding="utf-8"))
+            found[name] = set(re.findall(r"(\d+) GPU hours or more", text))
+            self.assertTrue(found[name], "%s does not say when a task is long" % name)
+        found["inferpilot.js"] = set(re.findall(r"^const LONG_GPU_H = (\d+);", (ROOT / "inferpilot.js").read_text(
+            encoding="utf-8"), re.M))
+        self.assertTrue(found["inferpilot.js"], "inferpilot.js has no LONG_GPU_H")
+        self.assertEqual(len(set.union(*found.values())), 1, found)
+
 
 class WeeklyReleaseTest(unittest.TestCase):
     """templates/weekly_release.md and weekly_release.zh-CN.md: a week of InferPilot's work in the shape of an

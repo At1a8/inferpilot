@@ -1,7 +1,8 @@
 # Task queue — scan of <sources> at <time, timezone>
 
 <!-- mode=scan artifact (see ../knowledge/dispatch.md). One row per candidate; the ranking follows
-     dispatch.md §6. -->
+     dispatch.md §6: within a rank, the smaller effort first; a task of 6 GPU hours or more is long.
+     GPU hours are the wall hours a task holds its GPUs, not hours times GPUs. -->
 
 ## Sources scanned
 
@@ -16,7 +17,7 @@
 
 | Rank | Task | Source | Type | Level | Priority | Depends on (AMD counterpart) | Effort | Evidence |
 |---|---|---|---|---|---|---|---|---|
-| 1 | | | | L1 / L2 / L3 | | | <agent hours> agent h / <GPU hours> GPU h | |
+| 1 | | | | L1 / L2 / L3 | | | <agent hours> agent h / <GPU hours> GPU h, long when 6 or more | |
 
 ## Starting the top tasks
 
