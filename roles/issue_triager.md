@@ -27,6 +27,10 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    its duplicates: what they add (a configuration, a log, a second model) goes into this triage record
    and into the reproduction.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
+   Where an open fix PR is what makes the problem P1 (§2: a default-configuration failure that
+   already has one), return `priority_without_pr` as well, the priority it has when no usable fix
+   PR exists: the run takes it when that pull request does not pass verification and it goes on to
+   a fix of its own.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
    names that issue and what this report adds to it. A report with several problems is several tasks:
@@ -49,6 +53,7 @@ Return:
 
 ```json
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
+ "priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>",
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "duplicate_of": "<with duplicate: #n, the original>",
@@ -182,8 +187,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, `resume_from`, and 
    promised that did not happen, and say what was not covered.
    - `ready_for_review`: what the fix changes and how it was verified; a `<PR link>` placeholder, since
      the human opens the PR.
-   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit when Bisect
-     named one, and a request to confirm on a current image.
+   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit or pull request
+     when the run named one (`fixed_by`), and a request to confirm on a current image. Stopped at PR,
+     main fixed it while the run worked on a fix of its own, which is not offered.
    - `not_reproduced`, `diagnosed`: the environment, duration and counts, or the root cause, and the
      exact information or test that would move it on.
    - `blocked`, `stopped`: what was done so far, without a conclusion.
@@ -196,6 +202,11 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, `resume_from`, and 
    placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile,
    as the diagnosis gave it (`component_issue.summary`). `ready_for_review`: that the pull request is
    a workaround, and what it leaves to the component.
+   With `existing_pr_result` an open fix PR was verified first and did not pass: say so in one
+   sentence, with what it did not pass. Say that the fix now offered is another one only for
+   `ready_for_review`, where the run has one; for any other ending say what the run reached after
+   it (a diagnosis, a stop), and promise no fix. The comment for that pull request is a draft of
+   its own (`comment_path`), not part of this reply.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
 3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
    `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they

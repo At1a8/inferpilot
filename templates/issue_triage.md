@@ -38,6 +38,8 @@
 ## Fix
 
 <!-- Work packages, commits, the PR body path; or the existing PR that was verified and the results.
+     Where that PR did not pass: what it did not pass, the comment drafted for it (`pr_comment.md`), and
+     the run's own fix after it.
      gsm8k on the fix against the base when the fix changes code the server runs (G2), or against the
      commit or release the report says worked where the base cannot serve the configuration; its
      speed on the task's client against the same commit (G5), and for a performance issue the number
