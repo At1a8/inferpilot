@@ -103,7 +103,10 @@ problem, or the run stops before Reproduce in the same way. It is then asked for
 of them, and not for a model: a reproduction that serves none has none to give. A task that names
 no model and pins nothing was set up by Setup alone, before the run knew which problem it takes:
 where the GPUs Setup chose do not fit that problem, the run stops as well and asks for the GPUs,
-since Reproduce uses the ones the run is set up with and no others.
+since Reproduce uses the ones the run is set up with and no others. The run after such a stop, and
+a follow-up on another configuration, is told which one the problem is on (`reported_on`): Setup
+works before Triage, and one left to choose again takes the GPUs that configuration needs, not the
+same ones.
 
 ## 5. Reproduction
 

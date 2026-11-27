@@ -1511,6 +1511,24 @@ class TriageCasesTest(unittest.TestCase):
                                                          "run's model and configuration"),
                            ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
                            ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
+                           # Setup works before Triage: the run after a mismatch, and a follow-up, tell it the configuration
+                           ("roles/issue_triager.md", "The run after it is given your `model_mismatch` as `reported_on`, as a run on one of the "
+                                                      "others is given its `model`"),
+                           ("roles/issue_triager.md", "So say it as the report does, the launch flags with the model"),
+                           ("roles/director.md", "With `reported_on` (the model and launch configuration the report puts the task's problem on; "
+                                                 "the result of an earlier run gives it, where that run was set up for another one), the task "
+                                                 "needs what that configuration needs"),
+                           ("roles/director.md", "a problem at TP8 takes eight GPUs, whatever the run before this one chose"),
+                           ("roles/director.md", "Where the report gives several commands, it is the one for the problem `task` names, and with "
+                                                 "`reported_on` the one for that configuration"),
+                           ("roles/intake.md", "`reported_on` (issue): the model and launch configuration the report puts the task's problem on"),
+                           ("roles/intake.md", "never fill it yourself"),
+                           ("knowledge/issue_triage.md", "is told which one the problem is on (`reported_on`): Setup works before Triage, and one "
+                                                         "left to choose again takes the GPUs that configuration needs, not the same ones"),
+                           ("templates/task_definition.md", "| `reported_on` | the model and launch configuration the report puts the task's "
+                                                            "problem on"),
+                           ("README.md", "| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on"),
+                           ("README.zh-CN.md", "| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置"),
                            ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
                            ("README.md", "a scan's top tasks, the other problems of an issue's report"),
                            ("README.zh-CN.md", "scan 排在前面的任务，issue 报告里的其他问题"),
@@ -1541,6 +1559,13 @@ class TriageCasesTest(unittest.TestCase):
                 ("out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), "
                  "...out.rerun_with.answers };", "an earlier answer brings the old configuration back into the rerun"),
                 ("{ request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: ", "the rerun keeps the request of the old configuration"),
+                # the configuration is a field of its own too, which Setup is given: it works before Triage
+                ("\"this task are that configuration's, not those of the run that stopped.\", reported_on: R.model_mismatch });",
+                 "a Setup left to choose again is not told the configuration, and takes the same GPUs"),
+                ("'of this task are that configuration\\'s, not those of the run that offered it.', reported_on: p.model } : {};",
+                 "the Setup of a follow-up on another configuration is not told which"),
+                ("  reported_on: String(A.reported_on || '').trim(),\n", "the roles are not given the configuration the task names"),
+                ("'bisect_fixed', 'confirm_leads', 'reported_on'];", "the configuration is not part of the definition a rerun carries"),
                 ("pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),",
                  "the rerun loses the rest of the task, or makes an inferred apply_prs the caller's"),
                 ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",

@@ -25,6 +25,7 @@ of it.
 | `sources`, `since` | what to scan, from when | | | | | optional |
 | `stop_after` | stop after this phase | optional | optional | optional | optional | optional |
 | `bisect_fixed` | when the reporter's code fails and main passes, find the commit that fixed it | | optional | | | |
+| `reported_on` | the model and launch configuration the report puts the task's problem on (`DeepSeek-V4.1, --tp-size 8`). The result of a run that was set up for another one gives it to the run after it (`next.rerun_with`, `next.start`): with no `gpu_ids` given, Setup takes as many GPUs as that configuration needs, and writes the launch for it | | optional | | | |
 | `confirm_leads` | default `false`: leads are listed with how to reproduce them; `true`: each is checked on the base commit, and those that show there are drafted as issues | optional | optional | optional | optional | |
 | `resume_from`, `run_dir` | `implement`: continue after a human approved the design | optional | | | | |
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |

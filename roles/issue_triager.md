@@ -45,7 +45,11 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    the problem was known, the `gpu_ids` you are given: two GPUs do not fit that problem whoever
    picked them. On a `model_mismatch` the run stops before Reproduce and asks: for the problem's
    model where the task has one, otherwise for each input it pins, and where it pins none for the
-   GPUs, never for a model the task has no use for.
+   GPUs, never for a model the task has no use for. The run after it is given your `model_mismatch`
+   as `reported_on`, as a run on one of the others is given its `model`: Setup, which works before
+   you, chooses the GPUs and writes the launch for it. So say it as the report does, the launch
+   flags with the model (`DeepSeek-V4.1, --tp-size 8`). A `reported_on` you are given is where an
+   earlier run found the problem this one takes.
    `priority`, `category`, `action` and `existing_prs` are then
    that problem's and no other's: a fix PR for another problem of the report is listed in the triage
    record only, since the run would apply it and check it against this problem's reproduction. Return

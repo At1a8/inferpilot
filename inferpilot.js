@@ -131,7 +131,7 @@ const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_
   'stop_after', 'resume_from', 'run_dir',
   'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
-  'image', 'image_ok', 'bisect_fixed', 'confirm_leads'];
+  'image', 'image_ok', 'bisect_fixed', 'confirm_leads', 'reported_on'];
 // '' is accepted for the enums so an undecided field costs no schema retry; pick() drops it.
 const TASK_DEF = S({
   mode: { type: 'string', enum: [...MODES, ''] },
@@ -445,6 +445,10 @@ const C = {
   accuracy_script: String(A.accuracy_script || ''),
   harness: A.harness ? (typeof A.harness === 'string' ? A.harness : JSON.stringify(A.harness)) : '',
   goal: String(A.goal || ''),
+  // The model and launch configuration the report puts the task's problem on, where the task says: the result of
+  // a run that found its problem on another one sets it for the run after it (afterMismatch, next.start). Setup
+  // works before Triage and is given nothing else of the report: it chooses the GPUs and writes the launch for it.
+  reported_on: String(A.reported_on || '').trim(),
   held_out: HELD_OUT,
   guards: GUARDS,
   sweep: SWEEP,
@@ -1141,7 +1145,7 @@ function afterMismatch(out, at, last, report) {
   Object.assign(out.rerun_with, pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),
     Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])),
     { request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: the model, the launch and the workload of `
-      + "this task are that configuration's, not those of the run that stopped." });
+      + "this task are that configuration's, not those of the run that stopped.", reported_on: R.model_mismatch });
   out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), ...out.rerun_with.answers };
   if (!R.questions.some((q) => q.field === 'model_path')) {
     out.say = `The run stopped after ${at}, before anything was reproduced: ${last}. Give what that configuration needs in place of the `
@@ -1216,7 +1220,7 @@ function nextSteps(status, at) {
       // Only the arguments start the run: what the report says of the problem's model goes with them, as the words
       // the Intake turns into that run's own model, scripts and workload.
       const words = p.model ? { request: `${task}. The report puts this problem on ${p.model}: the model, the launch and the workload `
-        + 'of this task are that configuration\'s, not those of the run that offered it.' } : {};
+        + 'of this task are that configuration\'s, not those of the run that offered it.', reported_on: p.model } : {};
       return { rank: i + 1, task: p.problem, ...(p.model ? { model: p.model } : {}),
         args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };
     });

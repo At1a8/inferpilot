@@ -339,6 +339,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`：为 `true` 时，若报告者的 commit 失败而 main 通过，就以复现脚本为测试在两者之间做 bisect，找出修复它的提交 |
+| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置（如 `DeepSeek-V4.1, --tp-size 8`）。一次运行如果发现它要处理的问题不在自己准备好的配置上，会在 Reproduce 之前停下，并在结果里把这个字段交给下一次运行（`next.rerun_with`；报告里其他问题用 `next.start`）：没有给 `gpu_ids` 时，Setup 按这个配置需要的数量选 GPU，并按它写启动脚本 |
 | `confirm_leads` | 默认 `false`：线索（角色遇到的、不属于本任务的问题）在报告里列出，附上复现方法，Spinoff 不占用 GPU；为 `true` 时，在报告前把每条线索放到 base 提交上确认，能复现的起草 issue |
 | `stop_after` | 在该模式的指定阶段之后停下（例如 `Design`、`Reproduce`）；填了该模式没有的阶段，会作为问题返回 |
 | `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行 |

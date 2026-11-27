@@ -2018,6 +2018,9 @@ const scenarios = [
     // Only the arguments start a run: what the report says of the problem's model goes with them, for the Intake.
     check(far.args.request.startsWith(`${far.args.task}. The report puts this problem on DeepSeek-V4.1, --tp-size 8:`) && !('request' in near.args),
       `the offered run carries the model the report names, in the words the Intake reads: ${far.args.request}`);
+    // And as a field of its own, which Setup is given: it works before Triage, and reads nothing else of the report.
+    check(far.args.reported_on === 'DeepSeek-V4.1, --tp-size 8' && !('reported_on' in near.args),
+      `the offered run names the configuration for Setup too: ${far.args.reported_on}, ${near.args.reported_on}`);
     check(near.args.model_path === '/models/m' && near.args.client_script === '/s/client.sh' && near.args.gpu_ids === '0,1' && !('model' in near),
       `one on this run's model keeps them: ${JSON.stringify(near.args)}`);
     // The task itself names a problem on another model than its own: nothing is reproduced or measured on the wrong one.
@@ -2035,6 +2038,7 @@ const scenarios = [
     check(again.mode === 'issue' && again.task === 'sglang#41299: the TP8 accuracy loss' && again.framework_dir === '/tmp/sglang'
       && again.request.startsWith('sglang#41299: the TP8 accuracy loss. The report puts this problem on DeepSeek-V4.1, --tp-size 8:'),
       `the rerun keeps the rest of the task and names the problem's configuration for the Intake: ${JSON.stringify(again)}`);
+    check(again.reported_on === 'DeepSeek-V4.1, --tp-size 8', `and for Setup, as a field of its own: ${again.reported_on}`);
     // What an earlier run was answered is cleared as well: the runner merges the answers, and they would come back.
     const mismatch = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce',
       model_mismatch: 'DeepSeek-V4.1, --tp-size 8', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
@@ -2063,6 +2067,9 @@ const scenarios = [
     check(set && set.ins.model_path === '/models/deepseek' && set.ins.client_script === '/s/client_tp8.sh' && set.ins.gpu_ids === '0,1,2,3,4,5,6,7'
       && !set.ins.workload, `and is set up on the answer and on what the Intake derives for it: ${set && JSON.stringify([set.ins.model_path,
         set.ins.client_script, set.ins.gpu_ids, set.ins.workload])}`);
+    check(intake.given.reported_on === 'DeepSeek-V4.1, --tp-size 8' && set && set.ins.reported_on === 'DeepSeek-V4.1, --tp-size 8'
+      && second.result.task_def.reported_on === 'DeepSeek-V4.1, --tp-size 8',
+      `Setup is told which configuration the task's problem is on, and the definition records it: ${set && set.ins.reported_on}`);
     // A task that stops before its fix needs no model, and can still pin what does not fit the problem: two GPUs
     // for one at TP8. It stops before Reproduce all the same, and is asked for what it pins, not for a model it
     // has no use for (a reproduction that serves none, a distributed test).
@@ -2111,6 +2118,23 @@ const scenarios = [
     const refitSetup = refit.calls.find((c) => c.key === 'director:setup');
     check(refit.result.status === 'stopped' && refit.result.stopped_at === 'Reproduce' && refitSetup && refitSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
       `with the answer the next run is set up on the GPUs the problem needs: ${refit.result.status} at ${refit.result.stopped_at}`);
+    // Left out, Setup chooses again, and this time it is told what for: the first run's Setup had no way to
+    // know the configuration, and one that is told no more would take the same two GPUs again.
+    const chooses = { 'director:setup': (ins) => ({ ...DEFAULTS['director:setup'](ins),
+      gpu_ids: /--tp-size 8/.test(ins.reported_on || '') ? '0,1,2,3,4,5,6,7' : '0,1' }),
+    'issue_triager:triage': (ins) => ({ priority: 'P1', category: 'wrong result', action: 'reproduce',
+      ...(ins.gpu_ids === '0,1' ? { model_mismatch: 'DeepSeek-V4.1, --tp-size 8' } : {}), triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const unpinned = { mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce' };
+    const firstRun = await run(unpinned, chooses);
+    const leftOut = await run({ ...unpinned, ...firstRun.result.next.rerun_with }, chooses);
+    const leftSetup = leftOut.calls.find((c) => c.key === 'director:setup');
+    const firstSetup = firstRun.calls.find((c) => c.key === 'director:setup');
+    check(firstRun.result.status === 'needs_input' && !firstSetup.ins.reported_on && firstRun.result.next.rerun_with.answers.gpu_ids === null
+      && leftOut.result.status === 'stopped' && leftOut.result.stopped_at === 'Reproduce' && leftOut.keys.includes('issue_triager:reproduce')
+      && leftSetup && leftSetup.ins.reported_on === 'DeepSeek-V4.1, --tp-size 8' && !leftSetup.ins.gpu_ids
+      && (leftOut.calls.find((c) => c.key === 'issue_triager:reproduce') || { ins: {} }).ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `a rerun that leaves the GPUs to Setup tells it the configuration, and is not set up on the same two again: ${leftOut.result.status} at ${
+        leftOut.result.stopped_at}, Setup given ${leftSetup && JSON.stringify([leftSetup.ins.reported_on, leftSetup.ins.gpu_ids])}`);
     // An input the task gave as an object is shown as it was given, not as "[object Object]".
     const shaped = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce',
       workload: { isl: 8192, osl: 1024, conc: 64 }, harness: { rounds: 3 } }, mismatch);
