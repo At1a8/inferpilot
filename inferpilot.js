@@ -1996,7 +1996,10 @@ function baselineFlaw(record) {
     if (seen.has(set)) return `${set} is there twice`;
     seen.add(set);
     if (!isFraction(b.score)) return `${set}: its score is no fraction between 0 and 1 (${JSON.stringify(b.score)})`;
-    if (!(Number.isInteger(b.questions) && b.questions > 0)) return `${set}: it does not say how many questions the set has (${JSON.stringify(b.questions)})`;
+    if (!(Number.isInteger(b.questions) && b.questions > 0)) {
+      return `${set}: it does not say how many questions the set has (${JSON.stringify(b.questions)})${
+        ourAccuracy ? '' : "; a task's own accuracy script has to give each set's size and answers in its results (templates/task_definition.md §1.1)"}`;
+    }
     const total = ourAccuracy && Object.keys(G2_TOTALS).includes(set) ? G2_TOTALS[set] : 0;
     if (total && b.questions !== total) return `${set}: ${b.questions} questions, and the set has ${total}`;
   }
@@ -2006,7 +2009,8 @@ let ourAccuracy = false; // Setup: the task brought no accuracy script of its ow
 const isFraction = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
 const g2Budget = (s) => (s && s.budget != null ? s.budget : G2_POINT);
 const inPoints = (b) => (Math.abs(b - G2_POINT) < 1e-12 ? 'a point' : `${+(b * 100).toFixed(4)} points`);
-function g2Unsound(g2, failures) {
+// `judged`: filled with the sets that were compared with a baseline, each with the budget it was held to.
+function g2Unsound(g2, failures, judged = []) {
   if (!g2 || typeof g2 !== 'object' || !Array.isArray(g2.sets) || !g2.sets.length) return 'it gives no scores (g2)';
   const fix = !!BEFORE_A_FIX[MODE];
   const commit = String(g2.commit || '').trim();
@@ -2026,6 +2030,9 @@ function g2Unsound(g2, failures) {
   if (!fix && noBase) return `it says that there is no baseline (${noBase}), and Setup measured one: only a fix can be without`;
   if (!fix && !measured.length) return 'Setup returned no accuracy of the baseline (baseline_accuracy), and the scores the round gives of it cannot be held to it';
   const names = g2.sets.map((s) => String((s && s.set) || '').trim().toLowerCase());
+  // One entry for a set: two of them would be two results of one measurement, and the round held to either.
+  const twice = names.find((n, i) => n && names.indexOf(n) !== i);
+  if (twice) return `${twice} is among its sets twice`;
   if (ourAccuracy && !names.includes('gsm8k')) {
     return `gsm8k is not among its sets (${names.filter(Boolean).join(', ') || 'none named'}), and InferPilot's harness puts it to every change`;
   }
@@ -2034,6 +2041,7 @@ function g2Unsound(g2, failures) {
   // Only a failure that does not block excuses a set below its budget. A blocking one makes no accepted round
   // (verifyLoop reads all_pass by it), and excuses nothing here either.
   const excused = new Set((failures || []).filter((f) => f.blocking === false).map((f) => String(f.gate || '').trim()));
+  let checked = 0; // the sets whose numbers the round is held to: every one but a report-only item listed as failed
   for (const s of g2.sets) {
     const name = String((s && s.set) || '').trim() || 'a set without a name';
     const gate = String((s && s.gate) || '').trim() || 'G2';
@@ -2045,6 +2053,7 @@ function g2Unsound(g2, failures) {
     // the round's own report, and its numbers are held to nothing. Not gsm8k, which every change answers for
     // with InferPilot's harness, and no set of G2's own.
     if (gate.toUpperCase() !== 'G2' && excused.has(gate) && !(ourAccuracy && name.toLowerCase() === 'gsm8k')) continue;
+    checked += 1;
     const asked = Number(s && s.questions);
     if (!s || !(Number.isInteger(asked) && asked > 0)) return `${name}: it does not say how many questions the set has`;
     const known = Object.keys(G2_TOTALS).includes(name.toLowerCase());
@@ -2080,7 +2089,11 @@ function g2Unsound(g2, failures) {
     if (s.fix < base - budget - 1e-9 && !excused.has(gate)) {
       return `${name}: ${s.fix} is more than ${inPoints(budget)} below the baseline's ${base}, and ${gate} is not among the round's failures that do not block`;
     }
+    judged.push({ set: name, budget });
   }
+  // A report-only item is an addition to what every change answers for. A round whose every set is one it lists
+  // as failed has put no number to the change (a task's own accuracy script names its sets as it likes).
+  if (!checked) return 'every set it gives is a report-only item that the round lists as failed: no number of the change is held to anything';
   return '';
 }
 
@@ -2273,7 +2286,8 @@ async function verifyLoop(extraGates, existing) {
     // report; what the run accepts is what the numbers show, and a round that gives none has shown nothing.
     const g2Due = (!BEFORE_A_FIX[MODE] || C.server_code_changed) && C.text_model !== false;
     const held = g2Due && (v.all_pass === true || (failures.length > 0 && !blocking.length));
-    const unsound = held ? g2Unsound(v.g2, failures) : '';
+    const judged = [];
+    const unsound = held ? g2Unsound(v.g2, failures, judged) : '';
     if (unsound) {
       await refused();
       const why = `the round was accepted, and G2's numbers do not bear it out: ${unsound}. G2 is `
@@ -2282,10 +2296,12 @@ async function verifyLoop(extraGates, existing) {
       return { ok: false, reason: why };
     }
     // A budget other than a point is the user's to name (acceptance.md §1.1), and the round's word is all the run
-    // has that the task names it. The record says which set was judged on which, for the reviewer and the report.
-    const budgets = held ? v.g2.sets.filter((s) => Math.abs(g2Budget(s) - G2_POINT) > 1e-12) : [];
+    // has that the task names it. The record says which set was judged on which, for the reviewer and the report:
+    // only of sets that were compared with a baseline, not of a fix's score that has none or of a report-only
+    // item that was held to nothing.
+    const budgets = judged.filter((j) => Math.abs(j.budget - G2_POINT) > 1e-12);
     if (budgets.length) {
-      note('Verify', 'budget', `G2 judged ${budgets.map((s) => `${s.set} on a budget of ${inPoints(g2Budget(s))}`).join(', ')}, which the round says `
+      note('Verify', 'budget', `G2 judged ${budgets.map((j) => `${j.set} on a budget of ${inPoints(j.budget)}`).join(', ')}, which the round says `
         + "the task names: a budget other than a point is the user's to give (goal), and no role's");
     }
     if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {

@@ -220,7 +220,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      says the change may lose accuracy (`acceptance.md` §1.1; `<accuracy_script> gsm8k gpqa_diamond
      simple_qa`; simple_qa needs the LLM judge, which the script probes before any inference); other
      suites or more runs only when `goal` asks. Never decide it yourself. An `accuracy_script` of the
-     task's runs instead, as given, with the same variables, on the sets it measures.
+     task's runs instead, as given, with the same variables, on the sets it measures. Its results
+     have to give each set's score, how many questions the set has and how many of them got an
+     answer (`task_definition.md` §1.1). Where they do not, fill no count in from elsewhere: fail the
+     baseline (`baseline_status: "fail"`), and say in `baseline` what the script's results lack.
      Performance is the run's `client_script` with `OUT_DIR=RUN_DIR/bench/baseline/<n>` for its n-th
      run, at least twice, and the spread recorded (`validation_doctrine.md`), on a server started only
      after the warm-up's is stopped and `gpu_status.py --check all` finds the machine idle

@@ -467,6 +467,8 @@ const scenarios = [
       ['a part of a second set', numbers({}, [gsm8k(), { set: 'simple_qa', fix: 0.4, base: 0.4, questions: 500, answered: 500, base_answered: 500 }]),
         'simple_qa: 500 questions, and the set has 4326'],
       ['a budget that is no fraction', numbers({}, [gsm8k({ budget: 2 })]), 'gsm8k: its budget is no fraction between 0 and 1 (2)'],
+      // One entry for a set: with two, the round could be held to the better one.
+      ['a set given twice', numbers({}, [gsm8k(), gsm8k({ fix: 0.84 })]), 'gsm8k is among its sets twice'],
       // A set the harness does not know by a fixed size is held to no size of its own, whatever it is called.
       ['a set named like a built-in, cut short', numbers({}, [gsm8k(), { set: 'constructor', fix: 0.5, base: 0.5, questions: 10, answered: 9, base_answered: 10 }]),
         'constructor: the change answered 9 of 10 questions'],
@@ -539,6 +541,19 @@ const scenarios = [
         { all_pass: false, failures: [{ gate: 'G2', blocking: false }] }) });
     check(refusedFor(ownShort, 'inhouse_qa: the change answered 90 of 100 questions'),
       `a set of G2's own that was cut short is not excused by a G2 failure that does not block: ${ended(ownShort)}, ${why(ownShort)}`);
+    // A report-only item is an addition to what a change answers for. A round whose every set is one it lists as
+    // failed has put no number to the change: a task's own script names its sets as it likes, one of them counts.
+    const onlyReports = await run(theirs, { ...measured([{ set: 'inhouse_qa', score: 0.712, questions: 100 }]),
+      ...round(numbers({}, [{ set: 'inhouse_qa', gate: 'ACC-1' }]), { all_pass: false, failures: [{ gate: 'ACC-1', blocking: false }] }) });
+    check(refusedFor(onlyReports, 'every set it gives is a report-only item that the round lists as failed'),
+      `a round with nothing but report-only items that failed is not accepted: ${ended(onlyReports)}, ${why(onlyReports)}`);
+    // The record names the budget of a set that was compared with its baseline, and of no other: not of a
+    // report-only item that was held to nothing.
+    const budgeted = (r) => r.result.phases.filter((p) => p.phase === 'Verify' && p.verdict === 'budget').map((p) => p.summary);
+    const reported = await run(feature, { ...both3, ...round(numbers({}, [gsm8k(), { ...second, budget: 0.05 }]),
+      { all_pass: false, failures: [{ gate: 'ACC-3', blocking: false }] }) });
+    check(reported.result.status === 'ready_for_review' && !budgeted(reported).length,
+      `a report-only item's budget is not recorded as one the set was judged on: ${JSON.stringify(budgeted(reported))}`);
     // The change is judged against the score Setup measured, not against the round's copy of it: a copy rounded
     // down within the tolerance does not move the bound.
     const exact = measured([{ set: 'gsm8k', score: 0.8954, questions: 1319 }]);
@@ -574,7 +589,9 @@ const scenarios = [
     }
     // A task's own accuracy script has its own sets and sizes, and still says how large each is.
     const sizeless = await run(theirs, measured([{ set: 'inhouse_qa', score: 0.712 }]));
-    check(sizeless.result.status === 'blocked' && sizeless.result.stopped_at === 'Setup', `a set of the task's own without its size stops at Setup too: ${ended(sizeless)}`);
+    check(sizeless.result.status === 'blocked' && sizeless.result.stopped_at === 'Setup'
+      && sizeless.result.phases.some((p) => p.phase === 'Setup' && /inhouse_qa: it does not say how many questions the set has \(undefined\); a task's own accuracy script has to give each set's size and answers in its results \(templates\/task_definition\.md §1\.1\)/.test(p.summary)),
+      `a set of the task's own without its size stops at Setup too, and the user is told what the script has to give: ${ended(sizeless)}`);
     // A round that fails is not held to its numbers: its failure is investigated, as before.
     const failing = await run(feature, { 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, left_running: '', g2: undefined,
       failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 against 0.89' }] } : DEFAULTS['verify_engineer:verify']()) });
@@ -622,6 +639,10 @@ const scenarios = [
     const alone = await run(issue, round(numbers({ commit: 'c_WP1', base_commit: '', no_baseline: unserved }, [gsm8k(noBase)])));
     check(served.result.status === 'ready_for_review' && alone.result.status === 'ready_for_review',
       `a fix compared with the last commit that served, or with no baseline and the reason: ${ended(served)}, ${ended(alone)}`);
+    // A score without a baseline was compared with nothing: a budget given with it is not recorded as judged.
+    const unjudged = await run(issue, round(numbers({ commit: 'c_WP1', base_commit: '', no_baseline: unserved }, [gsm8k({ ...noBase, budget: 0.02 })])));
+    check(unjudged.result.status === 'ready_for_review' && !unjudged.result.phases.some((p) => p.verdict === 'budget'),
+      `a fix's score without a baseline is judged on no budget: ${ended(unjudged)}`);
     for (const [what, g2, reason] of [
       ['no baseline and no reason', numbers({ commit: 'c_WP1', base_commit: '' }, [gsm8k(noBase)]),
         'gsm8k: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)'],

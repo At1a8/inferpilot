@@ -54,7 +54,9 @@ nowhere, whatever the request says of a stop.
      the benchmark the report or the failing test runs, when there is one, else the user's own for
      that model; ask when the request names none, and offer no `template` for it.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
-     it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
+     it InferPilot measures accuracy with its own (`task_definition.md` §1.2). Its results have to
+     give each set's score, size and number of answers (§1.1): tell the user so where the request
+     brings one, in `assumptions`.
    - `output_script` (`task_definition.md` §1.1): the user's own test that compares the outputs of a
      model that answers no text questions (a diffusion, speech or embedding model), when the request
      gives one; check that it exists and is readable. An issue or a ci task on such a model needs it,
