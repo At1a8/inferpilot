@@ -1954,12 +1954,15 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("knowledge/pr_playbook.md", "shows the score that fell and the score it restores, whatever it changes, a fix to the test alone included"),
                 ("templates/validation_report.md", "| accuracy claim (a CI failure on a score its test measures) |"),
                 # the same-pattern column holds what this run measured, not the failed job's score from another commit and lane
-                ("templates/validation_report.md", "the score on the base by that measurement, as this run measured it on this machine: "
-                                                   "Classify's runs on the task worktree, which is at the base (the commit, each run's score), or "
-                                                   "`not measured`"),
-                ("templates/validation_report.md", "Its runs on main are the base's only where the task began on that commit"),
+                ("templates/validation_report.md", "the score on the base by that measurement, as the verify engineer measured it in this run "
+                                                   "on this machine (the commit, each run's score), or `not measured`"),
+                # the column holds a number that counts: Classify's runs are the reproduction, named apart
+                ("templates/validation_report.md", "only the test, the verify and the performance engineer produce numbers that count "
+                                                   "(`guardrails.md` §3)"),
+                ("templates/validation_report.md", "Classify's runs reproduce the failure and are named apart as that, each with its commit: the "
+                                                   "task worktree is at the base, and main only where the task began on that commit"),
                 ("templates/validation_report.md", "Never the failed job's own score, which is another commit's on another machine: that one is "
-                                                   "named apart, with its commit and its lane"),
+                                                   "named apart too, with its commit and its lane"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
                 ("roles/reviewer.md", "the `accuracy_claim` entry of the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against "
