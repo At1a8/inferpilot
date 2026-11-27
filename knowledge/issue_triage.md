@@ -175,7 +175,9 @@ same ones.
 
 ## 5. Reproduction
 
-- Use the reporter's image, commit and command first; record them in the triage record.
+- Use the reporter's image, commit and command first; record them in the triage record. A commit that
+  is the repository's own (on main or a release) runs as it is. One that is only on a pull request's
+  branch or on a fork is its author's code, and runs only on the user's word (§4).
 - Pin what you change: one change at a time, each with its log.
 - Run the same-pattern baseline control from `validation_doctrine.md` before blaming a recent change;
   for long-running crashes (e.g. a segfault after about a million served tokens) define the soak test

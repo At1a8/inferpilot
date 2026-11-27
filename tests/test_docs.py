@@ -754,6 +754,8 @@ class ExistingFixFailsTest(unittest.TestCase):
                                            "marked `\"fixes\": false`: the run still verifies it on the user's word, and does not count it as an "
                                            "open fix where it decides the priority"),
                 ("roles/issue_triager.md", "`approved_prs` (the pull requests the user's own word names for the run to apply, or none)"),
+                ("knowledge/issue_triage.md", "A commit that is the repository's own (on main or a release) runs as it is. One that is only on a "
+                                              "pull request's branch or on a fork is its author's code, and runs only on the user's word (§4)"),
                 ("roles/issue_triager.md", "The reporter's commit runs here only where it is the repository's own: on main or on a release"),
                 ("roles/issue_triager.md", "run that arm only where the commit is the head of a pull request in `approved_prs` (the ones the user's "
                                            "own word names), else skip it, say so in `evidence`, and leave `reproduced_on_reporter` out"),
