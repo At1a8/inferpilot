@@ -952,8 +952,11 @@ class RecheckOnMainTest(unittest.TestCase):
                            ("knowledge/pr_playbook.md", "A verified fix is dropped only on proof"),
                            ("knowledge/pr_playbook.md", "A check that decides less than that prepares the PR"),
                            ("roles/director.md", "or the check on the latest main before the pull request"),
+                           # the report names the fix whichever phase named it
+                           ("roles/director.md", "and name the fix (`fixed_by`), whichever phase named it: Classify for a CI job whose tests pass "
+                                                 "on main, Bisect for an issue, or the check on the latest main before the pull request"),
                            # bisect_fixed is an issue's: a ci task is given the range, and no run that does not exist
-                           ("roles/director.md", "Where neither names it, say that the change that fixed it is not named, and give the range it "
+                           ("roles/director.md", "Where none names it, say that the change that fixed it is not named, and give the range it "
                                                  "lies in"),
                            ("roles/director.md", "For an issue, give the `bisect_fixed` run that would name it; a ci task has no such run, so offer "
                                                  "none"),
