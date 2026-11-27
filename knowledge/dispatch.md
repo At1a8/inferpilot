@@ -76,8 +76,20 @@ When a new architecture arrives (e.g. gfx1250 / MI45x), audit the platform gates
 1. CI code regressions (they block every AMD PR).
 2. P0 issues.
 3. Roadmap items, ordered by the customer workloads that need them.
-4. P1 issues and performance opportunities, by measured or estimated gain.
+4. P1 issues and performance opportunities.
 5. Everything else, including P2 and documentation.
 
+Within a rank, what a named customer workload or a roadmap item needs comes first, then the smaller
+effort, by GPU hours and then agent hours, then the larger measured or estimated gain: the day's machines
+reach more conclusions, and a long task does not hold back the short ones behind it. Effort orders tasks
+within a rank, never across ranks.
+GPU hours are the wall hours a task holds its GPUs (a machine for a TP8 run), not hours times GPUs.
+
+A task of 6 GPU hours or more is `long`. Its run is likely to outlast a default time limit or a shared
+machine's slot (an intermittent failure that needs soaks, a multi-GPU or multi-node configuration): start
+it apart from the queue, on a machine of its own and with time of its own, not in queue order. That is
+also why a long task at the end of its rank is not left waiting behind the short ones every day.
+
 Each ranked task records: type, level, dependencies with their AMD counterparts, the subsystems it
-touches, an effort estimate (agent hours and GPU hours) and the evidence it came from.
+touches, an effort estimate (agent hours and GPU hours), whether it is `long`, and the evidence it came
+from.

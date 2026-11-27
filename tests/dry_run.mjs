@@ -4298,6 +4298,33 @@ const scenarios = [
     check((late.result.next.user || []).some((u) => u.includes('may still share') && u.includes(`${RUN}/daily_report.md`)),
       `a director that timed out may still share the report: the user waits for it first: ${JSON.stringify(late.result.next.user)}`);
   }],
+  ['scan: the effort and long mark the dispatcher gives each task reach the tasks to start', async () => {
+    const def = (n) => ({ mode: 'issue', task: `https://github.com/sgl-project/sglang/issues/${n}` });
+    const r = await run({ mode: 'scan', framework_dir: '' }, {
+      'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
+        { rank: 1, task: 'a crash', priority: 'P1', source: 'issues', effort: { agent_h: 1, gpu_h: 1 }, long: false, task_def: def(1) },
+        { rank: 2, task: 'a soak-only divergence', priority: 'P1', source: 'issues', effort: { agent_h: 10, gpu_h: 16 }, long: true, task_def: def(2) },
+        { rank: 3, task: 'a TP8 accuracy loss', priority: 'P1', source: 'issues', effort: { agent_h: 6, gpu_h: 8 }, long: false, task_def: def(3) },
+        { rank: 4, task: 'a doc fix', priority: 'P2', source: 'issues', task_def: def(4) },
+      ] }),
+    });
+    check(r.result.queue[1].long === true && r.result.queue[1].effort.gpu_h === 16, 'the queue keeps effort and long');
+    check(r.result.queue[2].long === true, 'a task estimated at 6 GPU hours or more is long even where the dispatcher marked it not');
+    const [a, b, c, d] = r.result.next.start;
+    check(a.long === false && b.long === true && b.effort.gpu_h === 16 && c.long === true,
+      `the tasks to start carry it: ${JSON.stringify(r.result.next.start)}`);
+    check(d.long === null && !('effort' in d), `a task without an estimate is not offered as short: ${JSON.stringify(d)}`);
+    check(/4 tasks are ranked .*; each starts as a run of its own\. 2 of them are long \(6 GPU hours or more: #2, #3\): start each apart from the queue/
+      .test(r.result.next.say), `the long tasks are named: ${r.result.next.say}`);
+    check(/#4 has no effort estimate: how long it takes is unknown/.test(r.result.next.say), `next.say: ${r.result.next.say}`);
+    const rep = r.calls.find((x) => x.key === 'director:report');
+    check(rep && JSON.stringify((rep.ins.long_corrected || []).map((t) => t.rank)) === '[3]',
+      `the report is told which marks InferPilot corrected, to fix the files before sharing: ${JSON.stringify(rep && rep.ins.long_corrected)}`);
+    const plain = await run({ mode: 'scan', framework_dir: '' });
+    check(!/is long|are long/.test(plain.result.next.say) && plain.result.next.start.every((s) => s.long === null)
+      && /has no effort estimate/.test(plain.result.next.say), `a queue without estimates says so, not that its tasks are short: ${plain.result.next.say}`);
+    check((plain.calls.find((x) => x.key === 'director:report').ins.long_corrected || []).length === 0, 'nothing to correct, nothing told');
+  }],
   ['scan: a report from the last 24 hours makes the run ask first; rescan=true scans again', async () => {
     const recent = (ins) => (ins.rescan
       ? { lock: 'acquired', run_dir: RUN, candidates_path: `${RUN}/candidates.json`, counts: { ci: 5, issues: 30, upstream: 40 } }

@@ -190,7 +190,7 @@ cd /workspace/inferpilot && IS_SANDBOX=1 claude --dangerously-skip-permissions
 use /workspace/inferpilot/inferpilot.js with mode=scan, inferpilot_dir=/workspace/inferpilot
 ```
 
-scan 不改任何代码。它写出框架当天的日报，覆盖上一份日报以来（没有时为最近 7 天）的情况：main 上的 AMD CI（每个失败的 job、从何时开始失败、日志里说了什么）、按 P0、P1、P2 分好的开放 AMD 用户 issue，以及 AMD 需要跟进的上游改动。它把其中的任务排好序写进 `exp/scan_<time>/task_queue.md`，每项附可以启动它的任务定义，并把去掉本机信息的日报写进 `exp/scan_<time>/daily_report.md`，并用 `GITHUB_TOKEN` 作为 issue 分享到 InferPilot 仓库（第 1 步；token 不能往那里写时，这个文件由你来分享）。一天一份日报就够了：已有不到 24 小时的日报时，scan 会先问你要不要重扫（回答 `rescan`）；`upstream_repos` 可以加上要跟进的其他仓库，比如 vLLM。要接手一个任务，并在复现之后停下来确认环境，就给出它的字段：
+scan 不改任何代码。它写出框架当天的日报，覆盖上一份日报以来（没有时为最近 7 天）的情况：main 上的 AMD CI（每个失败的 job、从何时开始失败、日志里说了什么）、按 P0、P1、P2 分好的开放 AMD 用户 issue，以及 AMD 需要跟进的上游改动。它把其中的任务排好序写进 `exp/scan_<time>/task_queue.md`，每项附可以启动它的任务定义（同一档里工作量小的在前；占用 GPU 6 小时及以上的标为 long，不按队列顺序，单独给它一台机器和足够的时间），并把去掉本机信息的日报写进 `exp/scan_<time>/daily_report.md`，并用 `GITHUB_TOKEN` 作为 issue 分享到 InferPilot 仓库（第 1 步；token 不能往那里写时，这个文件由你来分享）。一天一份日报就够了：已有不到 24 小时的日报时，scan 会先问你要不要重扫（回答 `rescan`）；`upstream_repos` 可以加上要跟进的其他仓库，比如 vLLM。要接手一个任务，并在复现之后停下来确认环境，就给出它的字段：
 
 ```
 use /workspace/inferpilot/inferpilot.js with mode=issue, task=https://github.com/sgl-project/sglang/issues/41299,
