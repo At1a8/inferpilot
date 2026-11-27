@@ -2231,6 +2231,102 @@ const scenarios = [
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Classify', `status ${r.result.status}`);
     check(!r.keys.includes('ci_guardian:bisect'), 'no bisect without the failing test');
   }],
+  ['ci: main is judged first, on the lane\'s own image: a test that passes there has nothing to fix, and a lane this machine cannot be is handed over', async () => {
+    const classified = (out, drop = []) => ({ 'ci_guardian:classify': () => {
+      const a = { ...DEFAULTS['ci_guardian:classify'](), ...out };
+      for (const k of drop) delete a[k];
+      return a;
+    } });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const stale = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes',
+      evidence: 'the job ran rocm720 of 11-17; the test passes on rocm720 of 11-25' }, ['failure_class']));
+    check(stale.result.status === 'not_reproduced' && stale.result.stopped_at === 'Classify'
+      && !stale.keys.includes('ci_guardian:bisect') && !stale.keys.includes('implementer:implement') && stale.keys.includes('director:report'),
+      `a test that passes on main in the lane's newest image has nothing to fix: ${ended(stale)}`);
+    check(stale.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'passes_on_main' && p.summary.includes('rocm720 of 11-25')),
+      `the run record says which image it passes on: ${JSON.stringify(stale.result.phases.filter((p) => p.phase === 'Classify'))}`);
+    check(!stale.keys.some((k) => k.startsWith('issue_triager:reply')) && !stale.result.reply_draft_path, 'and a ci run writes no reply');
+    const merged = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', fixed_by: '#50220',
+      evidence: 'fails at the job\'s commit, passes on main' }));
+    check(merged.result.status === 'fixed_on_main' && merged.result.fixed_by === '#50220'
+      && merged.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('fixed by #50220: ')),
+      `a fix that merged since is named: ${ended(merged)}, ${merged.result.fixed_by}`);
+    const other = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
+      evidence: 'the lane is MI300X on rocm724; this machine is MI355X on rocm10' }));
+    check(other.result.status === 'handed_off' && other.result.stopped_at === 'Classify' && !other.keys.includes('ci_guardian:bisect')
+      && other.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off' && p.summary.includes(': the lane is MI300X')),
+      `a lane this machine cannot be is handed over, with what it needs: ${ended(other)}`);
+    for (const out of [{ on_main: 'fails' }, {}]) {
+      const fails = await run({ mode: 'ci', task: 'c' }, classified(out));
+      check(fails.result.status === 'ready_for_review' && fails.keys.includes('ci_guardian:bisect'),
+        `a failure main shows there (${JSON.stringify(out)}) is classified and fixed as before: ${ended(fails)}`);
+    }
+    const noClass = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails' }, ['failure_class']));
+    check(noClass.result.status === 'blocked' && noClass.result.stopped_at === 'Classify' && /has no class/.test(JSON.stringify(noClass.result.phases)),
+      `a failure of main without a class stops before the bisect: ${ended(noClass)}`);
+    // What only a fix needs is not asked of a failure that needs none: the answer may leave it out altogether.
+    const bare = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', performance: true }, ['failure_class', 'failing_test_cmd']));
+    check(bare.result.status === 'not_reproduced' && !bare.calls.some((c) => c.key === 'ci_guardian:classify' && c.n > 1),
+      `neither a class, a command to verify a fix with, nor a number to restore, and the answer is taken as it is: ${ended(bare)}`);
+    const away = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run', evidence: 'the lane is rocm724' }, ['failure_class', 'failing_test_cmd']));
+    check(away.result.status === 'handed_off', `nor of a lane this machine cannot be: ${ended(away)}`);
+    // A cluster is several tests on one lane or more: what passed says nothing of what was not run.
+    const part = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', unchecked: 'the two tests on rocm724',
+      evidence: 'all five pass on rocm720 of 11-25' }, ['failure_class']));
+    check(part.result.status === 'handed_off' && part.result.stopped_at === 'Classify' && !part.keys.includes('ci_guardian:bisect')
+      && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
+        && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
+      `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // A failure of the CI's own, or an intermittent one, is handed over whatever a rerun of the test shows here.
+    for (const cls of ['infrastructure', 'flaky']) {
+      for (const verdict of ['passes', 'not_run', 'fails']) {
+        const own = await run({ mode: 'ci', task: 'c' }, classified({ on_main: verdict, failure_class: cls, failing_test_cmd: '',
+          evidence: 'the runner lost communication at 02:14' }));
+        check(own.result.status === 'handed_off' && own.result.stopped_at === 'Classify' && !own.keys.includes('ci_guardian:bisect')
+          && own.result.phases.some((p) => p.phase === 'Classify' && p.verdict === cls && p.summary.includes('the runner lost communication')),
+          `${cls} with main "${verdict}" is handed over with its class and evidence, not ended as nothing to fix: ${ended(own)}`);
+      }
+    }
+    // Three passes here do not undo an intermittence the lane itself has shown on that commit and image: Classify
+    // answers "fails" with the class flaky, its command and the lane's runs, and the run hands that over. It is
+    // neither ended as nothing to fix nor bisected and fixed.
+    const lane = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', failure_class: 'flaky',
+      evidence: 'passes 3 of 3 here; the lane ran commit 4f1c2aa on rocm720 of 11-25 five times: 2 failed, 3 passed' }));
+    check(lane.result.status === 'handed_off' && lane.result.stopped_at === 'Classify' && !lane.keys.includes('ci_guardian:bisect')
+      && !lane.keys.includes('implementer:implement')
+      && lane.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'flaky' && p.summary.includes('2 failed, 3 passed')),
+      `a test that passes here and is intermittent in the lane's own runs is handed over as flaky: ${ended(lane)}`);
+    // The part not run is kept whole in the result however the run ends: a note keeps 600 characters of it.
+    const long = `the tests on rocm724: ${'test_x, '.repeat(120)}and more`;
+    for (const out of [{ on_main: 'passes' }, { on_main: 'not_run' }, { on_main: 'fails' }]) {
+      const kept = await run({ mode: 'ci', task: 'c' }, classified({ ...out, unchecked: long }));
+      const report = kept.calls.find((c) => c.key === 'director:report');
+      check(kept.result.unchecked === long && report && report.ins.unchecked === long,
+        `main "${out.on_main}": the part not run reaches the result and the report whole (${kept.result.unchecked.length} characters): ${ended(kept)}`);
+    }
+    // Where part fails and part was not run, what fails is fixed, and the run says what the fix does not answer for.
+    const mixed = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', unchecked: 'the two tests on rocm724' }));
+    check(mixed.result.status === 'ready_for_review' && mixed.keys.includes('ci_guardian:bisect') && mixed.result.unchecked === 'the two tests on rocm724'
+      && mixed.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'unchecked' && p.summary.includes('the two tests on rocm724')),
+      `a failure of main with a part not run is fixed, and the part is kept in the run record and the result: ${ended(mixed)}`);
+    const report = mixed.calls.find((c) => c.key === 'director:report');
+    check(report && report.ins.unchecked === 'the two tests on rocm724', 'the report is written knowing it');
+    // The failure came in after the task's base: a fix on that base would fix nothing.
+    const later = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
+      evidence: 'fails on main at abc1234, passes on the task worktree at 0ld5ha: start the task on main' }, ['failure_class', 'failing_test_cmd']));
+    check(later.result.status === 'handed_off' && !later.keys.includes('ci_guardian:bisect')
+      && later.result.phases.some((p) => p.phase === 'Classify' && p.summary.includes('passes on the task worktree at 0ld5ha')),
+      `a failure main shows and the task's own tree does not is not fixed on that tree: ${ended(later)}`);
+    // Every test three times can outlast the call: it is told its limit, and what it did not reach is unchecked.
+    const told = stale.calls.find((c) => c.key === 'ci_guardian:classify');
+    check(told.ins.time_limit_min > 0 && !Number.isNaN(Date.parse(told.ins.deadline_utc)),
+      `the classification is told its limit and when it ends: ${told.ins.time_limit_min} min, ${told.ins.deadline_utc}`);
+    // A task that only asks whether main still fails stops at Classify, and needs neither a model nor a client.
+    const ask = await run({ mode: 'ci', task: 'c', model_path: '', client_script: '', stop_after: 'Classify' },
+      classified({ on_main: 'passes', evidence: 'passes on rocm720 of 11-25' }, ['failure_class', 'failing_test_cmd']));
+    check(ask.result.status === 'not_reproduced' && !(ask.result.questions || []).length,
+      `stop_after=Classify gets the verdict without a model or a client: ${ended(ask)}`);
+  }],
   ['perf: a hand-off owner outside the list is rejected', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
       'architect:perf_plan': () => ({ work_packages: [WP('WP1')], handoffs: [{ id: 'O2', owner: 'kernel-workflow' }], gate_ok: true }),

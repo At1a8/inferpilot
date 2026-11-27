@@ -782,6 +782,13 @@ const DIAG = S({
   summary: str,
 }, ['verdict', 'root_cause']);
 const CLASSIFY = S({
+  // main, in the environment of the lane that failed (its newest image, its GPU model, its node count): fails
+  // (left out means fails), passes: nothing to fix, with fixed_by when a merged change is why; not_run: this
+  // machine is not that lane. passes is said of every test of the task on every lane it failed on: unchecked
+  // names what of the task was not run, and such a task is handed over, not called resolved
+  on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },
+  fixed_by: str,
+  unchecked: str,
   failure_class: { type: 'string', enum: ['code_regression', 'dependency_bump', 'test_bug', 'flaky', 'infrastructure'] },
   failing_test_cmd: str,
   window: str,
@@ -795,7 +802,7 @@ const CLASSIFY = S({
   accuracy_claim: str,
   evidence: str,
   triage_path: str,
-}, ['failure_class', 'failing_test_cmd', 'evidence', 'triage_path']);
+}, ['evidence', 'triage_path']);
 const BISECT = S({ culprit: str, confirmed: bool, work_packages: WPS, evidence: str }, ['culprit', 'confirmed']);
 const BISECT_FIX = S({ fix_commit: str, confirmed: bool, evidence: str }, ['fix_commit', 'confirmed']);
 // A diagnosis and a bisect can both find the root cause in an AMD component outside the framework (aiter, MoRI,
@@ -2109,7 +2116,9 @@ async function runCi() {
   if (early) return early;
 
   enter('Classify');
-  const cl = await call('ci_guardian', 'classify', inputs(), CLASSIFY);
+  // Classify runs every test of the task on main, three times each: it is told its limit, so that it runs what
+  // fits and hands the rest over (unchecked) instead of losing its answer to the timeout.
+  const cl = await call('ci_guardian', 'classify', inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);
   if (!cl) {
     note('Classify', 'fail', 'no classification');
     return finish('blocked', 'Classify');
@@ -2117,6 +2126,44 @@ async function runCi() {
   const failingCmd = String(cl.failing_test_cmd || '').trim();
   const handOver = cl.failure_class === 'infrastructure' || cl.failure_class === 'flaky';
   Object.assign(C, { triage_path: cl.triage_path, failing_test_cmd: failingCmd, failure_class: cl.failure_class });
+  // main is judged first, in the environment of the lane that failed: its newest image, its GPU model, its node
+  // count (ci_triage.md §2). A test that passes there leaves nothing to fix: the job ran an older image, or a fix
+  // has merged since. No fix, and no reply: a ci task has nobody to answer. One this machine cannot run as that
+  // lane does is handed over, since a run in another environment shows nothing either way. Only a failure that
+  // main shows there is classified and fixed.
+  const onMain = String(cl.on_main || 'fails').trim().toLowerCase();
+  // A cluster is several tests, on one lane or more: what was run says nothing of what was not. Kept whole in the
+  // result and for the report, however the run ends: a note keeps 600 characters of it.
+  const unchecked = String(cl.unchecked || '').trim();
+  if (unchecked) C.unchecked = R.unchecked = unchecked;
+  // A failure that is the CI's own (a runner lost, an image that did not pull, a full disk) or an intermittent one
+  // is handed over whatever a run of the test on main shows: a green rerun here does not make the job's failure
+  // go away, and its class and evidence go to the CI's maintainers below.
+  if (onMain === 'passes' && !handOver) {
+    if (unchecked) {
+      note('Classify', 'handed_off', `what was run passes on main, and part of the task was not run: ${unchecked}; ${cl.evidence}`);
+      return finish('handed_off', 'Classify');
+    }
+    const fixedBy = String(cl.fixed_by || '').trim();
+    if (fixedBy) C.fixed_by = R.fixed_by = fixedBy;
+    note('Classify', 'passes_on_main', `${fixedBy ? `fixed by ${fixedBy}: ` : ''}${cl.evidence}`);
+    return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');
+  }
+  if (onMain === 'not_run' && !handOver) {
+    note('Classify', 'handed_off', `main was not judged where the task needs it (the lane's environment, the task's own tree): ${cl.evidence}`
+      + `${unchecked ? `; not run: ${unchecked}` : ''}`);
+    return finish('handed_off', 'Classify');
+  }
+  if (!cl.failure_class) {
+    note('Classify', 'fail', 'main fails on the lane, and the failure has no class');
+    return finish('blocked', 'Classify');
+  }
+  // What fails is fixed, or handed over. The part of the task that was not run, or that fails only now and then
+  // next to tests that fail every time, stays outside it: nothing this run does answers for it, and the run
+  // record and the result say so.
+  if (unchecked) {
+    note('Classify', 'unchecked', `part of the task is outside what this run answers for (not run here, or intermittent): ${unchecked}`);
+  }
   if (!handOver && !failingCmd) {
     note('Classify', 'fail', `${cl.failure_class} without a failing_test_cmd; the failing_test gate needs one`);
     return finish('blocked', 'Classify');

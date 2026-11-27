@@ -140,7 +140,8 @@ clock can start before your session does.
      fix's files, as for any fix.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
-     fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates
+     fails), `failing_test` (the failing CI test passes on every lane it failed on that this machine can
+     run: with `unchecked`, name beside the gate's result what it does not cover); composability gates
      for every dimension the task touches (acceptance length for speculative decoding, accuracy bounds
      per KV dtype, PD transfer checks).
    - **G3 only with `long_context` on, G4 only with `stability` on;** one the task did not ask for is

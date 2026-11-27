@@ -1282,6 +1282,102 @@ def doc_command(path, start):
     return m.group(1) if m else None
 
 
+class CiOnMainTest(unittest.TestCase):
+    """A red CI job says what one image saw of one commit. Before a ci run classifies or fixes anything, main is
+    judged in the environment of the lane that failed (knowledge/ci_triage.md §2): a test that passes there has
+    nothing to fix, one this machine cannot run as that lane does is handed over, and only a failure main shows
+    there is classified."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_ends_at_classify_when_main_passes_or_the_lane_cannot_be_matched(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[(.*?)\]\);", src, re.S)
+        self.assertIn("on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },", body.group(1))
+        self.assertIn("fixed_by: str,", body.group(1))
+        self.assertIn("unchecked: str,", body.group(1))
+        self.assertNotIn("'failure_class'", body.group(2), "a failure main no longer shows has no class to give")
+        self.assertNotIn("'failing_test_cmd'", body.group(2), "nor a command to verify a fix with: the answer would be rejected for lacking it")
+        for said, why in (
+                ("const onMain = String(cl.on_main || 'fails').trim().toLowerCase();", "an answer without on_main is not a failure of main"),
+                ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
+                ("if (onMain === 'not_run' && !handOver) {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("if (onMain === 'passes' && !handOver) {", "a green rerun here ends a failure of the CI's own as nothing to fix"),
+                ("if (unchecked) C.unchecked = R.unchecked = unchecked;", "an exit before the fix loses the part of the task that was not run"),
+                ("const unchecked = String(cl.unchecked || '').trim();", "a task of which a part was not run is called resolved"),
+                ("inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);",
+                 "the classification is not told its limit, and a large cluster loses its answer to the timeout"),
+                ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
+            self.assertIn(said, src, why)
+        order = [src.index(x) for x in ("const onMain = ", "if (!handOver && !failingCmd) {", "const perfFailure = ")]
+        self.assertEqual(order, sorted(order), "main is judged before anything only a fix needs is asked for")
+
+    def test_the_documents_say_how_main_is_judged(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**First: does main still fail, on the lane's own image?**"),
+                ("knowledge/ci_triage.md", "that lane's newest image, its GPU model and its node count"),
+                ("knowledge/ci_triage.md", "the run ends with no fix and no reply"),
+                ("knowledge/ci_triage.md", "the lane is supported, so the test or the code has to run on it"),
+                ("knowledge/ci_triage.md", "no conclusion is drawn, in either direction"),
+                ("knowledge/ci_triage.md", "The newest image is established, not assumed"),
+                ("knowledge/ci_triage.md", "for every test of the task on every lane it failed on"),
+                ("knowledge/ci_triage.md", "each test run as the job ran it, in the job's order, three times"),
+                ("knowledge/ci_triage.md", "is `flaky`, not passing"),
+                ("knowledge/ci_triage.md", "sets `stop_after=Classify`: it needs no model and no client"),
+                ("roles/ci_guardian.md", "**Which image is the newest is established, not assumed.**"),
+                ("roles/ci_guardian.md", "one that only matches the failed job's can be as old as it"),
+                ("roles/ci_guardian.md", "**Every test of the task, on every lane it failed on.**"),
+                ("roles/ci_guardian.md", "**A pass that holds.**"),
+                ("roles/ci_guardian.md", "a failure can depend on the test before it"),
+                ("roles/ci_guardian.md", "`unchecked` naming that part"),
+                ("roles/ci_guardian.md", "run them on main: the commit `origin/main` names after a `git fetch origin`"),
+                ("roles/ci_guardian.md", "Where the task worktree's base is that commit, run them there"),
+                ("roles/ci_guardian.md", "A failure found there is run on the task worktree as well: the fix is made on that tree"),
+                ("roles/ci_guardian.md", "The tests fail on main and pass on the task worktree: the failure came in after the task's base"),
+                ("roles/ci_guardian.md", "`failing_test_cmd` runs the task worktree, never `RUN_DIR/main`"),
+                ("roles/ci_guardian.md", "the run fixes what fails, and says that the fix does not answer for the rest"),
+                ("roles/ci_guardian.md", "keep a quarter of the time to it, at most 15 minutes"),
+                ("knowledge/ci_triage.md", "where the rest fails, the run fixes what fails and names what it did not check"),
+                ("roles/director.md", "With `unchecked` (a ci task of which a part is outside what the run answers for"),
+                # a green rerun here does not make a failure of the CI's own go away
+                ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
+                ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),
+                # the lane's own runs of one commit on one image are evidence of an intermittent failure; three passes here are not its end
+                ("roles/ci_guardian.md", "So a test that passes all three times here fails all the same where the lane's own runs of that commit on "
+                                         "that image show it failing in some and passing in others"),
+                ("roles/ci_guardian.md", 'It is `on_main: "fails"` with `failure_class: "flaky"`, and `evidence` names those runs and their rate'),
+                ("knowledge/ci_triage.md", "So is one that passes all three here while the lane's own runs of that commit on that image show it "
+                                           "failing in some and passing in others"),
+                ("knowledge/ci_triage.md", "A failure that was the CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over"),
+                # intermittent is said of one commit, lane and image, not of the tracker's counts
+                ("roles/ci_guardian.md", "intermittent means some runs fail and some pass on one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "The tracker's counts are no such evidence: they span commits and images"),
+                ("knowledge/ci_triage.md", "Intermittent is said of one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "**A cluster of both.**"),
+                # the image is read where the tests run
+                ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
+                # a lane this machine cannot be is outside what the gate shows
+                ("knowledge/ci_triage.md", "A lane this machine cannot be stays `unchecked`: the gate is judged on the lanes that were run"),
+                ("roles/verify_engineer.md", "passes on every lane it failed on that this machine can run"),
+                ("roles/ci_guardian.md", "`scan_ci.py` lists ten tests and three job links of a cluster"),
+                ("roles/ci_guardian.md", "**Within your limit.**"),
+                ("roles/ci_guardian.md", "What you did not reach is `unchecked`, like any part you could not run"),
+                ("knowledge/ci_triage.md", "the commit `origin/main` names now, which the task's worktree is only when the task began there"),
+                ("roles/ci_guardian.md", "leave `failure_class` and `failing_test_cmd` out"),
+                ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
+                ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
+                ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
+                ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
+                ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            row = [line for line in text.splitlines() if line.startswith("| `ci` |")]
+            self.assertEqual(len(row), 1, name)
+            self.assertRegex(row[0], r"nothing to fix when main passes on the lane's own image|通过时不用修", name)
+
+
 class BranchBundleTest(unittest.TestCase):
     """What an attempt committed outlives its container: every role that moves the branch refreshes the
     bundle; a retry starts from the base and takes its commits from a side ref, a resume gets its branch
