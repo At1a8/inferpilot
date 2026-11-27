@@ -79,8 +79,10 @@ const LONG_ROLES = new Set(['verify_engineer', 'perf_engineer', 'investigator'])
 const LONG_CALLS = new Set(['issue_triager:reproduce']);
 // A longer limit InferPilot gave a call that showed it needs one (callWithTime); never past a given timeout.
 const GRANTED_MS = {};
-const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role]
-  || (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`)) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+// The limit a call has before anything is granted.
+const defaultTimeout = (role, sub) => (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`))
+  ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role] || defaultTimeout(role, sub);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
@@ -753,8 +755,9 @@ async function call(role, sub, ins, schema, label, opts) {
 // to MAX_GRANT times its own (needs: its needs_min, 0 when it ended for any other reason); nobody is
 // asked to choose a time. A timeout the user gave stays the limit. ins(limit, earlier) builds the
 // inputs, earlier the answer of the call before more time; schemaAgain, when given, checks that call's
-// answer. mostMs, when given, is a limit the call may ask for whatever its own: a Verify round with G4
-// (G4_ROUND_MS). Returns the answer, the earlier one, and with needs set, what it still needs.
+// answer. mostMs, when given, is the most the call may have, whatever its limit is: a Verify round with G4
+// (G4_ROUND_MS). It is the whole of it: a round that was given six days is not given twelve by the next one.
+// Returns the answer, the earlier one, and with needs set, what it still needs.
 async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAgain, ins, needs: needsOf, opts, mostMs = 0 }) {
   let earlier = null;
   for (let again = false; ; again = true) {
@@ -765,13 +768,22 @@ async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAg
     if (!needs) return { r, earlier };
     if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
     // past it, the run lock's idle window (MAX_CALL_MS) no longer covers the call: a human gives a timeout
-    const most = Math.max(MAX_GRANT * limit, minutes(mostMs));
+    const most = mostMs > 0 ? minutes(mostMs) : MAX_GRANT * limit;
     if (needs > most) {
       return { r, earlier, needs, limit, short: mostMs > 0 ? `more than the ${most} min a round with G4 can have`
         : `more than ${MAX_GRANT} times its limit` };
     }
     const grant = Math.max(needs, limit);
-    GRANTED_MS[grantKey] = grant * 60000;
+    // The role's other calls take a grant as theirs (grantKey: a GPU check, the check on the latest main, after a
+    // Verify round). What a call gets beyond any ordinary grant is that call's alone (mostMs: the days of G4): one
+    // of the others that stalls would hold the run for days, and none of them runs G4.
+    const ordinary = MAX_GRANT * minutes(defaultTimeout(role, sub));
+    if (mostMs > 0 && grant > ordinary) {
+      GRANTED_MS[`${role}:${sub}`] = grant * 60000;
+      GRANTED_MS[grantKey] = Math.max(GRANTED_MS[grantKey] || 0, ordinary * 60000);
+    } else {
+      GRANTED_MS[grantKey] = grant * 60000;
+    }
     note(PHASE, 'more_time', `${what} needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
     earlier = r;
   }

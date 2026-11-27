@@ -440,6 +440,19 @@ const scenarios = [
     const more = await run(G4, asks(10081));
     check(refused(more, 'needs 10081 min; its limit is 360 min (more than the 10080 min a round with G4 can have)'),
       `more than that is not given: ${limitsOf(more)}, ${more.result.status}`);
+    // Seven days are the whole of it, in a later round too: its limit is then the six days it was given, and twice
+    // that is no measure of what it may ask for. A round after a repair that asks for more than seven days is refused.
+    const later = (min) => ({ 'verify_engineer:verify': (ins, n) => (n === 1 || n === 3 ? { all_pass: false, failures: [], needs_min: n === 1 ? 9210 : min }
+      : n === 2 ? { all_pass: false, left_running: '', failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 against 0.89' }] }
+        : { all_pass: true, failures: [] }) });
+    const second = await run(G4, later(12000));
+    check(eqList(limitsOf(second), [360, 9210, 9210]) && second.result.status === 'blocked' && second.result.stopped_at === 'Verify'
+      && second.result.phases.some((p) => p.phase === 'Verify'
+        && p.summary.includes('needs 12000 min; its limit is 9210 min (more than the 10080 min a round with G4 can have)')),
+      `a later round is held to the seven days as well, not to twice the limit it was given: ${limitsOf(second)}, ${second.result.status}`);
+    const within = await run(G4, later(10000));
+    check(eqList(limitsOf(within), [360, 9210, 9210, 10000]) && within.result.status === 'ready_for_review',
+      `and gets what it asks for within them: ${limitsOf(within)}, ${within.result.status}`);
     // The machine's lock is taken over from a run that wrote nothing for twice its longest call: with G4 that
     // call is the round, so the window is two weeks, and a day for a task without it.
     check(idleOf(six) === '336' && idleOf(await run({ mode: 'feature', task: 't' })) === '24',
@@ -1034,6 +1047,20 @@ const scenarios = [
       `the check has the time the reproduction was granted: ${soaked.ins.time_limit_min} min`);
     const usual = (await run({ mode: 'issue', task: 'i' })).calls.find((c) => c.key === 'verify_engineer:recheck');
     check(usual.ins.time_limit_min === 360, `and the reproduction's own limit otherwise: ${usual.ins.time_limit_min} min`);
+    // A Verify round's grant is the verify engineer's own, so the check has it too. The days a round with G4 is
+    // given are that round's alone: the check and the GPU checks run no G4, and one of them that stalls must not
+    // hold the run for days. They have at most what any round could have been granted, twice its limit.
+    const askedFor = (min) => ({ 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, failures: [], needs_min: min }
+      : DEFAULTS['verify_engineer:verify']()) });
+    const roundLimits = (r) => r.calls.filter((c) => c.key === 'verify_engineer:verify').map((c) => c.ins.time_limit_min);
+    const longer = await run({ mode: 'issue', task: 'i' }, askedFor(500));
+    const longerCheck = longer.calls.find((c) => c.key === 'verify_engineer:recheck');
+    check(eqList(roundLimits(longer), [360, 500]) && longerCheck.ins.time_limit_min === 500,
+      `the check has the time a Verify round was granted: ${longerCheck.ins.time_limit_min} min`);
+    const g4 = await run({ mode: 'issue', task: 'i', stability: true, server_script: '/s/server.sh', client_script: '/s/client.sh' }, askedFor(9210));
+    const g4Check = g4.calls.find((c) => c.key === 'verify_engineer:recheck');
+    check(eqList(roundLimits(g4), [360, 9210]) && g4.result.status === 'ready_for_review' && g4Check.ins.time_limit_min === 720,
+      `the days of a round with G4 are the round's alone, and the check has twice a round's limit: ${g4Check.ins.time_limit_min} min`);
     // A check that timed out is not cancelled and may launch again: the run stops, and starts nothing next to it.
     const slow = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { 'verify_engineer:recheck': async () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
