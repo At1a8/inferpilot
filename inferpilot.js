@@ -3104,13 +3104,17 @@ function existingFix(found, needHead = true) {
       return p.repo && p.repo !== origin ? { ...p, pr: `${p.repo}${p.pr}` } : { ...p, repo: origin };
     })
     // The same pull request listed twice is one: a candidate once, and gone with it where it fails. It is the same
-    // under one name where the repositories agree or one entry gives none; the first entry stays, with what a
-    // later one adds of where the pull request is and which commit its branch is at.
+    // under one name where the repositories agree or one entry gives none. The two entries are read together, and
+    // a doubt decides against the pull request: it is open only where both have it so (a number alone is taken
+    // for open, which is no finding), and a fix only where neither says that it is none. Nothing is applied, or
+    // counted as an open fix, on the more hopeful of two entries. Where it is and which commit its branch is at
+    // come from whichever entry gives them.
     .reduce((kept, p) => {
       const i = kept.findIndex((q) => q.pr === p.pr && (!q.repo || !p.repo || q.repo === p.repo));
       if (i < 0) return [...kept, p];
       const q = kept[i];
-      kept[i] = { ...q, repo: q.repo || p.repo, head: q.head || p.head, author: q.author || p.author, association: q.association || p.association };
+      kept[i] = { ...q, state: q.state === 'open' ? p.state : q.state, fixes: q.fixes && p.fixes, repo: q.repo || p.repo,
+        head: q.head || p.head, author: q.author || p.author, association: q.association || p.association };
       return kept;
     }, []);
   const here = named.filter((p) => isPr(p.pr));

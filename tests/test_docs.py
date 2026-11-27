@@ -302,8 +302,6 @@ class CiExistingFixTest(unittest.TestCase):
                  "a closed or a merged pull request is applied, or a ci run applies one at no known commit"),
                 # an issue's triage may give a pull request by its number alone: it lists the open ones, and the implementer records the head
                 ("function existingFix(found, needHead = true) {", "a ci run takes a pull request without the commit its branch is at"),
-                (".map((p) => (typeof p === 'string' && !needHead ? { pr: p, state: 'open' } : p)).filter((p) => p && typeof p === 'object')",
-                 "an issue's pull request given by its number is dropped, or a ci run takes a bare number for an open pull request"),
                 ("const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;",
                  "a pull request the user did not name is applied, or several are applied together"),
                 ("if (!decided && candidates.length) {", "the user is not asked, is asked again after deciding, or is not asked again after an "
@@ -627,6 +625,11 @@ class ExistingFixFailsTest(unittest.TestCase):
                 # the pull request that failed, listed a second time, is no other fix: one entry for one pull request
                 ("const i = kept.findIndex((q) => q.pr === p.pr && (!q.repo || !p.repo || q.repo === p.repo));",
                  "a pull request listed twice is two candidates, and the one that failed keeps the priority under its second entry"),
+                # the two entries are read together: open only where both have it so, a fix only where neither says it is none
+                ("kept[i] = { ...q, state: q.state === 'open' ? p.state : q.state, fixes: q.fixes && p.fixes, repo: q.repo || p.repo,",
+                 "a pull request an entry gives as closed, or as no fix, is applied or counted as a fix on its number alone"),
+                (".map((p) => (typeof p === 'string' && !needHead ? { pr: p, state: 'open' } : p)).filter((p) => p && typeof p === 'object')",
+                 "an issue's pull request given by its number is dropped, or a ci run takes a bare number for an open pull request"),
                 ("fixes: p.fixes !== false }))", "a pull request the triage does not find to fix the problem counts as an open fix"),
                 ("      + `requests the run may apply (apply_prs: ${theirs.said.join(', ')}), and none of these. The run fixes the problem itself`);\n"
                  "    withoutUsablePr('the triage took a fix PR for open');",

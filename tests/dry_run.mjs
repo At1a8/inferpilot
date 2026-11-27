@@ -3717,6 +3717,22 @@ const scenarios = [
     check(twice.result.status === 'needs_input' && eqList(tq.options || [], ['#40872', 'none'])
       && (tq.question || '').startsWith('#40872 by mallory (contributor): open, and said to fix this failure.'),
       `a pull request listed twice is one candidate, with what the fuller entry says of it: ${JSON.stringify(tq.options)}, ${tq.question}`);
+    // The two entries are read together. A number alone lets the run take the pull request for open and for a fix;
+    // an entry that says it is closed, or no fix, says so of the same pull request, in whichever order they come:
+    // it is not applied, it is not put to the user as a fix, and it keeps no priority as one.
+    for (const [order, prs] of [['the number first', ['#40872', { ...theirs, state: 'closed', fixes: false }]],
+      ['the fuller entry first', [{ ...theirs, state: 'closed', fixes: false }, '#40872']]]) {
+      const shut2 = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage(prs, { priority_without_pr: 'P0' }));
+      check(shut2.result.status === 'ready_for_review' && applied(shut2).kind !== 'apply_pr' && shut2.result.priority === 'P0'
+        && notes(shut2, 'Reproduce').includes('named for verification, and not applied: #40872: it is closed'),
+        `a pull request one entry gives as closed is not applied on the number alone (${order}): ${ended(shut2)}, ${shut2.result.priority}, ${
+          JSON.stringify(notes(shut2, 'Reproduce'))}`);
+    }
+    const lookup2 = await run({ mode: 'issue', task: 'i' }, triage(['#40872', { ...theirs, fixes: false }]));
+    const l2 = ((lookup2.result.next || {}).ask || [])[0] || {};
+    check(eqList(l2.options || [], ['#40872', 'none']) && /named by the task, and not found to fix this failure by the triage/.test(l2.question || '')
+      && !/said to fix/.test(l2.question || ''),
+      `and one an entry gives as no fix is not asked about as a fix on the number alone: ${l2.question}`);
     const fuller = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage(['#40872', theirs]));
     check(applied(fuller).goal.startsWith('apply the existing fix #40872 at def5678 ') && applied(fuller).repo === 'sgl-project/sglang',
       `and it is applied at the commit and from the repository that entry gives: ${JSON.stringify(applied(fuller))}`);
