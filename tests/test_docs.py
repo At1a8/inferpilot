@@ -1089,8 +1089,15 @@ class FixAccuracyTest(unittest.TestCase):
                       "    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
                       "a rerun after the control file moved the stop stops where the task first said, or the file is not read when the run ends")
         # a rerun without a stop means it: not brought back by an earlier answer, nor by the request's words
-        self.assertIn("  if (rerun.stop_after === '' && asObject(RAW.answers).stop_after != null) rerun.answers = "
-                      "{ ...(rerun.answers || {}), stop_after: null };", src, "a stop an earlier answer named comes back in the rerun")
+        self.assertIn("  if (rerun.stop_after !== '' || asObject(answers).stop_after == null) return rerun;\n"
+                      "  rerun.answers = { ...(typeof answers === 'string' ? asObject(answers) : {}), ...(rerun.answers || {}), stop_after: null };",
+                      src, "a stop an earlier answer named comes back in the rerun, or answers given as a string are lost with it")
+        self.assertIn("  return withoutAnsweredStop(rerun, RAW.answers);", src)
+        # the Intake's questions come before the run exists: their rerun hands the stop on as well
+        self.assertIn("rerun_with: intakeStopHandedOn({ ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) }, raw, "
+                      "questions) },", src, "the rerun of the Intake's questions keeps the stop the task started with")
+        self.assertIn("  const asked = 'stop_after' in rerun || questions.some((q) => q.field === 'stop_after');", src,
+                      "a question about the stop itself is overruled by the control file")
         # every result that offers a rerun goes through it: the two written where they arise as well
         for said, why in (("  if (out.rerun_with) stopHandedOn(out.rerun_with);", "a result of nextSteps does not hand the stop on"),
                           ("rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });", "the image question does not hand the stop on"),

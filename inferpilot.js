@@ -427,7 +427,7 @@ async function intakeStage(raw) {
       questions,
       // null until the user answers: a run that still has it asks again rather than taking a placeholder
       next: { say: 'InferPilot needs these answers before it starts; nothing ran.', ask: questions,
-        rerun_with: { ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
+        rerun_with: intakeStopHandedOn({ ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) }, raw, questions) },
     });
   }
   return {
@@ -1305,11 +1305,35 @@ function stopHandedOn(rerun) {
   if (!('stop_after' in rerun) && stopNow !== STOP_AFTER && stopNow !== 'now') {
     rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';
   }
-  // A rerun without a stop means it. A stop an earlier answer named would come back with the answers, which the
-  // runner merges: it is cleared there too. The request's words are overruled by the empty field itself, which
-  // the next run takes for the caller's word (intakeStage).
-  if (rerun.stop_after === '' && asObject(RAW.answers).stop_after != null) rerun.answers = { ...(rerun.answers || {}), stop_after: null };
+  return withoutAnsweredStop(rerun, RAW.answers);
+}
+
+// A rerun without a stop means it. A stop an earlier answer named would come back with the answers, which the
+// runner merges: it is cleared there too. The request's words are overruled by the empty field itself, which the
+// next run takes for the caller's word (intakeStage). The runner merges this patch over the answers as the caller
+// gave them, and can only spread an object: answers given as a JSON string are carried in the patch whole, so
+// that the others (a model, a script, a workload) are not lost with the stop.
+function withoutAnsweredStop(rerun, answers) {
+  if (rerun.stop_after !== '' || asObject(answers).stop_after == null) return rerun;
+  rerun.answers = { ...(typeof answers === 'string' ? asObject(answers) : {}), ...(rerun.answers || {}), stop_after: null };
   return rerun;
+}
+
+// The same for a run the Intake stops with questions, before anything of it exists: where the control file moved
+// the stop while the Intake worked, the rerun goes by it. The mode may not be known yet, so the stop goes as the
+// operator wrote it, and the next run asks about one that names no phase of its mode. Not where the Intake's
+// question is about the stop itself: the answer decides there.
+function intakeStopHandedOn(rerun, raw, questions) {
+  let c = null;
+  try {
+    c = typeof control === 'function' ? control() : null;
+  } catch { /* an unreadable file changes nothing */ }
+  const moved = c && typeof c.stop_after === 'string' ? c.stop_after.trim() : null;
+  const asked = 'stop_after' in rerun || questions.some((q) => q.field === 'stop_after');
+  if (moved === null || asked || moved.toLowerCase() === 'now'
+    || moved.toLowerCase() === String(raw.stop_after || '').trim().toLowerCase()) return rerun;
+  rerun.stop_after = moved;
+  return withoutAnsweredStop(rerun, raw.answers);
 }
 
 // A rollback that did not leave the worktree clean is recorded for a human; returns the note suffix.

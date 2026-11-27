@@ -1493,6 +1493,53 @@ const scenarios = [
       `a stop the request's words name does not come back over a stop the caller cleared: ${stopsAsRead.result.status} at ${
         stopsAsRead.result.stopped_at}, then ${overruled.result.status} at ${overruled.result.stopped_at}, the Intake given ${
         JSON.stringify(intakeIns.given.stop_after)}`);
+    // Answers given as a JSON string are carried in that patch whole. The runner merges it over the answers as the
+    // caller gave them, and can only spread an object: the model answered before would be lost with the stop.
+    let shown2 = false;
+    const stringly = { mode: 'issue', task: 'i', model_path: '', client_script: '',
+      answers: JSON.stringify({ stop_after: 'Diagnose', model_path: '/models/m' }) };
+    const fromString = await run(stringly, {
+      'issue_triager:reproduce': () => {
+        shown2 = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (shown2 ? { stop_after: '' } : {}) });
+    const patch = (fromString.result.next.rerun_with || {}).answers || {};
+    check(fromString.result.status === 'needs_input' && patch.stop_after === null && patch.model_path === '/models/m' && patch.client_script === null,
+      `answers given as a string are carried in the patch that clears the stop: ${JSON.stringify(fromString.result.next.rerun_with)}`);
+    // The runner's merge, as runtime/run.mjs does it: the string is spread, and the patch goes over it.
+    const merged2 = { ...stringly, ...fromString.result.next.rerun_with, answers: { ...stringly.answers, ...patch, client_script: '/s/client.sh' } };
+    const afterString = await run(merged2);
+    check(afterString.result.status === 'ready_for_review' && afterString.result.task_def.model_path === '/models/m',
+      `and the rerun still has the model answered before: ${afterString.result.status} at ${afterString.result.stopped_at}, ${
+        afterString.result.task_def.model_path}`);
+    // The Intake's own questions come before anything of the run exists, and their rerun hands the stop on too:
+    // moved while the Intake worked, it is not the one the task started with. Not where the Intake asks about the
+    // stop itself, and not where nothing moved.
+    let defining = false;
+    const intakeAsks = (field) => ({ 'intake:define': (ins) => {
+      defining = true;
+      return { status: 'needs_input', summary: 'one thing is missing', task_def: { ...ins.given },
+        questions: [{ field, question: `What is ${field}?`, why: 'the task does not say' }] };
+    } });
+    const early = { mode: 'issue', task: 'i', request: 'the issue', stop_after: 'Diagnose' };
+    const atIntake = await run(early, intakeAsks('goal'), { control: () => (defining ? { stop_after: '' } : {}) });
+    check(atIntake.result.status === 'needs_input' && atIntake.result.stopped_at === 'Intake' && atIntake.result.next.rerun_with.stop_after === ''
+      && atIntake.result.next.rerun_with.answers.goal === null,
+      `a stop cleared while the Intake worked goes with the rerun of its questions: ${JSON.stringify(atIntake.result.next.rerun_with)}`);
+    defining = false;
+    const movedAtIntake = await run(early, intakeAsks('goal'), { control: () => (defining ? { stop_after: 'Verify' } : {}) });
+    const sameAtIntake = await run(early, intakeAsks('goal'), { control: () => ({ stop_after: 'diagnose' }) });
+    const plainAtIntake = await run(early, intakeAsks('goal'));
+    check(movedAtIntake.result.next.rerun_with.stop_after === 'Verify' && !('stop_after' in sameAtIntake.result.next.rerun_with)
+      && !('stop_after' in plainAtIntake.result.next.rerun_with),
+      `moved to another phase it is that phase, and where nothing moved the rerun names none: ${JSON.stringify([
+        movedAtIntake.result.next.rerun_with, sameAtIntake.result.next.rerun_with, plainAtIntake.result.next.rerun_with])}`);
+    defining = false;
+    const aboutStop = await run(early, intakeAsks('stop_after'), { control: () => (defining ? { stop_after: 'Verify' } : {}) });
+    check(aboutStop.result.status === 'needs_input' && aboutStop.result.next.rerun_with.stop_after === ''
+      && aboutStop.result.next.rerun_with.answers.stop_after === null,
+      `a question about the stop itself is left to its answer: ${JSON.stringify(aboutStop.result.next.rerun_with)}`);
     // An answer still wins over the empty field: that is how a stop the run asked about makes room for one.
     const answeredAgain = await run({ ...worded, stop_after: '', answers: { stop_after: 'Reproduce' } }, reads);
     check(answeredAgain.result.status === 'stopped' && answeredAgain.result.stopped_at === 'Reproduce',
