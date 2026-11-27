@@ -98,6 +98,16 @@ usable fix PR (§2 makes a default-configuration failure P1 only while one is op
 gets a workaround here for a component's defect. The comment promises no fix: it is written before
 the run knows what becomes of its own.
 
+What the run adds on top of the pull request is the run's own, and stays apart from it: a test where
+the pull request brought none, a change the review or the PR phase asked for. A failure there is
+repaired there (the unit gate says `failed_in`, the investigator `in_additions`), and is never held
+against the pull request; a gate that cannot say whose failure it is stops the run for a human.
+Verify runs again after such additions, and a failure of the pull request found then is answered
+as one found the first time. Before the pull request is taken off the branch, every round has to
+have said that it left nothing running (`left_running`, in every unit and Verify answer), and after
+it the branch has to be at the task's base (`base_commit`, which Setup returns): the run's own fix
+starts on no other commit.
+
 **A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
 the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails
 the same way is the same failure with more evidence. One of them is the original: the one the

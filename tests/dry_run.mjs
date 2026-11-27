@@ -116,8 +116,8 @@ const scenarios = [
   ['feature: unit gate fails once, feedback reaches the second round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => (n === 1
-        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'case 7 mismatches the reference' }
-        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' }),
+        ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', failure_summary: 'case 7 mismatches the reference' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const second = r.calls.filter((c) => c.key === 'implementer:implement')[1];
@@ -126,7 +126,7 @@ const scenarios = [
   ['implement: a unit test that passes without the change is a failed round', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true,
-        fails_without_change: n === 1 ? 'no' : 'mutant', incomplete: '', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
+        fails_without_change: n === 1 ? 'no' : 'mutant', left_running: '', incomplete: '', failure_summary: n === 1 ? 'passes on the parent: it never calls the new path' : '' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const rounds = r.calls.filter((c) => c.key === 'implementer:implement');
@@ -134,7 +134,7 @@ const scenarios = [
       && rounds[1].ins.feedback.includes('never calls the new path'), `feedback: ${rounds[1] && rounds[1].ins.feedback}`);
   }],
   ['implement: only a docs package may have nothing to fail', async () => {
-    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a', incomplete: '' });
+    const asNa = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'n/a', left_running: '', incomplete: '' });
     const docs = await run({ mode: 'feature', task: 't' }, {
       'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('D1', { kind: 'docs' })], gate_ok: true, perf_claim: '' }),
       'test_engineer:unit': asNa,
@@ -603,8 +603,10 @@ const scenarios = [
       + `--check <gpu_ids>\` before the ${call}'s first launch and again after the stop (*Killing*): a GPU idle before and in use `
       + `after is one the ${call} still holds`);
     check(freed(unitDoc, 'call') && unitDoc.includes('and so does a GPU the call still holds: `failure_summary` names it')
-      && freed(verifyDoc, 'round') && verifyDoc.includes('`summary` names one you cannot stop, and a GPU the round still holds'),
-      'a stop that exits 0 is confirmed on the GPUs: one idle before the first launch and in use after the stop fails the gate, or is named');
+      && freed(verifyDoc, 'round') && verifyDoc.includes('`left_running` names one you cannot stop, and a GPU the round still holds')
+      && verifyDoc.includes('say one or the other in every answer') && unitDoc.includes('`left_running` says what is left and where'),
+      'a stop that exits 0 is confirmed on the GPUs: one idle before the first launch and in use after the stop fails the gate, and is '
+      + 'named in a field of its own');
     check(unitDoc.includes('with `container` set, launched, polled and stopped in that container')
       && verifyDoc.includes('with `container` set, launched, polled and stopped in that container'),
       'with a container, both engineers launch, poll and stop there');
@@ -779,7 +781,7 @@ const scenarios = [
       const r = await run({ mode: 'feature', task: 't', agent_timeout_ms: 100 }, {
         [role]: slow(role === 'implementer:implement'
           ? (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py' })
-          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' })),
+          : () => ({ unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '' })),
       });
       check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `${role}: status ${r.result.status}`);
       check(r.keys.filter((k) => k === 'implementer:implement').length === 1, `${role}: the work package gets no second round`);
@@ -1050,7 +1052,7 @@ const scenarios = [
   }],
   ['feature: a work package that never passes is rolled back', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 1 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'still wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', failure_summary: 'still wrong' }),
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
     check(r.keys.filter((k) => k === 'implementer:implement').length === 2, 'max_fix_rounds + 1 attempts');
@@ -1061,8 +1063,8 @@ const scenarios = [
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
       'test_engineer:unit': (ins, n) => (n === 1
         ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
-          incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
-        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'runs 1-5 pass' }),
+          left_running: '', incomplete: 'DCP8 runs 4-5 not finished: driver pid 4242 writes logs/unit_WP1_driver.log', evidence: 'runs 1-3 pass' }
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', evidence: 'runs 1-5 pass' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const units = r.calls.filter((c) => c.key === 'test_engineer:unit');
@@ -1075,7 +1077,7 @@ const scenarios = [
   ['implement: a unit gate still without a result stops the package for a human: not rolled back, its commit kept', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: 'DCP1 never started: the GPUs were taken' }),
+        fails_without_change: 'parent', left_running: '', incomplete: 'DCP1 never started: the GPUs were taken' }),
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement', `status ${r.result.status}`);
     check(r.keys.filter((k) => k === 'test_engineer:unit').length === 2, 'one call to finish it, no more');
@@ -1087,13 +1089,13 @@ const scenarios = [
       `attention: ${JSON.stringify(r.result.attention)}`);
     const nothing = await run({ mode: 'feature', task: 't' }, {
       'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: 'run 3 still going' } : null),
+        fails_without_change: 'parent', left_running: '', incomplete: 'run 3 still going' } : null),
     });
     check(nothing.result.stopped_at === 'Implement' && !nothing.keys.includes('implementer:rollback')
       && nothing.result.attention.some((a) => a.wp === 'WP1'), 'a finishing call that returns nothing leaves the gate without a result too');
     const failed = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
       'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: '', failure_summary: 'run 2 diverged' }),
+        fails_without_change: 'parent', left_running: '', incomplete: '', failure_summary: 'run 2 diverged' }),
     });
     check(failed.keys.includes('implementer:rollback') && failed.keys.filter((k) => k === 'test_engineer:unit').length === 1,
       'a check that failed is a failure: rolled back as before');
@@ -1101,7 +1103,7 @@ const scenarios = [
   ['implement: a unit call with no answer at all is finished by one more call, not a fix round or a rollback', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 1, max_fix_rounds: 0 }, {
       'test_engineer:unit': (ins, n) => (n === 1 ? null
-        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
+        : { wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', evidence: 'ok' }),
     });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
     const fin = r.calls.filter((c) => c.key === 'test_engineer:unit')[1];
@@ -1124,7 +1126,7 @@ const scenarios = [
   ['implement: a unit answer is never asked for again blind, and one with checks not run says so with null', async () => {
     const finishing = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit')[1] || { ins: {} };
     const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent',
-      incomplete: '', evidence: 'ok' });
+      left_running: '', incomplete: '', evidence: 'ok' });
     const unusable = await run({ mode: 'feature', task: 't', agent_retries: 2, max_fix_rounds: 0 }, {
       'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false } : good(ins)),
     }, { schemaRetries: 1 });
@@ -1146,7 +1148,7 @@ const scenarios = [
       'an answer without incomplete is not a failed gate: no fix round and no rollback');
     const unrun = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
       'test_engineer:unit': (ins, n) => (n === 1 ? { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: null,
-        fails_without_change: null, incomplete: 'feature off and T1 not started: driver pid 4242 writes logs/unit_WP1.log' } : good(ins)),
+        fails_without_change: null, left_running: '', incomplete: 'feature off and T1 not started: driver pid 4242 writes logs/unit_WP1.log' } : good(ins)),
     });
     check(String(finishing(unrun).ins.incomplete).includes('pid 4242') && unrun.result.status === 'ready_for_review',
       `checks not run are null, and the gate reaches its finishing call as it was: ${finishing(unrun).ins.incomplete}`);
@@ -1161,8 +1163,8 @@ const scenarios = [
     check(doc.includes('Steps 1 to 4 run only the checks that never started'), 'the finishing call runs only what is missing');
   }],
   ['implement: a check given as null with nothing in incomplete is a gate without a result, not a failed one', async () => {
-    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '' });
-    const open = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: null, fails_without_change: null, incomplete: '' });
+    const good = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '' });
+    const open = (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: null, fails_without_change: null, left_running: '', incomplete: '' });
     const units = (r) => r.calls.filter((c) => c.key === 'test_engineer:unit');
     const implements_ = (r) => r.keys.filter((k) => k === 'implementer:implement').length;
     const finished = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, { 'test_engineer:unit': (ins, n) => (n === 1 ? open(ins) : good(ins)) });
@@ -1215,7 +1217,7 @@ const scenarios = [
       'test_engineer:unit': async (ins, n) => {
         if (n > 1) await new Promise((resolve) => setTimeout(resolve, 400));
         return { wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent',
-          incomplete: 'DCP8 runs 4-5: driver pid 4242 writes logs/unit_WP1_driver.log' };
+          left_running: '', incomplete: 'DCP8 runs 4-5: driver pid 4242 writes logs/unit_WP1_driver.log' };
       },
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Implement' && !r.keys.includes('implementer:rollback'),
@@ -1240,7 +1242,7 @@ const scenarios = [
   ['kernel: an integration whose unit gate has no result stops the run before Verify, its commit kept', async () => {
     const r = await run({ mode: 'feature', task: 't', ...CMD }, { ...withKernelHandoff('decode hot path'),
       'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-K-WP1', feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
+        fails_without_change: 'parent', left_running: '', incomplete: ins.work_package.id === 'K-K-WP1' ? 'the kernel suite still runs' : '' }) });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
     check(!r.keys.includes('verify_engineer:verify') && !r.keys.includes('implementer:rollback'), 'no Verify of an unverified kernel, and no rollback');
     check(r.result.handoffs[0].status === 'integration_held' && r.result.handoffs[0].commit === 'c_K-K-WP1',
@@ -1252,7 +1254,7 @@ const scenarios = [
       { id: 'O4', owner: 'kernel_workflow', spec_path: `${RUN}/handoffs/O4/op_spec.md` }], perf_claim: '-6% TPOT', gate_ok: true }) };
     const r = await run({ mode: 'perf', task: 'p', ...CMD }, { ...plan,
       'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O2', feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O2' ? 'the kernel suite still runs' : '' }) });
+        fails_without_change: 'parent', left_running: '', incomplete: ins.work_package.id === 'K-O2' ? 'the kernel suite still runs' : '' }) });
     const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
     check(byId.O2 === 'integration_held' && byId.O4 === 'recorded', `statuses ${JSON.stringify(byId)}`);
@@ -1268,7 +1270,7 @@ const scenarios = [
       'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
         kernel_handoff: { op_spec_path: `${RUN}/handoffs/K-${ins.work_package.id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } }),
       'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== 'K-O4', feature_off_unchanged: true,
-        fails_without_change: 'parent', incomplete: ins.work_package.id === 'K-O4' ? 'the kernel suite still runs' : '' }) });
+        fails_without_change: 'parent', left_running: '', incomplete: ins.work_package.id === 'K-O4' ? 'the kernel suite still runs' : '' }) });
     const byId = Object.fromEntries(r.result.handoffs.map((h) => [h.id, h.status]));
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Kernel', `status ${r.result.status} at ${r.result.stopped_at}`);
     check(byId.O2 === 'integrated' && byId.O4 === 'integration_held', `statuses ${JSON.stringify(byId)}`);
@@ -1281,7 +1283,7 @@ const scenarios = [
   }],
   ['kernel: an integration without a unit result stops the run also from a Verify fix, a review change or a kernel retry', async () => {
     const heldFor = (id) => (ins) => ({ wp: ins.work_package.id, unit_pass: ins.work_package.id !== id, feature_off_unchanged: true,
-      fails_without_change: 'parent', incomplete: ins.work_package.id === id ? 'the kernel suite still runs' : '' });
+      fails_without_change: 'parent', left_running: '', incomplete: ins.work_package.id === id ? 'the kernel suite still runs' : '' });
     const handoffFrom = (id) => (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py',
       kernel_handoff: ins.work_package.id === id ? { op_spec_path: `${RUN}/handoffs/K-${id}/op_spec.md`, test_cmd: 'pytest k.py', plug_in: 'x.py:f', reason: 'hot op' } : null });
     const verifies = (r) => r.keys.filter((k) => k === 'verify_engineer:verify').length;
@@ -1726,7 +1728,7 @@ const scenarios = [
   }],
   ['rollback: an unclean rollback goes on the attention list of the report', async () => {
     const r = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', failure_summary: 'wrong' }),
       'implementer:rollback': () => ({ wp: 'WP1', reset_to: 'base', clean: false }),
     });
     check(r.result.status === 'blocked' && r.result.attention.length === 1 && r.result.attention[0].wp === 'WP1',
@@ -1734,7 +1736,7 @@ const scenarios = [
     const rep = r.calls.find((c) => c.key === 'director:report');
     check(rep && Array.isArray(rep.ins.attention) && rep.ins.attention.length === 1, 'the report sees what a human must clean up');
     const clean = await run({ mode: 'feature', task: 't', max_fix_rounds: 0 }, {
-      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', failure_summary: 'wrong' }),
+      'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', failure_summary: 'wrong' }),
     });
     check(clean.result.attention.length === 0, 'a clean rollback needs no attention');
   }],
@@ -2078,7 +2080,9 @@ const scenarios = [
       triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
     const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
     const pass = () => DEFAULTS['verify_engineer:verify']();
-    const failing = (gate, extra) => ({ ...pass(), all_pass: false, failures: [{ gate, blocking: true, evidence: 'fails 3 of 3 with the PR applied', ...extra }] });
+    // A round that failed says that it left nothing running: the rollback of the pull request waits for that word.
+    const failing = (gate, extra) => ({ ...pass(), all_pass: false, left_running: '',
+      failures: [{ gate, blocking: true, evidence: 'fails 3 of 3 with the PR applied', ...extra }] });
     const packages = (r) => r.calls.filter((c) => c.key === 'implementer:implement').map((c) => `${c.ins.work_package.id}:${c.ins.work_package.kind || 'framework'}`);
     const comment = (r) => r.calls.find((c) => c.key === 'pr_engineer:comment');
     const fellBack = (r, at) => !!comment(r) && comment(r).ins.failed_at === at && comment(r).ins.existing_pr_result.prs === '#40872'
@@ -2130,7 +2134,7 @@ const scenarios = [
     // Its own tests fail: that is its result. No round repairs it, as a round would a package of the run's own.
     const red = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'test_engineer:unit': (ins) => (ins.work_package.kind === 'apply_pr'
-        ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, incomplete: '',
+        ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, left_running: '', incomplete: '', failed_in: 'pr',
           failure_summary: "test_dcp_tp8 fails with the PR applied: AssertionError at step 3", evidence: `${RUN}/logs/unit_WP1.log` }
         : DEFAULTS['test_engineer:unit'](ins)) });
     const applyRounds = red.calls.filter((c) => c.key === 'implementer:implement' && c.ins.work_package.kind === 'apply_pr').length;
@@ -2145,13 +2149,42 @@ const scenarios = [
       `one that loses accuracy against a baseline that ran to its end, which the investigator cannot explain: ${ended(lossy)}`);
     const slow = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'perf_engineer:perf_eval': (ins, n) => ({ ...DEFAULTS['perf_engineer:perf_eval'](), claim_reproduced: n > 1 }) });
-    check(slow.result.status === 'ready_for_review' && fellBack(slow, 'Performance') && /slower than the base beyond the noise band, or the number/.test(comment(slow).ins.failure),
-      `one that is slower than the base: ${ended(slow)}`);
+    check(slow.result.status === 'ready_for_review' && fellBack(slow, 'Performance')
+      && comment(slow).ins.failure === "on the task's client it is slower than the baseline beyond the noise band (+22%)",
+      `one that is slower than the base: ${ended(slow)}, ${comment(slow) && comment(slow).ins.failure}`);
     // A guard workload that is slower is measured too: the headline number holding does not hide it.
     const guard = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'perf_engineer:perf_eval': (ins, n) => ({ ...DEFAULTS['perf_engineer:perf_eval'](), guards_ok: n > 1 }) });
-    check(guard.result.status === 'ready_for_review' && fellBack(guard, 'Performance') && /measured on the guard workloads/.test(comment(guard).ins.failure),
+    check(guard.result.status === 'ready_for_review' && fellBack(guard, 'Performance')
+      && comment(guard).ins.failure === 'on a guard workload it is slower than the baseline beyond the noise band (+22%)',
       `one that is slower on a guard workload: ${ended(guard)}, ${comment(guard) && comment(guard).ins.failure}`);
+    // The reason names every check that failed, and none that did not or was never judged: the comment for the
+    // pull request is written from it.
+    const measuredAs = async (args, first, more = {}) => {
+      const x = await run({ mode: 'issue', task: 'i', ...args }, { ...existing, ...more,
+        'perf_engineer:perf_eval': (ins, n) => (n === 1 ? { ...DEFAULTS['perf_engineer:perf_eval'](), summary: '', ...first }
+          : DEFAULTS['perf_engineer:perf_eval']()) });
+      return { x, why: comment(x) ? comment(x).ins.failure : '(no comment)' };
+    };
+    const heldOut = await measuredAs({ held_out: true }, { held_out_ok: false });
+    check(fellBack(heldOut.x, 'Performance') && heldOut.why === 'the result does not hold at the held-out operating point',
+      `a result that holds on the task's client and not at the held-out point is said as that, not as a missed number: ${heldOut.why}`);
+    const two = await measuredAs({}, { claim_reproduced: false, guards_ok: false, summary: 'c64 -6%, guard c8 -9%' });
+    check(fellBack(two.x, 'Performance') && two.why === "on the task's client it is slower than the baseline beyond the noise band; "
+      + 'on a guard workload it is slower than the baseline beyond the noise band (c64 -6%, guard c8 -9%)',
+      `two checks that failed are both named: ${two.why}`);
+    const noBase = await measuredAs({}, { claim_reproduced: false, guards_ok: false, no_baseline: 'the base does not start on this configuration' });
+    check(fellBack(noBase.x, 'Performance') && noBase.why === 'on a guard workload it is slower than the baseline beyond the noise band',
+      `a number that had no baseline to be judged against is not said to have failed: ${noBase.why}`);
+    const unjudged = await measuredAs({}, { claim_reproduced: false, no_baseline: 'the base does not start on this configuration' });
+    check(unjudged.x.result.status === 'ready_for_review' && !comment(unjudged.x), `and alone it fails nothing: ${ended(unjudged.x)}`);
+    const number = await measuredAs({}, { claim_reproduced: false }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'performance', action: 'push_existing_pr', existing_prs: ['#40872'],
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
+      'issue_triager:reproduce': () => ({ reproduced: true, repro_cmd: 'bash repro.sh', perf_claim: 'decode tok/s back to 2400 at c32', evidence: '1900 tok/s' }) });
+    check(fellBack(number.x, 'Performance')
+      && number.why === "on the task's client the number it must restore did not come back (decode tok/s back to 2400 at c32)",
+      `for a performance problem the reason is the number that did not come back: ${number.why}`);
     const stillThere = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()),
       'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-9', title: 'the base fails the same way' }, summary: 'as on the base' }) });
@@ -2189,6 +2222,67 @@ const scenarios = [
         `a gate of ${whose} package that could not stop what it started stops the run, with no rollback and no further round: ${ended(leftOn)}`);
     }
 
+    // Every unit answer says what the gate could not stop, the empty string when it left nothing. One that leaves
+    // it out is no answer: the gate goes to the call that finishes it, and where that one is silent too, the
+    // package is held, with no fix round and no rollback next to what may still run.
+    const silentUnit = { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '',
+      failed_in: 'pr', failure_summary: 'test_dcp_tp8 fails', evidence: `${RUN}/logs/unit_WP1.log` };
+    for (const [whose, answers] of [['the pull request\'s', existing], ['the run\'s own', {}]]) {
+      const unsaid = await run({ mode: 'issue', task: 'i' }, { ...answers, 'test_engineer:unit': () => silentUnit });
+      check(unsaid.result.status === 'blocked' && unsaid.result.stopped_at === 'Implement' && !comment(unsaid)
+        && unsaid.calls.filter((c) => c.key === 'test_engineer:unit').length === 2 && !unsaid.calls.some((c) => c.key === 'implementer:rollback')
+        && unsaid.calls.filter((c) => c.key === 'implementer:implement').length === 1,
+        `a failed gate of ${whose} package that does not say whether it cleaned up is held, not repaired or rolled back: ${ended(unsaid)}, ${
+          unsaid.calls.filter((c) => c.key === 'test_engineer:unit').length} unit calls`);
+      // The call that finishes the gate can still say it, and the gate is then judged as it stands.
+      const saidLater = await run({ mode: 'issue', task: 'i', max_fix_rounds: 0 }, { ...answers,
+        'test_engineer:unit': (ins, n) => (n === 1 ? silentUnit : { ...silentUnit, left_running: '' }) });
+      check(saidLater.calls.some((c) => c.key === 'implementer:rollback') && saidLater.result.attention.every((a) => !/could not stop/.test(a.issue)),
+        `said by the call that finishes the gate, a failure is a failure as before (${whose}): ${ended(saidLater)}`);
+    }
+    // What an answer could not stop is looked at before the call that would finish the gate starts next to it,
+    // and before that call's answer takes its place.
+    let finishing = 0;
+    const both2 = await run({ mode: 'issue', task: 'i' }, { 'test_engineer:unit': (ins, n) => {
+      if (n > 1) finishing += 1;
+      return { wp: 'WP1', unit_pass: false, feature_off_unchanged: null, fails_without_change: null, evidence: `${RUN}/logs/unit_WP1.log`,
+        incomplete: 'the feature-off suite still runs: driver pid 4242', left_running: 'the smoke server, pid 5151, on GPU 0-7' };
+    } });
+    check(both2.result.status === 'blocked' && both2.result.stopped_at === 'Implement' && finishing === 0
+      && both2.result.attention.some((a) => /could not stop what it started \(the smoke server, pid 5151/.test(a.issue)),
+      `a gate that is unfinished and could not stop a process is held before a finishing call starts: ${ended(both2)}, ${finishing} finishing call(s)`);
+    const laterLeft = await run({ mode: 'issue', task: 'i' }, { 'test_engineer:unit': (ins, n) => (n === 1
+      ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: null, fails_without_change: null, left_running: '', incomplete: 'run 3 still going' }
+      : { wp: 'WP1', unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '',
+        left_running: 'the driver of run 3, pid 4242' }) });
+    check(laterLeft.result.status === 'blocked' && laterLeft.result.stopped_at === 'Implement'
+      && laterLeft.result.attention.some((a) => /could not stop what it started \(the driver of run 3/.test(a.issue)),
+      `the call that finishes a gate is held to the same: ${ended(laterLeft)}`);
+
+    // A Verify round says the same of itself. One that failed and could not stop its server is followed by no
+    // investigation, repair or rollback, for someone else's pull request or for a fix of the run's own.
+    for (const [whose, answers] of [['the pull request', existing], ['the run\'s own fix', {}]]) {
+      const stuckRound = await run({ mode: 'issue', task: 'i' }, { ...answers,
+        'verify_engineer:verify': () => ({ ...failing('issue_repro'), left_running: 'the fix arm\'s server, pid 6262, on GPU 0-7' }) });
+      check(stuckRound.result.status === 'blocked' && stuckRound.result.stopped_at === 'Verify' && !comment(stuckRound)
+        && !stuckRound.keys.includes('investigator:investigate') && !stuckRound.calls.some((c) => c.key === 'implementer:rollback')
+        && stuckRound.result.attention.some((a) => /Verify round 0 could not stop what it started \(the fix arm's server, pid 6262/.test(a.issue)),
+        `a failed round of ${whose} that could not stop what it started is not investigated or rolled back: ${ended(stuckRound)}`);
+    }
+    // A round that passed goes on: the measurement after it checks the GPUs itself, and the result keeps the warning.
+    const passedLeft = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => ({ ...pass(), left_running: 'a client of G2, pid 7373' }) });
+    check(passedLeft.result.status === 'ready_for_review' && passedLeft.result.attention.some((a) => /pid 7373/.test(a.issue)),
+      `a round that passed and left something running goes on, and says so: ${ended(passedLeft)}`);
+    // A failed round that does not say whether it cleaned up: the comment is drafted, and the pull request is not
+    // rolled back next to what may still run.
+    const unsaidRound = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': () => ({ ...pass(), all_pass: false, failures: [{ gate: 'issue_repro', blocking: true, evidence: 'fails 3 of 3' }] }) });
+    check(unsaidRound.result.status === 'blocked' && unsaidRound.result.stopped_at === 'Verify' && !!comment(unsaidRound)
+      && !unsaidRound.calls.some((c) => c.key === 'implementer:rollback') && !unsaidRound.keys.includes('investigator:diagnose')
+      && unsaidRound.result.phases.some((p) => p.phase === 'Verify' && /the Verify round that failed did not say whether what it started has stopped/.test(p.summary)),
+      `a failed round that does not say whether it cleaned up leaves the pull request on the branch for a human: ${ended(unsaidRound)}`);
+
     // What is not the pull request's stops the run as for any fix: nothing is decided against it.
     const shared = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'verify_engineer:verify': (ins, n) => (n === 1 ? failing('G0') : pass()),
@@ -2211,7 +2305,7 @@ const scenarios = [
     // branch: the comment is drafted, and then nothing more is started next to it, neither a second rollback,
     // which the first could undo the run's own fix after, nor a diagnosis.
     const redUnit = (ins) => (ins.work_package.kind === 'apply_pr'
-      ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, incomplete: '',
+      ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, left_running: '', incomplete: '', failed_in: 'pr',
         failure_summary: 'test_dcp_tp8 fails with the PR applied', evidence: `${RUN}/logs/unit_WP1.log` }
       : DEFAULTS['test_engineer:unit'](ins));
     const racing = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { ...existing, 'test_engineer:unit': redUnit,
@@ -2275,6 +2369,94 @@ const scenarios = [
       && !!comment(dirty) && dirty.result.next.user.some((u) => u.startsWith('post the comment on #40872'))
       && dirty.result.attention.some((a) => /left the worktree unclean/.test(a.issue)),
       `a branch that is not clean stops the run, with the comment drafted all the same: ${ended(dirty)}`);
+    // A clean worktree is not yet the task's base: the run's own fix starts only on the commit Setup made the
+    // branch on. A rollback that stopped elsewhere, or a base Setup did not return, ends the run with the comment.
+    for (const [what, answers, said] of [
+      ['stopped at another commit', { 'implementer:rollback': () => ({ wp: 'ALL', reset_to: 'c0ffee12', clean: true }) }, /rolled back to c0ffee12, not to the task's base \(base0f1e2d3c\)/],
+      ['named no commit', { 'implementer:rollback': () => ({ wp: 'ALL', reset_to: '', clean: true }) }, /rolled back to a commit the rollback did not name/],
+      ['could not be checked, since Setup returned no base', { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), base_commit: '' }) },
+        /not to the task's base \(which Setup did not return\)/]]) {
+      const astray = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => failing('issue_repro'), ...answers });
+      check(astray.result.status === 'blocked' && astray.result.stopped_at === 'Verify' && !!comment(astray) && !astray.keys.includes('investigator:diagnose')
+        && astray.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'fail' && said.test(p.summary))
+        && astray.result.attention.some((a) => /check the branch before anything is built on it/.test(a.issue))
+        && astray.result.next.user.some((u) => u.startsWith('post the comment on #40872')),
+        `a rollback that ${what} starts no fix of the run's own, and the comment stays: ${ended(astray)}, ${
+          JSON.stringify(astray.result.phases.filter((p) => p.phase === 'Verify' && p.verdict === 'fail').map((p) => p.summary))}`);
+    }
+    // The same commit under a shorter or a longer name, in whatever letters, is the base.
+    for (const name of ['base', 'BASE0F1', 'base0f1e2d3c4b5a6978']) {
+      const named = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()),
+        'implementer:rollback': () => ({ wp: 'ALL', reset_to: name, clean: true }) });
+      check(named.result.status === 'ready_for_review' && fellBack(named, 'Verify'), `the base named ${name} is the base: ${ended(named)}`);
+    }
+
+    // What the comment phase says besides the path stays with the result: what the comment says, and what the leak
+    // scan found on the pull request's own branch, which a clean comment does not clear.
+    const scanned = await run({ mode: 'issue', task: 'i' }, { ...existing,
+      'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()),
+      'pr_engineer:comment': () => ({ comment_path: `${RUN}/pr_comment.md`, summary: 'the reproduction still fails 3 of 3 with the PR applied',
+        branch_findings: 'its second commit adds a path under /home to a test config' }) });
+    const kept = scanned.result.existing_pr_result;
+    const reported = scanned.calls.filter((c) => c.key === 'director:report').pop();
+    check(kept.branch_findings === 'its second commit adds a path under /home to a test config'
+      && kept.comment_summary === 'the reproduction still fails 3 of 3 with the PR applied'
+      && scanned.result.phases.some((p) => p.verdict === 'warning' && /the leak scan found on the branch of #40872, which the comment for it does not clear/.test(p.summary))
+      && reported && reported.ins.existing_pr_result.branch_findings === kept.branch_findings,
+      `what the leak scan found on the pull request's branch reaches the result, the run record and the report: ${JSON.stringify(kept)}`);
+    check(!r.result.existing_pr_result.branch_findings && r.result.existing_pr_result.comment_summary === 'applied to main, the reproduction still fails 3 of 3',
+      `and a scan that found nothing there leaves nothing: ${JSON.stringify(r.result.existing_pr_result)}`);
+
+    // What the run adds on top of the pull request is the run's own: a test the implementer wrote where the pull
+    // request brought none. Its failure is not the pull request's: the next round repairs it, and no comment is drafted.
+    const ownTest = (failedIn) => (ins, n) => (ins.work_package.kind === 'apply_pr' && n === 1
+      ? { wp: 'WP1', unit_pass: false, feature_off_unchanged: true, fails_without_change: null, left_running: '', incomplete: '',
+        ...(failedIn ? { failed_in: failedIn } : {}), failure_summary: 'the added test passes a bad fixture argument; the PR\'s own tests pass' }
+      : { ...DEFAULTS['test_engineer:unit'](ins, n) });
+    const mended = await run({ mode: 'issue', task: 'i' }, { ...existing, 'test_engineer:unit': ownTest('additions') });
+    const mendRounds = mended.calls.filter((c) => c.key === 'implementer:implement');
+    check(mended.result.status === 'ready_for_review' && !comment(mended) && !mended.keys.includes('investigator:diagnose')
+      && mendRounds.length === 2 && mendRounds.every((c) => c.ins.verify_only === true) && /bad fixture argument/.test(mendRounds[1].ins.feedback)
+      && !mended.calls.some((c) => c.key === 'implementer:rollback'),
+      `a failure in the test the run added is repaired in the next round, and is not the pull request's: ${ended(mended)}, ${mendRounds.length} rounds`);
+    const neverMended = await run({ mode: 'issue', task: 'i', max_fix_rounds: 1 }, { ...existing,
+      'test_engineer:unit': (ins, n) => ownTest('additions')(ins, 1) });
+    check(neverMended.result.status === 'blocked' && neverMended.result.stopped_at === 'Implement' && !comment(neverMended)
+      && !neverMended.result.existing_pr_result && neverMended.calls.filter((c) => c.key === 'implementer:implement').length === 2,
+      `one the run cannot repair stops the run for a human, with no comment against the pull request: ${ended(neverMended)}`);
+    const whose = await run({ mode: 'issue', task: 'i' }, { ...existing, 'test_engineer:unit': ownTest('') });
+    check(whose.result.status === 'blocked' && whose.result.stopped_at === 'Implement' && !comment(whose)
+      && whose.calls.filter((c) => c.key === 'implementer:implement').length === 1
+      && whose.result.phases.some((p) => p.phase === 'Implement' && /does not say whether what failed is the pull request's or what the run added to it/.test(p.summary)),
+      `a gate that does not say whose failure it is decides nothing against the pull request: ${ended(whose)}`);
+
+    // The same holds later. What the review asks for is added on top as the run's own, and Verify runs again: a
+    // failure the investigator places in those additions is repaired there, and one it does not is still the pull
+    // request's, answered with the comment and a fix of the run's own, never with a repair on the author's commits.
+    const asked = { 'reviewer:review': (ins, n) => (n === 1
+      ? { verdict: 'changes_requested', findings: [{ severity: 'major', where: 'test_x.py', issue: 'no test for the failure' }],
+        work_packages: [WP('R1', { kind: 'test' })], review_path: `${RUN}/review.md`, summary: 'one major' }
+      : DEFAULTS['reviewer:review']()) };
+    const later = await run({ mode: 'issue', task: 'i' }, { ...existing, ...asked,
+      'verify_engineer:verify': (ins, n) => (n === 2 ? failing('issue_repro') : pass()) });
+    check(later.result.status === 'ready_for_review' && fellBack(later, 'Verify')
+      && eqList(packages(later), ['WP1:apply_pr', 'R1:test', 'WP1:framework']),
+      `a failure of the pull request found after a review addition is the pull request's: no repair on top, the comment, and the run's own fix (${
+        packages(later)}): ${ended(later)}`);
+    const inAdded = await run({ mode: 'issue', task: 'i' }, { ...existing, ...asked,
+      'verify_engineer:verify': (ins, n) => (n === 2 ? failing('G0') : pass()),
+      'investigator:investigate': () => ({ verdict: 'fix_needed', in_additions: true, work_packages: [WP('FIX1')], summary: 'the added test leaves a server flag set' }) });
+    check(inAdded.result.status === 'ready_for_review' && !comment(inAdded) && !inAdded.keys.includes('investigator:diagnose')
+      && eqList(packages(inAdded), ['WP1:apply_pr', 'R1:test', 'FIX1:framework']),
+      `a failure in what the run added is repaired there, and the pull request stays verified (${packages(inAdded)}): ${ended(inAdded)}`);
+    // The PR phase's own round goes the same way.
+    const prAsked = { 'pr_engineer:pr': (ins, n) => (n === 1
+      ? { ...DEFAULTS['pr_engineer:pr'](), lint_pass: false, work_packages: [WP('P1', { kind: 'test' })] } : DEFAULTS['pr_engineer:pr']()) };
+    const atPr = await run({ mode: 'issue', task: 'i' }, { ...existing, ...prAsked,
+      'verify_engineer:verify': (ins, n) => (n === 2 ? failing('issue_repro') : pass()) });
+    check(atPr.result.status === 'ready_for_review' && fellBack(atPr, 'Verify') && eqList(packages(atPr), ['WP1:apply_pr', 'P1:test', 'WP1:framework']),
+      `and after a package the PR phase asked for (${packages(atPr)}): ${ended(atPr)}`);
+
     // The comment is the pull request's due, but a run without one still fixes the failure.
     const mute = await run({ mode: 'issue', task: 'i' }, { ...existing,
       'verify_engineer:verify': (ins, n) => (n === 1 ? failing('issue_repro') : pass()), 'pr_engineer:comment': () => null });

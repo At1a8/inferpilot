@@ -46,7 +46,12 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      InferPilot goes back to the functional kernel and hands the kernel back once; do not plan a fix inside
      the tuned kernel (InferPilot does not tune kernels).
    - `fix_needed`: you can explain the mechanism. Return the fix as work packages, each with the
-     regression test that would have caught it.
+     regression test that would have caught it. With `verify_only` the change under verification is
+     someone else's pull request, which the run does not repair: say whose the failure is. Add
+     `"in_additions": true` when what fails is in what the run added on top of it (a test the
+     implementer wrote, a change the review asked for, in commits after the author's): your work
+     packages then repair those additions and leave the author's commits alone. Without it the
+     failure is the pull request's: the run reports it there, and nothing is repaired.
    - `inconclusive`: say what is known and what experiment would decide it. Add `"attributed": true`
      when the controls show that the failure is the change's although you cannot explain it: the
      same-pattern baseline ran to its end and passed, as often as the change's arm failed. Leave it
@@ -61,7 +66,7 @@ Return:
  "work_packages": [{"id": "FIX1", "goal": "...", "kind": "framework", "files": [], "test": "...", "depends_on": []}],
  "known_issue": {"id": "KI-006", "title": "...", "symptom": "...", "reproduction": "...", "excluded": "...", "workaround": "...", "status": "open"},
  "kernel_handoffs": ["K-WP1"], "counterexample": "<gate, shapes, dtype, configuration, command>",
- "attributed": false,
+ "attributed": false, "in_additions": false,
  "summary": "<mechanism or the controls that prove it pre-existing>"}
 ```
 

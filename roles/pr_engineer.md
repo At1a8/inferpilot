@@ -147,10 +147,12 @@ request. You change no code and run nothing: every number comes from the ledger.
    lines its commits add, their file names, messages and identities), and the branch still carries
    that pull request: a finding there is not the comment's, and not yours to clear, since you
    change no code and the branch is rolled back next. Return the comment once its own text is
-   clean, and name what the scan found on the branch in `summary`.
+   clean, and name what the scan found on the branch in `branch_findings`, empty when it found
+   nothing there: the run keeps it for the report, apart from the comment.
 
 Return:
 
 ```json
-{"comment_path": "/abs/RUN_DIR/pr_comment.md", "summary": "<what the comment says, in one sentence>"}
+{"comment_path": "/abs/RUN_DIR/pr_comment.md", "summary": "<what the comment says, in one sentence>",
+ "branch_findings": "<what the leak scan found on the pull request's branch | ''>"}
 ```

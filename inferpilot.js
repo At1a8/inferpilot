@@ -702,6 +702,7 @@ const SETUP = S({
   baseline: str,
   branch: str,
   worktree: str,
+  base_commit: str, // the commit the task branch was made on: what a rollback of the whole task must come back to
   gpu_ids: str, // the GPU set every later role uses
   // The scripts every later measurement runs: the task's own, or rendered from templates/harness/
   server_script: str,
@@ -853,12 +854,18 @@ const UNIT = S({
   fails_without_change: { type: ['string', 'null'], enum: ['parent', 'mutant', 'no', 'n/a', null] },
   incomplete: str,
   failure_summary: str,
-  left_running: str, // what the gate started and could not stop (a server, a GPU it still holds); '' when nothing
+  // what the gate started and could not stop (a server, a GPU it still holds), '' when it left nothing. Every
+  // answer says one or the other: one that leaves it out is no answer, not a gate that cleaned up
+  left_running: str,
+  // verify_only, a failed gate: 'pr' when what fails is the pull request's (a test it brought, an existing test
+  // of the repository, its own code), 'additions' when it is only what the run added on top (a test it wrote)
+  failed_in: { type: 'string', enum: ['pr', 'additions', ''] },
   evidence: str,
-}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete']);
+}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete', 'left_running']);
 const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean']);
 // The comment for an existing fix PR that did not pass verification: what a human may post on it.
-const PR_COMMENT = S({ comment_path: str, summary: str }, ['comment_path']);
+// branch_findings: what the leak scan found on the pull request's branch, which the comment does not clear.
+const PR_COMMENT = S({ comment_path: str, summary: str, branch_findings: str }, ['comment_path']);
 const VERIFY = S({
   all_pass: bool,
   gates: obj,
@@ -871,6 +878,9 @@ const VERIFY = S({
   server_code_changed: bool,
   ledger_path: str,
   summary: str,
+  // what the round started and could not stop (a server, a GPU it still holds), '' when it left nothing: nothing
+  // is investigated, repaired or rolled back next to it
+  left_running: str,
 }, ['all_pass', 'failures']);
 // in_use: '' when the pinned GPUs are idle; otherwise each one another job uses, its VRAM%, GPU% and pids
 const GPU_CHECK = S({ in_use: str }, ['in_use']);
@@ -883,6 +893,10 @@ const INVESTIGATE = S({
   // inconclusive: true when the controls show the failure is the change's although its mechanism is not found
   // (the same-pattern baseline ran to its end and passed where the change's arm failed)
   attributed: bool,
+  // someone else's pull request under verification: true when what fails is in what the run added on top of it
+  // (a test it wrote, a change the review asked for), which the run repairs; otherwise the failure is the pull
+  // request's
+  in_additions: bool,
   summary: str,
 }, ['verdict']);
 const PERF = S({
@@ -1323,6 +1337,7 @@ async function setup(requireBaseline) {
   }
   // GPUs and scripts the user gave win; otherwise every later role uses the ones Setup pinned or rendered.
   const own = (v) => (isTemplate(v) ? '' : String(v || ''));
+  C.base_commit = String(s.base_commit || '').trim();
   Object.assign(C, { run_dir: s.run_dir, branch: s.branch || C.branch, worktree: s.worktree || C.worktree,
     gpu_ids: String(C.gpu_ids || s.gpu_ids || '').trim(),
     server_script: own(C.server_script) || own(s.server_script),
@@ -1464,9 +1479,13 @@ async function implementAll(wps, existing) {
       }
       const utLabel = `test_engineer:${wp.id}#${round}`;
       const unitIns = { work_package: wp, commit: im.commit, unit_test_cmd: im.unit_test_cmd || wp.test,
-        time_limit_min: exactMinutes(timeoutFor('test_engineer')) };
+        time_limit_min: exactMinutes(timeoutFor('test_engineer')), ...(existing ? { verify_only: true } : {}) };
       let ut = await call('test_engineer', 'unit', inputs(unitIns), UNIT, utLabel, UNIT_ONCE);
       if (!ut && TIMED_OUT_CALLS.has(utLabel)) return gateTimedOut(wp, utLabel, im.commit);
+      // What an answer says it could not stop holds the package before anything else is started next to it, the
+      // call that would finish the gate included: that call's answer would also take this one's place.
+      const leftBy = (a) => (a ? String(a.left_running || '').trim() : '');
+      if (leftBy(ut)) return gateLeftRunning(wp, im.commit, leftBy(ut));
       // A gate without its result, checks still to give one or no answer at all, is finished by one more
       // call, which spends no fix round and reads the runs the first one left going.
       if (!ut || unfinished(ut)) {
@@ -1475,13 +1494,12 @@ async function implementAll(wps, existing) {
         const fin = await call('test_engineer', 'unit', inputs({ ...unitIns, incomplete: left,
           earlier_evidence: (ut && ut.evidence) || '' }), UNIT, finLabel, UNIT_ONCE);
         if (!fin && TIMED_OUT_CALLS.has(finLabel)) return gateTimedOut(wp, finLabel, im.commit, left);
+        if (leftBy(fin)) return gateLeftRunning(wp, im.commit, leftBy(fin));
         if (!fin || unfinished(fin)) {
           return noResult(wp, im.commit, fin ? leftOpen(fin) : `the call to finish it returned no answer; before it: ${left}`);
         }
         ut = fin;
       }
-      const still = String(ut.left_running || '').trim();
-      if (still) return gateLeftRunning(wp, im.commit, still);
       // A unit test proves something only if it can fail: on the parent commit when the package changes
       // behaviour, on a copy of the change broken in one way when it keeps behaviour (a performance
       // change, a kernel swap, a refactor). Only a docs package has nothing to fail.
@@ -1496,9 +1514,16 @@ async function implementAll(wps, existing) {
           + `${ut.failure_summary ? `: ${ut.failure_summary}` : ''}`;
       } else {
         feedback = ut.failure_summary || 'the unit or feature-off gate failed';
-        // Someone else's fix is verified as it is: a gate it failed is its result, and no round repairs it.
-        if (existing) {
+        // Someone else's fix is verified as it is: a gate it failed is its result, and no round repairs it. What
+        // the run added on top (a test the implementer wrote, where the pull request brought none) is the run's
+        // to repair in the next round, and its failure is never the pull request's. A gate that does not say
+        // which of the two failed decides nothing against the pull request: a human does.
+        if (existing && ut.failed_in === 'pr') {
           theirs = true;
+          break;
+        }
+        if (existing && ut.failed_in !== 'additions') {
+          feedback = `${feedback} (the gate does not say whether what failed is the pull request's or what the run added to it)`;
           break;
         }
       }
@@ -1551,6 +1576,24 @@ async function verifyLoop(extraGates, existing) {
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
+    // What the round started and could not stop still holds the GPUs or the worktree. A round that failed is
+    // followed by an investigation, a repair or a rollback, which work there: none of them starts next to it.
+    // One that passed goes on, and the measurement after it checks the GPUs itself.
+    const leftOn = String(v.left_running || '').trim();
+    if (leftOn) {
+      leftRunning.push(`Verify round ${round} left running: ${leftOn}`);
+      ATTENTION.push({ call: `verify_engineer#${round}`, issue: `Verify round ${round} could not stop what it started (${leftOn}): `
+        + 'stop it before reusing its GPUs' });
+      const passedRound = v.all_pass === true || ((v.failures || []).length > 0 && !(v.failures || []).some((f) => f.blocking !== false));
+      if (!passedRound) {
+        const why = `the round could not stop what it started (${leftOn}): nothing is investigated, repaired or rolled back next to it`;
+        note('Verify', 'fail', why);
+        return { ok: false, reason: why };
+      }
+    }
+    // A failure that is someone else's pull request's (existing): the answer also says whether this round said
+    // that it left nothing running, which a rollback of that pull request waits for.
+    const theirs = (reason) => ({ ok: false, theirs: true, reason, cleanup_unsaid: typeof v.left_running !== 'string' });
     // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
     // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
@@ -1567,7 +1610,7 @@ async function verifyLoop(extraGates, existing) {
     if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
       note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
         + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);
-      return { ok: false, theirs: true, reason: 'the accuracy claim is not met' };
+      return theirs('the accuracy claim is not met');
     }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
@@ -1591,7 +1634,7 @@ async function verifyLoop(extraGates, existing) {
     const integratedKernels = R.handoffs.filter((h) => h.status === 'integrated')
       .map((h) => ({ handoff: h.id, wp: h.integrated_wp, commit: h.commit }));
     const inv = await call('investigator', 'investigate',
-      inputs({ failures: blocking, round, integrated_kernels: integratedKernels }),
+      inputs({ failures: blocking, round, integrated_kernels: integratedKernels, ...(existing ? { verify_only: true } : {}) }),
       INVESTIGATE, `investigator#${round}`);
     if (!inv) {
       note('Investigate', 'fail', 'the investigator returned nothing');
@@ -1605,7 +1648,7 @@ async function verifyLoop(extraGates, existing) {
       if (mine.length) {
         note('Investigate', 'fail', `${mine.join(', ')} still fails with the fix as it does on the base: that is the failure the task is `
           + 'to fix, not a known issue. A human decides: for a score, whether the threshold itself was wrong');
-        return { ok: false, theirs: true, reason: `the fix does not fix: ${mine.join(', ')} still fails with it, as on the base` };
+        return theirs(`the fix does not fix: ${mine.join(', ')} still fails with it, as on the base`);
       }
       if (inv.known_issue) R.known_issues.push(inv.known_issue);
       continue;
@@ -1619,8 +1662,11 @@ async function verifyLoop(extraGates, existing) {
     // That holds for a failure the investigator can explain, and for one whose mechanism is not found while the
     // controls show it is the change's (attributed). An inconclusive comparison, a baseline control that was
     // interrupted or ended another way, decides nothing against the pull request: a human does, as for any fix.
-    if (existing && (inv.verdict === 'fix_needed' || (inv.verdict === 'inconclusive' && inv.attributed === true))) {
-      return { ok: false, theirs: true, reason: `${failing || 'a gate failed'}${inv.summary ? `: ${inv.summary}` : ''}` };
+    // What fails in the run's own additions on top of it (a test it wrote, a change the review asked for) is not
+    // the pull request's: that is repaired below, as for any fix.
+    if (existing && inv.in_additions !== true
+      && (inv.verdict === 'fix_needed' || (inv.verdict === 'inconclusive' && inv.attributed === true))) {
+      return theirs(`${failing || 'a gate failed'}${inv.summary ? `: ${inv.summary}` : ''}`);
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
       const fix = await implementAll(inv.work_packages);
@@ -1720,12 +1766,23 @@ async function performance(claim) {
         : unjudged ? `reported, not judged: no baseline (${unjudged}); ${p.summary || ''}`
           : (p.summary || '');
   note('Performance', ok ? 'pass' : 'fail', why);
-  return { ok, trusted, claimed: !!claim, reproduced, guards: !!p && p.guards_ok === true };
+  // What a trusted measurement showed to be worse, each check by its own name: the number on the task's client
+  // (not where it had no baseline to be judged against), the held-out operating point, the guard workloads.
+  const judged = !!claim && !unjudged;
+  const failed = !trusted ? [] : [
+    judged && p.claim_reproduced !== true && (claim === NO_SLOWER ? "on the task's client it is slower than the baseline beyond the noise band"
+      : `on the task's client the number it must restore did not come back (${claim})`),
+    judged && p.claim_reproduced === true && HELD_OUT && p.held_out_ok !== true && 'the result does not hold at the held-out operating point',
+    p.guards_ok !== true && 'on a guard workload it is slower than the baseline beyond the noise band',
+  ].filter(Boolean);
+  return { ok, trusted, claimed: !!claim, reproduced, failed, summary: String((p && p.summary) || '').trim() };
 }
 
 // An independent review of the diff and its evidence. Requested changes come back as work packages:
 // implemented, verified again (and measured again when the task measures), then reviewed again.
-async function reviewLoop(extraGates, perfClaim, runPerf) {
+// `existing`: someone else's pull request is under verification (deliver). What the review asks for is added on
+// top of it as the run's own, and a failure of the pull request found after that is still the pull request's.
+async function reviewLoop(extraGates, perfClaim, runPerf, existing) {
   for (let round = 0; ; round++) {
     enter('Review');
     const rv = await call('reviewer', 'review', inputs({ round, extra_gates: extraGates || [], claim: claimNow(perfClaim, runPerf) }),
@@ -1753,22 +1810,27 @@ async function reviewLoop(extraGates, perfClaim, runPerf) {
     }
     const fix = await implementAll(wps);
     if (!fix.ok) return { ok: false, at: 'Implement' };
-    const stop = await repaired(extraGates, perfClaim, runPerf);
+    const stop = await repaired(extraGates, perfClaim, runPerf, existing);
     if (stop) return stop;
   }
 }
 
 // After the fixes of a review or PR round: Kernel, Verify and Performance again, each ending with the
 // stop check; what failed or stopped, or null.
-async function repaired(extraGates, perfClaim, runPerf) {
+async function repaired(extraGates, perfClaim, runPerf, existing) {
   const afterFix = stopAt('Implement');
   if (afterFix) return afterFix;
   const ks = await kernelStage(); // hand-offs a requested change raised
   if (ks.held) return { ok: false, at: 'Kernel' };
   const afterKernel = stopAt('Kernel');
   if (afterKernel) return afterKernel;
-  const ver = await verifyLoop(extraGates);
-  if (!ver.ok) return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify' };
+  const ver = await verifyLoop(extraGates, existing);
+  // A failure the round attributes to someone else's pull request goes back as such: the caller answers it with
+  // the comment and a fix of the run's own, not with a stop.
+  if (!ver.ok) {
+    return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify',
+      ...(ver.theirs ? { theirs: true, reason: ver.reason, cleanup_unsaid: ver.cleanup_unsaid } : {}) };
+  }
   const afterVerify = stopAt('Verify');
   if (afterVerify) return afterVerify;
   if (runPerf) {
@@ -1876,9 +1938,15 @@ async function kernelStage() {
 // drafts the comment that says so for that pull request, takes it off the task branch, and goes on to a fix of
 // its own, as if no pull request had been opened. The comment is written whatever comes of that fix.
 // Returns EXISTING_FAILED for the caller to go on, or the finished run where it cannot: a call that timed out
-// may still be at work on the branch, the branch is not clean, or the run was asked to stop after this phase.
+// may still be at work on the branch, the round that failed did not say that it left nothing running
+// (cleanupUnsaid), the branch is not back at the task's base, or the run was asked to stop after this phase.
 const EXISTING_FAILED = { existing_failed: true };
-async function existingFailed(prs, at, why) {
+// Two names of one commit, a short one and a long one: at least the four characters git itself asks of a name.
+const sameCommit = (a, b) => {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length >= 4 && long.toLowerCase().startsWith(short.toLowerCase());
+};
+async function existingFailed(prs, at, why, cleanupUnsaid) {
   note(at, 'existing_fix_failed', `${prs} did not pass verification: ${why}. A comment is drafted for it, and the run fixes the failure itself`);
   C.existing_pr_result = R.existing_pr_result = { prs, failed_at: at, why: String(why || '').slice(0, 1200), comment_path: '' };
   // What is on the branch from here on is the run's own: the PR phase writes no verification comment for it.
@@ -1887,10 +1955,21 @@ async function existingFailed(prs, at, why) {
   const path = cm ? String(cm.comment_path || '').trim() : '';
   if (path) C.existing_pr_result.comment_path = path;
   else note(at, 'warning', `no comment was drafted for ${prs}: the PR engineer returned ${cm ? 'no path' : 'nothing'}; the run record has what failed`);
+  // What the comment phase says besides the path is kept with the result, for the report and whoever posts the
+  // comment: what the comment says, and what the leak scan found on the pull request's own branch, which a clean
+  // comment does not clear.
+  const summary = cm ? String(cm.summary || '').trim() : '';
+  if (summary) C.existing_pr_result.comment_summary = summary.slice(0, 600);
+  const found = cm ? String(cm.branch_findings || '').trim() : '';
+  if (found) {
+    C.existing_pr_result.branch_findings = found;
+    note(at, 'warning', `the leak scan found on the branch of ${prs}, which the comment for it does not clear: ${found}`);
+  }
   // A call that timed out is not cancelled: the rollback of the package that failed, a gate or the comment itself
   // may still be at work in this worktree or on these GPUs. A second rollback next to it could undo the fix that
   // follows, or be undone by it: nothing more is started, and a human stops what is left.
-  const live = [...TIMED_OUT_CALLS].map((c) => `${c} timed out and may still be running`).concat(leftRunning);
+  const live = [...TIMED_OUT_CALLS].map((c) => `${c} timed out and may still be running`).concat(leftRunning)
+    .concat(cleanupUnsaid ? [`the ${at} round that failed did not say whether what it started has stopped (left_running)`] : []);
   if (live.length) {
     note(at, 'fail', `${prs} is not taken off the task branch, and no fix of the run's own is started next to what may still be `
       + `running: ${live.join('; ')}`);
@@ -1900,6 +1979,17 @@ async function existingFailed(prs, at, why) {
     reason: `${prs} did not pass verification: ${why}` }), ROLLBACK, 'implementer:rollback:existing');
   if (!rb || rb.clean !== true) {
     note(at, 'fail', `${prs} could not be taken off the task branch${rolledBack(rb, 'ALL')}: the run's own fix is not started on top of it`);
+    return finish('blocked', at);
+  }
+  // A clean worktree is not yet the task's base: the run's own fix starts only on the commit Setup made the
+  // branch on. A rollback that stopped elsewhere, or a base Setup did not return, leaves that unconfirmed.
+  const base = String(C.base_commit || '').trim();
+  const target = String(rb.reset_to || '').trim();
+  if (!sameCommit(target, base)) {
+    R.attention.push({ wp: 'ALL', worktree: C.worktree, issue: `the rollback of ${prs} left the task branch at ${target || 'a commit it did not name'}, `
+      + `and the task's base is ${base || 'not known (Setup returned no base_commit)'}: check the branch before anything is built on it` });
+    note(at, 'fail', `${prs} was rolled back to ${target || 'a commit the rollback did not name'}, not to the task's base (${
+      base || 'which Setup did not return'}): the run's own fix is not started there`);
     return finish('blocked', at);
   }
   // Nothing of the pull request is left: its package is not a verified one, and what it handed off is gone with it.
@@ -1917,6 +2007,9 @@ async function existingFailed(prs, at, why) {
 // `existing`: the pull requests the work packages apply, when what is delivered is the verification of someone
 // else's fix (see existingFailed).
 async function deliver(wps, extraGates, perfClaim, runPerf, existing) {
+  // A round that ends on a failure of someone else's pull request (theirs) is answered with the comment and a
+  // fix of the run's own; any other ends the run where it stopped.
+  const failed = (r, at) => (existing && r.theirs ? existingFailed(existing, r.at || at, r.reason, r.cleanup_unsaid) : ended(r, at));
   if (wps.length) {
     const impl = await implementAll(wps, existing);
     // Only what is the pull request's sends the run on to a fix of its own: it no longer applies, or a gate it
@@ -1931,7 +2024,7 @@ async function deliver(wps, extraGates, perfClaim, runPerf, existing) {
   if (stopHere('Kernel')) return finish('stopped', 'Kernel');
 
   const ver = await verifyLoop(extraGates, existing);
-  if (!ver.ok) return existing && ver.theirs ? existingFailed(existing, 'Verify', ver.reason) : ended(ver, 'Verify');
+  if (!ver.ok) return failed(ver, 'Verify');
   if (stopHere('Verify')) return finish('stopped', 'Verify');
 
   if (runPerf) {
@@ -1945,20 +2038,19 @@ async function deliver(wps, extraGates, perfClaim, runPerf, existing) {
         return finish('dropped', 'Performance');
       }
       // Measured, and slower than the base, short of the number it must restore, or slower on a guard workload:
-      // for someone else's fix that is a result to report, not a cost for a human to accept. A measurement that
-      // was not trusted decides nothing.
-      if (existing && perf.trusted) {
-        return existingFailed(existing, 'Performance', perf.claimed && !perf.reproduced
-          ? 'measured on the task\'s client, it is slower than the base beyond the noise band, or the number it must restore did not come back'
-          : 'measured on the guard workloads, it is slower than the base there beyond the noise band');
+      // for someone else's fix that is a result to report, not a cost for a human to accept. The reason names
+      // every check that failed and no other: the comment for the pull request is written from it. A
+      // measurement that was not trusted decides nothing, and one that had no baseline judged no number.
+      if (existing && perf.trusted && perf.failed.length) {
+        return existingFailed(existing, 'Performance', `${perf.failed.join('; ')}${perf.summary ? ` (${perf.summary})` : ''}`);
       }
       return finish('blocked', 'Performance');
     }
     if (stopHere('Performance')) return perf.skipped ? ended(stoppedUnmeasured()) : finish('stopped', 'Performance');
   }
 
-  const rev = await reviewLoop(extraGates, perfClaim, runPerf);
-  if (!rev.ok) return ended(rev, rev.at);
+  const rev = await reviewLoop(extraGates, perfClaim, runPerf, existing);
+  if (!rev.ok) return failed(rev, rev.at);
   if (stopHere('Review')) return finish('stopped', 'Review');
 
   // What the PR engineer finds missing goes back through Implement, Verify and Review, once.
@@ -1968,10 +2060,10 @@ async function deliver(wps, extraGates, perfClaim, runPerf, existing) {
     if (!pr.wps.length || round >= 1) return finish('blocked', 'PR');
     const fix = await implementAll(pr.wps);
     if (!fix.ok) return finish('blocked', 'Implement');
-    const stop = await repaired(extraGates, perfClaim, runPerf);
-    if (stop) return ended(stop, stop.at);
-    const reviewed = await reviewLoop(extraGates, perfClaim, runPerf);
-    if (!reviewed.ok) return ended(reviewed, reviewed.at);
+    const stop = await repaired(extraGates, perfClaim, runPerf, existing);
+    if (stop) return failed(stop, stop.at);
+    const reviewed = await reviewLoop(extraGates, perfClaim, runPerf, existing);
+    if (!reviewed.ok) return failed(reviewed, reviewed.at);
     if (stopHere('Review')) return finish('stopped', 'Review');
   }
 }

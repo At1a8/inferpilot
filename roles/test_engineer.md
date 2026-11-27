@@ -39,8 +39,11 @@ clock can start before your session does; on the call that finishes a gate, `inc
    holds, unless a check left running for the call that finishes the gate uses it. One you cannot
    stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it, and
    `left_running` says what is left and where (`"the smoke server, pid 4242, on GPU 0-7"`).
-   InferPilot then starts no fix round and no rollback next to it: the package stops with its
-   commit, and a human stops what is left. `left_running` is empty when everything stopped.
+   InferPilot then starts no fix round and no rollback next to it, nor the call that would finish
+   the gate: the package stops with its commit, and a human stops what is left. `left_running` is
+   empty when everything stopped, and every answer gives it: one that leaves it out is taken for
+   no answer, not for a gate that cleaned up. It is not where a check goes that still runs for the
+   call that finishes the gate: that is `incomplete`'s.
 
    **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
    with `incomplete`: each check without a result, why, and for one still running its PID and its
@@ -122,8 +125,17 @@ Return:
 
 ```json
 {"wp": "WP1", "unit_pass": true, "feature_off_unchanged": true, "fails_without_change": "parent | mutant | no | n/a",
- "incomplete": "", "failure_summary": "", "left_running": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
+ "incomplete": "", "failure_summary": "", "left_running": "",
+ "failed_in": "<verify_only, a failed gate: pr | additions>",
+ "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
+
+With `verify_only` the package is someone else's pull request, which the run verifies as it is
+(`issue_triage.md` §4), and a gate that fails says in `failed_in` whose the failure is. `pr`: a test
+the pull request brought fails, or an existing test of the repository, or its own code. `additions`:
+only what the run added on top fails, a test the implementer wrote in a commit of its own after the
+author's. Where both fail, it is `pr`. InferPilot repairs only what the run added, answers a failure
+of the pull request with a comment on it, and stops for a human where the gate does not say which.
 
 Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
 gate names nothing there, and a check it did not run stays `null`. A gate with checks still without a

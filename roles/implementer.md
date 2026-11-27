@@ -116,4 +116,8 @@ Return:
 ```
 
 `clean` is true only when `git status` in the worktree is clean after the reset; `false` puts the
-worktree on the report's list of state a human must clean up.
+worktree on the report's list of state a human must clean up. `reset_to` is the commit the branch is
+at once you are done, as `git -C <worktree> rev-parse HEAD` gives it then, not the one you meant to
+reach. For `ALL` that is the task's base (`base_commit`): where InferPilot goes on to a fix of its own
+after someone else's pull request did not pass, it compares the two, and starts nothing on a branch
+that is elsewhere.

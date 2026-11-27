@@ -10,6 +10,7 @@ export const WP = (id, extra) => ({ id, goal: `goal of ${id}`, kind: 'framework'
 export const DEFAULTS = {
   'intake:define': (ins) => ({ status: 'ready', task_def: ins.given || {}, provenance: {}, assumptions: [], questions: [], summary: 'as given' }),
   'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
+    base_commit: 'base0f1e2d3c',
     server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': (ins) => ({ report_path: `${RUN}/run_report.md`, summary: 'done',
@@ -56,6 +57,10 @@ export const DEFAULTS = {
     ? { status: 'failed', notes: ins.backend_result.error }
     : { status: 'improved', speedup: 1.37, evidence: 'eval dir', integrate_wp: WP(`K-${ins.handoff.id}`, { kind: 'kernel' }) }),
 };
+// What every unit answer says besides its result (roles/test_engineer.md): what the gate could not stop, '' when
+// it left nothing. The default is a gate that cleaned up; a scenario that writes its own answer says so itself.
+const unitResult = DEFAULTS['test_engineer:unit'];
+DEFAULTS['test_engineer:unit'] = (ins, n) => ({ ...unitResult(ins, n), left_running: '' });
 
 // The implementer hands WP1's kernel over (reason FAIL makes the fake back end throw).
 export const withKernelHandoff = (reason) => ({
