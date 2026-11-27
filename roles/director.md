@@ -418,7 +418,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   for a CI job whose tests pass on main, Bisect for an issue, or the check on the latest main before
   the pull request. Where none names it, say that the change that fixed it is
   not named, and give the range it lies in: from the commit the run began on to the main the check
-  ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
+  ran on (`recheck.main`), or from the reporter's commit to main. That range is there only where
+  the first is an ancestor of the second. Where the check says that the two diverge
+  (`recheck.evidence`), or a job's commit and main do (the triage record), give no range and say
+  that: the failure was a branch's, and main passing shows no fix of it. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
   at PR, the run had verified a fix of its own before main moved: say that its branch was not
   proposed, and where it is. For a ci task whose tests passed on main at Classify (`not_reproduced`,

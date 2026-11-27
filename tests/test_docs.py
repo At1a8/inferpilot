@@ -2361,26 +2361,34 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
                 # a fix is named on proof, as for an issue: a change that only looks like the fix is a candidate
                 ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit only where you showed that it is the fix, on the lane's "
-                                         "image, each run as the job ran it. Four things show it"),
-                # the job's own commit has to fail on this image first; a pass there is a failure not reproduced, and nothing more
-                ("roles/ci_guardian.md", "First, the job's own commit fails here as the job failed: the same error, or the same measurement short "
-                                         "of its threshold"),
+                                         "image, each run as the job ran it. Four things show it, in this order"),
+                # ancestry comes first, before anything of the job's commit runs: a pull request's code runs only on the user's word
+                ("roles/ci_guardian.md", "First, the job's commit is an ancestor of the main you ran (`git merge-base --is-ancestor <the job's "
+                                         "commit> <main>`), and you check that before you run anything of it"),
+                ("roles/ci_guardian.md", "A job of a pull request's branch failed on code that is its author's, which runs on this machine only "
+                                         "on the user's word (`ci_triage.md` §2): run none of it"),
+                ("roles/ci_guardian.md", "The two histories have no range for a fix to lie in, so say that they diverge and name no fix; what "
+                                         "main showed stands"),
+                # the job's own commit has to fail on this image; a pass there is a failure not reproduced, and nothing more
+                ("roles/ci_guardian.md", "Second, that commit fails here as the job failed: the same error, or the same measurement short of its "
+                                         "threshold"),
                 ("roles/ci_guardian.md", "Where it passes here, the failure is not reproduced on that commit, and nothing more: the job may have "
                                          "run another image than this one (compare the two, as the job's log and this container name them), or "
                                          "the failure may be intermittent"),
                 ("roles/ci_guardian.md", "No change of main is shown to be the fix then"),
-                # a range for the fix needs the job's commit to be an ancestor of main: a job of a pull request's branch has none
-                ("roles/ci_guardian.md", "Second, that commit is an ancestor of the main you ran (`git merge-base --is-ancestor <the job's commit> "
-                                         "<main>`)"),
-                ("roles/ci_guardian.md", "the two histories have no range for a fix to lie in, so say that they diverge and claim none"),
                 # the parent has to fail as the job failed: another failure shows nothing of the change
                 ("roles/ci_guardian.md", "Third, the change lies in that range, the test fails on the change's parent as the job failed, and passes "
                                          "on the change"),
                 ("roles/ci_guardian.md", "A parent that fails another way (an import, a test that is not collected) shows nothing of that change"),
                 # the same error can have another cause: the change has to address this failure, or pass when replayed on the job's commit
-                ("roles/ci_guardian.md", "Fourth, the change addresses this failure, the same error on the same path, as step 4 asks of an open "
-                                         "pull request: a later regression with the same error that another change repaired passes the parent's "
-                                         "test too"),
+                ("roles/ci_guardian.md", "Fourth, the change is the fix of this failure, and the main you ran still has it"),
+                ("roles/ci_guardian.md", "It addresses this failure, the same error on the same path, as step 4 asks of an open pull request: a "
+                                         "later regression with the same error that another change repaired passes the parent's test too"),
+                # a change reverted since fixed an earlier main: it is not why this one passes
+                ("roles/ci_guardian.md", "And nothing since has reverted it or replaced what it changed: one that was reverted fixed an earlier "
+                                         "main, and is not why this one passes"),
+                ("roles/ci_guardian.md", "Where the tree does not show that, revert the change on main in a throwaway worktree and run the test: "
+                                         "it has to fail as the job failed"),
                 ("roles/ci_guardian.md", "Where its diff does not show that, apply the change to the job's commit and run the test there, or leave "
                                          "it a candidate"),
                 ("roles/ci_guardian.md", "The first two show that a fix lies between the job's commit and main, not which change it is"),
@@ -2396,9 +2404,17 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "And the change addresses this failure, the same error on the same path"),
                 ("roles/verify_engineer.md", "Where its diff does not show that, apply the change to `<base>` and run the gate there, or leave it a "
                                              "candidate"),
+                ("roles/verify_engineer.md", "And `main` still has it: nothing since has reverted it or replaced what it changed, or it fixed an "
+                                             "earlier main and is not why this one passes"),
+                ("roles/verify_engineer.md", "Where the tree does not show that, revert the change on the recheck worktree and run the gate: it has "
+                                             "to fail as it failed on the base"),
                 ("roles/verify_engineer.md", "The log of main since `<base>` shows candidates, not the fix"),
                 ("roles/verify_engineer.md", "Where `<base>` is no ancestor of `main` (a task that began on a branch), there is no such range: say "
-                                             "that the two diverge"),
+                                             "in `evidence` that the two diverge, in those words, and the report gives none"),
+                # the report gives a range only where there is one: histories that diverge have none
+                ("roles/director.md", "That range is there only where the first is an ancestor of the second"),
+                ("roles/director.md", "Where the check says that the two diverge (`recheck.evidence`), or a job's commit and main do (the triage "
+                                      "record), give no range and say that: the failure was a branch's, and main passing shows no fix of it"),
                 ("roles/verify_engineer.md", '"fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main '
                                              'passes because of it>"'),
                 # a candidate is kept where it is not cut short: the run record keeps only the start of the evidence
