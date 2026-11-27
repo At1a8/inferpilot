@@ -544,23 +544,25 @@ class ExistingFixFailsTest(unittest.TestCase):
                  "a round that does not say whether it cleaned up is taken for one that did"),
                 ("    const refused = () => stopped(v);", "a round that is refused is not asked what it left"),
                 # the check says what it could not stop, in every answer: a process that holds no GPU shows nowhere else
-                ("const ROUND_CLEANUP = S({ in_use: str, left_running: str }, ['in_use', 'left_running']);",
-                 "idle GPUs are taken for a round that stopped everything"),
+                ("const ROUND_CLEANUP = S({ in_use: str, in_use_gpus: arr({ type: ['string', 'integer'] }), left_running: str },\n"
+                 "  ['in_use', 'in_use_gpus', 'left_running']);", "idle GPUs are taken for a round that stopped everything, or the GPUs in use "
+                                                                 "are read from words"),
                 ("      else if (left) unconfirmed = `${unsaid}the check after it could not stop ${left}`;",
                  "what the check could not stop is investigated next to"),
                 # the GPUs are compared by their numbers: another job on one of them excuses that one alone
                 ("const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\\bGPU\\s+(\\d+)\\s*:/g)].map((m) => m[1]))];",
                  "the GPUs an answer names are not read by their numbers"),
-                ("      const fresh = gpusNamed(held).filter((g) => !gpusNamed(inUse).includes(g));",
+                ("      const fresh = ids.filter((g) => !gpusNamed(inUse).includes(g));",
                  "a job on one GPU before the round excuses a server the round left on another"),
-                ("      else if (held && !gpusNamed(held).length) unconfirmed = `${unsaid}the GPUs in use after it cannot be read from the check (${held})`;",
-                 "an occupancy the run cannot read is taken for none"),
+                ("      const unread = ids.some((g) => !/^\\d+$/.test(g)) || (!!held && !ids.length) || gpusNamed(held).some((g) => !ids.includes(g));",
+                 "a GPU in use that the list does not give by its number is taken for none"),
                 # a round that asks for more time is run again at once: one that does not say what it left is checked first
                 ("    const needs = limit && r ? Math.ceil(Number(await needsOf(r)) || 0) : 0;", "a caller cannot check anything before a round is run again"),
                 ("        return Number(r.needs_min) > 0 && (await stopped(r)) ? r.needs_min : 0;",
                  "a round that does not say what it left is run again next to it"),
-                ("    if (unconfirmed && !passedRound && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false)) {",
-                 "a round held for what it left is investigated as a failure"),
+                ("    const wantsTime = v.all_pass !== true && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false);\n"
+                 "    if (wantsTime && (leftOn || unconfirmed)) {", "a round held for what it left is investigated as a failure, or passes on "
+                                                                    "failures that do not block with gates it never ran"),
                 ("    if (!passedRound) await refused();", "a failed round is not asked whether it cleaned up"),
                 # a pass that is refused is asked the same: no script for a model with no text answers, no comparison, no score
                 ("    if (C.server_code_changed && outputsLacking()) {\n      await refused();", "a refused pass is taken for a round that cleaned up"),
@@ -690,12 +692,22 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "A GPU idle before the round and in use after that stop counts as one the round still holds"),
                 ("roles/verify_engineer.md", "With `round: after <n>` the call follows round `<n>`, which did not say whether it left anything "
                                              "running, and was not accepted or asked to be run again with more time"),
-                ("roles/verify_engineer.md", "Such a call returns one field more, in every answer: `left_running`, what you could not stop or could "
-                                             "not find the log of, the empty string when all of it stopped"),
+                ("roles/verify_engineer.md", "Such a call returns two fields more, in every answer. `left_running`: what you could not stop or "
+                                             "could not find the log of, the empty string when all of it stopped"),
                 ("roles/verify_engineer.md", "A driver or a suite that holds no GPU shows nowhere else"),
-                ("roles/verify_engineer.md", "InferPilot compares the numbers, and takes a GPU that was idle before the round for one the round "
-                                             "still holds"),
-                ("roles/verify_engineer.md", 'Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | \'\'", "left_running": ""}`'),
+                ("roles/verify_engineer.md", "And `in_use_gpus`: the HIP number of every pinned GPU still in use, as a list (`[\"0\", \"1\"]`), "
+                                             "empty when none is"),
+                ("roles/verify_engineer.md", "InferPilot compares the numbers of the list, and reads no words for them"),
+                ("roles/verify_engineer.md", 'Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | \'\'", "in_use_gpus": ["1"], '
+                                             '"left_running": ""}`'),
+                ("roles/verify_engineer.md", "A round that needs more time and is not run again, for that or for what its own `left_running` "
+                                             "names, is unfinished: InferPilot does not accept it, also where every failure it lists is one that "
+                                             "does not block"),
+                # what a PR phase exported from the branch that was rolled back does not stay next to the next export
+                ("roles/implementer.md", "once the rollback of `ALL` is clean, move `RUN_DIR/patches`, `RUN_DIR/patches_additions` and "
+                                         "`RUN_DIR/pr_body.md` to `RUN_DIR/failed/` where they exist"),
+                ("roles/implementer.md", "`git am patches/*.patch` (README step 5) would replay the commits that were rolled back with the fix "
+                                         "that replaces them"),
                 ("roles/verify_engineer.md", "A round that asks for more time without the field is checked the same way before it is run again, "
                                              "and is not run again where the check could not stop something"),
                 ("roles/investigator.md", "Say `in_additions` with whatever verdict you return for a failure that is the additions'"),

@@ -22,14 +22,18 @@ With `round: after <n>` the call follows round `<n>`, which did not say whether 
 running, and was not accepted or asked to be run again with more time: what that round started is
 this run's to stop too. Stop each of its launches by its log (`python3
 <inferpilot_dir>/scripts/stop_launch.py <log>...`, until it exits 0), then check the GPUs as above.
-Such a call returns one field more, in every answer: `left_running`, what you could not stop or
+Such a call returns two fields more, in every answer. `left_running`: what you could not stop or
 could not find the log of, the empty string when all of it stopped. A driver or a suite that holds
-no GPU shows nowhere else. Name each GPU in `in_use` as `GPU <HIP number>:`, as before the round:
-InferPilot compares the numbers, and takes a GPU that was idle before the round for one the round
-still holds. Next to that, to what `left_running` names, or to GPUs it cannot read from `in_use`,
-it starts no investigation, repair or rollback, and does not run the round again.
+no GPU shows nowhere else. And `in_use_gpus`: the HIP number of every pinned GPU still in use, as a
+list (`["0", "1"]`), empty when none is. `in_use` says the same in words, each GPU as `GPU <HIP
+number>:` as before the round, for the user to read: InferPilot compares the numbers of the list,
+and reads no words for them. It takes a GPU that was idle before the round for one the round
+still holds. Next to that, to what `left_running` names, or where the list does not give every
+GPU in use by its number, it starts no investigation, repair or rollback, and does not run the
+round again.
 
-Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "left_running": ""}`
+Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "in_use_gpus": ["1"],
+"left_running": ""}`
 
 ## PHASE=verify
 
@@ -63,7 +67,9 @@ clock can start before your session does.
    GPUs (`round: after <n>`): stop what the run left there and check them, as before a round. A GPU
    idle before the round and in use after that stop counts as one the round still holds. A round
    that asks for more time without the field is checked the same way before it is run again, and
-   is not run again where the check could not stop something.
+   is not run again where the check could not stop something. A round that needs more time and is
+   not run again, for that or for what its own `left_running` names, is unfinished: InferPilot
+   does not accept it, also where every failure it lists is one that does not block.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.

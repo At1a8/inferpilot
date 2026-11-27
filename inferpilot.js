@@ -1670,9 +1670,13 @@ async function implementAll(wps, existing, over) {
 
 // What the verify engineer says after a round that did not say what it left running (PHASE=gpus, round
 // "after <n>"): the pinned GPUs still in use, and what of the round's launches it could not stop. A process
-// that holds no GPU (a driver, a suite) shows in the second alone, so the answer always has it.
-const ROUND_CLEANUP = S({ in_use: str, left_running: str }, ['in_use', 'left_running']);
-// The pinned GPUs an answer names as in use ("GPU 1: VRAM 12%, GPU 40%, pids 777"), by their numbers.
+// that holds no GPU (a driver, a suite) shows in the second alone, so the answer always has it. The GPUs are
+// named twice: in words (in_use, for the user), and by their HIP numbers as a list (in_use_gpus), which is what
+// the run compares. Words are not parsed for that: an entry written another way would go unseen.
+const ROUND_CLEANUP = S({ in_use: str, in_use_gpus: arr({ type: ['string', 'integer'] }), left_running: str },
+  ['in_use', 'in_use_gpus', 'left_running']);
+// The pinned GPUs the check before a round names as in use ("GPU 1: VRAM 12%, GPU 40%, pids 777"), by their
+// numbers. One it names another way is not read, and excuses nothing after the round.
 const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\bGPU\s+(\d+)\s*:/g)].map((m) => m[1]))];
 
 // Verify against the same-pattern baseline; a failure goes to the investigator,
@@ -1697,9 +1701,9 @@ async function verifyLoop(extraGates, existing) {
     // what the run left there and checks the GPUs, as before every round (PHASE=gpus, round "after <n>"), and
     // says what it could not stop. Nothing is confirmed where that gives no answer, where it could not stop
     // something, or where a GPU that was idle before the round is in use after it (one the round still holds,
-    // as the round itself is asked to judge it; compared by the GPUs' numbers, and held where they cannot be
-    // read). The reason is then in `unconfirmed`: the round is not run again, nothing is investigated, repaired
-    // or rolled back, and no lead is confirmed there (leftRunning). Asked once for an answer.
+    // as the round itself is asked to judge it; compared by the GPUs' numbers, and held where the answer does
+    // not give them all). The reason is then in `unconfirmed`: the round is not run again, nothing is
+    // investigated, repaired or rolled back, and no lead is confirmed there (leftRunning). Asked once for an answer.
     let unconfirmed = '';
     const asked = new Set();
     const stopped = async (answer) => {
@@ -1709,13 +1713,17 @@ async function verifyLoop(extraGates, existing) {
       const after = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), ROUND_CLEANUP, label);
       const left = after ? String(after.left_running || '').trim() : '';
       const held = after ? String(after.in_use || '').trim() : '';
-      const fresh = gpusNamed(held).filter((g) => !gpusNamed(inUse).includes(g));
+      // The numbers of the GPUs in use: every entry a HIP number, none where the words name one, and no GPU the
+      // words name by its number left out.
+      const ids = after ? [...new Set((after.in_use_gpus || []).map((g) => String(g).trim()))] : [];
+      const unread = ids.some((g) => !/^\d+$/.test(g)) || (!!held && !ids.length) || gpusNamed(held).some((g) => !ids.includes(g));
+      const fresh = ids.filter((g) => !gpusNamed(inUse).includes(g));
       const unsaid = `Verify round ${round} did not say whether what it started has stopped (left_running), and `;
       if (!after) unconfirmed = `${unsaid}the check after it gave no answer`;
       else if (left) unconfirmed = `${unsaid}the check after it could not stop ${left}`;
-      else if (held && !gpusNamed(held).length) unconfirmed = `${unsaid}the GPUs in use after it cannot be read from the check (${held})`;
+      else if (unread) unconfirmed = `${unsaid}the check after it does not name every GPU in use by its number (${held || ids.join(', ')}; in_use_gpus: ${JSON.stringify(after.in_use_gpus)})`;
       else if (fresh.length) unconfirmed = `${unsaid}GPU ${fresh.join(', ')}, not in use before it, is in use after it (${held})`;
-      else if (held) note('Verify', 'warning', `another job uses a pinned GPU after round ${round}, as before it: ${held}`);
+      else if (ids.length) note('Verify', 'warning', `another job uses a pinned GPU after round ${round}, as before it: ${held}`);
       if (unconfirmed) {
         leftRunning.push(unconfirmed);
         ATTENTION.push({ call: `verify_engineer#${round}`, issue: `${unconfirmed}: stop what it left before reusing its GPUs` });
@@ -1767,10 +1775,15 @@ async function verifyLoop(extraGates, existing) {
     // or a pass that the checks below do not accept.
     const refused = () => stopped(v);
     if (!passedRound) await refused();
-    // One that asked for more time and was not run again, because what it left is not known to have stopped:
-    // it has no failure to investigate, and a human looks at the GPUs first.
-    if (unconfirmed && !passedRound && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false)) {
-      const why = `the round needs ${v.needs_min} min more and is not run again: ${unconfirmed}`;
+    // One that asked for more time and was not run again, because it could not stop what it started or because
+    // what it left is not known to have stopped, is unfinished: its gates did not all run. That holds whatever
+    // its failures say. With only failures that do not block it would count as passed, and go on to Performance
+    // and Review with gates it never ran and a process it left behind. It has no failure to investigate either:
+    // a human looks at the GPUs first.
+    const wantsTime = v.all_pass !== true && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false);
+    if (wantsTime && (leftOn || unconfirmed)) {
+      const why = `the round needs ${v.needs_min} min more and is not run again: ${
+        leftOn ? `it could not stop what it started (${leftOn})` : unconfirmed}`;
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }

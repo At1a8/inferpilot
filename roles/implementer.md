@@ -142,4 +142,8 @@ worktree on the report's list of state a human must clean up. `reset_to` is the 
 at once you are done, as `git -C <worktree> rev-parse HEAD` gives it then, not the one you meant to
 reach. For `ALL` that is the task's base (`base_commit`): where InferPilot goes on to a fix of its own
 after someone else's pull request did not pass, it compares the two, and starts nothing on a branch
-that is elsewhere.
+that is elsewhere. What a PR phase exported from the branch that is gone goes with it: once the
+rollback of `ALL` is clean, move `RUN_DIR/patches`, `RUN_DIR/patches_additions` and
+`RUN_DIR/pr_body.md` to `RUN_DIR/failed/` where they exist. The next export writes its patches
+under other names next to them, and `git am patches/*.patch` (README step 5) would replay the
+commits that were rolled back with the fix that replaces them.

@@ -2516,24 +2516,32 @@ const scenarios = [
     // of, as before every round.
     const heldAfter = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => silentFail(),
       'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after')
-        ? { in_use: 'GPU 3: VRAM 71%, GPU 0%, pids 9191', left_running: '' } : { in_use: '' }) });
+        ? { in_use: 'GPU 3: VRAM 71%, GPU 0%, pids 9191', in_use_gpus: ['3'], left_running: '' } : { in_use: '' }) });
     check(heldAfter.result.status === 'blocked' && heldAfter.result.stopped_at === 'Verify' && !comment(heldAfter)
       && !heldAfter.keys.includes('investigator:investigate') && !heldAfter.calls.some((c) => c.key === 'implementer:rollback')
       && heldAfter.result.attention.some((a) => /GPU 3, not in use before it, is in use after it \(GPU 3: VRAM 71%/.test(a.issue)),
       `a GPU idle before such a round and in use after it is one the round still holds: ${ended(heldAfter)}`);
-    // The GPUs are compared by their numbers. Another job on one of them before the round excuses that one, and no
-    // other: a server the round left on a GPU that was idle is still found. What the check cannot name excuses
+    // The GPUs are compared by their numbers, which the check gives as a list: words are not parsed for them.
+    // Another job on one of them before the round excuses that one, and no other: a server the round left on a GPU
+    // that was idle is still found, however the words put it. A list that does not name every GPU in use excuses
     // nothing, and neither does an idle GPU: a driver or a suite that holds none is what the check could not stop,
     // which it says in every answer.
     const busyBefore = 'GPU 0: VRAM 12%, GPU 40%, pids 777';
+    const unnamed = /the check after it does not name every GPU in use by its number/;
     for (const [what, after, said] of [
-      ['a GPU that was idle before it, next to one another job used', { in_use: `${busyBefore}; GPU 1: VRAM 71%, GPU 0%, pids 9191`, left_running: '' },
+      ['a GPU that was idle before it, next to one another job used',
+        { in_use: `${busyBefore}; GPU 1: VRAM 71%, GPU 0%, pids 9191`, in_use_gpus: ['0', '1'], left_running: '' },
         /GPU 1, not in use before it, is in use after it \(GPU 0: VRAM 12%, GPU 40%, pids 777; GPU 1: VRAM 71%/],
-      ['GPUs the check does not name', { in_use: 'two of the cards are busy', left_running: '' },
-        /the GPUs in use after it cannot be read from the check \(two of the cards are busy\)/],
-      ['a process that holds no GPU', { in_use: busyBefore, left_running: 'the G2 client driver, pid 5151: its log is missing' },
+      ['such a GPU that the words name another way', { in_use: `${busyBefore}; GPU 1 busy, pid 9191`, in_use_gpus: [0, 1], left_running: '' },
+        /GPU 1, not in use before it, is in use after it \(GPU 0: VRAM 12%, GPU 40%, pids 777; GPU 1 busy, pid 9191\)/],
+      ['GPUs in use that the list does not give', { in_use: 'two of the cards are busy', in_use_gpus: [], left_running: '' }, unnamed],
+      ['a GPU the words name and the list leaves out', { in_use: `${busyBefore}; GPU 1: VRAM 71%, GPU 0%, pids 9191`, in_use_gpus: ['0'], left_running: '' },
+        unnamed],
+      ['a GPU the list names by no number', { in_use: busyBefore, in_use_gpus: ['0', 'the second card'], left_running: '' }, unnamed],
+      ['a process that holds no GPU', { in_use: busyBefore, in_use_gpus: ['0'], left_running: 'the G2 client driver, pid 5151: its log is missing' },
         /the check after it could not stop the G2 client driver, pid 5151: its log is missing/],
-      ['no word on what the check could not stop', { in_use: '' }, /the check after it gave no answer/]]) {
+      ['no list of the GPUs in use', { in_use: busyBefore, left_running: '' }, /the check after it gave no answer/],
+      ['no word on what the check could not stop', { in_use: '', in_use_gpus: [] }, /the check after it gave no answer/]]) {
       const kept = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => silentFail(),
         'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after') ? after : { in_use: busyBefore }) });
       check(kept.result.status === 'blocked' && kept.result.stopped_at === 'Verify' && !comment(kept)
@@ -2542,7 +2550,7 @@ const scenarios = [
         `after such a round, ${what} holds the run: ${ended(kept)}, ${JSON.stringify(kept.result.attention.map((a) => a.issue.slice(0, 160)))}`);
     }
     const sharedGpu = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': (ins, n) => (n === 1 ? silentFail() : pass()),
-      'verify_engineer:gpus': () => ({ in_use: 'GPU 3: VRAM 12%, GPU 40%, pids 777', left_running: '' }) });
+      'verify_engineer:gpus': () => ({ in_use: 'GPU 3: VRAM 12%, GPU 40%, pids 777', in_use_gpus: ['3'], left_running: '' }) });
     check(sharedGpu.result.status === 'ready_for_review' && fellBack(sharedGpu, 'Verify')
       && sharedGpu.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'warning'
         && /another job uses a pinned GPU after round 0, as before it: GPU 3: VRAM 12%/.test(p.summary)),
@@ -2559,12 +2567,29 @@ const scenarios = [
       `one that says it left nothing runs again at once: ${ended(saidTime)}, ${verifyCalls(saidTime)}`);
     const heldTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': wantsTime({}),
       'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after')
-        ? { in_use: '', left_running: 'the fix arm\'s server, pid 6262' } : { in_use: '' }) });
+        ? { in_use: '', in_use_gpus: [], left_running: 'the fix arm\'s server, pid 6262' } : { in_use: '' }) });
     const heldWhy = (heldTime.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
     check(heldTime.result.status === 'blocked' && heldTime.result.stopped_at === 'Verify' && !comment(heldTime)
       && eqList(verifyCalls(heldTime), ['gpus 0', 'verify 0', 'gpus after 0']) && !heldTime.keys.includes('investigator:investigate')
       && /the round needs 200 min more and is not run again: Verify round 0 did not say whether what it started has stopped \(left_running\), and the check after it could not stop the fix arm's server, pid 6262/.test(heldWhy),
       `and is not run again next to what the check could not stop: ${ended(heldTime)}, ${verifyCalls(heldTime)}, ${heldWhy}`);
+    // Such a round is unfinished whatever its failures say. With only failures that do not block it would count
+    // as passed, and go on to Performance with gates it never ran: it is not run again, and it is not accepted.
+    const known = [{ gate: 'G4', blocking: false, summary: 'known issue KI-9' }];
+    for (const [what, answer, gpus, said] of [
+      ['could not stop a server', { left_running: 'the base arm\'s server, pid 8484' }, {},
+        /the round needs 200 min more and is not run again: it could not stop what it started \(the base arm's server, pid 8484\)/],
+      ['does not say what it left, where the check could not stop it', {},
+        { 'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after')
+          ? { in_use: '', in_use_gpus: [], left_running: 'the fix arm\'s server, pid 6262' } : { in_use: '' }) },
+        /the round needs 200 min more and is not run again: Verify round 0 did not say whether what it started has stopped/]]) {
+      const partly = await run({ mode: 'issue', task: 'i' }, { ...existing, ...gpus,
+        'verify_engineer:verify': () => ({ ...pass(), all_pass: false, failures: known, needs_min: 200, ...answer }) });
+      const partlyWhy = (partly.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(partly.result.status === 'blocked' && partly.result.stopped_at === 'Verify' && !partly.keys.includes('perf_engineer:perf_eval')
+        && partly.calls.filter((c) => c.key === 'verify_engineer:verify').length === 1 && said.test(partlyWhy),
+        `a round that needs more time, has only failures that do not block and ${what} is not taken for one that passed: ${ended(partly)}, ${partlyWhy}`);
+    }
     // A round that asks for more time and could not stop what it started is not run again next to it.
     let rounds = 0;
     const moreTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => {
