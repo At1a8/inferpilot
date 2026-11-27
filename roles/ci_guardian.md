@@ -85,9 +85,12 @@ Then:
   is not every test and lane you ran, it says which (`#50231: test_a on rocm720; #50240: test_b`),
   and the triage record keeps each confirmed fix with its tests and lanes. A change short of the
   four is a candidate: name it in `evidence` and in the triage record, marked as not confirmed (the
-  run record keeps only the start of `evidence`, the triage record all of it), and `fixed_by` stays
-  empty. The run then ends as not reproduced on main, which is all it showed, and names no fix it
-  did not confirm.
+  run record keeps only the start of `evidence`, the triage record all of it), and keep it out of
+  `fixed_by`, which names confirmed fixes alone. Where one test or lane has a confirmed fix and
+  another only a candidate, `fixed_by` keeps the first with what it was shown on, and `evidence`
+  and the triage record say which tests and lanes have no confirmed fix. Where none has one,
+  `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it showed, and
+  names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is

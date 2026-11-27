@@ -424,14 +424,17 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   that: the failure was a branch's, and main passing shows no fix of it. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
   at PR, the run had verified a fix of its own before main moved: say that its branch was not
-  proposed, and where it is. For a ci task whose tests passed on main at Classify (`not_reproduced`,
-  or `handed_off` where part of the task was not run), read its triage record: a change it holds
-  as a candidate for the fix is named as one, and as not confirmed. The phases keep only the
-  start of Classify's evidence, where it may be missing. A fix the record holds as confirmed is
-  named too where the run handed the task over with a part not run: the result has no `fixed_by`
-  then. Name a confirmed fix, from the record or from `fixed_by`, as the fix of the tests and
-  lanes it was confirmed on, and of nothing else: a cluster can have been fixed by several
-  changes, each for some of its tests.
+  proposed, and where it is. For a ci task whose tests passed on main at Classify (`fixed_on_main`
+  or `not_reproduced` there, or `handed_off` where part of the task was not run), read its triage
+  record: a change it holds as a candidate for the fix is named as one, and as not confirmed. The
+  phases keep only the start of Classify's evidence, where it may be missing. A fix the record
+  holds as confirmed is named too where the run handed the task over with a part not run: the
+  result has no `fixed_by` then. Name a confirmed fix, from the record or from `fixed_by`, as the
+  fix of the tests and lanes it was confirmed on, and of nothing else: a cluster can have been
+  fixed by several changes, each for some of its tests. Where a fix is confirmed for some of them
+  only (`fixed_on_main` with a `fixed_by` that says which), the run's status speaks for those
+  alone: list the tests and lanes that have no confirmed fix as well, each with the candidate the
+  record holds for it, or as passing on main with no change named.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on

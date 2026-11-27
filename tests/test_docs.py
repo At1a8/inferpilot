@@ -2428,16 +2428,27 @@ class CiOnMainTest(unittest.TestCase):
                 # a candidate is kept where it is not cut short: the run record keeps only the start of the evidence
                 ("roles/ci_guardian.md", "A change short of the four is a candidate: name it in `evidence` and in the triage record, marked as not "
                                          "confirmed (the run record keeps only the start of `evidence`, the triage record all of it), and "
-                                         "`fixed_by` stays empty"),
-                ("roles/director.md", "For a ci task whose tests passed on main at Classify (`not_reproduced`, or `handed_off` where part of the "
-                                      "task was not run), read its triage record: a change it holds as a candidate for the fix is named as "
-                                      "one, and as not confirmed"),
+                                         "keep it out of `fixed_by`, which names confirmed fixes alone"),
+                # a candidate for one test does not empty the field for the test whose fix is confirmed
+                ("roles/ci_guardian.md", "Where one test or lane has a confirmed fix and another only a candidate, `fixed_by` keeps the first with "
+                                         "what it was shown on, and `evidence` and the triage record say which tests and lanes have no "
+                                         "confirmed fix"),
+                ("roles/ci_guardian.md", "Where none has one, `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it "
+                                         "showed, and names no fix it did not confirm"),
+                # the report reads the triage record for every ending of a task that passed on main, a scoped fix included
+                ("roles/director.md", "For a ci task whose tests passed on main at Classify (`fixed_on_main` or `not_reproduced` there, or "
+                                      "`handed_off` where part of the task was not run), read its triage record: a change it holds as a "
+                                      "candidate for the fix is named as one, and as not confirmed"),
+                ("roles/director.md", "Where a fix is confirmed for some of them only (`fixed_on_main` with a `fixed_by` that says which), the "
+                                      "run's status speaks for those alone: list the tests and lanes that have no confirmed fix as well, "
+                                      "each with the candidate the record holds for it, or as passing on main with no change named"),
                 # a confirmed fix of the part that was run is not lost where the rest of the task is handed over
                 ("roles/director.md", "A fix the record holds as confirmed is named too where the run handed the task over with a part not run: "
                                       "the result has no `fixed_by` then"),
                 ("templates/ci_triage.md", "the fix that merged where the runs confirmed it, with the tests and lanes it was confirmed on: the "
                                            "job's commit and the change's parent fail on this image, the change passes; a change that only looks "
-                                           "like the fix as a candidate, marked not confirmed"),
+                                           "like the fix as a candidate, marked not confirmed; the tests and lanes that have no "
+                                           "confirmed fix"),
                 ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: the job\'s commit and its parent fail '
                                          'here, it passes; with its tests and lanes where it is not the fix of all that ran>"'),
                 ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
