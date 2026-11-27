@@ -12,6 +12,7 @@
 | on main, in the lane's own environment | fails / passes (the image the job ran, the lane's newest and how it was found, each test's runs, the fix that merged; what of the task was not run) / not run here (what the lane needs) |
 | error signature | |
 | first red run / last green run | <run links and times> |
+| open fix PRs | none / <#n: what it changes, and whether its diff addresses this failure; the run verifies it in place of a fix of its own> |
 
 ## Classification
 

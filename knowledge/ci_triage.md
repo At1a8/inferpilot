@@ -91,6 +91,37 @@ client, which a task that can reach a fix is asked for before it starts.
 | flaky | fails some runs and passes others on one commit, lane and image; the tracker's `flaky` is a hint, since its counts span commits and images | rerun N times, report the rate, propose quarantine only with numbers |
 | infrastructure | `Self-hosted runner lost communication`, interface errors (`UCX ERROR failed to get interface index ... errno 19`), image pull or disk failures | hand over to CI maintainers with the evidence |
 
+**A failure an open pull request already fixes is verified, not fixed again.** Before a culprit is
+searched for, look for the fix someone has opened: the one the tracker or the CI issue names, the pull
+requests linked to it, the open ones that touch the failing test. Read its diff, since a pull request
+that cites a failure does not always fix it. The run applies it to main and verifies it as it would a
+fix of its own: the failing test is its gate, on every lane it failed on, and its accuracy and speed
+are measured by what it changes (§4). It ends in a verification comment for that pull request, drafted
+for a human to post, with what was run, on which image and hardware, at which commit of the pull
+request, and the results (`pr_playbook.md` §Attribution). No second pull request is opened for the same
+failure. A fix that has merged needs none of this: main has it.
+
+Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents
+hold. The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks
+which one to verify, or none. The task can say so from the start (`apply_prs`: the pull requests the
+run may apply, or `none`), and then nothing is asked. Nothing else stands for that word. What the
+classification says of the author is no proof that the author can put code on main: an association
+with the repository (a member of its organisation, a collaborator) can come without write access, a
+model read it, and the run has no way of its own to look the permission up. What the Intake read
+into a request in plain words is a reading too, and is asked about: only a field or an answer the
+caller gave counts. A task a scan offers names no pull request to apply: it is taken by the fields
+of a task definition, and an answer or a request a model wrote next to them goes no further. The
+word has to decide: it names a pull request, or it says `none`. Any other answer, or both at once,
+is asked about again, since taken for `none` it would send the run to a fix of its own.
+
+What the user names is looked up like any other: the classification is given it (`named_prs`), and
+the run applies only a pull request found open, with the commit its branch is at. A word that names
+its repository (a URL, `<owner>/<repo>#<n>`) keeps it: it is a word for a pull request the
+classification places in that repository, and never for the framework's pull request of the same
+number. One that is closed, merged or not found is not applied, the triage record says why, and the
+run goes on to a fix of its own. One pull request is verified in a run: several applied together
+would show nothing of each, and the others are named in the triage record.
+
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a
 serving benchmark below its threshold on one lane). Record the number the fix must restore: the

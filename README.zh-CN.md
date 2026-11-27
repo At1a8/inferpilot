@@ -18,7 +18,7 @@ InferPilot 为什么存在、与既定设计如何对应，见 [`docs/design.md`
 | `perf` | 针对某个模型和固定负载的系统级性能目标 | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | 带实测收益的 PR，或放弃改动；kernel 级的工作交给 kernel 后端 |
 | `scan` | 无——框架当天的状态：main 上的 AMD CI、开放的 AMD 用户 issue、AMD 需要跟进的上游改动（平台门控和 host 同步线索按需附带） | Collect → Dispatch → Report | 日报（作为 issue 分享到 InferPilot 仓库，否则是一个由你来分享的文件），附排好序的任务和启动每个任务的定义 |
 
-括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel。issue 或 CI failure 的修复改了 server 会运行的代码时，Performance 要测它（G5：不比 base 慢）；只改测试、文档或 CI 文件的修复跳过这一步，除非问题本身就是性能问题（被分诊为 `performance` 的 issue，或某个测试因它测出的数值而失败的 CI failure）：这时无论修复改了什么，掉下去的数值都必须回来。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
+括号中的阶段只在适用时运行：有 kernel hand-off 且 `kernel_backend` 不是 `none` 时才跑 Kernel。issue 或 CI failure 的修复改了 server 会运行的代码时，Performance 要测它（G5：不比 base 慢）；只改测试、文档或 CI 文件的修复跳过这一步，除非问题本身就是性能问题（被分诊为 `performance` 的 issue，或某个测试因它测出的数值而失败的 CI failure）：这时无论修复改了什么，掉下去的数值都必须回来。报告者的代码失败、而 main 通过的 issue，结论是*已在 main 上修复*；设置 `bisect_fixed` 时，会先跑一个 Bisect 阶段找出修复它的提交。CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect：运行去验证那个 PR，并给它起草一条评论，和 issue 的做法一样。那个 PR 的代码只有在你点名（`apply_prs`）之后才会在本机运行，任务里没说时运行会先问。运行中发现了不属于本任务的问题时才跑 Spinoff：没有本次改动的 base 提交上也出现的失败，或者某个角色在工作中遇到的线索（读到的代码里的 bug、本身就坏掉的测试或镜像）。对每个在 base 上出现的失败，找出跟踪它的上游 issue，或起草一个 issue 由你提交。线索列出来并附上复现方法；设置 `confirm_leads` 时，先把每条线索放到 base 提交上确认，能复现的再起草 issue。
 
 任务从一份**任务定义**开始（[`templates/task_definition.md`](templates/task_definition.md)）：也就是 `inferpilot.js` 接受的那些字段，每个角色读的都是同样的字段名。可以直接给出这些字段，也可以用一句话描述需求：这时先运行 Intake 阶段，把需求整理成任务定义，并在不改动任何东西的前提下核实能核实的内容（checkout、本机上的模型、GPU、issue）。如果任务定义仍缺少该模式需要的内容——issue、checkout、`feature` 和 `perf` 以及 issue、CI 修复需要的模型、`perf` 需要的固定负载——就什么都不启动，而是返回问题，每个字段一个，并尽量附上选项或默认值。完整的任务定义会跳过 Intake。
 
@@ -334,7 +334,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` 后端：GEAK checkout，其中的 kernel lane 作为外部程序运行 |
 | `kernel_backend_command` | `command` 后端：带 `{task_dir}`、`{out_dir}`、`{gpu_ids}`、`{budget}` 占位符的 shell 命令；用于 `geak` 时替换默认命令 |
 | `kernel_budget` | kernel 后端的优化轮数（默认 6），即命令里的 `{budget}` |
-| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR |
+| `apply_prs` | `perf`：要应用并做 A/B 的候选 PR。`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`：验证 PR 会在本机运行它作者的代码，所以不论作者是谁，只有在这里点名的 PR 才会应用；没给时运行会先问 |
 | `sources`、`since` | `scan`：`ci`、`issues`、`upstream`（默认）以及 `hardware`、`perf` 中的任意几个；时间窗口的起点（默认为上一份日报） |
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |

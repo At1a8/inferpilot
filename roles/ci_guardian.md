@@ -102,7 +102,33 @@ Then:
      CI*). Without one the task stops here.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
-4. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
+4. Look for a fix someone has already opened: the pull request the tracker or the CI issue names for
+   this failure, the pull requests linked to the issue or the job, and the open pull requests of the
+   framework's repository that touch the failing test or name its error (the search API with
+   `GITHUB_TOKEN`, GET only). Read the diff of each, and run nothing of it: its code is its author's,
+   and runs on this machine only when the run applies it. It counts only when it addresses this
+   failure, the same error on the same path, not when it only cites it: the fix a tracker names can be
+   wrong. Return those that are open, drafts included, as `existing_prs`, the likeliest first, each
+   with its number (`#<n>`), the repository it is in (`repo`: `<owner>/<repo>`, as the API gives it),
+   its author, the author's association with the repository as the API gives it
+   (`author_association`), its head commit and its `state` (`open`). The run verifies one of them on
+   this machine in place of finding the culprit and fixing the failure a second time (`ci_triage.md`
+   §2), and no bisect follows. It does so only on the user's word, whoever the author is: the
+   association is for the user to read, and proves no right to put code on main. One that has merged
+   is not listed: main has its fix, and what still fails there it does not fix. One in another
+   repository (a component's) is not listed either: name it in the triage record.
+   The pull requests in `named_prs` are the ones the task or the request names for verification: look
+   each of them up, whether or not your own search found it, and return it in `existing_prs` as well,
+   with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`) and, for an
+   open one, its author, association and head commit. One that is a pull request of another
+   repository goes under its full name (`<owner>/<repo>#<n>`), never as this repository's `#<n>`. A
+   name that carries its repository (`<owner>/<repo>#<n>`, from a URL the user gave) is looked up in
+   that repository, never by its number in the framework's: aiter's `#777` and the framework's `#777`
+   are two pull requests, and the user's word is for one of them. Return it as `#<n>` only when that
+   repository is the framework's, and always with its `repo`: the run takes a word that names a
+   repository for a pull request you place there, and for no other. The run applies only one returned
+   `open` with its head: it does not take your word for a closed one, and guesses no revision.
+5. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
    handover note there (who, what evidence).
 
 Return:
@@ -112,6 +138,9 @@ Return:
  "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
  "unchecked": "<the tests or lanes of the task that were not run here, or that fail only now and then>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
+ "existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>",
+                   "association": "<author_association>", "head": "<sha>",
+                   "state": "open | closed | merged | not_found"}],
  "window": "<last green sha>..<first red sha>", "evidence": "<signature, lanes, since date>",
  "performance": false, "perf_claim": "<performance failures only>",
  "accuracy": false, "accuracy_claim": "<accuracy failures only>",

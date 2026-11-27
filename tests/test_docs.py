@@ -263,6 +263,170 @@ class TokenComparisonTest(unittest.TestCase):
         self.assertEqual(found, [], "these ask for outputs equal to another run's; G2 compares scores")
 
 
+class CiExistingFixTest(unittest.TestCase):
+    """A CI failure that an open pull request already fixes is verified, not fixed a second time
+    (knowledge/ci_triage.md §2), as an issue with an open fix PR is: the classification names the pull request,
+    the run applies it without a bisect, the failing test is its gate, and the PR phase drafts a verification
+    comment for it. A pull request runs its author's code on this machine: the run applies one only on the
+    user's word, whoever wrote it, and only one the classification found open, at the commit its branch is at."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_applies_one_pull_request_on_the_users_word_without_a_bisect(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        self.assertIn("existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str }, ['pr'])),", body,
+                      "the classification cannot say who wrote an open fix, which repository and commit it is at, or whether it is still open")
+        for said, why in (
+                # the user's word is what the caller gave: the field or, where it is blank, the answer; not the Intake's reading
+                ("const field = prWords(RAW.apply_prs);\n  const said = field.length ? field : prWords(asObject(RAW.answers).apply_prs);\n"
+                 "  return { said, read: said.length ? [] : prWords(A.apply_prs) };", "what the Intake read into a request passes for the user's word"),
+                ("const isPr = (p) => /^#\\d+$/.test(p);", "a pull request of another repository is applied to this tree"),
+                ("const bare = /^(?:pr\\s*|pull request\\s*)?#?(\\d+)$/i.exec(p);", "an answer that gives the bare number is dropped"),
+                # a word that names its repository keeps it: its number alone names another pull request in the framework's
+                ("return m ? `${m[1]}#${m[2]}` : '';", "a URL is cut down to its number, which names another pull request in the framework's repository"),
+                ("return p.pr === ref.slice(at) && (!repo || p.repo === repo);", "a word for another repository's pull request runs the framework's"),
+                # the word decides when it names a pull request or says none, and one of the two only
+                ("const none = said.some((w) => /^\"?none\"?$/i.test(w));\n  const decided = none ? !byUser.length : byUser.length > 0;",
+                 "an answer that names nothing is taken for none"),
+                ("const usable = here.filter((p) => p.state === 'open' && p.head);", "a closed or a merged pull request, or one at no known commit, is applied"),
+                ("const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;",
+                 "a pull request the user did not name is applied, or several are applied together"),
+                ("if (!decided && candidates.length) {", "the user is not asked, is asked again after deciding, or is not asked again after an "
+                                                         "answer that decides nothing"),
+                ("named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],",
+                 "Classify is not told which pull requests the task names, with their repositories, to look them up"),
+                ("out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };", "a field the task left blank wins over the answer, and the run asks again"),
+                ("const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))\n"
+                 "      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "a scan offers a ci task with a pull request to apply, as a field or as an answer a model wrote"),
+                # an issue's existing fix: one pull request, and the roles after it know which
+                ("const prs = listed[0] || '';\n    if (prs) C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several")):
+            self.assertIn(said, src, why)
+        self.assertNotIn("MAINTAINERS", src, "the run still applies a pull request on what a model says of its author")
+        ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
+        for said, why in (
+                ("const fix = existingFix(cl.existing_prs);", "the open fix is applied without the user's word"),
+                ("if (stopHere('Bisect')) {", "a stop named for the phase an existing fix skips does not hold"),
+                ("R.questions = [fix.ask.question];", "the run does not ask before it runs another author's code"),
+                ("const lacking = askForFix('Classify');", "an existing fix is applied without the model and the client its gates need"),
+                ("C.existing_prs = [pr];", "the roles after Classify do not know which pull request is under verification"),
+                ("kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`",
+                 "the pull request is not applied as a work package, or not at the commit the classification read"),
+                ("return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');", "the existing fix is not held to the failing test and the fix's gates")):
+            self.assertIn(said, ci, why)
+        self.assertLess(ci.index("const fix = existingFix(cl.existing_prs);"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
+        self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("const fix = existingFix(cl.existing_prs);"),
+                        "a failure that is handed over is fixed all the same")
+        self.assertLess(ci.index("if (fix.ask) {"), ci.index("if (fix.apply) {"), "the question comes after the pull request is applied")
+        # The run ends in a comment for the pull request, and the user is told to post it, not to push a branch.
+        for said in ("...((C.existing_prs || []).length ? { comment_for: C.existing_prs } : {}) };",
+                     "if (verified) user.push(`post the verification comment on ${verified}, once you have re-run what it cites: ${R.pr.pr_body_path}`);"):
+            self.assertIn(said, src)
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure an open pull request already fixes is verified, not fixed again.**"),
+                ("knowledge/ci_triage.md", "a pull request that cites a failure does not always fix it"),
+                ("knowledge/ci_triage.md", "the failing test is its gate, on every lane it failed on, and its accuracy and speed are measured by what it changes"),
+                ("knowledge/ci_triage.md", "It ends in a verification comment for that pull request, drafted for a human to post"),
+                ("knowledge/ci_triage.md", "at which commit of the pull request"),
+                ("knowledge/ci_triage.md", "No second pull request is opened for the same failure"),
+                ("knowledge/ci_triage.md", "A fix that has merged needs none of this: main has it"),
+                # whose code the run executes
+                ("knowledge/ci_triage.md", "Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents hold"),
+                ("knowledge/ci_triage.md", "The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks which one "
+                                           "to verify, or none"),
+                ("knowledge/ci_triage.md", "What the classification says of the author is no proof that the author can put code on main"),
+                ("knowledge/ci_triage.md", "the run has no way of its own to look the permission up"),
+                ("knowledge/ci_triage.md", "What the Intake read into a request in plain words is a reading too, and is asked about: only a field or "
+                                           "an answer the caller gave counts"),
+                ("knowledge/ci_triage.md", "A task a scan offers names no pull request to apply"),
+                ("knowledge/ci_triage.md", "the run applies only a pull request found open, with the commit its branch is at"),
+                ("knowledge/ci_triage.md", "One that is closed, merged or not found is not applied, the triage record says why, and the run goes on "
+                                           "to a fix of its own"),
+                ("knowledge/ci_triage.md", "One pull request is verified in a run: several applied together would show nothing of each"),
+                ("roles/ci_guardian.md", "4. Look for a fix someone has already opened"),
+                ("roles/ci_guardian.md", "Read the diff of each, and run nothing of it"),
+                ("roles/ci_guardian.md", "the fix a tracker names can be wrong"),
+                ("roles/ci_guardian.md", "the author's association with the repository as the API gives it (`author_association`), its head commit "
+                                         "and its `state` (`open`)"),
+                ("roles/ci_guardian.md", "the repository it is in (`repo`: `<owner>/<repo>`, as the API gives it)"),
+                # a name that carries its repository is looked up there, never by its number in the framework's
+                ("roles/ci_guardian.md", "A name that carries its repository (`<owner>/<repo>#<n>`, from a URL the user gave) is looked up in that "
+                                         "repository, never by its number in the framework's"),
+                ("roles/ci_guardian.md", "Return it as `#<n>` only when that repository is the framework's, and always with its `repo`"),
+                ("knowledge/ci_triage.md", "A word that names its repository (a URL, `<owner>/<repo>#<n>`) keeps it"),
+                ("knowledge/ci_triage.md", "never for the framework's pull request of the same number"),
+                ("knowledge/ci_triage.md", "it is taken by the fields of a task definition, and an answer or a request a model wrote next to them "
+                                           "goes no further"),
+                ("knowledge/ci_triage.md", "The word has to decide: it names a pull request, or it says `none`"),
+                ("knowledge/ci_triage.md", "Any other answer, or both at once, is asked about again"),
+                ("roles/ci_guardian.md", "It does so only on the user's word, whoever the author is: the association is for the user to read, and "
+                                         "proves no right to put code on main"),
+                ("roles/ci_guardian.md", "The pull requests in `named_prs` are the ones the task or the request names for verification: look each "
+                                         "of them up"),
+                ("roles/ci_guardian.md", "with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`)"),
+                ("roles/ci_guardian.md", "One that is a pull request of another repository goes under its full name (`<owner>/<repo>#<n>`), never "
+                                         "as this repository's `#<n>`"),
+                ("roles/ci_guardian.md", "The run applies only one returned `open` with its head"),
+                ("roles/ci_guardian.md", "One that has merged is not listed"),
+                ("roles/ci_guardian.md", "One in another repository (a component's) is not listed either"),
+                ("roles/ci_guardian.md", '"existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>", '
+                                         '"association": "<author_association>", "head": "<sha>", "state": "open | closed | merged | not_found"}],'),
+                ("roles/implementer.md", "Write the head you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit"),
+                ("roles/implementer.md", "What you add (a missing test, a fix on top) is commits of your own after the author's"),
+                # a conflict resolved in a cherry-pick is part of that commit: said, not hidden
+                ("roles/implementer.md", "a conflict resolved during a cherry-pick is staged before `git cherry-pick --continue`, and so is part of "
+                                         "that commit"),
+                ("roles/implementer.md", "the verification comment says that this commit is not the author's as pushed"),
+                ("roles/implementer.md", 'write that tip in the ledger as well (`git rev-parse HEAD`, "the PR as applied")'),
+                # a retry that takes the package from the restored ref records this attempt's tip between the author's commits and its own
+                ("roles/implementer.md", "An `apply_pr` package is taken from the ref in two parts"),
+                ("roles/implementer.md", 'first the commits up to that one, the author\'s; then write this attempt\'s tip in the ledger (`git '
+                                         'rev-parse HEAD`, "the PR as applied"); then the commits after it, the run\'s additions'),
+                ("roles/implementer.md", "take nothing from the ref for this package: apply the PR from step 3, which records the tip"),
+                ("roles/test_engineer.md", "the commit the package was made on: the last commit of `verified_work_packages`, or `<base>` for the first package"),
+                # the feature-off comparison takes the same tree before the package as the control does
+                ("roles/test_engineer.md", "The parent is the tree before the package, here as in step 3"),
+                ("roles/test_engineer.md", "where a test an earlier commit of the package broke fails already and would pass for unchanged"),
+                # the PR engineer rewrites nothing of the author's, and exports the run's additions apart
+                ("roles/pr_engineer.md", "A run that verified an existing PR (`existing_prs`) rewrites nothing of it"),
+                ("roles/pr_engineer.md", "Only what the run added after that tip is tidied, in commits of its own that stay after it"),
+                ("roles/pr_engineer.md", "A commit of the PR whose conflict the implementer resolved while applying it (the ledger names each) is "
+                                         "not the author's as pushed"),
+                ("roles/pr_engineer.md", "format-patch <that tip>..inferpilot/<slug> -o RUN_DIR/patches_additions"),
+                ("roles/pr_engineer.md", "a series that carried the PR's own commits would apply them a second time"),
+                ("roles/pr_engineer.md", "that is the whole of what was verified, to replay it, not what the comment offers"),
+                ("knowledge/pr_playbook.md", "It is for one PR: a run verifies one (for an issue the first its triage lists, for a CI failure the one "
+                                             "the user names)"),
+                ("knowledge/pr_playbook.md", "The run's result says to post the comment, and gives no push command"),
+                ("roles/pr_engineer.md", "(an issue triaged `push_existing_pr`, a CI failure classified with `existing_prs`)"),
+                ("roles/pr_engineer.md", "It names the commit of the PR that was verified"),
+                ("roles/pr_engineer.md", "lists apart what the run added on top of it, commit by commit and why"),
+                ("roles/pr_engineer.md", "None for an existing PR's verification (`push_command` empty)"),
+                ("templates/ci_triage.md", "| open fix PRs |"),
+                ("templates/task_definition.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.md", "A CI failure that an open pull request already fixes skips Bisect"),
+                ("README.md", "It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say"),
+                ("README.md", "so the run applies one only when it is named here, whoever wrote it; without it the run asks"),
+                ("README.zh-CN.md", "那个 PR 的代码只有在你点名（`apply_prs`）之后才会在本机运行，任务里没说时运行会先问"),
+                ("README.zh-CN.md", "所以不论作者是谁，只有在这里点名的 PR 才会应用；没给时运行会先问"),
+                ("templates/task_definition.md", "so the run applies one only when it is named here, whoever wrote it"),
+                ("README.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect"),
+                ("README.zh-CN.md", "`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        self.assertIn("args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none",
+                      (ROOT / "inferpilot.js").read_text(encoding="utf-8").split("\n")[3], "whenToUse does not tell the caller of it")
+        # The steps of the classification are numbered through: the new one did not leave two fourth steps.
+        role = (ROOT / "roles" / "ci_guardian.md").read_text(encoding="utf-8")
+        classify = role[role.index("## PHASE=classify"):role.index("## PHASE=bisect")]
+        self.assertEqual(re.findall(r"^(\d+)\. ", classify, re.M), ["1", "2", "3", "4", "5"])
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_setup_container_and_runner_variables_are_in_both_readmes(self):
         missing = ["%s reads %s; %s does not say what it does" % (path.relative_to(ROOT), name, readme)
