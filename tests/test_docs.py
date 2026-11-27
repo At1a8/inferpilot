@@ -2162,6 +2162,17 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "keep a quarter of the time to it, at most 15 minutes"),
                 ("knowledge/ci_triage.md", "where the rest fails, the run fixes what fails and names what it did not check"),
                 ("roles/director.md", "With `unchecked` (a ci task of which a part is outside what the run answers for"),
+                # on the newest image of its variant, a package main rejects is not Setup's to block a fix task on
+                ("roles/director.md", "That is said of an image that is not the newest of its variant"),
+                ("roles/director.md", "For an issue or a ci task that may be the failure the task is about, or one the CI lane's own setup "
+                                      "step repairs before its tests run: report `baseline_status: \"skip\"`, with what was rejected and by "
+                                      "which import in `notes`"),
+                ("roles/director.md", "A ci task blocked here would never reach the classification that names a dependency's failure"),
+                ("roles/director.md", "A feature or a perf task has no baseline to measure then: it fails, and `baseline` says that the "
+                                      "newest image does not run the worktree"),
+                ("knowledge/env_hygiene.md", "On the newest image of its variant it is neither: the worktree and its newest image disagree"),
+                ("roles/ci_guardian.md", "A package of the lane's newest image that main rejects at import is yours to classify like any "
+                                         "other failure of main"),
                 # a green rerun here does not make a failure of the CI's own go away
                 ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
                 ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),

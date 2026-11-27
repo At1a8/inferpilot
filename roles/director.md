@@ -167,7 +167,16 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      `INFERPILOT_GIT_EMAIL` in `~/.inferpilot_env`, then the bootstrap); the PR phase resets the
      authors once one is set. Never set it yourself.
    - An image too old for the worktree (sgl-kernel or aiter rejected at import or startup) fails the
-     baseline; `baseline` names the newer image to start a container from.
+     baseline; `baseline` names the newer image to start a container from. That is said of an image
+     that is not the newest of its variant. Where the check before step 0 found it `current`, there
+     is no newer image to name, and a package the worktree rejects is no failure of this run's
+     environment: the worktree and its newest image disagree. For an issue or a ci task that may be
+     the failure the task is about, or one the CI lane's own setup step repairs before its tests
+     run: report `baseline_status: "skip"`, with what was rejected and by which import in `notes`,
+     and the run goes on to Triage or Classify, which say what it is. A ci task blocked here would
+     never reach the classification that names a dependency's failure. A feature or a perf task
+     has no baseline to measure then: it fails, and `baseline` says that the newest image does not
+     run the worktree.
 4. **Baseline.**
    - First, one discarded warm-up per GPU set: a launch and a short run of the client, so the first
      launch in a fresh container, which compiles kernels and is slower, is not measured.

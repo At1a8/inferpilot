@@ -86,7 +86,10 @@ Then:
    the tests its latest scan saw fail are failing now (`n_failing`; `broken`, `flaky`, `new`): a
    `no longer failing` entry is history, which the tracker keeps for some days.
 2. Classify it with `ci_triage.md` §2: `code_regression`, `dependency_bump`, `test_bug`, `flaky`,
-   `infrastructure`. For `flaky`, rerun the test enough times to state a rate.
+   `infrastructure`. For `flaky`, rerun the test enough times to state a rate. A package of the
+   lane's newest image that main rejects at import is yours to classify like any other failure of
+   main: Setup reports it in its `notes` and does not stop the run for it (`director.md`, Setup
+   step 3).
    - `performance`: true when the test fails on a number it measures (a throughput, a latency, a
      speed threshold), not on an error, whatever its class (`ci_triage.md` §2). Then `perf_claim` is
      the number the fix must restore — metric, workload and value, from the test's threshold or the
