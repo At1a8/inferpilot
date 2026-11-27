@@ -107,7 +107,11 @@ PR; its Motivation names that pull request and what it did not pass (`pr_playboo
    error, is a work package). A change that takes effect outside the worktree (a package's version,
    an environment variable a Dockerfile sets) is in effect for that run, as the ledger's record makes
    the fix's environment, and the body gives the setup with the command: the command alone shows the
-   image's behaviour.
+   image's behaviour. A CI fix on a lane whose setup installs over its image is run the same way:
+   the lane's environment is in effect for that run, as the triage record's script makes it for
+   the final tree (`RUN_DIR/lane_env.sh`, with the test's job where the record names several), and
+   the body gives the lane's setup step with the command, as the lane's workflow runs it: the
+   script in the repository and the job's flags, and no path of this run.
 6. **Push command:** the exact `git push` the human should run from the worktree, in the container. Do
    not run it. None for an existing PR's verification (`push_command` empty): the run has no pull
    request of its own. What it added on top is exported apart for the comment to offer, from the tip

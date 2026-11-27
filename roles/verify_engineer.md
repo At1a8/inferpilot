@@ -98,9 +98,11 @@ clock can start before your session does.
    `ci_guardian.md`, PHASE=classify), what a tree calls for is what that setup puts in effect for
    it, and the image's package is no tree's: call the script for every tree the round runs, the
    fix, the base and any other commit, and put what it prints on that arm's `PYTHONPATH`, after the
-   tree's own code. Never give a tree the build made for another: the fix can move the pin, and the
-   script decides for each tree. Where the script fails for a tree, that arm's environment cannot
-   be made: the blocking failure of the last item below.
+   tree's own code. That goes for the fix's gate and for every server the round launches. Where the
+   record names several jobs, a test runs in the environment of its own. Never give a tree the
+   build made for another: the fix can move the pin, and the script decides for each tree. Where
+   the script fails for a tree, that arm's environment cannot be made: the blocking failure of the
+   last item below.
    - Make the environment the arm's own wherever you can: a variable in the arm's process
      environment only, a package in a directory of the arm's (`pip install --no-deps --target
      RUN_DIR/env/<arm> ...`) put first on its `PYTHONPATH`, checked by the version the package

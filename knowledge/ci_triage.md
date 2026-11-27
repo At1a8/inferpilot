@@ -63,8 +63,9 @@ intermittence the lane has shown. Intermittent is said of one commit, one lane a
 tracker's counts span commits and images, and prove nothing of the kind. A failure that was the
 CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the
 tests do here. The lane's environment is also what its setup step installs over the image (AITER
-rebuilt or kept, as the setup of the tested tree decides against the image and the job's flags): a
-run on the image as it ships, where the lane replaced a package, is a run in another environment.
+rebuilt or kept, and whatever else it installs, as the setup of the tested tree decides against
+the image and the job's flags): a run on the image as it ships, where the lane replaced a
+package, is a run in another environment.
 So are two of the lane's own jobs on one commit whose setups differ: what differs between them is
 two environments, not an intermittent failure. Every tree the task runs later gets the lane's
 environment resolved for itself, by the script the triage record names: the commits of a bisect,
