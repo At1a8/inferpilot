@@ -1499,6 +1499,8 @@ async function setup(requireBaseline) {
   // No other task goes on from such a Setup, whatever baseline it reports: nothing of it would run in that
   // image, and a server that does not start there would read as a problem that is gone.
   const rejected = String(s.import_rejected || '').trim();
+  // Kept whole in the result, however the run ends: a note keeps 600 characters, so it names the rejection first.
+  if (rejected) R.import_rejected = rejected;
   if (rejected && MODE !== 'ci') {
     note('Setup', 'fail', `the newest image does not run the worktree: ${rejected}`);
     return false;
@@ -1506,8 +1508,8 @@ async function setup(requireBaseline) {
   if (rejected) C.import_rejected = rejected;
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
   note('Setup', ok ? 'pass' : 'fail',
-    `baseline ${s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}${
-      rejected ? `; the worktree rejects a package of the newest image, which Classify judges: ${rejected}` : ''}`);
+    `${rejected ? `the worktree rejects a package of the newest image, which Classify judges: ${rejected}; ` : ''}baseline ${
+      s.baseline_status}${s.baseline ? `: ${s.baseline}` : ''}${s.notes ? `; ${s.notes}` : ''}`);
   return ok;
 }
 

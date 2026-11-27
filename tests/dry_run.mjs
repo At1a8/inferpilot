@@ -1532,14 +1532,27 @@ const scenarios = [
     check(classify && classify.ins.import_rejected === rejected && setupNote && setupNote.summary.includes(rejected),
       `a ci task goes on to Classify with what its worktree rejects of the image, and the record has it: ${
         JSON.stringify([classify && classify.ins.import_rejected, setupNote && setupNote.summary])}`);
-    const plain = (await run({ mode: 'ci', task: 'c' }, skip)).calls.find((c) => c.key === 'ci_guardian:classify');
-    check(plain && !('import_rejected' in plain.ins), 'a Setup that names no rejected package gives Classify none');
+    // The result keeps the rejection whole, and the Setup line names it before the baseline and the notes: a line
+    // keeps 600 characters, and a long baseline or note would cut it off at the end.
+    const wordy = { 'director:setup': () => ({ ...rejecting['director:setup'](), baseline: 'b'.repeat(400), notes: 'n'.repeat(400),
+      import_rejected: `${rejected}; ${'traceback '.repeat(80)}END` }) };
+    const long = await run({ mode: 'ci', task: 'c' }, wordy);
+    const longNote = long.result.phases.find((p) => p.phase === 'Setup' && p.verdict === 'pass');
+    const kept = String(long.result.import_rejected || '');
+    check(kept.endsWith('END') && kept.length > 600 && longNote.summary.includes(rejected) && ciGoes.result.import_rejected === rejected,
+      `the result keeps the rejection whole, and the Setup line names it first: ${kept.length} characters, ${
+        longNote.summary.slice(0, 90)}`);
+    const plainRun = await run({ mode: 'ci', task: 'c' }, skip);
+    const plain = plainRun.calls.find((c) => c.key === 'ci_guardian:classify');
+    check(plain && !('import_rejected' in plain.ins) && !('import_rejected' in plainRun.result),
+      'a Setup that names no rejected package gives Classify none, and the result has none');
     const afterSetup = ['issue_triager:triage', 'analyst:recon', 'director:spec', 'architect:perf_plan'];
     for (const mode of ['issue', 'feature', 'perf']) {
       const stops = await run({ mode, task: 't' }, { 'director:setup': () => ({ ...rejecting['director:setup'](),
         baseline_status: mode === 'issue' ? 'skip' : 'pass' }) });
       check(stops.result.status === 'blocked' && stops.result.stopped_at === 'Setup' && !stops.keys.some((k) => afterSetup.includes(k))
-        && JSON.stringify(stops.result.phases).includes(`the newest image does not run the worktree: ${rejected}`),
+        && JSON.stringify(stops.result.phases).includes(`the newest image does not run the worktree: ${rejected}`)
+        && stops.result.import_rejected === rejected,
         `${mode}: no other task goes on from a Setup whose worktree rejects a package of the newest image: ${
           stops.result.status} at ${stops.result.stopped_at}, calls ${stops.keys.join(' ')}`);
     }
