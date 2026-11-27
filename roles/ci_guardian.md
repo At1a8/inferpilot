@@ -31,16 +31,19 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
   variant for a lane that runs the daily sglang image, by the date and whatever the release. The
   lane goes by its base tag, the release with the ROCm and the GPU (`v0.5.23-rocm720-mi35x`): the
   base its workflow passes, or the framework's newest release, and of that exact base the newest
-  date (its start script, read in the tree under test: sglang's is
-  `<framework_dir>/scripts/ci/amd/amd_ci_start_container.sh`). An older release built on a later
-  day, or a release and its `.post1` built on one day, give the two different answers. So hold the
-  tag that command prints against the lane's base as the lane resolves it now; the image of its
-  latest run on main shows the base that run had. With the lane's base, it is the lane's newest
-  image. With another, the lane's is the newest date of its own base: `latest_image.py --base
-  <release>-<rocm>-<gpu>`. Where the registry has no image of that base yet (a release cut since
-  the last build), the lane's is what its start script falls back to. A lane on another family of
-  images has a newest tag of its own: the MILES nightly runs `miles-<rocm>-<gpu>-<date>`, which
-  `latest_image.py` skips, and resolves it in its workflow. Take such a lane's image from its
+  date among the days it looks back (its start script, read in the tree under test: sglang's is
+  `<framework_dir>/scripts/ci/amd/amd_ci_start_container.sh`, which looks at today and the six days
+  before). An older release built on a later day, or a release and its `.post1` built on one day,
+  give the two different answers. So ask for the lane's own, with the base as the lane resolves it
+  now and the days its start script looks back: `latest_image.py --base <release>-<rocm>-<gpu>
+  --days 7`. The image of the lane's latest run on main shows the base that run had. Where that
+  base has no image of those days (a release cut since the last build, or a base last built before
+  them), an older image of the base is not the lane's: the lane's is what its start script falls
+  back to. sglang's falls back to a build of the variant's newest date among those days, whatever
+  the release: `--variant <rocm>-<gpu> --days 7` names that date, and where more than one release
+  was built on it, the start script or the lane's log says which the lane takes. A lane on another
+  family of images has a newest tag of its own: the MILES nightly runs `miles-<rocm>-<gpu>-<date>`,
+  which `latest_image.py` skips, and resolves it in its workflow. Take such a lane's image from its
   workflow and its latest run on main, never the sglang image of the same ROCm and GPU: a failure
   of the lane's own environment would pass on the other image, and read as not reproduced. Where
   you cannot establish a lane's image, its base included, that lane was not run (below). The image

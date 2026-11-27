@@ -201,22 +201,89 @@ class LatestImageTest(unittest.TestCase):
         tags = self.TAGS + [{"name": "v0.5.22-rocm10-mi35x-20261104", "last_updated": "2026-11-04T09:00:00Z"}]
         asked = []
 
-        def fetch(repo, name, timeout):
-            asked.append(name)
+        def fetch(repo, name, timeout, pages=2, since=""):
+            asked.append((name, since))
             return tags
 
         def run(*argv):
             out, err = io.StringIO(), io.StringIO()
-            with mock.patch.object(latest_image, "fetch", fetch), redirect_stdout(out), redirect_stderr(err):
+            with mock.patch.object(latest_image, "fetch", fetch), redirect_stdout(out), redirect_stderr(err), \
+                    mock.patch.object(latest_image, "today", lambda: latest_image.dt.date(2026, 11, 10)):
                 code = latest_image.main(list(argv))
             return code, out.getvalue().strip(), err.getvalue().strip()
 
         self.assertEqual(run("--variant", "rocm10-mi35x"), (0, "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261104", ""))
         self.assertEqual(run("--base", "v0.5.23-rocm10-mi35x"), (0, "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261103", ""))
-        self.assertEqual(asked, ["rocm10-mi35x", "v0.5.23-rocm10-mi35x"], "the registry is asked for the tags of the base")
+        self.assertEqual(asked, [("rocm10-mi35x", ""), ("v0.5.23-rocm10-mi35x", "")], "the registry is asked for the tags of the base")
         code, out, err = run("--base", "v0.5.24-rocm10-mi35x")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("no rocm/sgl-dev tag of the base v0.5.24-rocm10-mi35x", err)
+        # A lane looks for its base among today and the six days before, and then falls back to another release:
+        # on 2026-11-10 the base's last build, of 2026-11-03, is no answer, and the variant's newest of those days is.
+        code, out, err = run("--base", "v0.5.23-rocm10-mi35x", "--days", "7")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no rocm/sgl-dev tag of the base v0.5.23-rocm10-mi35x dated in the last 7 days", err)
+        self.assertEqual(run("--base", "v0.5.23-rocm10-mi35x", "--days", "8"), (0, "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261103", ""))
+        self.assertEqual(run("--variant", "rocm10-mi35x", "--days", "7"), (0, "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261104", ""))
+        self.assertEqual(asked[-1], ("rocm10-mi35x", "2026-11-03"), "and the pages are read back to the day before the first of them")
+        code, out, err = run("--variant", "rocm10-mi35x", "--days", "6")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no daily rocm/sgl-dev tag for rocm10-mi35x dated in the last 6 days", err)
+        # A base given blank is an unresolved base: never the default variant's image with exit 0. Nothing is looked up.
+        lookups = len(asked)
+        for argv in (("--base", ""), ("--base", "  "), ("--days", "0"), ("--base", "v0.5.23-rocm10-mi35x", "--days", "-1")):
+            with self.assertRaises(SystemExit) as stop:
+                run(*argv)
+            self.assertEqual(stop.exception.code, 2, argv)
+        self.assertEqual(len(asked), lookups)
+
+    def test_only_the_days_a_lane_looks_back_count(self):
+        tags = self.TAGS + [{"name": "v0.5.22-rocm10-mi35x-20261104", "last_updated": "2026-11-04T09:00:00Z"}]
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.23-rocm10-mi35x", "20261103"), "v0.5.23-rocm10-mi35x-20261103")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.23-rocm10-mi35x", "20261104"), "", "its last build is older")
+        self.assertEqual(latest_image.pick(tags, "rocm10-mi35x", "20261104"), "v0.5.22-rocm10-mi35x-20261104")
+        self.assertEqual(latest_image.pick(tags, "rocm10-mi35x", "20261105"), "")
+        with mock.patch.object(latest_image, "today", lambda: latest_image.dt.date(2026, 11, 10)):
+            self.assertEqual(latest_image.window(7), ("20261104", "2026-11-03"), "today and the six days before; pushes from the day before")
+            self.assertEqual(latest_image.window(1), ("20261110", "2026-11-09"))
+
+    def test_every_page_that_holds_a_push_of_those_days_is_read(self):
+        # Docker Hub lists tags by push time. Without --days two pages are read; with it, every page down to the
+        # first push older than the window, and a list too long to read to that point fails: it is never cut short.
+        def hub(pushed):  # one tag a page; the last page has no next
+            return {"page%d" % n: {"results": [{"name": "v0.5.23-rocm10-mi35x-202611%02d" % n, "last_updated": day + "T12:00:00Z"}],
+                                   "next": "page%d" % (n + 1) if n < len(pushed) else None}
+                    for n, day in enumerate(pushed, 1)}
+
+        def read(pages, **kw):
+            served = []
+
+            def urlopen(url, timeout=0):
+                key = url if url in pages else "page1"
+                served.append(key)
+                return io.BytesIO(json.dumps(pages[key]).encode())
+
+            with mock.patch.object(latest_image.urllib.request, "urlopen", urlopen):
+                return [t["name"][-2:] for t in latest_image.fetch("rocm/sgl-dev", "v0.5.23-rocm10-mi35x", 1, **kw)], served
+
+        days = ["2026-11-09", "2026-11-08", "2026-11-07", "2026-11-02", "2026-11-01"]
+        self.assertEqual(read(hub(days)), (["01", "02"], ["page1", "page2"]), "two pages without a window")
+        self.assertEqual(read(hub(days), since="2026-11-03"), (["01", "02", "03", "04"], ["page1", "page2", "page3", "page4"]),
+                         "every page down to the first push older than the window")
+        self.assertEqual(read(hub(days[:3]), since="2026-11-03")[1], ["page1", "page2", "page3"], "or to the end of the list")
+        with mock.patch.object(latest_image, "MAX_PAGES", 3):
+            self.assertEqual(read(hub(days[:3]), since="2026-11-03")[1], ["page1", "page2", "page3"], "a list that ends at the limit is whole")
+            with self.assertRaisesRegex(ValueError, "more than 3 pages of tags pushed since 2026-11-03"):
+                read(hub(days), since="2026-11-03")
+            # the command says so and prints no image
+            out, err = io.StringIO(), io.StringIO()
+            pages = hub(days)
+            with mock.patch.object(latest_image.urllib.request, "urlopen", lambda url, timeout=0: io.BytesIO(
+                    json.dumps(pages[url if url in pages else "page1"]).encode())), redirect_stdout(out), redirect_stderr(err), \
+                    mock.patch.object(latest_image, "today", lambda: latest_image.dt.date(2026, 11, 10)):
+                code = latest_image.main(["--base", "v0.5.23-rocm10-mi35x", "--days", "7"])
+            self.assertEqual((code, out.getvalue()), (1, ""))
+            self.assertIn("the lookup would be cut short", err.getvalue())
 
     def test_compare_with_the_newest_of_the_same_variant(self):
         self.assertEqual(latest_image.parse_daily("rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261102"),
