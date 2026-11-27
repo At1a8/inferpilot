@@ -2193,8 +2193,13 @@ class CiOnMainTest(unittest.TestCase):
                 # a fix is named on proof, as for an issue: a change that only looks like the fix is a candidate
                 ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit only where you showed that it is the fix: the test "
                                          "fails on the change's parent and passes on the change, on the lane's image"),
-                ("roles/ci_guardian.md", "That the job's commit failed and main passes says that something between the two fixed it, not "
-                                         "which change did"),
+                # the job's own commit has to fail on this image first: the job and main ran different images
+                ("roles/ci_guardian.md", "First show that the job's own commit fails so on this image: the job and main ran different images, "
+                                         "and where that commit passes here, the image is what changed"),
+                ("roles/ci_guardian.md", "No change of main is the fix then, and a later regression that was repaired since would pass the "
+                                         "parent's test in its place"),
+                ("roles/ci_guardian.md", "Only with that commit failing here does the fix lie between it and main, and that alone does not say "
+                                         "which change it is"),
                 # the parent has to fail as the job failed: another failure shows nothing of the change
                 ("roles/ci_guardian.md", "The parent has to fail as the job failed, with the same error or the same measurement short of its "
                                          "threshold"),
@@ -2205,9 +2210,17 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "The log of main since `<base>` shows candidates, not the fix"),
                 ("roles/verify_engineer.md", '"fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main '
                                              'passes because of it>"'),
-                ("roles/ci_guardian.md", "A change that only looks like the fix is named in `evidence` as a candidate, and `fixed_by` stays "
-                                         "empty"),
-                ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: fails on its parent, passes on it>"'),
+                # a candidate is kept where it is not cut short: the run record keeps only the start of the evidence
+                ("roles/ci_guardian.md", "A change that only looks like the fix is a candidate: name it in `evidence` and in the triage record, "
+                                         "marked as not confirmed (the run record keeps only the start of `evidence`, the triage record all of "
+                                         "it), and `fixed_by` stays empty"),
+                ("roles/director.md", "For a ci task that ended as `not_reproduced` at Classify, read its triage record: a change it holds as "
+                                      "a candidate for the fix is named as one, and as not confirmed"),
+                ("templates/ci_triage.md", "the fix that merged where the runs confirmed it: the job's commit and the change's parent fail on "
+                                           "this image, the change passes; a change that only looks like the fix as a candidate, marked not "
+                                           "confirmed"),
+                ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: the job\'s commit and its parent fail '
+                                         'here, it passes>"'),
                 ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
                 ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)

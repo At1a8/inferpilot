@@ -61,11 +61,15 @@ Then:
   where you showed that it is the fix: the test fails on the change's parent and passes on the
   change, on the lane's image, each run as the job ran it. The parent has to fail as the job
   failed, with the same error or the same measurement short of its threshold: one that fails
-  another way (an import, a test that is not collected) shows nothing of that change. That the
-  job's commit failed and main passes says that something between the two fixed it, not which
-  change did. A change that only looks like the fix is named in `evidence` as a candidate, and
-  `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it showed, and
-  names no fix it did not confirm.
+  another way (an import, a test that is not collected) shows nothing of that change. First show
+  that the job's own commit fails so on this image: the job and main ran different images, and
+  where that commit passes here, the image is what changed. No change of main is the fix then,
+  and a later regression that was repaired since would pass the parent's test in its place. Only
+  with that commit failing here does the fix lie between it and main, and that alone does not
+  say which change it is. A change that only looks like the fix is a candidate: name it in
+  `evidence` and in the triage record, marked as not confirmed (the run record keeps only the
+  start of `evidence`, the triage record all of it), and `fixed_by` stays empty. The run then
+  ends as not reproduced on main, which is all it showed, and names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is
@@ -143,7 +147,7 @@ Return:
 
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
- "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit you showed to be the fix: fails on its parent, passes on it>",
+ "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit you showed to be the fix: the job's commit and its parent fail here, it passes>",
  "unchecked": "<the tests or lanes of the task that were not run here, or that fail only now and then>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>",

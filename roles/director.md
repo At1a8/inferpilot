@@ -406,7 +406,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
   at PR, the run had verified a fix of its own before main moved: say that its branch was not
-  proposed, and where it is.
+  proposed, and where it is. For a ci task that ended as `not_reproduced` at Classify, read its
+  triage record: a change it holds as a candidate for the fix is named as one, and as not
+  confirmed. The phases keep only the start of Classify's evidence, where it may be missing.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
