@@ -49,7 +49,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    given measures what the one `run.json` recorded did, and the run directory still records the verified
    work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
    (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
-   was to judge, and `known_issues.json`, `handoffs.json` and `run_state.json`. Check that every script
+   was to judge (a `feature`'s with the spec's yes or no on whether it is a cost the user stated), and
+   `known_issues.json`, `handoffs.json` and `run_state.json`. Check that every script
    the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`,
    `output_script`, `long_context_script`) is still, byte for
    byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
@@ -331,9 +332,12 @@ on the commit the run's last Verify round ran on. Change nothing.
    says `none` is no claim: empty for it, and empty where the record has no such row, never the claim
    as the rest of the record words it (a run that was to judge one then stops). `perf_cost`
    (`feature`): `true` when that claim is a cost the
-   user stated, as `RUN_DIR/feature_spec.md` has it (the row under its claim), which stays the claim on
-   InferPilot's client, and `false`
-   otherwise and in the other modes (always say which: a claim not said to be a cost is a gain, which
+   user stated, which stays the claim on InferPilot's client, and `false` when it is not, as the row
+   under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or
+   `no`). `null` when the spec has no such row, or the row says neither: never `false` for it, since a
+   cost taken for a gain is judged on InferPilot's client as no slowdown at all, a stricter claim than
+   the run had (the resume of a feature with a claim then stops). `false`
+   in the other modes (always say which: a claim not said to be a cost is a gain, which
    is never claimed on InferPilot's client). A `feature` that states no claim, and a fix of a problem
    that is not one of performance, are judged all the same, as no slower than the baseline
    (`validation_doctrine.md`, *G5 for a feature*, *G5 for a fix*; such a fix when it changes code the
@@ -357,7 +361,10 @@ on the commit the run's last Verify round ran on. Change nothing.
    a fix of its own (`existing_prs`, `existing_pr`), for which the PR phase writes a comment; the
    score an accuracy problem in CI must restore (`accuracy_claim`), without which no round is
    accepted; the AMD component its root cause is in (`component_issue`); the part of a ci task it
-   does not answer for (`unchecked`). Take none of it from another record, and add nothing to it.
+   does not answer for (`unchecked`); whether the model of an `issue` or a `ci` task answers text
+   questions (`text_model`), as the run's Setup said or a Verify round found since, which goes before
+   what this run's Setup says of it. Take none of it from another record, and add nothing to it: a
+   key the file does not have is left out, never given as `null`.
 7. `design_auto_approved` (`feature`): `true` when the run's Design went on to Implement without a
    human's approval (its report says so, its Design phase `auto_approved`); `false` otherwise and in
    the other modes.
@@ -368,7 +375,7 @@ Return:
 
 ```json
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
- "known_issues": [], "handoffs": [], "run_state": {}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
+ "known_issues": [], "handoffs": [], "run_state": {"text_model": true}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
  "perf_cost": false, "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
 ```

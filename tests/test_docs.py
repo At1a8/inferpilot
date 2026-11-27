@@ -1587,8 +1587,10 @@ class FeaturePerformanceTest(unittest.TestCase):
         for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)",
                      "claimOf(restored, rs.perf_cost)"):
             self.assertIn(call, src, "a cost the user stated is lost on the way to Performance")
-        self.assertEqual(src.count("perf_cost: bool,"), 3,
-                         "the spec, the approved design and a run resumed from Verify all say whether the claim is a cost the user stated")
+        self.assertEqual(src.count("perf_cost: bool,"), 2,
+                         "the spec and the approved design both say whether the claim is a cost the user stated")
+        self.assertIn("  perf_cost: { type: ['boolean', 'null'] }, // feature: the claim is a cost the user stated, as its spec says; null: it does not say\n",
+                      src, "a run resumed from Verify says whether the claim is a cost, or that its spec does not say")
         self.assertIn("`perf_cost` (`feature`): `true` when that claim is a cost the user stated",
                       " ".join((ROOT / "roles" / "director.md").read_text(encoding="utf-8").split()),
                       "a run resumed from Verify is not told to restore whether its claim is a cost")

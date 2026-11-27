@@ -1011,8 +1011,9 @@ const K_COLLECT = S({
 // is the commit its last Verify round ran on; the mode's gate command and the claim are the ones its Verify
 // and Performance were given, perf_required whether its Performance was to judge a claim the run stated
 // (perf_cost: a feature's that is a cost the user stated, which the answer always says: a claim not said to be
-// one is a gain, never claimed on InferPilot's client; a feature that states none, and a fix of a problem
-// that is not one of performance, are judged as no slower, which is no claim to restore);
+// one is a gain, never claimed on InferPilot's client, so the answer is the spec's own yes or no, and null
+// where the spec says neither, which stops the resume of a feature with a claim; a feature that states none,
+// and a fix of a problem that is not one of performance, are judged as no slower, which is no claim to restore);
 // known_issues and handoffs as its report wrote them (Verify judges a failure the baseline shares by the
 // first, and reverts an integrated kernel by the second), and run_state likewise (STATE), null when the run
 // directory lost them; task_definition as its run.json recorded it.
@@ -1030,7 +1031,7 @@ const RESUMED = S({
   failing_test_cmd: str, // ci: the failing_test gate
   perf_required: bool,
   perf_claim: str,       // '' for none
-  perf_cost: bool,       // feature: the claim is a cost the user stated, as its spec has it
+  perf_cost: { type: ['boolean', 'null'] }, // feature: the claim is a cost the user stated, as its spec says; null: it does not say
   design_auto_approved: bool, // feature: its Design went on to Implement with no human's approval
   triage_path: str,
   spec_path: str,
@@ -1049,10 +1050,12 @@ const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]))
 // What a run establishes before Verify that the phases after it go by, and that no phase's record holds as the
 // run had it: the pull request it verifies in place of a fix of its own (the PR phase writes a comment for it,
 // and no pull request), the score an accuracy problem in CI must restore (no round is accepted without it), the
-// AMD component its root cause is in (the reply, the report and the result name the draft), and the part of a
-// ci task it does not answer for. The report writes it down as given (run_state.json), and a run resumed from
-// Verify goes on with it. STATE says what each of them holds: one in another form is one the file lost, and so
-// is a pull request without the commit the run verified it at, or one that existing_prs does not name.
+// AMD component its root cause is in (the reply, the report and the result name the draft), the part of a ci
+// task it does not answer for, and whether the model of an issue or a ci task answers text questions, as Setup
+// said or as a Verify round found since (G2 of a fix for one that does not is the task's output comparison).
+// The report writes it down as given (run_state.json), and a run resumed from Verify goes on with it. STATE
+// says what each of them holds: one in another form is one the file lost, and so is a pull request without
+// the commit the run verified it at, or one that existing_prs does not name.
 const filled = (v) => typeof v === 'string' && !!v.trim();
 const STATE = {
   existing_prs: (v) => Array.isArray(v) && v.length > 0 && v.every(filled),
@@ -1061,6 +1064,7 @@ const STATE = {
   accuracy_claim: filled,
   component_issue: (v) => !!v && typeof v === 'object' && !Array.isArray(v) && COMPONENTS.includes(v.component) && filled(v.draft_path),
   unchecked: filled,
+  text_model: (v) => typeof v === 'boolean',
 };
 const runState = () => pick(C, Object.keys(STATE));
 // One form for a setting however it was written down. JSON, given as an object or in a string, is compared as
@@ -1356,17 +1360,11 @@ function nextSteps(status, at) {
     out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };
   } else if (status === 'needs_input' && (R.questions || []).some((q) => FIX_NEEDS[q.field])) {
     const what = R.questions.map((q) => FIX_NEEDS[q.field]).filter(Boolean).join(' and ');
-    // A run resumed from Verify is asked here when its Setup finds a model that answers no text questions and the
-    // task names no output comparison. With the answer the task measures otherwise than the run it resumes, which
-    // stops a resume: the answer starts the task over, and the arguments of the resume are cleared for it.
-    const over = RESUME === 'verify';
-    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over${
-      over ? ', as a run of its own: with the answer it measures otherwise than the run this one resumed' : ''}.${report}`;
+    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over.${report}`;
     out.ask = R.questions;
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
-    if (over) Object.assign(out.rerun_with, { resume_from: '', run_dir: '' });
   }
   // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
   if ((R.other_problems || []).length && !out.start) {
@@ -1445,7 +1443,9 @@ async function start(requireBaseline) {
   // needs none, and a stop asked for now holds first.
   const stop = liveStopAfter();
   const lacking = BEFORE_A_FIX[MODE] && stop !== 'now' && !BEFORE_A_FIX[MODE].includes(stop) ? outputsLacking() : null;
-  if (lacking) {
+  // A run resumed from Verify is not asked on its Setup's word: what the run it resumes knew of the model is
+  // restored (run_state.json), and Verify judges its fix by that, as it did in that run.
+  if (lacking && RESUME !== 'verify') {
     note('Setup', 'needs_input', lacking.why);
     R.questions = [lacking];
     return finish('needs_input', 'Setup');
@@ -2191,9 +2191,12 @@ async function resumeVerify(claimOf) {
   const changed = saved ? MEASURED.filter((k) => canon(saved[k], k) !== canon(GIVEN[k], k)) : [];
   const restored = rs ? String(rs.perf_claim || '').trim() : '';
   const lost = rs ? ['known_issues', 'handoffs'].filter((k) => !Array.isArray(rs[k])) : [];
-  // What the run had established before Verify, as its report wrote it down: {} for a run that had none of it.
+  // What the run had established before Verify, as its report wrote it down. Only a key the file does not have
+  // says that the run had none of it: every key it has is held to its form, one that is null too, which no
+  // report was given. What the model is, every issue and ci run past its Setup knows: a file without it lost it.
   const state = rs && rs.run_state && typeof rs.run_state === 'object' && !Array.isArray(rs.run_state) ? rs.run_state : null;
-  const garbled = state ? Object.keys(STATE).filter((k) => state[k] != null && !STATE[k](state[k], state)) : [];
+  const garbled = state ? Object.keys(STATE).filter((k) => k in state && !STATE[k](state[k], state)) : [];
+  const unsaid = !!state && !!BEFORE_A_FIX[MODE] && !('text_model' in state);
   const why = !rs ? ['the director restored nothing from the run directory'] : [
     rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
       + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
@@ -2215,11 +2218,16 @@ async function resumeVerify(claimOf) {
         + 'Performance holds both arms to']] : [])
       .map(([k, what]) => !String(rs[k] || '').trim() && `the run directory records no ${what}`),
     rs.perf_required === true && !restored && 'the run was to measure a claim its run directory does not record',
+    // Read as no cost, a cost the user stated would be judged on InferPilot's client as no slowdown at all.
+    MODE === 'feature' && restored && typeof rs.perf_cost !== 'boolean' && 'the run directory does not record whether the claim is a cost '
+      + 'the user stated (the row under the claim in feature_spec.md): taken for a gain, a cost would be held to a stricter claim than the run had',
     lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
       + 'and what a kernel regression reverts would be lost',
     !state && 'the run directory has no readable run_state.json: a pull request the run verified in place of a fix of its own, '
       + 'a score its fix was to restore, or a part of the task it left unchecked would be lost',
     garbled.length && `run_state.json does not hold ${garbled.join(', ')} as the report was given ${garbled.length > 1 ? 'them' : 'it'}`,
+    unsaid && 'run_state.json does not say whether the model answers text questions (text_model), which the run\'s Setup said, '
+      + 'or a Verify round after it: G2 of the fix would be judged by what this run\'s Setup says instead',
   ].filter(Boolean);
   if (why.length) {
     note('Setup', 'fail', `resume_from verify: ${why.join('; ')}`);
@@ -2232,12 +2240,17 @@ async function resumeVerify(claimOf) {
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   // What the run had established goes on as it was: the roles after Verify read it in their inputs, the PR
   // phase writes the comment for a pull request the run verified, a round is accepted only with the score an
-  // accuracy problem must restore, and the result names what a human files or runs elsewhere.
+  // accuracy problem must restore, and the result names what a human files or runs elsewhere. What the run knew
+  // of the model replaces what this run's Setup said of it, as a Verify round's word replaced Setup's in that
+  // run: a fix for a model found to answer no text questions is still judged on its output comparison.
+  const setupSaid = C.text_model;
   Object.assign(C, pick(state, Object.keys(STATE)));
   for (const k of ['component_issue', 'unchecked']) if (C[k]) R[k] = C[k];
   const had = [C.existing_prs && `${C.existing_prs.join(', ')}, the pull request it verified in place of a fix of its own`,
     C.accuracy_claim && 'the score its fix must restore', C.component_issue && `its root cause in ${C.component_issue.component}`,
-    C.unchecked && 'the part of the task it does not answer for'].filter(Boolean);
+    C.unchecked && 'the part of the task it does not answer for',
+    BEFORE_A_FIX[MODE] && C.text_model !== setupSaid && `a model that ${C.text_model ? 'answers' : 'answers no'} text questions, as the run `
+      + 'had it, whatever Setup says of it now'].filter(Boolean);
   // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
   // Performance ran, and the task the issue or PR its triage, reproduction and reply are about. A goal
   // run.json does not have is the run's too: it had none, and this run's would add what it never measured.

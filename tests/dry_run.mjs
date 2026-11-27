@@ -994,8 +994,8 @@ const scenarios = [
     const doc = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
     check(doc.includes('first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6)')
       && doc.includes('the verified work packages, each with its commit, the mode\'s gate command (`issue`, `ci`), its triage record (`issue`, `ci`), '
-        + 'its spec and design (`feature`), its analysis (`perf`), the claim its Performance was to judge, and `known_issues.json`, `handoffs.json` '
-        + 'and `run_state.json`')
+        + 'its spec and design (`feature`), its analysis (`perf`), the claim its Performance was to judge (a `feature`\'s with the spec\'s yes or no on '
+        + 'whether it is a cost the user stated), and `known_issues.json`, `handoffs.json` and `run_state.json`')
       && doc.includes('run no smoke, so that nothing is measured'), 'Setup checks everything a resume needs before its smoke');
     // A fix's Setup measures no baseline, since its base may be the server that does not start: nor does its resume.
     check(doc.includes('An `issue` or a `ci` run whose Setup measured no baseline (step 4; the ledger\'s baseline section says so) runs no smoke on a resume either, '
@@ -1075,7 +1075,7 @@ const scenarios = [
       && restore.includes('word for word from the row its phase wrote it in: the *performance claim* row of `issue_triage.md`, `ci_triage.md` or '
         + '`feature_spec.md`, the *claim* row of the Plan in `perf_analysis.md`')
       && restore.includes('A row that says `none` is no claim')
-      && restore.includes('as `RUN_DIR/feature_spec.md` has it (the row under its claim)'),
+      && restore.includes('as the row under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or `no`)'),
       'and a resume takes them from those rows');
   }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
@@ -1219,8 +1219,9 @@ const scenarios = [
   ['setup: a run resumed from Verify goes on with what the run established before Verify, as its report wrote it down', async () => {
     const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
     const given = (r, key) => (r.calls.find((c) => c.key === key) || { ins: {} }).ins;
+    // What the run knew of its model is part of what every issue and ci run established: a text model, unless said otherwise.
     const resumedWith = (mode, state, more = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
-      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: state }), ...more });
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: state && { text_model: true, ...state } }), ...more });
     const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
       && r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
     // A ci run verifies someone's pull request for a failure on a score, and could not run a part of the task.
@@ -1233,7 +1234,7 @@ const scenarios = [
       'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), accuracy: true, accuracy_claim: score, unchecked: part, existing_prs: [theirs] }) });
     const state = given(first, 'director:report').run_state;
     check(first.result.stopped_at === 'Verify' && (first.result.next.rerun_with || {}).resume_from === 'verify'
-      && eqList(state, { existing_prs: ['#50220'], existing_pr: theirs, accuracy_claim: score, unchecked: part }),
+      && eqList(state, { existing_prs: ['#50220'], existing_pr: theirs, accuracy_claim: score, unchecked: part, text_model: true }),
       `the report of a run whose Verify had no result is given what the run had established: ${JSON.stringify(state)}`);
     // The run that goes on is given it back, and is the run it resumes: the score is a gate of its own again.
     const again = (more = {}) => run({ ...task, ...first.result.next.rerun_with }, {
@@ -1273,7 +1274,7 @@ const scenarios = [
     // A run that had none of it wrote an empty object: nothing is restored, and nothing is missing.
     const none = await resumedWith('ci', {});
     check(none.result.status === 'ready_for_review' && !(none.result.pr || {}).comment_for && !none.result.unchecked && !none.result.component_issue
-      && !given(none, 'verify_engineer:verify').accuracy_claim && eqList(given(none, 'director:report').run_state, {})
+      && !given(none, 'verify_engineer:verify').accuracy_claim && eqList(given(none, 'director:report').run_state, { text_model: true })
       && !none.result.phases.some((p) => p.summary.includes('run_state.json')),
       `a run that had established none of it goes on as a run of its own fix: ${ended(none)}`);
     // What the file lost is not none: the run stops before anything is measured.
@@ -1283,39 +1284,66 @@ const scenarios = [
       ['existing_pr', { existing_pr: theirs }], ['existing_pr', { existing_prs: ['#50221'], existing_pr: theirs }],
       ['existing_pr', { existing_prs: ['#50220'], existing_pr: { ...theirs, head: '' } }],
       ['accuracy_claim', { accuracy_claim: ' ' }], ['component_issue', { component_issue: { component: 'cuda', draft_path: draft } }],
-      ['component_issue', { component_issue: { component: 'aiter' } }], ['unchecked', { unchecked: ['test_a'] }]]) {
+      ['component_issue', { component_issue: { component: 'aiter' } }], ['unchecked', { unchecked: ['test_a'] }],
+      // Only a key the file does not have says that the run had none of it: one that is null is held to its form like any other.
+      ['accuracy_claim', { accuracy_claim: null }], ['existing_prs', { existing_prs: null }], ['text_model', { text_model: null }],
+      ['text_model', { text_model: 'no' }]]) {
       const garbled = await resumedWith('ci', lost);
       check(stoppedFor(garbled, `run_state.json does not hold ${what} as the report was given it`),
         `${JSON.stringify(lost)} is not what a report was given, and is not read as none: ${ended(garbled)}`);
     }
+    // An issue or a ci run whose file does not say what its model is lost it; a feature has no such thing to say.
+    const unsaid = (mode) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: {} }) });
+    check(stoppedFor(await unsaid('ci'), 'run_state.json does not say whether the model answers text questions (text_model)')
+      && (await unsaid('feature')).result.status === 'ready_for_review', 'what the model is, every issue and ci run knows: a file without it lost it');
     // The script that compares the outputs of a model that answers no text questions is one the run measures with.
-    const outputs = (was, now, more = {}) => run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN, ...(now ? { output_script: now } : {}) }, {
-      'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }),
-      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), task_definition: { ...ins.task_def, output_script: was } }), ...more });
-    const compared = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false,
-      gates: { issue_repro: 'pass', G2: "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)" } }) };
-    const same = await outputs('/s/outputs.sh', '/s/outputs.sh', compared);
-    check(same.result.status === 'ready_for_review' && given(same, 'verify_engineer:verify').output_script === '/s/outputs.sh',
+    // was, now: the script in run.json and in this task; knew: what the run knew of the model; says: this run's Setup.
+    const S1 = '/s/outputs.sh';
+    const outputs = ({ was = '', now = '', knew = false, says }, more = {}) => run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN,
+      ...(now ? { output_script: now } : {}) }, {
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), ...(says == null ? {} : { text_model: says }) }),
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: { text_model: knew }, task_definition: { ...ins.task_def, output_script: was } }),
+      ...more });
+    const comparison = "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)";
+    const compared = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, gates: { issue_repro: 'pass', G2: comparison } }) };
+    const same = await outputs({ was: S1, now: S1 }, compared);
+    check(same.result.status === 'ready_for_review' && given(same, 'verify_engineer:verify').output_script === S1,
       `the run's own output comparison is run again: ${ended(same)}`);
-    for (const [was, now] of [['/s/outputs.sh', '/s/outputs_v2.sh'], ['', '/s/outputs.sh']]) {
-      check(stoppedFor(await outputs(was, now, compared), '(output_script not as its run.json has them)'),
+    for (const [was, now] of [[S1, '/s/outputs_v2.sh'], ['', S1]]) {
+      check(stoppedFor(await outputs({ was, now }, compared), '(output_script not as its run.json has them)'),
         `a resume given ${now} where the run had ${was || 'none'} would compare otherwise, and measures nothing`);
     }
-    // Setup finds such a model in a run that named no script, and asks. With the answer the task measures otherwise
-    // than the run this one resumes, so the answer starts it over: the arguments of the resume are cleared.
-    const asked = await outputs('', '');
-    const next = asked.result.next || {};
-    check(asked.result.status === 'needs_input' && asked.result.stopped_at === 'Setup' && !asked.keys.includes('director:resume')
-      && eqList((next.ask || []).map((q) => q.field), ['output_script']) && (next.rerun_with || {}).resume_from === '' && next.rerun_with.run_dir === ''
-      && /it starts over, as a run of its own: with the answer it measures otherwise than the run this one resumed/.test(next.say),
-      `a resumed run asked for the output comparison starts over with the answer: ${ended(asked)}, ${JSON.stringify(next.rerun_with)}`);
-    const over = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN, ...next.rerun_with, answers: { output_script: '/s/outputs.sh' } },
-      { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }), ...compared });
-    check(over.result.status === 'ready_for_review' && over.keys.includes('issue_triager:triage') && !over.keys.includes('director:resume')
-      && given(over, 'verify_engineer:verify').output_script === '/s/outputs.sh', `and with it the task runs from its start: ${ended(over)}`);
-    const fresh = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
-    check(fresh.result.status === 'needs_input' && !('resume_from' in fresh.result.next.rerun_with) && !('run_dir' in fresh.result.next.rerun_with)
-      && /and run the task again: it starts over\.( The report: |$)/.test(fresh.result.next.say), `a run that is no resume is asked as before: ${fresh.result.next.say}`);
+    // What the model is, a Verify round can find where Setup took it for a text model: the report is given what the
+    // run knows by then, and the run that goes on knows it too, whatever its own Setup says and its Verify leaves out.
+    const found = await run({ mode: 'issue', task: 'i', output_script: S1 }, compared);
+    check(found.result.status === 'ready_for_review' && given(found, 'director:report').run_state.text_model === false,
+      `the report is given what a Verify round found of the model, not what Setup said: ${JSON.stringify(given(found, 'director:report').run_state)}`);
+    const silent = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), gates: { issue_repro: 'pass' } }) };
+    const skipped = await outputs({ was: S1, now: S1, says: true }, silent);
+    check(skipped.result.status === 'blocked' && skipped.result.stopped_at === 'Verify' && given(skipped, 'verify_engineer:verify').text_model === false
+      && /accepted without the result of its output comparison/.test(JSON.stringify(skipped.result.phases))
+      && skipped.result.phases.some((p) => p.verdict === 'resumed' && p.summary.includes('a model that answers no text questions, as the run had it, '
+        + 'whatever Setup says of it now')),
+      `a round that leaves the comparison out is not accepted in the resumed run either, though its Setup takes the model for a text model: ${ended(skipped)}`);
+    // Without the script the run had none either: its Verify is the judge again, and no round with a change to the server passes.
+    const bare = await outputs({});
+    check(bare.result.status === 'blocked' && bare.result.stopped_at === 'Verify' && bare.keys.includes('director:resume')
+      && /the model answers no text questions, and the task names no output_script/.test(JSON.stringify(bare.result.phases)),
+      `a run that found such a model and has no script to compare with passes no round: ${ended(bare)}`);
+    // Nor is the resumed run asked on its own Setup's word, where the run it resumes had the model for a text model.
+    const mind = await outputs({ knew: true, says: false });
+    check(mind.result.status === 'ready_for_review' && mind.keys.includes('director:resume') && given(mind, 'verify_engineer:verify').text_model === true
+      && !mind.result.questions, `a resumed run is not asked for a script on its Setup's word: ${ended(mind)}`);
+    // A feature's claim is a cost only where its spec says so. One that does not say is not read as no: on InferPilot's
+    // client a cost taken for a gain is judged as no slowdown at all.
+    const costOf = (cost, more = {}) => run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), perf_cost: cost, ...more }) });
+    check(stoppedFor(await costOf(null), 'does not record whether the claim is a cost the user stated'),
+      'a feature whose spec does not say whether its claim is a cost stops the resume');
+    const noClaim = await costOf(null, { perf_required: false, perf_claim: '' });
+    check(noClaim.result.status === 'ready_for_review' && /no slower than the baseline/.test(given(noClaim, 'perf_engineer:perf_eval').claim || ''),
+      `one that states no claim has no cost to lose, and goes on: ${ended(noClaim)}`);
     // The director is told what to write down, what to give back, and that neither is put together from other records.
     const read = (...at) => readFileSync(path.join(INFERPILOT, ...at), 'utf8');
     const said = (phase) => phaseSection(read('roles', 'director.md'), phase).replace(/\s+/g, ' ');
@@ -1324,8 +1352,13 @@ const scenarios = [
       && said('report').includes('A run that stopped at Setup writes none of them'), 'the report writes the run\'s state down as it is given');
     check(said('resume').includes('`run_state`, as the report wrote it to `RUN_DIR/run_state.json`, in the same way')
       && said('resume').includes('`null` for a file that is missing or does not parse')
-      && said('resume').includes('Take none of it from another record, and add nothing to it')
+      && said('resume').includes('Take none of it from another record, and add nothing to it: a key the file does not have is left out, never given as `null`')
+      && said('resume').includes('whether the model of an `issue` or a `ci` task answers text questions (`text_model`), as the run\'s Setup said or a Verify '
+        + 'round found since, which goes before what this run\'s Setup says of it')
       && said('resume').includes('the scripts, `output_script` among them'), 'and the resume gives it back as the file holds it');
+    check(said('resume').includes('as the row under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or `no`)')
+      && said('resume').includes('`null` when the spec has no such row, or the row says neither: never `false` for it'),
+      'whether a claim is a cost is the spec\'s own yes or no, and no answer where the spec gives none');
     check(said('resume').includes('a command put together from the rest of the record is not the one Verify was given')
       && said('resume').includes('empty where the record has no such row, never the claim as the rest of the record words it')
       && !said('resume').includes('a record written before it had'), 'a gate or a claim whose row is missing is not put together from the rest of the record');
