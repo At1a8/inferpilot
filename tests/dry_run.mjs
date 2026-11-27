@@ -1689,6 +1689,53 @@ const scenarios = [
     const mind = await outputs({ knew: true, says: false });
     check(mind.result.status === 'ready_for_review' && mind.keys.includes('director:resume') && given(mind, 'verify_engineer:verify').text_model === true
       && !mind.result.questions, `a resumed run is not asked for a script on its Setup's word: ${ended(mind)}`);
+    // The user's word on what the model is (text_model) stands in Setup's place, and on it the run asked for no
+    // output comparison: a resume brings the word the run had, or none where it had none. was, now: the word in
+    // run.json and in this task; says: this run's Setup; knew: what the run knew of the model when it ended.
+    const worded = ({ was, now, says = false, knew = true, mode = 'issue' }, verify = {}, args = {}) => run({ mode, task: 'i', resume_from: 'verify',
+      run_dir: RUN, ...(now === undefined ? {} : { text_model: now }), ...args }, {
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: says }),
+      'director:resume': (ins) => {
+        const { text_model: given_, ...def } = ins.task_def;
+        return { ...DEFAULTS['director:resume'](ins), ...(mode === 'issue' ? { run_state: { text_model: knew } } : {}),
+          task_definition: { ...def, ...(was === undefined ? {} : { text_model: was }) } };
+      },
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, ...verify }) });
+    const gsm8k = { text_model: true, gates: { issue_repro: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' } };
+    for (const [was, now, how] of [[true, true, 'the same word'], [true, 'true', 'the word as a string'], ['True', true, 'the word as run.json wrote it'],
+      [undefined, undefined, 'no word, where the run had none'], [undefined, '', 'an empty field, where the run had none']]) {
+      const same = await worded({ was, now }, gsm8k);
+      check(same.result.status === 'ready_for_review' && given(same, 'verify_engineer:verify').text_model === true,
+        `${how}: the resume goes on, with the model as the run had it: ${ended(same)}`);
+    }
+    for (const [was, now, how] of [[true, undefined, 'none where the run had one'], [undefined, true, 'one where the run had none'],
+      [true, false, 'the opposite word'], [false, 'true', 'the opposite word, as a string']]) {
+      const other = await worded({ was, now }); // a round that says neither what the model is nor what G2 gave
+      check(stoppedFor(other, '(text_model not as its run.json has them)'),
+        `a resume that brings ${how} would judge the fix by another G2 than the run's, and measures nothing: ${ended(other)}`);
+    }
+    const answered = await worded({ was: true }, gsm8k, { answers: { text_model: 'true' } });
+    check(answered.result.status === 'ready_for_review', `the word given as an answer is the caller's word as well: ${ended(answered)}`);
+    // On the word against Setup's, the resumed run holds its Verify as the run did: the verify engineer is told
+    // that the word is not confirmed, and a round that does not say what the server showed is not accepted.
+    const held = await worded({ was: true, now: true });
+    const heldWhy = (held.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+    check(held.result.status === 'blocked' && held.result.stopped_at === 'Verify' && given(held, 'verify_engineer:verify').text_model_unconfirmed === true
+      && /where Setup took it for one that answers none/.test(heldWhy) && /accepted without saying which the server showed \(text_model\)/.test(heldWhy),
+      `the word that stands against Setup's is held to gsm8k in the resumed run too: ${ended(held)}, ${heldWhy}`);
+    const agreedNow = await worded({ was: true, now: true, says: true });
+    check(agreedNow.result.status === 'ready_for_review' && !('text_model_unconfirmed' in given(agreedNow, 'verify_engineer:verify')),
+      `and a word this run's Setup agrees with changes nothing: ${ended(agreedNow)}`);
+    // What a Verify round of the run found of the model went before the word there, and does here.
+    const disproved = await worded({ was: true, now: true, knew: false });
+    check(given(disproved, 'verify_engineer:verify').text_model === false && disproved.result.stopped_at === 'Verify'
+      && disproved.result.phases.some((p) => p.verdict === 'resumed' && p.summary.includes('a model that answers no text questions, as the run had it, '
+        + 'whatever the task says of it now')),
+      `a word the run's Verify disproved does not stand in the resumed run: ${ended(disproved)}`);
+    // The word is a fix's: a feature is neither given it nor held to it.
+    const featured = await worded({ now: true, mode: 'feature' });
+    check(featured.result.status === 'ready_for_review' && !('text_model' in given(featured, 'director:setup')),
+      `a feature's resume is not stopped for a word no feature run records: ${ended(featured)}`);
     // A feature's claim is a cost only where its spec says so. One that does not say is not read as no: on InferPilot's
     // client a cost taken for a gain is judged as no slowdown at all.
     const costOf = (cost, more = {}) => run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
@@ -1710,6 +1757,12 @@ const scenarios = [
       && said('resume').includes('whether the model of an `issue` or a `ci` task answers text questions (`text_model`), as the run\'s Setup said or a Verify '
         + 'round found since, which goes before what this run\'s Setup says of it')
       && said('resume').includes('the scripts, `output_script` among them'), 'and the resume gives it back as the file holds it');
+    check(said('resume').includes('So does a `text_model` that is not the one `run.json` has (`issue`, `ci`: the user\'s word on what the model is; '
+      + 'the opposite word, one where the run had none, none where it had one)')
+      && said('resume').includes('Give it as the file has it, and leave it out where the file has none: what Setup or a Verify round found of the model '
+        + 'is not that word, and is in `run_state` (step 6)')
+      && said('resume').includes('and before the user\'s word, which a Verify round of the run had the last word on as well'),
+      'the director is told that the user\'s word on the model is held against run.json, and that what the run found of the model is not that word');
     check(said('resume').includes('an `issue`\'s pull request that did not pass (`existing_pr_result`), after which the fix on the branch is the run\'s own, '
       + 'the PR phase prepares it as any fix\'s')
       && said('report').includes('A run resumed from Verify (`resume_from: verify`) in which that pull request did not pass ends once it is off the task branch')

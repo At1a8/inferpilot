@@ -377,7 +377,12 @@ on the commit the run's last Verify round ran on. Change nothing.
    has (another configuration, one where the run had none, none where it had one) stops the resume in
    the same way: Setup takes the GPUs that configuration needs where the task gives none, and the
    launch script written for the run's, which a resume does not write again, would start on the GPUs
-   of another. A path, like any other string, is compared as
+   of another. So does a `text_model` that is not the one `run.json` has (`issue`, `ci`: the user's
+   word on what the model is; the opposite word, one where the run had none, none where it had one):
+   on that word the run asked for no output comparison, and Verify is held to gsm8k by it, so a
+   resume that brings another would judge the fix by another G2 than the run's. Give it as the file
+   has it, and leave it out where the file has none: what Setup or a Verify round found of the
+   model is not that word, and is in `run_state` (step 6). A path, like any other string, is compared as
    written, since the run uses it as given: a space at its end is part of a file's name; what the file
    at it holds, Setup held against the run's copy before its smoke (step 1 there). What a
    `workload` holds is compared as it is there, a number also where it is written as its digits:
@@ -441,7 +446,8 @@ on the commit the run's last Verify round ran on. Change nothing.
    accepted; the AMD component its root cause is in (`component_issue`); the part of a ci task it
    does not answer for (`unchecked`); whether the model of an `issue` or a `ci` task answers text
    questions (`text_model`), as the run's Setup said or a Verify round found since, which goes before
-   what this run's Setup says of it. Take none of it from another record, and add nothing to it: a
+   what this run's Setup says of it, and before the user's word, which a Verify round of the run had
+   the last word on as well. Take none of it from another record, and add nothing to it: a
    key the file does not have is left out, never given as `null`. A `ci` run's file that names the
    pull request it verified (`existing_prs`) without that pull request as Classify returned it, with
    the commit it was verified at (`existing_pr`), lost it, and the resume stops: the comment for the

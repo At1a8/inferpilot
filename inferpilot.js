@@ -1130,10 +1130,14 @@ const RESUMED = S({
 // them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
 // in C later. The configuration the report puts an issue's problem on is among them (reported_on): Setup takes
 // the GPUs that configuration needs where the task gives none, and the launch script it wrote for the run's,
-// which a resume does not write again, would be started on the GPUs of another.
-const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness',
-  'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script', 'reported_on'];
-const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
+// which a resume does not write again, would be started on the GPUs of another. So is the user's word on what
+// the model of a fix is (text_model), as a word: the one the run had, or none where it had none. On that word
+// the run asked for no output comparison, and by it Verify is held to gsm8k (wordAgainstSetup): a resume that
+// leaves it out, or brings one the run did not have, would judge the fix by another G2 than the run's. What the
+// run came to know of the model besides, from Setup or a Verify round, goes on from run_state.json (STATE).
+const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'text_model',
+  'harness', 'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script', 'reported_on'];
+const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k === 'text_model' ? MODEL_WORD : k in C ? C[k] : A[k]]));
 // The task and the goal are no part of that: a run resumed from Verify goes on with the run's own, as run.json
 // has them, whatever it was given. The goal names data sets and guard workloads the run's Verify and Performance
 // ran, and the task the issue or PR its triage, reproduction and reply are about; a goal run.json does not have
@@ -1229,10 +1233,12 @@ const listOf = (v) => {
   const l = plain(v);
   return (Array.isArray(l) ? l : l === '' ? [] : [l]).map(String);
 };
+// The user's word on the model counts where Setup's does, for a fix: true, false, or none (modelWord).
 const canon = (v, key = '') => JSON.stringify(key === 'harness' ? harnessLines(v)
   : FLAGS.includes(key) ? on(v)
     : key === 'apply_prs' ? listOf(v)
-      : TEMPLATED.includes(key) && isTemplate(v) ? TEMPLATE : plain(v));
+      : key === 'text_model' ? (BEFORE_A_FIX[MODE] ? modelWord(v) : null)
+        : TEMPLATED.includes(key) && isTemplate(v) ? TEMPLATE : plain(v));
 const REPORT = S({ report_path: str, summary: str }, ['report_path']);
 // A scan's report always says how its daily report went out: empty strings when it did not.
 const SCAN_REPORT = S({ ...REPORT.properties, daily_report_url: str, daily_report_action: str },
@@ -2975,16 +2981,18 @@ async function resumeVerify(claimOf) {
   // that did not pass, a round is accepted only with the score an
   // accuracy problem must restore, and the result names what a human files, posts or runs elsewhere. What the run knew
   // of the model replaces what this run's Setup said of it, as a Verify round's word replaced Setup's in that
-  // run: a fix for a model found to answer no text questions is still judged on its output comparison.
-  const setupSaid = C.text_model;
+  // run: a fix for a model found to answer no text questions is still judged on its output comparison. It
+  // replaces the user's word in the same way, which is the run's own word (MEASURED): a Verify round of the
+  // run that launched the model had the last word there too.
+  const saidNow = C.text_model;
   Object.assign(C, pick(state, Object.keys(STATE)));
   for (const k of ['component_issue', 'unchecked', 'existing_pr_result']) if (C[k]) R[k] = C[k];
   const had = [C.existing_prs && `${C.existing_prs.join(', ')}, the pull request it verified in place of a fix of its own`,
     C.existing_pr_result && `${C.existing_pr_result.prs}, the pull request it verified first, which did not pass: the fix is its own`,
     C.accuracy_claim && 'the score its fix must restore', C.component_issue && `its root cause in ${C.component_issue.component}`,
     C.unchecked && 'the part of the task it does not answer for',
-    BEFORE_A_FIX[MODE] && C.text_model !== setupSaid && `a model that ${C.text_model ? 'answers' : 'answers no'} text questions, as the run `
-      + 'had it, whatever Setup says of it now'].filter(Boolean);
+    BEFORE_A_FIX[MODE] && C.text_model !== saidNow && `a model that ${C.text_model ? 'answers' : 'answers no'} text questions, as the run `
+      + `had it, whatever ${MODEL_WORD === null ? 'Setup' : 'the task'} says of it now`].filter(Boolean);
   // The task and the goal are the run's own (asItsRun, above), and the result names them as well: the task
   // definition it returns is the one the run worked on.
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: `
