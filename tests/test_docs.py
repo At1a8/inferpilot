@@ -1259,11 +1259,15 @@ class OutputComparisonTest(unittest.TestCase):
             for stale in ("What its outputs are worth is the reproduction's or the failing test's to show", "G2 says that gsm8k cannot be put to it",
                           "nor one for a model that answers no text questions"):
                 self.assertNotIn(stale, self.flat(path), "%s still leaves such a fix unmeasured" % path)
-        # The playbook said that the fix for such a model gives no table: it gives what the comparison showed.
-        self.assertNotIn("one for a model that answers no text questions says that instead", self.flat("knowledge/pr_playbook.md"),
+        # The playbook said that the fix for such a model gives no table: it gives what the comparison showed. Read in
+        # the note on accuracy, where the clause stood: the note on speed has a sentence much like it.
+        accuracy = [i for i in items("knowledge/pr_playbook.md") if i.startswith("- **Accuracy Tests:**")]
+        self.assertEqual(len(accuracy), 1, "knowledge/pr_playbook.md has no note on accuracy tests")
+        self.assertNotIn("one for a model that answers no text questions says that instead", accuracy[0],
                          "knowledge/pr_playbook.md still has such a fix say that it changes nothing the server runs")
-        self.assertIn("A fix to tests, documentation or CI files alone says that it changes no code the server runs, and gives no table.",
-                      self.flat("knowledge/pr_playbook.md"))
+        self.assertIn("A fix to tests, documentation or CI files alone says that it changes no code the server runs, and gives no table. "
+                      "The fix of an accuracy problem in CI", accuracy[0])
+        self.assertIn("for a model that answers no text questions, what the task's own test compared in their place", accuracy[0])
 
     def test_the_task_definition_and_both_readmes_list_the_script(self):
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
