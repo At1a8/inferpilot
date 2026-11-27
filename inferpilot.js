@@ -715,7 +715,7 @@ async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAg
     const limit = minutes(timeoutFor(role, sub));
     const r = await call(role, sub, ins(limit, earlier), again && schemaAgain ? schemaAgain : schema,
       `${label}${again ? '+time' : ''}`, opts);
-    const needs = limit && r ? Math.ceil(Number(needsOf(r)) || 0) : 0;
+    const needs = limit && r ? Math.ceil(Number(await needsOf(r)) || 0) : 0;
     if (!needs) return { r, earlier };
     if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
     // past it, the run lock's idle window (MAX_CALL_MS) no longer covers the call: a human gives a timeout
@@ -1668,6 +1668,13 @@ async function implementAll(wps, existing, over) {
   return { ok: true };
 }
 
+// What the verify engineer says after a round that did not say what it left running (PHASE=gpus, round
+// "after <n>"): the pinned GPUs still in use, and what of the round's launches it could not stop. A process
+// that holds no GPU (a driver, a suite) shows in the second alone, so the answer always has it.
+const ROUND_CLEANUP = S({ in_use: str, left_running: str }, ['in_use', 'left_running']);
+// The pinned GPUs an answer names as in use ("GPU 1: VRAM 12%, GPU 40%, pids 777"), by their numbers.
+const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\bGPU\s+(\d+)\s*:/g)].map((m) => m[1]))];
+
 // Verify against the same-pattern baseline; a failure goes to the investigator,
 // whose verdict decides: fix work packages (implemented, then re-verified), a
 // baseline bug (recorded; the gate is re-judged on what remains) or a stop.
@@ -1685,14 +1692,47 @@ async function verifyLoop(extraGates, existing) {
     } else if (!gpus) {
       log(`  [inferpilot] the pinned GPUs were not checked before Verify round ${round}: the check returned nothing`);
     }
+    // An answer that does not say whether the round left anything running (left_running) is not taken for one
+    // that cleaned up. Before anything works on these GPUs or in this worktree again, the verify engineer stops
+    // what the run left there and checks the GPUs, as before every round (PHASE=gpus, round "after <n>"), and
+    // says what it could not stop. Nothing is confirmed where that gives no answer, where it could not stop
+    // something, or where a GPU that was idle before the round is in use after it (one the round still holds,
+    // as the round itself is asked to judge it; compared by the GPUs' numbers, and held where they cannot be
+    // read). The reason is then in `unconfirmed`: the round is not run again, nothing is investigated, repaired
+    // or rolled back, and no lead is confirmed there (leftRunning). Asked once for an answer.
+    let unconfirmed = '';
+    const asked = new Set();
+    const stopped = async (answer) => {
+      if (typeof answer.left_running === 'string' || asked.has(answer)) return !unconfirmed;
+      const label = `verify_engineer:gpus#after${round}${asked.size ? '+time' : ''}`;
+      asked.add(answer);
+      const after = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), ROUND_CLEANUP, label);
+      const left = after ? String(after.left_running || '').trim() : '';
+      const held = after ? String(after.in_use || '').trim() : '';
+      const fresh = gpusNamed(held).filter((g) => !gpusNamed(inUse).includes(g));
+      const unsaid = `Verify round ${round} did not say whether what it started has stopped (left_running), and `;
+      if (!after) unconfirmed = `${unsaid}the check after it gave no answer`;
+      else if (left) unconfirmed = `${unsaid}the check after it could not stop ${left}`;
+      else if (held && !gpusNamed(held).length) unconfirmed = `${unsaid}the GPUs in use after it cannot be read from the check (${held})`;
+      else if (fresh.length) unconfirmed = `${unsaid}GPU ${fresh.join(', ')}, not in use before it, is in use after it (${held})`;
+      else if (held) note('Verify', 'warning', `another job uses a pinned GPU after round ${round}, as before it: ${held}`);
+      if (unconfirmed) {
+        leftRunning.push(unconfirmed);
+        ATTENTION.push({ call: `verify_engineer#${round}`, issue: `${unconfirmed}: stop what it left before reusing its GPUs` });
+      }
+      return !unconfirmed;
+    };
     // A round with more time runs whole again: its suites are judged together.
     const t = await callWithTime({
       role: 'verify_engineer', sub: 'verify', grantKey: 'verify_engineer', what: 'the round', label: `verify_engineer#${round}`,
       schema: VERIFY, opts: ONE_SESSION, ins: (limit) => inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
       // A round that could not stop what it started is not asked again with more time next to it: its answer
-      // goes to the check below as it is.
-      needs: (r) => (!String(r.left_running || '').trim() && r.all_pass !== true && !(r.failures || []).some((f) => f.blocking !== false)
-        ? r.needs_min : 0),
+      // goes to the check below as it is. Nor is one that does not say: asked again, the round starts at once
+      // on these GPUs, so what it left is stopped and checked first, and the round is held where that fails.
+      needs: async (r) => {
+        if (String(r.left_running || '').trim() || r.all_pass === true || (r.failures || []).some((f) => f.blocking !== false)) return 0;
+        return Number(r.needs_min) > 0 && (await stopped(r)) ? r.needs_min : 0;
+      },
     });
     if (t.needs) {
       note('Verify', 'fail', `the round needs ${t.needs} min; its limit is ${t.limit} min (${t.short})`);
@@ -1723,29 +1763,17 @@ async function verifyLoop(extraGates, existing) {
         return { ok: false, reason: why };
       }
     }
-    // A round that is not accepted and does not say whether it left anything running is not taken for one that
-    // cleaned up. Before anything works on these GPUs again, the verify engineer stops what the run left there
-    // and checks them, as before every round (PHASE=gpus). Where that gives no answer either, or a GPU that was
-    // idle before the round is in use after it (one the round still holds, as the round itself is asked to judge
-    // it), nothing is investigated, repaired or rolled back, and no lead is confirmed there (leftRunning).
-    // Asked once, by whatever refuses the round: its failures, or a pass that the checks below do not accept.
-    let unconfirmed = '';
-    let said = typeof v.left_running === 'string';
-    const refused = async () => {
-      if (said) return;
-      said = true;
-      const freed = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), GPU_CHECK, `verify_engineer:gpus#after${round}`);
-      const held = freed ? String(freed.in_use || '').trim() : '';
-      const unsaid = `Verify round ${round} did not say whether what it started has stopped (left_running), and `;
-      if (!freed) unconfirmed = `${unsaid}the GPUs could not be checked`;
-      else if (held && !inUse) unconfirmed = `${unsaid}a GPU not known to be in use before it is in use after it (${held})`;
-      else if (held) note('Verify', 'warning', `another job uses a pinned GPU after round ${round}, as before it: ${held}`);
-      if (unconfirmed) {
-        leftRunning.push(unconfirmed);
-        ATTENTION.push({ call: `verify_engineer#${round}`, issue: `${unconfirmed}: stop what it left before reusing its GPUs` });
-      }
-    };
+    // A round that is not accepted is asked what it left (stopped, above), by whatever refuses it: its failures,
+    // or a pass that the checks below do not accept.
+    const refused = () => stopped(v);
     if (!passedRound) await refused();
+    // One that asked for more time and was not run again, because what it left is not known to have stopped:
+    // it has no failure to investigate, and a human looks at the GPUs first.
+    if (unconfirmed && !passedRound && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false)) {
+      const why = `the round needs ${v.needs_min} min more and is not run again: ${unconfirmed}`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     // A failure that is someone else's pull request's (existing).
     const theirs = (reason) => ({ ok: false, theirs: true, reason });
     // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
@@ -1877,7 +1905,9 @@ async function verifyLoop(extraGates, existing) {
     }
     if (inv.verdict === 'fix_needed' && Array.isArray(inv.work_packages) && inv.work_packages.length) {
       const fix = await implementAll(inv.work_packages, undefined, existing);
-      if (!fix.ok) return fix.theirs ? theirs(fix.reason) : { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
+      // A repair package whose gate shows a defect of the pull request failed in Implement: the fall-back is
+      // recorded there, and a stop named for Implement holds there.
+      if (!fix.ok) return fix.theirs ? { ...theirs(fix.reason), at: 'Implement' } : { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };
       const afterFix = stopAt('Implement');
       if (afterFix) return afterFix;
       const ks = await kernelStage(); // hand-offs a fix raised

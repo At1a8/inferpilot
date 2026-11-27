@@ -497,9 +497,11 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("const fix = await implementAll(pr.wps, undefined, existing);\n"
                  "    if (!fix.ok) return fix.theirs ? failed({ theirs: true, reason: fix.reason }, 'Implement') : finish('blocked', 'Implement');",
                  "the unit gate of a PR-phase addition forgets the pull request"),
-                ("const fix = await implementAll(inv.work_packages, undefined, existing);\n"
-                 "      if (!fix.ok) return fix.theirs ? theirs(fix.reason) : { ok: false, reason: `fix ${fix.failed_wp || ''} failed: ${fix.reason}` };",
-                 "the unit gate of a repair to the additions forgets the pull request"),
+                ("const fix = await implementAll(inv.work_packages, undefined, existing);\n", "the unit gate of a repair to the additions "
+                                                                                             "forgets the pull request"),
+                # such a failure was found in Implement: the fall-back is recorded there, and a stop named for Implement holds there
+                ("      if (!fix.ok) return fix.theirs ? { ...theirs(fix.reason), at: 'Implement' } : { ok: false, reason: `fix ${fix.failed_wp || ''} "
+                 "failed: ${fix.reason}` };", "a defect of the pull request that a repair's gate shows is recorded as a Verify failure"),
                 # the pull request stays on the branch until its comment is drafted
                 ("    if (!passed && theirs) {\n", "the pull request's package is rolled back before the comment for it reads the branch"),
                 ("return existing && inv.in_additions === true ? { ok: false, reason } : theirs(reason);",
@@ -536,9 +538,29 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("      if (!passedRound) {\n        const why = `the round could not stop what it started (${leftOn}): nothing is investigated, "
                  "repaired or rolled back next to it`;", "an investigation or a rollback starts next to what a failed round could not stop"),
                 # a failed round that does not say whether it cleaned up: the GPUs are checked before anything else works on them
-                ("    let said = typeof v.left_running === 'string';\n    const refused = async () => {\n      if (said) return;\n      said = true;\n"
-                 "      const freed = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), GPU_CHECK, `verify_engineer:gpus#after${round}`);",
+                ("      if (typeof answer.left_running === 'string' || asked.has(answer)) return !unconfirmed;\n"
+                 "      const label = `verify_engineer:gpus#after${round}${asked.size ? '+time' : ''}`;\n      asked.add(answer);\n"
+                 "      const after = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), ROUND_CLEANUP, label);",
                  "a round that does not say whether it cleaned up is taken for one that did"),
+                ("    const refused = () => stopped(v);", "a round that is refused is not asked what it left"),
+                # the check says what it could not stop, in every answer: a process that holds no GPU shows nowhere else
+                ("const ROUND_CLEANUP = S({ in_use: str, left_running: str }, ['in_use', 'left_running']);",
+                 "idle GPUs are taken for a round that stopped everything"),
+                ("      else if (left) unconfirmed = `${unsaid}the check after it could not stop ${left}`;",
+                 "what the check could not stop is investigated next to"),
+                # the GPUs are compared by their numbers: another job on one of them excuses that one alone
+                ("const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\\bGPU\\s+(\\d+)\\s*:/g)].map((m) => m[1]))];",
+                 "the GPUs an answer names are not read by their numbers"),
+                ("      const fresh = gpusNamed(held).filter((g) => !gpusNamed(inUse).includes(g));",
+                 "a job on one GPU before the round excuses a server the round left on another"),
+                ("      else if (held && !gpusNamed(held).length) unconfirmed = `${unsaid}the GPUs in use after it cannot be read from the check (${held})`;",
+                 "an occupancy the run cannot read is taken for none"),
+                # a round that asks for more time is run again at once: one that does not say what it left is checked first
+                ("    const needs = limit && r ? Math.ceil(Number(await needsOf(r)) || 0) : 0;", "a caller cannot check anything before a round is run again"),
+                ("        return Number(r.needs_min) > 0 && (await stopped(r)) ? r.needs_min : 0;",
+                 "a round that does not say what it left is run again next to it"),
+                ("    if (unconfirmed && !passedRound && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false)) {",
+                 "a round held for what it left is investigated as a failure"),
                 ("    if (!passedRound) await refused();", "a failed round is not asked whether it cleaned up"),
                 # a pass that is refused is asked the same: no script for a model with no text answers, no comparison, no score
                 ("    if (C.server_code_changed && outputsLacking()) {\n      await refused();", "a refused pass is taken for a round that cleaned up"),
@@ -546,12 +568,12 @@ class ExistingFixFailsTest(unittest.TestCase):
                  "a pass without its output comparison is taken for a round that cleaned up"),
                 ("    if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {\n"
                  "      await refused();", "a pass without the score is taken for a round that cleaned up"),
-                ("      else if (held && !inUse) unconfirmed = `${unsaid}a GPU not known to be in use before it is in use after it (${held})`;",
+                ("      else if (fresh.length) unconfirmed = `${unsaid}GPU ${fresh.join(', ')}, not in use before it, is in use after it (${held})`;",
                  "a GPU the round still holds is investigated next to"),
                 ("        leftRunning.push(unconfirmed);", "the closing phases launch on GPUs the run could not confirm free"),
                 ("    if (unconfirmed) {\n      note('Verify', 'fail', `${unconfirmed}: nothing is investigated or repaired next to it`);",
                  "an investigation starts where the round may still hold the GPUs"),
-                ("needs: (r) => (!String(r.left_running || '').trim() && r.all_pass !== true && !(r.failures || []).some((f) => f.blocking !== false)",
+                ("        if (String(r.left_running || '').trim() || r.all_pass === true || (r.failures || []).some((f) => f.blocking !== false)) return 0;",
                  "a round that could not stop what it started is run again with more time next to it"),
                 ("const live = [...TIMED_OUT_CALLS].map((c) => `${c} timed out and may still be running`).concat(leftRunning);\n  if (live.length) {",
                  "a rollback starts next to a call that timed out, or to what a round left running"),
@@ -666,12 +688,21 @@ class ExistingFixFailsTest(unittest.TestCase):
                                              "without the result the fix is accepted on), it calls PHASE=gpus once more before anything else "
                                              "works on these GPUs (`round: after <n>`)"),
                 ("roles/verify_engineer.md", "A GPU idle before the round and in use after that stop counts as one the round still holds"),
-                ("roles/verify_engineer.md", "With `round: after <n>` the call follows round `<n>`, which was not accepted and did not say whether "
-                                             "it left anything running"),
+                ("roles/verify_engineer.md", "With `round: after <n>` the call follows round `<n>`, which did not say whether it left anything "
+                                             "running, and was not accepted or asked to be run again with more time"),
+                ("roles/verify_engineer.md", "Such a call returns one field more, in every answer: `left_running`, what you could not stop or could "
+                                             "not find the log of, the empty string when all of it stopped"),
+                ("roles/verify_engineer.md", "A driver or a suite that holds no GPU shows nowhere else"),
+                ("roles/verify_engineer.md", "InferPilot compares the numbers, and takes a GPU that was idle before the round for one the round "
+                                             "still holds"),
+                ("roles/verify_engineer.md", 'Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | \'\'", "left_running": ""}`'),
+                ("roles/verify_engineer.md", "A round that asks for more time without the field is checked the same way before it is run again, "
+                                             "and is not run again where the check could not stop something"),
                 ("roles/investigator.md", "Say `in_additions` with whatever verdict you return for a failure that is the additions'"),
                 ("knowledge/issue_triage.md", "The pull request stays on the branch until the comment for it is drafted, which reads the branch"),
-                ("knowledge/issue_triage.md", "after a Verify round that is not accepted and does not say, the GPUs are checked first, and nothing "
-                                              "is investigated where they cannot be, or where one that was idle before the round is in use"),
+                ("knowledge/issue_triage.md", "after a Verify round that is not accepted and does not say, the verify engineer stops what is left "
+                                              "and checks the GPUs first, and nothing is investigated where it could not stop something, or where "
+                                              "a GPU that was idle before the round is in use"),
                 ("knowledge/issue_triage.md", "A measurement that fails after the pull request passed one is not the pull request's to answer for"),
                 ("roles/verify_engineer.md", "`left_running` names one you cannot stop, and a GPU the round still holds, and is the empty string "
                                              "when everything stopped: say one or the other in every answer"),

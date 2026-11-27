@@ -61,6 +61,10 @@ export const DEFAULTS = {
 // it left nothing. The default is a gate that cleaned up; a scenario that writes its own answer says so itself.
 const unitResult = DEFAULTS['test_engineer:unit'];
 DEFAULTS['test_engineer:unit'] = (ins, n) => ({ ...unitResult(ins, n), left_running: '' });
+// The check after a Verify round that did not say what it left running says what it could not stop, too.
+const gpusBeforeARound = DEFAULTS['verify_engineer:gpus'];
+DEFAULTS['verify_engineer:gpus'] = (ins, n) => (String(ins.round).startsWith('after')
+  ? { in_use: '', left_running: '' } : gpusBeforeARound(ins, n));
 
 // The implementer hands WP1's kernel over (reason FAIL makes the fake back end throw).
 export const withKernelHandoff = (reason) => ({

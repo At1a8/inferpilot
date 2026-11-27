@@ -2483,7 +2483,7 @@ const scenarios = [
         'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after') ? null : { in_use: '' }) });
       check(unknown.result.status === 'blocked' && unknown.result.stopped_at === 'Verify' && !comment(unknown)
         && !unknown.keys.includes('investigator:investigate') && !unknown.calls.some((c) => c.key === 'implementer:rollback')
-        && unknown.result.attention.some((a) => /did not say whether what it started has stopped \(left_running\), and the GPUs could not be checked/.test(a.issue)),
+        && unknown.result.attention.some((a) => /did not say whether what it started has stopped \(left_running\), and the check after it gave no answer/.test(a.issue)),
         `where the GPUs cannot be checked after such a round of ${whose}, nothing is investigated or rolled back: ${ended(unknown)}`);
     }
     // What is not known to have stopped is the whole run's to know: no lead is confirmed on these GPUs either.
@@ -2515,17 +2515,56 @@ const scenarios = [
     // still holds, and nothing is investigated next to it; one another job used before the round too is warned
     // of, as before every round.
     const heldAfter = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => silentFail(),
-      'verify_engineer:gpus': (ins) => ({ in_use: String(ins.round).startsWith('after') ? 'GPU 3: VRAM 71%, GPU 0%, pids 9191' : '' }) });
+      'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after')
+        ? { in_use: 'GPU 3: VRAM 71%, GPU 0%, pids 9191', left_running: '' } : { in_use: '' }) });
     check(heldAfter.result.status === 'blocked' && heldAfter.result.stopped_at === 'Verify' && !comment(heldAfter)
       && !heldAfter.keys.includes('investigator:investigate') && !heldAfter.calls.some((c) => c.key === 'implementer:rollback')
-      && heldAfter.result.attention.some((a) => /a GPU not known to be in use before it is in use after it \(GPU 3: VRAM 71%/.test(a.issue)),
+      && heldAfter.result.attention.some((a) => /GPU 3, not in use before it, is in use after it \(GPU 3: VRAM 71%/.test(a.issue)),
       `a GPU idle before such a round and in use after it is one the round still holds: ${ended(heldAfter)}`);
+    // The GPUs are compared by their numbers. Another job on one of them before the round excuses that one, and no
+    // other: a server the round left on a GPU that was idle is still found. What the check cannot name excuses
+    // nothing, and neither does an idle GPU: a driver or a suite that holds none is what the check could not stop,
+    // which it says in every answer.
+    const busyBefore = 'GPU 0: VRAM 12%, GPU 40%, pids 777';
+    for (const [what, after, said] of [
+      ['a GPU that was idle before it, next to one another job used', { in_use: `${busyBefore}; GPU 1: VRAM 71%, GPU 0%, pids 9191`, left_running: '' },
+        /GPU 1, not in use before it, is in use after it \(GPU 0: VRAM 12%, GPU 40%, pids 777; GPU 1: VRAM 71%/],
+      ['GPUs the check does not name', { in_use: 'two of the cards are busy', left_running: '' },
+        /the GPUs in use after it cannot be read from the check \(two of the cards are busy\)/],
+      ['a process that holds no GPU', { in_use: busyBefore, left_running: 'the G2 client driver, pid 5151: its log is missing' },
+        /the check after it could not stop the G2 client driver, pid 5151: its log is missing/],
+      ['no word on what the check could not stop', { in_use: '' }, /the check after it gave no answer/]]) {
+      const kept = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => silentFail(),
+        'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after') ? after : { in_use: busyBefore }) });
+      check(kept.result.status === 'blocked' && kept.result.stopped_at === 'Verify' && !comment(kept)
+        && !kept.keys.includes('investigator:investigate') && !kept.calls.some((c) => c.key === 'implementer:rollback')
+        && kept.result.attention.some((a) => said.test(a.issue)),
+        `after such a round, ${what} holds the run: ${ended(kept)}, ${JSON.stringify(kept.result.attention.map((a) => a.issue.slice(0, 160)))}`);
+    }
     const sharedGpu = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': (ins, n) => (n === 1 ? silentFail() : pass()),
-      'verify_engineer:gpus': () => ({ in_use: 'GPU 3: VRAM 12%, GPU 40%, pids 777' }) });
+      'verify_engineer:gpus': () => ({ in_use: 'GPU 3: VRAM 12%, GPU 40%, pids 777', left_running: '' }) });
     check(sharedGpu.result.status === 'ready_for_review' && fellBack(sharedGpu, 'Verify')
       && sharedGpu.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'warning'
         && /another job uses a pinned GPU after round 0, as before it: GPU 3: VRAM 12%/.test(p.summary)),
       `a GPU another job used before the round too is warned of, and the run goes on: ${ended(sharedGpu)}`);
+    // A round that asks for more time is run again at once, on the same GPUs. One that does not say whether it
+    // left anything running is asked first, by the same check, and is not run again where that confirms nothing.
+    const wantsTime = (more) => (ins, n) => (n === 1 ? { ...pass(), all_pass: false, failures: [], needs_min: 200, ...more } : pass());
+    const verifyCalls = (r) => r.calls.filter((c) => c.key.startsWith('verify_engineer:')).map((c) => `${c.key.split(':')[1]} ${c.ins.round}`);
+    const unsaidTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': wantsTime({}) });
+    check(unsaidTime.result.status === 'ready_for_review' && eqList(verifyCalls(unsaidTime).slice(0, 4), ['gpus 0', 'verify 0', 'gpus after 0', 'verify 0']),
+      `a round that asks for more time without saying what it left is checked before it runs again: ${ended(unsaidTime)}, ${verifyCalls(unsaidTime)}`);
+    const saidTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': wantsTime({ left_running: '' }) });
+    check(saidTime.result.status === 'ready_for_review' && eqList(verifyCalls(saidTime).slice(0, 3), ['gpus 0', 'verify 0', 'verify 0']),
+      `one that says it left nothing runs again at once: ${ended(saidTime)}, ${verifyCalls(saidTime)}`);
+    const heldTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': wantsTime({}),
+      'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after')
+        ? { in_use: '', left_running: 'the fix arm\'s server, pid 6262' } : { in_use: '' }) });
+    const heldWhy = (heldTime.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+    check(heldTime.result.status === 'blocked' && heldTime.result.stopped_at === 'Verify' && !comment(heldTime)
+      && eqList(verifyCalls(heldTime), ['gpus 0', 'verify 0', 'gpus after 0']) && !heldTime.keys.includes('investigator:investigate')
+      && /the round needs 200 min more and is not run again: Verify round 0 did not say whether what it started has stopped \(left_running\), and the check after it could not stop the fix arm's server, pid 6262/.test(heldWhy),
+      `and is not run again next to what the check could not stop: ${ended(heldTime)}, ${verifyCalls(heldTime)}, ${heldWhy}`);
     // A round that asks for more time and could not stop what it started is not run again next to it.
     let rounds = 0;
     const moreTime = await run({ mode: 'issue', task: 'i' }, { ...existing, 'verify_engineer:verify': () => {
@@ -2769,6 +2808,32 @@ const scenarios = [
         `a failure of the addition itself (failed_in ${JSON.stringify(failedIn)}) is repaired in the next round, and the pull request stays verified: ${
           packages(ownGate)}`);
     }
+    // So is the gate of a repair that an investigation plans for the additions. A defect of the pull request that
+    // it shows failed in Implement: the fall-back is recorded there, and a stop the operator moved to Implement
+    // during the repair holds there, with no diagnosis for a fix of the run's own.
+    let investigated = false;
+    const repairShows = { ...existing, ...asked,
+      'verify_engineer:verify': (ins, n) => (n === 2 ? failing('G0') : pass()),
+      'investigator:investigate': () => {
+        investigated = true;
+        return { verdict: 'fix_needed', in_additions: true, work_packages: [WP('FIX1')], summary: 'the added test leaves a server flag set' };
+      },
+      'test_engineer:unit': (ins, n) => (ins.work_package.id === 'FIX1'
+        ? { wp: 'FIX1', unit_pass: false, feature_off_unchanged: true, fails_without_change: 'parent', left_running: '', incomplete: '', failed_in: 'pr',
+          failure_summary: 'with the flag cleared, the PR\'s own cache test fails' }
+        : DEFAULTS['test_engineer:unit'](ins, n)) };
+    const fromRepair = await run({ mode: 'issue', task: 'i' }, repairShows);
+    check(fromRepair.result.status === 'ready_for_review' && fellBack(fromRepair, 'Implement')
+      && fromRepair.result.existing_pr_result.failed_at === 'Implement' && /the PR's own cache test fails/.test(fromRepair.result.existing_pr_result.why)
+      && eqList(packages(fromRepair), ['WP1:apply_pr', 'R1:test', 'FIX1:framework', 'WP1:framework']),
+      `a defect of the pull request that a repair's gate shows is recorded where it failed, in Implement: ${ended(fromRepair)}, ${
+        JSON.stringify(fromRepair.result.existing_pr_result && fromRepair.result.existing_pr_result.failed_at)}, ${packages(fromRepair)}`);
+    investigated = false;
+    const stopMoved = await run({ mode: 'issue', task: 'i' }, repairShows, { control: () => (investigated ? { stop_after: 'Implement' } : {}) });
+    check(stopMoved.result.status === 'stopped' && stopMoved.result.stopped_at === 'Implement' && !!comment(stopMoved)
+      && !stopMoved.keys.includes('investigator:diagnose') && eqList(packages(stopMoved), ['WP1:apply_pr', 'R1:test', 'FIX1:framework']),
+      `a stop moved to Implement during that repair holds there, with the comment and no fix of the run's own: ${ended(stopMoved)}, ${
+        packages(stopMoved)}`);
     // The reproduction fails again after an addition, as on the base, and the investigator places that in the
     // addition: the pull request is not blamed, and with no repair to make a human decides.
     const reintroduced = await run({ mode: 'issue', task: 'i' }, { ...existing, ...asked,

@@ -18,10 +18,18 @@ round goes on. Start nothing.
 
 Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
 
-With `round: after <n>` the call follows round `<n>`, which was not accepted and did not say whether
-it left anything running: what that round started is this run's to stop too, and a GPU still in use
-after the stop is named in `in_use` as above. InferPilot takes one that was idle before the round
-for one the round still holds, and starts no investigation, repair or rollback next to it.
+With `round: after <n>` the call follows round `<n>`, which did not say whether it left anything
+running, and was not accepted or asked to be run again with more time: what that round started is
+this run's to stop too. Stop each of its launches by its log (`python3
+<inferpilot_dir>/scripts/stop_launch.py <log>...`, until it exits 0), then check the GPUs as above.
+Such a call returns one field more, in every answer: `left_running`, what you could not stop or
+could not find the log of, the empty string when all of it stopped. A driver or a suite that holds
+no GPU shows nowhere else. Name each GPU in `in_use` as `GPU <HIP number>:`, as before the round:
+InferPilot compares the numbers, and takes a GPU that was idle before the round for one the round
+still holds. Next to that, to what `left_running` names, or to GPUs it cannot read from `in_use`,
+it starts no investigation, repair or rollback, and does not run the round again.
+
+Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "left_running": ""}`
 
 ## PHASE=verify
 
@@ -53,7 +61,9 @@ clock can start before your session does.
    it does not accept leaves the field out (one that failed, or a pass it refuses: one without the
    result the fix is accepted on), it calls PHASE=gpus once more before anything else works on these
    GPUs (`round: after <n>`): stop what the run left there and check them, as before a round. A GPU
-   idle before the round and in use after that stop counts as one the round still holds.
+   idle before the round and in use after that stop counts as one the round still holds. A round
+   that asks for more time without the field is checked the same way before it is run again, and
+   is not run again where the check could not stop something.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
