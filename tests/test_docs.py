@@ -300,7 +300,7 @@ class CiExistingFixTest(unittest.TestCase):
                  "Classify is not told which pull requests the task names, with their repositories, to look them up"),
                 ("out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };", "a field the task left blank wins over the answer, and the run asks again"),
                 ("const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))\n"
-                 "      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
                  "a scan offers a ci task with a pull request to apply, as a field or as an answer a model wrote"),
                 # an issue's existing fix: one pull request, and the roles after it know which
                 ("const prs = listed[0] || '';\n    if (prs) C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several")):
@@ -1290,12 +1290,29 @@ class ModelWordTest(unittest.TestCase):
         self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the user's word on the model")
         for said, why in (
                 # only what the caller gave counts, as a field or as an answer: not what the Intake read into a request
-                ("const MODEL_WORD = modelWord(RAW.text_model) === null ? modelWord(asObject(RAW.answers).text_model) : modelWord(RAW.text_model);",
-                 "the word is read from somewhere else than the caller's arguments"),
-                ("const modelWord = (v) => (['true', 'false'].includes(String(v).trim().toLowerCase()) ? on(String(v).trim()) : null);",
-                 "a value that is neither true nor false is read as one of them"),
-                ("if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && !['true', 'false'].includes(asked(a.text_model))) {",
+                ("const MODEL_WORD = callersModelWord(RAW);", "the word is read from somewhere else than the caller's arguments"),
+                ("const callersModelWord = (raw) => (modelWord(raw.text_model) === null ? modelWord(asObject(raw.answers).text_model)\n"
+                 "  : modelWord(raw.text_model));", "the word is read from somewhere else than the caller's field or answer"),
+                # a word is a boolean or a string: a list or an object that reads "true" as a string is not one
+                ("  const said = typeof v === 'boolean' || typeof v === 'string' ? String(v).trim().toLowerCase() : '';\n"
+                 "  return said === 'true' ? true : said === 'false' ? false : null;",
+                 "a value that is neither true nor false, or no word at all, is read as one of them"),
+                ("if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && modelWord(a.text_model) === null) {",
                  "a value that is neither is not asked about, and Setup's word stands without a word of it"),
+                # only the caller gives the word: not the Intake's definition, not a task a scan offers
+                ("pick(res.task_def, TASK_KEYS.filter((k) => k !== 'text_model'))", "the Intake's reading of the model goes into the run's record"),
+                (".filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "a scan says what a model is in the user's place"),
+                # nor does the Intake ask against it
+                ("    .filter((q) => !(callersModelWord(raw) === true && q && q.field === 'output_script'));",
+                 "an Intake that takes the model for the wrong kind stops the run before Setup hears the user's word"),
+                # on the word alone no comparison was asked for: the round is accepted only with gsm8k's result
+                ("  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;", "the run does not know that the word stands against Setup's"),
+                ("    const scored = /^(pass|fail)\\b/i.test(compared)\n"
+                 "      || (/\\bno baseline\\b/i.test(compared) && /\\d/.test(compared) && !/^(not[ _-]?run|skip)/i.test(compared));",
+                 "a G2 that did not run counts as gsm8k's result"),
+                ("    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))\n"
+                 "      && !scored) {", "a fix is accepted on the user's word with neither gsm8k nor a comparison behind it"),
                 ("R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];", "the question for the script does not offer the correction"),
                 ("if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());",
                  "a run whose stop before the fix was lifted is not offered the correction"),
@@ -1317,6 +1334,18 @@ class ModelWordTest(unittest.TestCase):
                 ("knowledge/validation_doctrine.md", "the user's word (`text_model`) stands in Setup's place, either way"),
                 ("roles/intake.md", "`text_model` is the user's word on what the model is"),
                 ("roles/intake.md", "Never set it yourself, from the request's wording or the model's name"),
+                ("roles/intake.md", "InferPilot reads it only where the caller gave it, and takes none from the definition you return"),
+                ("roles/intake.md", "With `text_model: true` in `given` or `answers`, ask for no `output_script`, whatever you make of the "
+                                    "model's files"),
+                ("roles/verify_engineer.md", "InferPilot accepts a round there only with gsm8k's result in `gates`, a `pass` or a `fail` with "
+                                             "both scores, or the fix's score with `no baseline`"),
+                ("roles/verify_engineer.md", "Never leave G2 out or report it `not run` for a fix that changes code the server runs"),
+                ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
+                                                 "only with gsm8k's result on the model"),
+                ("templates/task_definition.md", "The word is `true` or `false`, as a boolean or as that word; anything else is asked about"),
+                ("templates/task_definition.md", "what the Intake reads into a request, or a scan writes for a task it offers, is not taken for it"),
+                ("knowledge/validation_doctrine.md", "a round on the user's word that the model answers text questions is accepted only with "
+                                                     "gsm8k's result on it"),
                 ("roles/director.md", "Say what you find also where the task gives `text_model`"),
                 ("README.md", "`issue` and `ci`: your word on what the model is, where Setup's is wrong"),
                 ("README.zh-CN.md", "Setup 把模型判断错了时，由你来说它是哪一类")):

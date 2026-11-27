@@ -99,7 +99,11 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   puts gsm8k to the model and asks for no script. `false` says the opposite of a model Setup took
   for one that answers text questions. Your word stands in Setup's place until a server is up: the
   verify engineer, who launches the model, has the last word either way, and a fix on a model
-  that answers no text questions still passes nothing without its comparison.
+  that answers no text questions still passes nothing without its comparison. Nor does a fix pass
+  on your word alone: where it stands against Setup's, a round is accepted only with gsm8k's
+  result on the model, which a round that left G2 out does not give. The word is `true` or
+  `false`, as a boolean or as that word; anything else is asked about. Only you give it: what
+  the Intake reads into a request, or a scan writes for a task it offers, is not taken for it.
 - **`long_context_script`**, with `long_context` on, runs the task's long-context test against `PORT`
   and writes its results to `OUT_DIR`, a directory InferPilot makes for each run before it starts the
   script: for each request, whether it passed, with its output, and the per-token logprobs when the

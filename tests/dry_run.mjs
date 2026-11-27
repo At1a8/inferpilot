@@ -1568,6 +1568,35 @@ const scenarios = [
       'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, text_model: true } }) });
     check(readIn.result.status === 'needs_input' && readIn.result.stopped_at === 'Setup' && asked(readIn),
       `a word the Intake read into the request does not stand in Setup's place: ${readIn.result.status} at ${readIn.result.stopped_at}`);
+    // Nor does it go into the run's record: from there a follow-up or a rerun would carry it as the caller's own.
+    const another = [{ problem: 'the server hangs on shutdown', priority: 'P2' }];
+    const withOthers = (list) => ({ 'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce',
+      reason: 'the crash, the more urgent of two', other_problems: list, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const readOn = await run({ mode: 'issue', task: 'sglang#41299', request: 'the issue; it is a chat model, I think', stop_after: 'Reproduce' }, {
+      ...withOthers(another),
+      'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, text_model: true } }) });
+    const followed = (readOn.result.next.start || [])[0];
+    check(!('text_model' in readOn.result.task_def) && followed && !('text_model' in followed.args),
+      `the Intake's reading of the model is in no record and no follow-up: ${JSON.stringify([readOn.result.task_def.text_model,
+        followed && followed.args.text_model])}`);
+    const saidOn = await run({ mode: 'issue', task: 'sglang#41299', text_model: true, stop_after: 'Reproduce' }, withOthers(another));
+    check(saidOn.result.task_def.text_model === true && ((saidOn.result.next.start || [])[0] || { args: {} }).args.text_model === true,
+      `the caller's own word is kept, for the run and for a follow-up on the same model: ${JSON.stringify(saidOn.result.next.start)}`);
+    // An Intake that takes the model for one that answers no text questions, as Setup did, asks for its output
+    // comparison. Against the caller's word that it answers them, the question is not put: the run reaches Setup.
+    const intakeAsks = { 'intake:define': (ins) => ({ status: 'needs_input', summary: 'a diffusion model, by its files',
+      task_def: { ...ins.given, ...ins.answers },
+      questions: [{ field: 'output_script', question: 'Which script compares the outputs?', why: 'the model answers no text questions' }] }) };
+    const heard = await run({ mode: 'issue', task: 'i', request: 'the issue', answers: { text_model: true } }, { ...noText, ...intakeAsks });
+    check(heard.result.status === 'ready_for_review' && heard.keys.includes('director:setup'),
+      `an Intake that asks for the script against the caller's word does not stop the run: ${heard.result.status} at ${heard.result.stopped_at}`);
+    const unheard = await run({ mode: 'issue', task: 'i', request: 'the issue' }, { ...noText, ...intakeAsks });
+    check(unheard.result.status === 'needs_input' && unheard.result.stopped_at === 'Intake'
+      && eqList((unheard.result.next.ask || []).map((x) => x.field), ['output_script']) && !unheard.keys.includes('director:setup'),
+      `without that word the Intake's question is put: ${unheard.result.status} at ${unheard.result.stopped_at}`);
+    const saidNone = await run({ mode: 'issue', task: 'i', request: 'the issue', answers: { text_model: false } }, { ...noText, ...intakeAsks });
+    check(saidNone.result.status === 'needs_input' && saidNone.result.stopped_at === 'Intake',
+      `and with the word that the model answers none: ${saidNone.result.status} at ${saidNone.result.stopped_at}`);
     // The verify engineer launches the model, and has the last word: where the user was wrong, the round passes nothing.
     const wrongWord = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
       'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, server_code_changed: true,
@@ -1575,6 +1604,37 @@ const scenarios = [
     check(wrongWord.result.status === 'blocked' && wrongWord.result.stopped_at === 'Verify'
       && /Name the script \(output_script\)/.test(wrongWord.result.next.say),
       `a word the server contradicts does not get the fix past Verify: ${wrongWord.result.status} at ${wrongWord.result.stopped_at}`);
+    // On the user's word alone the run asked for no output comparison. A round is accepted there only with gsm8k's
+    // result on the model, which bears the word out: not with G2 left out or not run, which would leave the fix
+    // with neither gsm8k nor a comparison behind it.
+    const onWord = (gates, more = {}) => run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass', ...gates }, ...more }) });
+    for (const [said, gates] of [['leaves G2 out', {}], ['says G2 did not run', { G2: 'not run: the fix changes one line' }],
+      ['says it skipped G2, with a number', { G2: 'skipped: 1319 questions would take too long, no baseline' }]]) {
+      const unscored = await onWord(gates);
+      const whyNot = (unscored.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(unscored.result.status === 'blocked' && unscored.result.stopped_at === 'Verify' && !unscored.keys.includes('perf_engineer:perf_eval')
+        && /the task says that the model answers text questions \(text_model\) where Setup took it for one that answers none/.test(whyNot)
+        && /accepted without gsm8k's result on it: G2 is ("|not reported)/.test(whyNot),
+        `on the user's word against Setup's, a round that ${said} is not accepted: ${unscored.result.status} at ${unscored.result.stopped_at}, ${whyNot}`);
+    }
+    for (const [said, gates, more] of [['a pass against the baseline', { G2: 'pass 0.893 vs 0.895 (1319 q)' }, {}],
+      ['the score where the fix has no baseline', { G2: '0.893 (1319 q), no baseline: the base does not start on this configuration' }, {}],
+      ['a miss the baseline shares', { G2: 'fail 0.851 vs 0.853 (1319 q), KI-3' },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-3' }] }]]) {
+      const scoredRun = await onWord(gates, more);
+      check(scoredRun.result.status === 'ready_for_review', `with ${said} the word is borne out, and the round is judged as any other: ${
+        scoredRun.result.status} at ${scoredRun.result.stopped_at}`);
+    }
+    // A fix that changes no code the server runs has no G2 to give, whoever said what the model is.
+    const noCode = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false,
+        gates: { issue_repro: 'pass', G2: 'not run: no code the server runs changed' } }) });
+    check(noCode.result.status === 'ready_for_review', `a fix to tests alone is asked for no gsm8k on that word: ${noCode.result.status}`);
+    // The rule is for the word that stands against Setup's: where the two agree, a round is judged as before.
+    const agreed = await run({ mode: 'issue', task: 'i', text_model: true }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass' } }) });
+    check(agreed.result.status === 'ready_for_review', `a word Setup agrees with changes nothing: ${agreed.result.status}`);
     // The word goes both ways: a model Setup took for one that answers text questions, and the user says answers none.
     const saysNone = await run({ mode: 'issue', task: 'i', text_model: false });
     check(saysNone.result.status === 'needs_input' && saysNone.result.stopped_at === 'Setup'
@@ -1591,6 +1651,14 @@ const scenarios = [
       const unclear = await run({ mode: 'issue', task: 'i', text_model: odd }, noText);
       check(asks(unclear, 'text_model'), `text_model ${JSON.stringify(odd)} is asked about before anything is set up: ${unclear.result.status} at ${
         unclear.result.stopped_at}`);
+    }
+    // A word is a boolean or a string. A list or an object that reads "true" once it is made a string is not what
+    // the user said, and one that cannot be made a string at all stops nothing but the question: each is asked about.
+    for (const [how, args] of [['a list as the field', { text_model: [true] }], ['a list as the answer', { answers: { text_model: ['true'] } }],
+      ['an object as the field', { text_model: { toString: 'true' } }], ['an object as the answer', { answers: { text_model: { value: true } } }]]) {
+      const shaped = await run({ mode: 'issue', task: 'i', ...args }, noText);
+      check(asks(shaped, 'text_model') && !shaped.keys.includes('director:setup'),
+        `text_model given as ${how} is asked about, and stands for no word: ${shaped.result.status} at ${shaped.result.stopped_at}`);
     }
     const given = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, answers: { output_script: ' /s/outputs.sh ' } }, noText);
     const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
@@ -2952,6 +3020,13 @@ const scenarios = [
     check(eqList(Object.keys(ciOffer.args).sort(), ['framework_dir', 'inferpilot_dir', 'mode', 'task']),
       `and carries the fields of a task definition and nothing else, no answer and no request, so that the run it starts asks (the ci scenario): ${
         JSON.stringify(Object.keys(ciOffer.args))}`);
+    // Nor does a scan say what a model is in the user's place (text_model): the run it starts hears Setup, and the user.
+    const worded = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
+      { rank: 1, task: 'a diffusion model returns black images', type: 'issue', priority: 'P1', source: 'issues',
+        task_def: { mode: 'issue', task: 'sgl-project/sglang#41300', framework_dir: '/sgl-workspace/sglang', model_path: '/models/sd', text_model: true } }] }) });
+    const wordOffer = (worded.result.next.start || [])[0];
+    check(wordOffer && wordOffer.args.model_path === '/models/sd' && !('text_model' in wordOffer.args),
+      `an issue task a scan offers says nothing of what its model is: ${JSON.stringify(wordOffer && wordOffer.args)}`);
     const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
     check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
       && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,

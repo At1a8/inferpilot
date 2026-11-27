@@ -152,7 +152,12 @@ clock can start before your session does.
        on its server: where one Setup took for such a model answers text questions all the same (the
        server has chat completions, and answers one), run gsm8k as for any other fix, leave the
        task's script unrun, and say so in `gates` and with `"text_model": true` in your answer, so
-       that the later rounds and the report read the model as what it is.
+       that the later rounds and the report read the model as what it is. The user can say the same
+       before any server is up (the task's `text_model: true`, against Setup's word), and the run
+       then asks for no script: InferPilot accepts a round there only with gsm8k's result in
+       `gates`, a `pass` or a `fail` with both scores, or the fix's score with `no baseline` (below).
+       Never leave G2 out or report it `not run` for a fix that changes code the server runs, and
+       where the model answers no text questions after all, say `"text_model": false`.
      - With no `output_script` there is nothing to compare the outputs of such a model with, and
        gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
        `"G2": "not run: the model answers no text questions, and the task names no output_script"`

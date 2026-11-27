@@ -185,6 +185,17 @@ const asObject = (v) => {
     return {};
   }
 };
+// The user's word on what the model of a fix is (text_model): true when it answers text questions, false when it
+// answers none, null when it says neither. A word is a boolean or a string: an array or an object that reads
+// "true" once it is made a string is not what the user said, and is asked about (missingFields).
+const modelWord = (v) => {
+  const said = typeof v === 'boolean' || typeof v === 'string' ? String(v).trim().toLowerCase() : '';
+  return said === 'true' ? true : said === 'false' ? false : null;
+};
+// Only what the caller gave counts, the field or, where the field says neither, the answer: the word is there
+// to correct Setup, which judges by the model's files and the command that serves it.
+const callersModelWord = (raw) => (modelWord(raw.text_model) === null ? modelWord(asObject(raw.answers).text_model)
+  : modelWord(raw.text_model));
 // The pull requests a task names for the run to apply (apply_prs), as the words they were given in. The user's
 // word is what the caller gave: the field or, where the field is blank, the answer. What the Intake read into a
 // request is its reading, not that word (existingFix).
@@ -310,7 +321,7 @@ function missingFields(a) {
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
   // So would the user's word on what the model is: read as nothing, it would leave Setup's word standing.
-  if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && !['true', 'false'].includes(asked(a.text_model))) {
+  if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && modelWord(a.text_model) === null) {
     ask('text_model', 'Does the model answer text questions (true), or is it one that answers none, a diffusion, speech or embedding '
       + 'model (false)?', `text_model takes true or false, and ${JSON.stringify(a.text_model)} is neither: Setup's word on the model would stand`,
     ['true', 'false']);
@@ -407,8 +418,15 @@ async function intakeStage(raw) {
   if (!request && missingFields({ ...answers, ...given }).length === 0) return { args: { ...raw, ...answers, ...given } };
   enter('Intake');
   const res = await call('intake', 'define', { request, given, answers, inferpilot_dir: INFERPILOT }, INTAKE, 'intake');
-  const merged = { ...(res && res.task_def ? pick(res.task_def, TASK_KEYS) : {}), ...answers, ...given };
-  const asked = res && res.status === 'needs_input' ? (res.questions || []) : [];
+  // What the Intake returns is its reading, and the user's word on the model (text_model) is not its to give:
+  // taken from its definition, the word would go into the run's record, and from there into a follow-up or a
+  // rerun as the caller's own.
+  const merged = { ...(res && res.task_def ? pick(res.task_def, TASK_KEYS.filter((k) => k !== 'text_model')) : {}), ...answers, ...given };
+  // Nor does the Intake ask against that word. With the caller's word that the model answers text questions, a
+  // question for its output comparison is not put: an Intake that takes the model for another kind, as Setup
+  // did, would stop the run before Setup hears the word.
+  const asked = (res && res.status === 'needs_input' ? (res.questions || []) : [])
+    .filter((q) => !(callersModelWord(raw) === true && q && q.field === 'output_script'));
   const questions = [...asked, ...missingFields(merged).filter((q) => !asked.some((a) => a.field === q.field))];
   const provenance = (res && res.provenance) || {};
   const assumptions = (res && res.assumptions) || [];
@@ -465,11 +483,11 @@ const GUARDS = on(A.guards);
 const SWEEP = on(A.sweep);
 const TUNE = on(A.tune);
 const BISECT_FIXED = on(A.bisect_fixed);
-// The user's word on what the model of a fix is (text_model): true when it answers text questions, false when it
-// answers none, null when the caller did not say. Only what the caller gave counts, as a field or as an answer:
-// it is there to correct Setup, which judges by the model's files and the command that serves it.
-const modelWord = (v) => (['true', 'false'].includes(String(v).trim().toLowerCase()) ? on(String(v).trim()) : null);
-const MODEL_WORD = modelWord(RAW.text_model) === null ? modelWord(asObject(RAW.answers).text_model) : modelWord(RAW.text_model);
+// The user's word on what the model of a fix is (callersModelWord): null when the caller did not say.
+const MODEL_WORD = callersModelWord(RAW);
+// Set by Setup where that word made the model one that answers text questions and Setup took it for one that
+// answers none: the run then asks for no output comparison, on the word alone, and Verify holds it to gsm8k.
+let wordAgainstSetup = false;
 // Correctness gates that take hours or days, each off unless the task asks for it: G3 (long context)
 // and G4 (stability: one throughput test of more than 48 hours, validation_doctrine.md).
 const LONG_CONTEXT = on(A.long_context);
@@ -1205,8 +1223,9 @@ function nextSteps(status, at) {
     // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
     // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
     // fields and no further: an answer or a request it put next to them would stand for the user's word.
+    // Nor is what a model is the scan's to say for the user (text_model): Setup says, and the user corrects it.
     const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
-      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
+      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
       .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
@@ -1448,6 +1467,7 @@ async function setup(requireBaseline) {
   // (MODEL_WORD) stands in its place where the caller gave one, either way; the run record says where the two differ.
   const setupSays = s.text_model !== false;
   if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;
+  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;
   if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null && MODEL_WORD !== setupSays) {
     note('Setup', 'text_model', `the task says that the model ${MODEL_WORD ? 'answers' : 'answers no'} text questions (text_model), and Setup `
       + `took it for one that ${setupSays ? 'answers them' : 'answers none'}: the task's word stands until Verify launches the model`);
@@ -1686,6 +1706,21 @@ async function verifyLoop(extraGates) {
       const why = `the model answers no text questions, and the round was accepted without the result of its output comparison: G2 is ${
         compared ? `"${compared}"` : 'not reported'}${comparisonFailed ? ', and the round lists it among its failures' : ''}. `
         + "G2 of such a fix is the task's output_script, run on the base and on the fix";
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
+    // The user's word made the model one that answers text questions where Setup took it for one that answers
+    // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. A round is accepted
+    // there only with the G2 that bears the word out: gsm8k was put to the model, and the round gives its result,
+    // a pass or a fail against the baseline, or the fix's score where it has none (verify_engineer.md). Not on a
+    // G2 the round left out or did not run: the fix would have neither gsm8k nor a comparison behind it.
+    const scored = /^(pass|fail)\b/i.test(compared)
+      || (/\bno baseline\b/i.test(compared) && /\d/.test(compared) && !/^(not[ _-]?run|skip)/i.test(compared));
+    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))
+      && !scored) {
+      const why = 'the task says that the model answers text questions (text_model) where Setup took it for one that answers none, and the '
+        + `round was accepted without gsm8k's result on it: G2 is ${compared ? `"${compared}"` : 'not reported'}. The word stands only with `
+        + 'that result; where the model answers none after all, name its output comparison (output_script)';
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }

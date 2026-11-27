@@ -61,7 +61,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
    - `text_model` is the user's word on what the model is, given as a field or as an answer where
      Setup took the model for the wrong kind (`task_definition.md` §1.1). Never set it yourself,
      from the request's wording or the model's name: InferPilot reads it only where the caller
-     gave it. A value that is neither `true` nor `false` is asked about.
+     gave it, and takes none from the definition you return. A value that is neither `true` nor
+     `false` is asked about. With `text_model: true` in `given` or `answers`, ask for no
+     `output_script`, whatever you make of the model's files: the user has said that it answers
+     text questions, and InferPilot does not put that question against the word.
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
      a context length, thinking off. Only what the request states; the feature's source and the
      templates fill the rest at Setup. The accuracy sets come from `goal`, never from here.
