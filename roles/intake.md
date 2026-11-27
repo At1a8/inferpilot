@@ -27,7 +27,7 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      gsm8k a fix that changes code the server runs (`knowledge/validation_doctrine.md`). It is the
      reporter's model, or the one the failing test serves; ask when neither is on the machine. Give it
      also when it answers no text questions (a diffusion model): the run serves it for the fix, and
-     G2 says that gsm8k cannot be put to it.
+     G2 compares its outputs with the task's `output_script` (below), since gsm8k cannot be put to it.
    - `gpu_ids`: GPUs that exist, by HIP number (`scripts/gpu_status.py`); leave it empty to let Setup
      pick free ones.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
@@ -49,6 +49,15 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      that model; ask when the request names none, and offer no `template` for it.
    - `accuracy_script`, optional: the user's own accuracy script, when the request gives one; without
      it InferPilot measures accuracy with its own (`task_definition.md` §1.2).
+   - `output_script` (`task_definition.md` §1.1): the user's own test that compares the outputs of a
+     model that answers no text questions (a diffusion, speech or embedding model), when the request
+     gives one; check that it exists and is readable. An issue or a ci task on such a model needs it,
+     unless `stop_after` ends the run before a fix: G2 for its fix is that comparison, the fix's
+     outputs against the base's (`knowledge/validation_doctrine.md`, *G2 for a model that answers no
+     text questions*). Ask for it when the request names none, and offer nothing in its place:
+     InferPilot has no template for one, and never write it for the user. Where you cannot tell what
+     the model is, leave the field out: Setup says, and the run asks then. Never ask it of a model
+     that answers text questions, which G2 measures on gsm8k.
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
      a context length, thinking off. Only what the request states; the feature's source and the
      templates fill the rest at Setup. The accuracy sets come from `goal`, never from here.

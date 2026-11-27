@@ -26,6 +26,7 @@
 | G0 | | | | | |
 | G1 | unit tests, each able to fail (parent commit, or a broken copy when the change keeps behaviour) | | | | |
 | G2 | | | | | |
+| accuracy claim (a CI failure on a score its test measures) | the failing test's own measurement, as the test stood at the base: set, questions, model, sampling | the score that fell | the score restored, and the claim | | |
 | G3 | | | | | |
 | G4 | | | | | |
 

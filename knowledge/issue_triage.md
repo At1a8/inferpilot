@@ -106,9 +106,9 @@ The gates run again after such additions, the unit gate of each addition and Ver
 of the pull request found then is answered as one found the first time. The pull request stays on
 the branch until the comment for it is drafted, which reads the branch, and is taken off with
 everything else after that. Before it is, every round has to have said that it left nothing running
-(`left_running`, in every unit and Verify answer; after a failed Verify round that does not say,
-the GPUs are checked first, and nothing is investigated where they cannot be, or where one that was
-idle before the round is in use), and after it the branch has to be at the task's base
+(`left_running`, in every unit and Verify answer; after a Verify round that is not accepted and
+does not say, the GPUs are checked first, and nothing is investigated where they cannot be, or where
+one that was idle before the round is in use), and after it the branch has to be at the task's base
 (`base_commit`, which Setup returns): the run's own fix starts on no other commit. A measurement
 that fails after the pull request passed one is not the pull request's to answer for: what changed
 between the two is the run's own additions, or noise, and a human decides.
@@ -149,7 +149,9 @@ its own, with the issue and the problem's name as its `task`: the run's result o
   for a fix, `validation_doctrine.md`), on the reporter's model: at most 1 point below the base, or
   below the commit or release the report says worked where the base cannot serve the configuration;
   with neither, the fix's score is reported and not judged. Record the model, and what the report says
-  worked, in the triage record.
+  worked, in the triage record. For a model that answers no text questions (a diffusion, speech or
+  embedding model) the task's own output comparison stands in gsm8k's place (`output_script`; *G2
+  for a model that answers no text questions*).
 - Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
   `client_script`: no slower than the base beyond the noise band, or than the same stand-in for a base
   that cannot serve; with neither, its numbers are reported and not judged. A `performance` issue is

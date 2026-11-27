@@ -17,7 +17,7 @@ Why it exists and how it maps onto the agreed design: [`docs/design.md`](docs/de
 |---|---|---|---|
 | `feature` | an upstream PR or design to bring to AMD | Setup → Spec → Recon → Design → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | branch + PR body + validation report |
 | `issue` | an AMD user issue | Setup → Triage → Reproduce → Diagnose (skipped for an existing fix PR) → Implement → (Kernel) → Verify → Performance (skipped for a fix to tests, documentation or CI files alone) → Review → PR → (Spinoff) → Reply → Report | fix PR, or a conclusion (triaged, not reproduced, fixed on main, diagnosed); always a reply draft, rewritten from how the run ended |
-| `ci` | a red AMD CI job or Failure Tracker cluster | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance (skipped as for an issue) → Review → PR → (Spinoff) → Report | fix PR, or a handover for flaky/infrastructure failures |
+| `ci` | a red AMD CI job or Failure Tracker cluster | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance (skipped as for an issue) → Review → PR → (Spinoff) → Report | fix PR; a handover for flaky/infrastructure failures, or for a lane this machine cannot be; nothing to fix when main passes on the lane's own image |
 | `perf` | a system-level performance goal for a model and a fixed workload | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | PR with a measured win, or the change dropped; kernel-level items go to the kernel back end |
 | `scan` | none — the day's state of the framework: the AMD CI on main, open AMD user issues, upstream changes AMD needs to follow (platform gates and host-sync leads on request) | Collect → Dispatch → Report | the daily report, shared as an issue in InferPilot's repository (else a file for you to share), with the ranked tasks and the definition that starts each |
 
@@ -27,12 +27,14 @@ changes code the server runs (G5: no slower than the base); a fix to tests, docu
 alone skips it, unless the problem is itself one of performance (an issue triaged as `performance`,
 a CI failure on a number its test measures): its number must come back, whatever the fix changes. An
 issue whose reporter's code fails while main passes ends as *fixed on main*; with `bisect_fixed` a
-Bisect phase first finds the commit that fixed it. Spinoff runs when the run found problems that are
-not its own: a failure the base commit shows without the change, or a lead a role met on the way (a
-bug in code it read, a broken test or image). For each failure the base commit shows, it gives the
-upstream issue that tracks it, or an issue draft for you to file. Leads are listed with how to
-reproduce them; with `confirm_leads` it first checks each on the base commit and drafts those that
-show there.
+Bisect phase first finds the commit that fixed it. A CI failure that an open pull request already fixes
+skips Bisect: the run verifies that pull request and drafts a comment for it, as it does for an issue.
+It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say.
+Spinoff runs when the run found problems that are not its own: a failure the base commit shows without
+the change, or a lead a role met on the way (a bug in code it read, a broken test or image). For each
+failure the base commit shows, it gives the upstream issue that tracks it, or an issue draft for you to
+file. Leads are listed with how to reproduce them; with `confirm_leads` it first checks each on the
+base commit and drafts those that show there.
 
 A task starts from a **task definition** ([`templates/task_definition.md`](templates/task_definition.md)):
 the fields `inferpilot.js` takes, the same names every role reads. It can be given as fields, or as a
@@ -582,6 +584,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `server_script` | your script that starts the server for `model_path`; InferPilot sets `PORT`, `HIP_VISIBLE_DEVICES`, `PYTHONPATH` and `EXTRA_ARGS` (the feature's flags, empty for the baseline), and the script passes `--port $PORT` and `$EXTRA_ARGS` to the server; required for `feature` and `perf` ([`templates/task_definition.md`](templates/task_definition.md) §1.1). Without one, you may answer `template`: InferPilot's `templates/harness/server.sh`, after the model's recipe in the sglang cookbook |
 | `client_script` | your script that runs the workload against `PORT` and writes its logs to `OUT_DIR`: the benchmark, run unchanged; required for `feature` and `perf`: every feature is measured against the baseline (G5), the gain it claims or, where it claims none, that it is no slower; for `issue` and `ci` too, unless `stop_after` ends the run before a fix: a fix that changes code the server runs is measured on it against the base, and is no slower (G5). Without one, a feature or a perf task may answer `template`: InferPilot's `templates/harness/perf.sh` (sglang's serving benchmark) on the `workload`, which a task that takes it gives in full; on it a feature is judged only as no slower than the baseline, never on its source's gain |
 | `accuracy_script` | your script that measures accuracy against `API_URL` and writes its results under `RESULT_ROOT`, run unchanged for every arm; optional: without one, InferPilot's `templates/harness/accuracy.sh` (`scripts/eval_accuracy.sh`) |
+| `output_script` | `issue` and `ci`, for a model that answers no text questions (a diffusion, speech or embedding model), which gsm8k cannot be put to: your test of its outputs, which stands in for gsm8k as G2 when a fix changes code the server runs. It puts the same inputs with the same seeds to the server at `PORT` and writes each output to `OUT_DIR`; with `BASE_DIR` set (its run on the base), it compares its outputs with those and exits non-zero when they differ by more than it tolerates. Run unchanged, once on the base and once on the fix. InferPilot has no template for it: Setup says what the model is, and a task that can reach a fix without one is asked for it then ([`templates/task_definition.md`](templates/task_definition.md) §1.1) |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}` (`python3 scripts/harness.py show` lists them): each parameter takes the task's value, else the one the tests of the feature's source use (vLLM's `--max-model-len 4096` for PARD-2), else for the server the model's sglang cookbook recipe, else the template's default ([`templates/task_definition.md`](templates/task_definition.md) §1.2) |
 | `container` | only when InferPilot runs on the host: the framework's container, reached with `docker exec` |
 | `exp_root` | where run directories go (default `<inferpilot_dir>/exp`, which git ignores). On a host mount they outlive the container, and a retry in a new container takes the task's commits from `RUN_DIR/branch.bundle` instead of writing them again: use one where the container can go away mid-run (a preemptible node, a job's time limit) |
@@ -589,7 +592,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` back end: the GEAK checkout whose kernel lane runs as an outside program |
 | `kernel_backend_command` | `command` back end: shell command with `{task_dir}`, `{out_dir}`, `{gpu_ids}`, `{budget}`; for `geak` it replaces the default command |
 | `kernel_budget` | optimization rounds for the kernel back end (default 6), its `{budget}` |
-| `apply_prs` | `perf`: candidate PRs to apply and A/B |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so the run applies one only when it is named here, whoever wrote it; without it the run asks |
 | `sources`, `since` | `scan`: any of `ci`, `issues`, `upstream` (the default) and `hardware`, `perf`; the start of the window (default: the previous report) |
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
@@ -612,7 +615,9 @@ each field came from (`provenance`) and the intake's `assumptions`.
 
 Human checkpoints: questions from the Intake (`needs_input`), and from Spec when a port's client does not
 run its source's scenarios; the question for a model or a client, when an issue or a ci run reaches its
-fix without one, or with InferPilot's client and only a part of its `workload`; any `stop_after`; with
+fix without one, or with InferPilot's client and only a part of its `workload`; the question after Setup
+for the script that compares outputs (`output_script`), when the model of such a run answers no text
+questions; any `stop_after`; with
 `auto_approve_design`
 set to `false`, L3 tasks and designs the architect flags stop at Design (`awaiting_design_review`; by
 default they go on, and the report says no human approved the design); a review the reviewer marks `blocked`

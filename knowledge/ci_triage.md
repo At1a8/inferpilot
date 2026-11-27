@@ -50,13 +50,77 @@ fix PR or a handover within a week for anything else.
 
 ## 2. Classify before fixing
 
+**First: does main still fail, on the lane's own image?** A red job says what one image saw of one
+commit. Run the failing tests on main (the commit `origin/main` names now, which the task's worktree
+is only when the task began there) in the environment of the lane that failed: that lane's newest
+image, its GPU model and its node count. The newest image is established, not assumed: the newest tag
+of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
+The answer is for every test of the task on every lane it failed on, and a pass has to hold: each
+test run as the job ran it, in the job's order, three times. One that fails some of those runs is
+`flaky`, not passing. So is one that passes all three here while the lane's own runs of that commit
+on that image show it failing in some and passing in others: three passes do not undo an
+intermittence the lane has shown. Intermittent is said of one commit, one lane and one image: the
+tracker's counts span commits and images, and prove nothing of the kind. A failure that was the
+CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the
+tests do here.
+
+- All of it passes: there is nothing to fix in the framework, and the run ends with no fix and no
+  reply. The job ran an image older than the lane's newest, or a fix has merged since. Most of two
+  tracker snapshots were this: 160 of 214 entries in June 2026 came from an image whose aiter lacked
+  `shuffle_scale`, and 168 of 208 in September from one with Triton 3.4.0 where aiter needed 3.6.0.
+- Any of it fails: it is a failure of main, and is classified below. An image that is newer than
+  main expects (a library bump that breaks a test) is a `dependency bump`. A lane whose Python or
+  PyTorch is older than the code needs is one too, or a `test bug`: the lane is supported, so the
+  test or the code has to run on it (`enterContext` on the rocm720 lane's Python 3.10: 40 tracker
+  entries in November 2026).
+- This machine cannot be that lane (another GPU model, another ROCm, a second node), or is not in
+  its newest image: no conclusion is drawn, in either direction, and the failure is handed over with
+  what the lane needs. So is the part of a task that could not be run here, where the rest passes;
+  where the rest fails, the run fixes what fails and names what it did not check. A failure that
+  shows on main and not on the task's own tree came in after the task's base: the task is started
+  again on main.
+
+A task that only asks whether main still fails sets `stop_after=Classify`: it needs no model and no
+client, which a task that can reach a fix is asked for before it starts.
+
 | Class | Signals | Action |
 |---|---|---|
 | code regression | `status` says `new regression (since DATE)`; many tests share one cluster; one lane or all lanes start failing on the same day | find the culprit commit, fix forward |
 | dependency bump | started with a library or image bump (e.g. Mooncake v0.3.14 broke a PD test on ROCm images) | pin or adapt, report upstream to the library |
 | test bug | `never-passed` on a lane, order dependence (`world group is not initialized` only when another test ran first), an API newer than the lane's Python (`enterContext` is 3.11+, the rocm720 lane runs 3.10) | fix the test, not the framework |
-| flaky | passes on rerun; `flaky` status; failure rate below the noise you measured | rerun N times, report the rate, propose quarantine only with numbers |
+| flaky | fails some runs and passes others on one commit, lane and image; the tracker's `flaky` is a hint, since its counts span commits and images | rerun N times, report the rate, propose quarantine only with numbers |
 | infrastructure | `Self-hosted runner lost communication`, interface errors (`UCX ERROR failed to get interface index ... errno 19`), image pull or disk failures | hand over to CI maintainers with the evidence |
+
+**A failure an open pull request already fixes is verified, not fixed again.** Before a culprit is
+searched for, look for the fix someone has opened: the one the tracker or the CI issue names, the pull
+requests linked to it, the open ones that touch the failing test. Read its diff, since a pull request
+that cites a failure does not always fix it. The run applies it to main and verifies it as it would a
+fix of its own: the failing test is its gate, on every lane it failed on, and its accuracy and speed
+are measured by what it changes (§4). It ends in a verification comment for that pull request, drafted
+for a human to post, with what was run, on which image and hardware, at which commit of the pull
+request, and the results (`pr_playbook.md` §Attribution). No second pull request is opened for the same
+failure. A fix that has merged needs none of this: main has it.
+
+Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents
+hold. The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks
+which one to verify, or none. The task can say so from the start (`apply_prs`: the pull requests the
+run may apply, or `none`), and then nothing is asked. Nothing else stands for that word. What the
+classification says of the author is no proof that the author can put code on main: an association
+with the repository (a member of its organisation, a collaborator) can come without write access, a
+model read it, and the run has no way of its own to look the permission up. What the Intake read
+into a request in plain words is a reading too, and is asked about: only a field or an answer the
+caller gave counts. A task a scan offers names no pull request to apply: it is taken by the fields
+of a task definition, and an answer or a request a model wrote next to them goes no further. The
+word has to decide: it names a pull request, or it says `none`. Any other answer, or both at once,
+is asked about again, since taken for `none` it would send the run to a fix of its own.
+
+What the user names is looked up like any other: the classification is given it (`named_prs`), and
+the run applies only a pull request found open, with the commit its branch is at. A word that names
+its repository (a URL, `<owner>/<repo>#<n>`) keeps it: it is a word for a pull request the
+classification places in that repository, and never for the framework's pull request of the same
+number. One that is closed, merged or not found is not applied, the triage record says why, and the
+run goes on to a fix of its own. One pull request is verified in a run: several applied together
+would show nothing of each, and the others are named in the triage record.
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a
@@ -103,7 +167,9 @@ from 10-02 to at least 10-25) had no owner.
 
 ## 4. Gates for a CI fix
 
-- The failing test passes on the fix, on every lane it failed on (extra gate `failing_test`).
+- The failing test passes on the fix, on every lane it failed on (extra gate `failing_test`). A lane
+  this machine cannot be stays `unchecked`: the gate is judged on the lanes that were run, and the
+  pull request says where the fix was not verified.
 - The existing tests of the module the fix touches still pass, judged against the tree without the
   fix; one the regression kept from running at all (the module did not import) is judged against the
   culprit's parent. G0 (`validation_doctrine.md`) only when the fix is behind a feature's switch: most
@@ -111,8 +177,9 @@ from 10-02 to at least 10-25) had no owner.
 - A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well (G2
   for a fix, `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent
   where the regression keeps the base from serving. A fix to tests, documentation or CI files alone
-  (a `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of
-  §1).
+  (a `test_bug`) is not. One for a model that answers no text questions (the Wan DiT failures of
+  §1) is measured by the task's own output comparison in gsm8k's place (`output_script`; *G2 for a
+  model that answers no text questions*).
 - Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
   `client_script`: no slower than the base beyond the noise band, or than the culprit's parent where
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
