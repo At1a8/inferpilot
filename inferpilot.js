@@ -1285,6 +1285,13 @@ function nextSteps(status, at) {
   }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;
+  // The control file can move the stop while a run goes on, and that is the operator's last word on where the
+  // task stops. The rerun a result offers goes by it, where the result names no stop of its own: a run started
+  // with stop_after=Diagnose, whose stop was lifted and which then asked for what its fix needs, is not run
+  // again only to stop after Diagnose once more. "now" is no place to stop a run that starts over.
+  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopAfterNow !== STOP_AFTER && stopAfterNow !== 'now') {
+    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopAfterNow) || '';
+  }
   return out;
 }
 

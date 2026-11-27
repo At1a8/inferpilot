@@ -1405,6 +1405,44 @@ const scenarios = [
     }, { control: () => (classified ? { stop_after: '' } : {}) });
     check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci) && !ci.keys.includes('implementer:implement'),
       `ci: the same, after Bisect: ${ci.result.status} at ${ci.result.stopped_at}`);
+    // The control file's last word on the stop goes with the rerun the result offers. Started with a stop before
+    // the fix, and asked for the model once that stop was lifted, the task is not run again only to stop there.
+    check(issue.result.next.rerun_with.stop_after === '' && ci.result.next.rerun_with.stop_after === '',
+      `the rerun carries the stop as the control file left it: ${JSON.stringify([issue.result.next.rerun_with, ci.result.next.rerun_with])}`);
+    // The runner's merge (runtime/run.mjs): the arguments, rerun_with over them, the answers merged, and the user's answer.
+    const first = { mode: 'issue', task: 'i', model_path: '', stop_after: 'Diagnose' };
+    const again = (r) => ({ ...first, ...r.result.next.rerun_with, answers: { ...r.result.next.rerun_with.answers, model_path: '/models/m' } });
+    const goesOn = await run(again(issue));
+    check(goesOn.result.status === 'ready_for_review' && goesOn.keys.includes('implementer:implement'),
+      `with the answer the task goes on to its fix, as the operator last asked: ${goesOn.result.status} at ${goesOn.result.stopped_at}`);
+    // Moved to a later phase, the stop is that phase's for the rerun too, by the phase's own name.
+    let shown = false;
+    const later = await run(first, {
+      'issue_triager:reproduce': () => {
+        shown = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (shown ? { stop_after: ' verify ' } : {}) });
+    check(later.result.status === 'needs_input' && asked(later) && later.result.next.rerun_with.stop_after === 'Verify',
+      `a stop the control file moved to Verify goes with the rerun: ${JSON.stringify(later.result.next.rerun_with)}`);
+    const stopsLater = await run(again(later));
+    check(stopsLater.result.status === 'stopped' && stopsLater.result.stopped_at === 'Verify',
+      `and the rerun stops there: ${stopsLater.result.status} at ${stopsLater.result.stopped_at}`);
+    // A stop nobody moved is the task's own, and stays in its arguments: the result names none.
+    for (const control of [undefined, { control: () => ({ stop_after: 'Verify' }) }, { control: () => ({}) }]) {
+      const unmoved = await run({ mode: 'feature', task: 't', stop_after: 'Verify' }, {
+        'director:spec': () => ({ ...DEFAULTS['director:spec'](), workload_gap: 'the source measures agentic sessions', fallback_client: 'template' }),
+      }, control);
+      check(unmoved.result.status === 'needs_input' && unmoved.result.stopped_at === 'Spec' && !('stop_after' in unmoved.result.next.rerun_with),
+        `a result after a stop that did not move names none (${control ? JSON.stringify(control.control()) : 'no control file'}): ${
+          unmoved.result.status} at ${unmoved.result.stopped_at}, ${JSON.stringify(unmoved.result.next.rerun_with)}`);
+    }
+    // A result that names a stop of its own keeps it. A run the control file stopped says to run again without
+    // a stop: the stop it moved to is where the run ended, and is not handed to the rerun to end there again.
+    const halted = await run({ mode: 'issue', task: 'i' }, undefined, { control: () => ({ stop_after: 'Reproduce' }) });
+    check(halted.result.status === 'stopped' && halted.result.stopped_at === 'Reproduce' && halted.result.next.rerun_with.stop_after === '',
+      `a run the control file stopped offers a rerun without that stop: ${halted.result.status} at ${halted.result.stopped_at}, ${
+        JSON.stringify(halted.result.next.rerun_with)}`);
   }],
   ['arguments: an issue or a ci task that can reach a fix names the client G5 measures it on; one that stops before the fix needs none', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);

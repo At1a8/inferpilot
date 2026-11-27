@@ -236,7 +236,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 
 **查看运行状态。** runner 存活期间每 30 秒重写一次 `exp/scan.status.json`（状态、阶段、正在进行的 agent 调用及各自的最后一行和它出现的时间 `last_at`）；`updated` 超过两分钟没更新，说明 runner 已经不在了。`exp/scan.agents/` 保存每次 agent 调用的 prompt、完整的输出流和 stderr（`--agent-log-dir` 可以换个位置），`--show-text` 会把 agent 写的文字也打进日志。
 
-**改变运行的停止点。** runner 在每个阶段边界读取 `exp/scan.control.json`（参数文件名换成 `.control.json`；`--control-file` 可以指定别的文件）：`{"stop_after": "<phase>"}` 在该模式的这个阶段之后停（这个 scan 是 `Collect`，feature 任务可以是 `Verify`），`{"stop_after": "now"}` 在当前阶段结束后停，`{"stop_after": ""}` 跑到结束。停止点变化时日志里会写一行；运行已经过了那个阶段、或者文件里不是 JSON 对象时，日志也会说明；运行开始时就已经存在的文件，要等它被改过之后才生效。只有 runner 会读控制文件，两个 backend 都一样；在 Claude Code 里直接跑（由它的 Workflow tool 执行）时没有控制文件，停止点就是启动时的 `stop_after`。
+**改变运行的停止点。** runner 在每个阶段边界读取 `exp/scan.control.json`（参数文件名换成 `.control.json`；`--control-file` 可以指定别的文件）：`{"stop_after": "<phase>"}` 在该模式的这个阶段之后停（这个 scan 是 `Collect`，feature 任务可以是 `Verify`），`{"stop_after": "now"}` 在当前阶段结束后停，`{"stop_after": ""}` 跑到结束。停止点变化时日志里会写一行；运行已经过了那个阶段、或者文件里不是 JSON 对象时，日志也会说明；运行开始时就已经存在的文件，要等它被改过之后才生效。停止点被改过之后，运行如果以提问结束，会把它带给下一次运行：再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值，任务不会重跑一遍又停在最初说的地方。只有 runner 会读控制文件，两个 backend 都一样；在 Claude Code 里直接跑（由它的 Workflow tool 执行）时没有控制文件，停止点就是启动时的 `stop_after`。
 
 **停止一个运行。** `kill <runner 的 pid>`（SIGTERM；日志第一行给出这个 pid），或者对前台启动的 runner 按 Ctrl-C，会停掉它的所有 agent 以及它们启动的一切，包括用 `setsid` 或 `nohup` 启动的 server（它们都继承了标明这个 runner 的 `INFERPILOT_RUN_TAG`），释放机器锁，并在 `--result-file` 里写下 `"status": "interrupted"`。以其他方式死掉的运行（`kill -9`、被 OOM killer 杀掉）会留下它的进程：下一个运行会把它们列出来（任务容器里的也包括在内），`--kill-orphans` 会先停掉它们。容器重启会带走其中的进程，但会留下机器锁，而新容器判断不了锁的 runner 是否还在：用 `python3 scripts/run_lock.py release --force` 释放它。
 

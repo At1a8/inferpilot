@@ -1079,6 +1079,21 @@ class FixAccuracyTest(unittest.TestCase):
             for said in ("`issue`", "`ci`", "`stop_after`", "gsm8k"):
                 self.assertIn(said, row[0], "%s: the model_path row" % name)
 
+    def test_the_rerun_after_a_moved_stop_stops_where_the_control_file_last_said(self):
+        """The control file can lift a stop before the fix, and the run then asks for what the fix lacks. The task is
+        run again with the answers and the same arguments: with the stop it started with among them, it would stop
+        before the fix again. The result hands on the stop as the control file last set it."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopAfterNow !== STOP_AFTER && stopAfterNow !== 'now') {\n"
+                      "    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopAfterNow) || '';", src,
+                      "a rerun after the control file moved the stop stops where the task first said")
+        flat = lambda path: " ".join((ROOT / path).read_text(encoding="utf-8").split())
+        for path, said in (("README.md", "the arguments for running it again (`next.rerun_with`) carry `stop_after` as the file last set it"),
+                           ("README.zh-CN.md", "再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值"),
+                           ("templates/task_definition.md", "The run that follows the answers keeps the stop where the file put it "
+                                                            "(`next.rerun_with` carries it)")):
+            self.assertIn(said, flat(path), "%s does not say it" % path)
+
     def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_says_what_it_is_compared_with(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")
