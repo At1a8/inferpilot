@@ -34,23 +34,38 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
   jobs, and name in `unchecked` whatever part of the task you could not establish.
 - **What the lane's setup installs is part of its environment.** A lane does not run its image as
   it is. Its setup step can replace a package the image ships: sglang's
-  `<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's
-  is not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where
-  the job overrides the pin. The same image can then pass in the job and fail here, or the other
-  way round. What the setup puts in effect is decided by the tree it tests. So resolve it for each
-  tree you run, main and the task worktree: that tree's pin for the lane's stage, with the flags
-  and the overrides the lane's workflow gives the job. The failed job's log shows how the setup
-  went and which overrides it had. It tested another tree: what it installed is evidence, and
-  not what to install for these. Hold what you resolved against what the image you run in has.
-  `pip show amd-aiter` gives the version, and the commit it was built from only where the version
-  carries one (`0.1.26.dev144+g285579b62`). Equal versions without a commit do not show the same
-  build: read where the package came from, or build it as the setup does. Where the two differ,
-  put the lane's into effect for these runs as an arm's environment is made
-  (`verify_engineer.md`, PHASE=verify step 1: in a directory of the run's own, first on
-  `PYTHONPATH`, never in place), and name both versions in `evidence`. Where you cannot, or
-  cannot tell, those tests did not run in the lane's environment. That lane is then one this
-  machine could not be (below): named in `unchecked` where another part of the task was judged,
-  and `on_main: "not_run"` only where no part of it was.
+  `<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER in some cases and
+  keeps the image's in others. The same image can then pass in the job and fail here, or the other
+  way round. What the setup puts in effect is decided by the tree it tests, and by the setup's own
+  rules. So take, for each tree you run, main and the task worktree, the decision that tree's setup
+  script takes against the image you run in, with the flags and the overrides the lane's workflow
+  gives the job: follow the script branch by branch, and put no rule of your own in its place. It
+  decides on the version the image's package reports (`pip show amd-aiter`), which names the commit
+  it was built from only where the version carries one: decide on what it reads, as it does.
+  sglang's rules when this was written, as an example of what to look for: an override of the pin
+  forces a rebuild, even at the commit the image has; on MI30x and MI35x, a version that carries
+  its commit (`0.1.26.dev144+g285579b62`) is rebuilt where `<framework_dir>/docker/rocm.Dockerfile`
+  pins another commit for the lane's stage; any other dev build is kept, whatever the pin. Where
+  the setup keeps the image's package, so do you: the pin's build would replace what the lane runs.
+  Where it rebuilds, the lane's package is that build, not the commit alone: the patches the setup
+  applies again and the files it takes from the tested tree are part of it, so a package of the
+  same commit that the image ships is not it. Build it as the setup does, into a directory of the
+  run's own that goes first on `PYTHONPATH`, never in place (`verify_engineer.md`, PHASE=verify
+  step 1), and name in `evidence` what the image has and what the setup puts in effect for each
+  tree. The failed job's log shows how the setup went and which overrides it had. It tested another
+  tree: what it installed is evidence, and not what to install for these. The lane's environment
+  holds for every later run of the task, and each tree has its own: the pin can move within the
+  window a bisect searches, and with the fix. So write what you did as a script of the run,
+  `RUN_DIR/lane_env.sh`: given a tree, it takes the setup's decision for that tree, builds what the
+  decision calls for where the run has not built it yet, and prints the directory to put first on
+  `PYTHONPATH` (nothing where the setup keeps the image's package). It installs nothing in place,
+  and fails where it cannot build. `failing_test_cmd` calls it for the tree it runs (step 3), and
+  the triage record names it, with the flags and overrides it holds and what it resolved for each
+  tree you ran. Bisect, Verify and the check on the latest main call it for every tree they run,
+  the base included, and take what it prints: no tree is given the build Classify made for another.
+  Where you cannot make the lane's environment, or cannot tell what it is, those tests did not run
+  in it. That lane is then one this machine could not be (below): named in `unchecked` where
+  another part of the task was judged, and `on_main: "not_run"` only where no part of it was.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one
@@ -124,6 +139,10 @@ Then:
      CI*). Without one the task stops here.
 3. Write the smallest command that reproduces the failure locally (`failing_test_cmd`, required for
    every class; the fix is verified with it) and the window (last green → first red).
+   Where the lane's setup puts in effect what the image does not have, the command makes the lane's
+   environment itself: it calls `RUN_DIR/lane_env.sh` for the tree it runs and puts what that
+   prints on `PYTHONPATH`, after the tree's own code. The fix is then verified in the lane's
+   environment, and a later phase that points the command at another tree gets that tree's.
 4. Look for a fix someone has already opened: the pull request the tracker or the CI issue names for
    this failure, the pull requests linked to the issue or the job, and the open pull requests of the
    framework's repository that touch the failing test or name its error (the search API with
@@ -173,9 +192,15 @@ Return:
 
 1. Read the diffs of the commits merged in the window that touch the failing test's import graph
    first; the common AMD breakages are listed in `ci_triage.md` §3.
-2. If reading does not settle it, `git bisect run` the failing test in a throwaway worktree.
-3. Confirm: the test fails at the culprit and passes at its parent, on the failing lane's image. Record
-   how long it took where it passed: the verify engineer's time limits for the test come from it.
+2. If reading does not settle it, `git bisect run` the failing test in a throwaway worktree. Each
+   commit runs in the lane's environment for its own tree: where the triage record names
+   `RUN_DIR/lane_env.sh`, every step calls it for the worktree at that commit. The pin can move
+   within the window, and a bump of it can be the culprit: a build made for another commit would
+   hide it. A commit whose environment cannot be made is skipped (exit 125), never taken for good
+   or bad.
+3. Confirm: the test fails at the culprit and passes at its parent, on the failing lane's image,
+   each of the two in the lane's environment for its tree. Record how long it took where it passed:
+   the verify engineer's time limits for the test come from it.
 4. Plan the fix forward as work packages; the package's `test` is the failing test. For a
    `dependency_bump`, the package pins or adapts and the triage record says what to report upstream.
 5. Where what fails is a defect of an AMD component outside the framework (aiter, MoRI, ROCm, the ROCm

@@ -94,6 +94,13 @@ clock can start before your session does.
    its image is built or the steps it changes are run in the container (a package it installs, an
    environment variable it sets), one to a benchmark or a tool until the tool runs: a run in the
    unchanged environment shows nothing.
+   For a ci task whose triage record names the lane's setup (`RUN_DIR/lane_env.sh`:
+   `ci_guardian.md`, PHASE=classify), what a tree calls for is what that setup puts in effect for
+   it, and the image's package is no tree's: call the script for every tree the round runs, the
+   fix, the base and any other commit, and put what it prints on that arm's `PYTHONPATH`, after the
+   tree's own code. Never give a tree the build made for another: the fix can move the pin, and the
+   script decides for each tree. Where the script fails for a tree, that arm's environment cannot
+   be made: the blocking failure of the last item below.
    - Make the environment the arm's own wherever you can: a variable in the arm's process
      environment only, a package in a directory of the arm's (`pip install --no-deps --target
      RUN_DIR/env/<arm> ...`) put first on its `PYTHONPATH`, checked by the version the package
@@ -414,6 +421,10 @@ request is prepared.
    alone). Never in place: this call changes nothing, the pull request is checked in this image
    after it, and a call that ends without an answer cannot put anything back. Where main's change
    must replace a package of the image, or cannot be put into effect at all, answer `inconclusive`.
+   For a ci task whose triage record names the lane's setup (`RUN_DIR/lane_env.sh`), main's
+   environment is what that setup puts in effect for main's tree: call the script for the recheck
+   worktree, and put what it prints on `PYTHONPATH` after that tree's code. Where it fails, answer
+   `inconclusive`.
 4. Run it as you ran it on the base: the same model and settings, on the GPUs in `gpu_ids`, and as
    many times as the base needed to show the failure (the ledger has the counts), at least 6 for a
    failure that did not show on every run there (`validation_doctrine.md`, *Noise characterization*):

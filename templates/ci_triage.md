@@ -12,6 +12,7 @@
 | on main, in the lane's own environment | fails / passes (the image the job ran, the lane's newest and how it was found, each test's runs, the fix that merged; what of the task was not run) / not run here (what the lane needs) |
 | error signature | |
 | first red run / last green run | <run links and times> |
+| the lane's setup | nothing over the image / <what the lane's setup puts in effect that the image does not have: `RUN_DIR/lane_env.sh`, which makes it for a given tree, the job's flags and overrides it holds, and what it resolved for each tree that was run> |
 | open fix PRs | none / <#n: what it changes, and whether its diff addresses this failure; the run verifies it in place of a fix of its own> |
 
 ## Classification

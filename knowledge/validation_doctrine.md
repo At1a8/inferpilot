@@ -269,9 +269,12 @@ Notes per gate:
   changes are run in the container (a package it installs, an environment variable it sets, such as
   `SGLANG_USE_AITER`), a tool when it runs. So every tree runs in the environment its own files call
   for: the fix with the change in effect, the base with the image's, a parent or a mutant of a commit
-  with what that tree declares. That holds for every run of the task: the unit test and its control
-  at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2 and of G5,
-  and the command the pull request gives. The same run in the unchanged environment shows nothing.
+  with what that tree declares. On a CI lane whose setup step replaces a package of its image, what
+  a tree calls for is what that setup puts in effect for it (`ci_triage.md` §2): the image's package
+  is then no tree's, the base's included. That holds for every run of the task: the unit test and
+  its control at Implement, the feature-off checks, `issue_repro` or `failing_test`, both arms of G2
+  and of G5, and the command the pull request gives. The same run in the unchanged environment shows
+  nothing.
   The commonest such change is a new version of a package the server runs (aiter, PyTorch, Triton,
   flashinfer), bumped or pinned: no line of the framework changes, and every kernel may.
   The environment is the arm's own wherever it can be: a variable set for the arm's processes alone,

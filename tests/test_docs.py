@@ -2179,24 +2179,60 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "**A cluster of both.**"),
                 # what the lane's setup installs over its image is part of the lane's environment
                 ("roles/ci_guardian.md", "**What the lane's setup installs is part of its environment.**"),
-                ("roles/ci_guardian.md", "`<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's is "
-                                         "not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where the "
-                                         "job overrides the pin"),
-                # what the setup installs is decided by the tree it tests: resolved for main and for the task worktree, not read off the job
-                ("roles/ci_guardian.md", "What the setup puts in effect is decided by the tree it tests. So resolve it for each tree you run, "
-                                         "main and the task worktree"),
+                ("roles/ci_guardian.md", "`<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER in some cases and keeps "
+                                         "the image's in others"),
+                # the setup's own decision is followed, for each tree, against the image and the job's flags: no rule of the guardian's
+                ("roles/ci_guardian.md", "What the setup puts in effect is decided by the tree it tests, and by the setup's own rules"),
+                ("roles/ci_guardian.md", "So take, for each tree you run, main and the task worktree, the decision that tree's setup script takes "
+                                         "against the image you run in, with the flags and the overrides the lane's workflow gives the job"),
+                ("roles/ci_guardian.md", "follow the script branch by branch, and put no rule of your own in its place"),
+                ("roles/ci_guardian.md", "It decides on the version the image's package reports (`pip show amd-aiter`), which names the commit it "
+                                         "was built from only where the version carries one: decide on what it reads, as it does"),
+                ("roles/ci_guardian.md", "an override of the pin forces a rebuild, even at the commit the image has"),
+                ("roles/ci_guardian.md", "any other dev build is kept, whatever the pin"),
+                ("roles/ci_guardian.md", "Where the setup keeps the image's package, so do you: the pin's build would replace what the lane runs"),
+                # a rebuild is the setup's build, patches and tree files included: the commit alone is not the package
+                ("roles/ci_guardian.md", "Where it rebuilds, the lane's package is that build, not the commit alone: the patches the setup applies "
+                                         "again and the files it takes from the tested tree are part of it"),
+                ("roles/ci_guardian.md", "Build it as the setup does, into a directory of the run's own that goes first on `PYTHONPATH`, never in "
+                                         "place"),
                 ("roles/ci_guardian.md", "It tested another tree: what it installed is evidence, and not what to install for these"),
-                # a version without a commit does not show the same build
-                ("roles/ci_guardian.md", "`pip show amd-aiter` gives the version, and the commit it was built from only where the version "
-                                         "carries one"),
-                ("roles/ci_guardian.md", "Equal versions without a commit do not show the same build"),
-                ("roles/ci_guardian.md", "put the lane's into effect for these runs as an arm's environment is made"),
+                # the lane's environment is carried to the later phases as a script that makes it for a given tree
+                ("roles/ci_guardian.md", "The lane's environment holds for every later run of the task, and each tree has its own"),
+                ("roles/ci_guardian.md", "So write what you did as a script of the run, `RUN_DIR/lane_env.sh`: given a tree, it takes the setup's "
+                                         "decision for that tree, builds what the decision calls for where the run has not built it yet, and "
+                                         "prints the directory to put first on `PYTHONPATH`"),
+                ("roles/ci_guardian.md", "`failing_test_cmd` calls it for the tree it runs (step 3), and the triage record names it"),
+                ("roles/ci_guardian.md", "Bisect, Verify and the check on the latest main call it for every tree they run, the base included, "
+                                         "and take what it prints: no tree is given the build Classify made for another"),
+                ("roles/verify_engineer.md", "Never give a tree the build made for another: the fix can move the pin, and the script decides for "
+                                             "each tree"),
+                ("roles/ci_guardian.md", "it calls `RUN_DIR/lane_env.sh` for the tree it runs and puts what that prints on `PYTHONPATH`, after the "
+                                         "tree's own code"),
+                ("roles/ci_guardian.md", "Each commit runs in the lane's environment for its own tree: where the triage record names "
+                                         "`RUN_DIR/lane_env.sh`, every step calls it for the worktree at that commit"),
+                ("roles/ci_guardian.md", "A commit whose environment cannot be made is skipped (exit 125), never taken for good or bad"),
+                ("roles/ci_guardian.md", "on the failing lane's image, each of the two in the lane's environment for its tree"),
+                ("roles/verify_engineer.md", "For a ci task whose triage record names the lane's setup (`RUN_DIR/lane_env.sh`: `ci_guardian.md`, "
+                                             "PHASE=classify), what a tree calls for is what that setup puts in effect for it, and the image's "
+                                             "package is no tree's"),
+                ("roles/verify_engineer.md", "call the script for every tree the round runs, the fix, the base and any other commit"),
+                ("roles/verify_engineer.md", "main's environment is what that setup puts in effect for main's tree: call the script for the recheck "
+                                             "worktree"),
+                ("knowledge/validation_doctrine.md", "On a CI lane whose setup step replaces a package of its image, what a tree calls for is what "
+                                                     "that setup puts in effect for it (`ci_triage.md` §2): the image's package is then no "
+                                                     "tree's, the base's included"),
+                ("knowledge/ci_triage.md", "Every tree the task runs later gets the lane's environment resolved for itself, by the script the "
+                                           "triage record names: the commits of a bisect, the fix and its base, main at the last check"),
+                ("templates/ci_triage.md", "| the lane's setup | nothing over the image / <what the lane's setup puts in effect that the image "
+                                           "does not have: `RUN_DIR/lane_env.sh`, which makes it for a given tree"),
                 # a lane whose setup cannot be made here is one this machine could not be: the rest of the task is still judged
                 ("roles/ci_guardian.md", "That lane is then one this machine could not be (below): named in `unchecked` where another part of "
                                          'the task was judged, and `on_main: "not_run"` only where no part of it was'),
                 # two jobs of one commit whose setups differ ran two environments: no evidence of an intermittent failure
                 ("roles/ci_guardian.md", "The lane's runs count there only where their setup put the same packages in effect"),
-                ("knowledge/ci_triage.md", "The lane's environment is also what its setup step installs over the image"),
+                ("knowledge/ci_triage.md", "The lane's environment is also what its setup step installs over the image (AITER rebuilt or "
+                                           "kept, as the setup of the tested tree decides against the image and the job's flags)"),
                 ("knowledge/ci_triage.md", "So are two of the lane's own jobs on one commit whose setups differ"),
                 # the image is read where the tests run
                 ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
