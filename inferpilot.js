@@ -1590,10 +1590,17 @@ async function verifyLoop(extraGates) {
     // to compare them with (verify_engineer.md). Not on a G2 the round left out or did not run: the script the
     // task names is no evidence until it has compared something.
     const compared = String((v.gates || {}).G2 || '').trim();
+    // The second result is the documented one and nothing looser: the outputs that were kept and the directory
+    // they are in, with "no baseline" and why. A G2 that says it did not run or that it failed is neither,
+    // whatever else it says; nor is a comparison the round lists among its failures, blocking or not: what the
+    // user's script reports on fixed inputs and seeds is excused by no known issue (verify_engineer.md).
+    const keptOutputs = /\bno baseline\b/i.test(compared) && /\boutputs\/fix-/.test(compared) && !/^(not[ _-]?run|fail|skip)/i.test(compared);
+    const comparisonFailed = failures.some((f) => String(f.gate || '').trim() === 'G2');
     if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))
-      && !/^pass\b/i.test(compared) && !/\bno baseline\b/i.test(compared)) {
+      && (comparisonFailed || !(/^pass\b/i.test(compared) || keptOutputs))) {
       const why = `the model answers no text questions, and the round was accepted without the result of its output comparison: G2 is ${
-        compared ? `"${compared}"` : 'not reported'}. G2 of such a fix is the task's output_script, run on the base and on the fix`;
+        compared ? `"${compared}"` : 'not reported'}${comparisonFailed ? ', and the round lists it among its failures' : ''}. `
+        + "G2 of such a fix is the task's output_script, run on the base and on the fix";
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }
@@ -1632,6 +1639,17 @@ async function verifyLoop(extraGates) {
     }
     note('Investigate', inv.verdict, inv.summary || '');
     if (inv.verdict === 'baseline_bug') {
+      // The output comparison of a model that answers no text questions runs the user's script on fixed inputs
+      // and seeds: a difference it reports is never the baseline's to keep. Where the base differs from itself
+      // as much, the script cannot tell the fix from noise, and a known issue would excuse every later miss:
+      // none is recorded, and a human decides, with the script.
+      if (C.text_model === false && C.output_script && blocking.some((f) => String(f.gate || '').trim() === 'G2')) {
+        const why = "the output comparison (G2) differs by more than the task's output_script tolerates, and the investigator finds the same "
+          + 'on the base: no known issue excuses a difference the comparison reports. As it stands the script cannot tell the fix from '
+          + 'noise: a human decides';
+        note('Investigate', 'fail', why);
+        return { ok: false, reason: why };
+      }
       // What the task is there to fix fails on the base by definition. A gate of the fix's own that still fails
       // is the fix not fixing, never a known issue: recorded as one, it would be excused in the next round.
       const mine = own(blocking).map((f) => f.gate);

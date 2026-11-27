@@ -992,10 +992,17 @@ class OutputComparisonTest(unittest.TestCase):
                       "    if (C.server_code_changed && outputsLacking()) {", src,
                       "a round that finds such a model without the script can pass")
         # With the script, a round is accepted only on the comparison's result: not on a G2 it left out or did not run.
-        self.assertIn("const compared = String((v.gates || {}).G2 || '').trim();\n"
+        self.assertIn("const compared = String((v.gates || {}).G2 || '').trim();\n", src)
+        # "no baseline" is the documented result and nothing looser: the outputs kept and where, never a G2 that did not run or failed
+        self.assertIn("const keptOutputs = /\\bno baseline\\b/i.test(compared) && /\\boutputs\\/fix-/.test(compared) "
+                      "&& !/^(not[ _-]?run|fail|skip)/i.test(compared);\n"
+                      "    const comparisonFailed = failures.some((f) => String(f.gate || '').trim() === 'G2');\n"
                       "    if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))\n"
-                      "      && !/^pass\\b/i.test(compared) && !/\\bno baseline\\b/i.test(compared)) {", src,
+                      "      && (comparisonFailed || !(/^pass\\b/i.test(compared) || keptOutputs))) {", src,
                       "a round can be accepted for such a model without the result of its output comparison")
+        # a difference the comparison reports is never the baseline's to keep: no known issue, and a human decides
+        self.assertIn("if (C.text_model === false && C.output_script && blocking.some((f) => String(f.gate || '').trim() === 'G2')) {", src,
+                      "a known issue can excuse the output comparison in a later round")
         self.assertIn("\nFIX_NEEDS.output_script = ", src, "the result does not say what to give")
         question = re.search(r"\nconst OUTPUTS_ASK = (.*?);\n", src, re.S).group(1)
         for said in ("PORT", "OUT_DIR", "BASE_DIR", "same inputs with the same seeds", "exits non-zero", "no template for it"):
@@ -1016,6 +1023,8 @@ class OutputComparisonTest(unittest.TestCase):
                      "is a blocking failure, and so is a run that compared nothing", "This is the one G2 that compares outputs",
                      "A round is accepted only on the comparison's result, a pass or outputs kept where there is no baseline",
                      "never on a G2 that did not run, with the script named or without",
+                     "No known issue excuses a difference the comparison reports",
+                     "where the base differs from itself as much, the script cannot tell the fix from noise",
                      "Each run of the fix writes to a directory of its own, named for its commit"):
             self.assertIn(said, note[0])
         fix = [i for i in notes if i.startswith("- **G2 for a fix.**")]
@@ -1036,6 +1045,15 @@ class OutputComparisonTest(unittest.TestCase):
                            ("roles/verify_engineer.md", "InferPilot accepts a round for such a model only on one of those two results, a `pass` or "
                                                         "outputs kept with `no baseline`"),
                            ("roles/verify_engineer.md", "never report it `not run` where the task names the script"),
+                           ("roles/verify_engineer.md", "The second is that form and nothing looser: it names the outputs that were kept and the "
+                                                        "directory they are in"),
+                           ("roles/verify_engineer.md", "a G2 that begins `not run` or `fail` is neither, whatever it says of a baseline"),
+                           # the known-issue rule of step 4 does not apply to the comparison
+                           ("roles/verify_engineer.md", "Step 4 excuses nothing here: the comparison runs on fixed inputs and seeds"),
+                           ("roles/verify_engineer.md", "no entry of `known_issues` makes an output that differs by more than the script tolerates "
+                                                        "pass, or fail without blocking"),
+                           ("roles/verify_engineer.md", "a comparison listed among the round's failures is not accepted"),
+                           ("roles/verify_engineer.md", "the run stops for a human, and records no known issue"),
                            ("roles/verify_engineer.md", 'say so in `gates` and with `"text_model": true` in your answer'),
                            ("roles/verify_engineer.md", '`"text_model": true` when a model Setup took for such a one answers text questions after all'),
                            ("roles/verify_engineer.md", "What you say replaces what Setup said, for the later rounds and the report"),

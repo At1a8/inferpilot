@@ -1607,6 +1607,17 @@ const scenarios = [
       ['leaves G2 out', {}, {}],
       ['reports a comparison that failed without blocking', { G2: 'fail: 3 of 16 images differ beyond the tolerance (KI-002)' },
         { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-002' }] }],
+      // "no baseline" is the documented result and nothing looser: the outputs that were kept, and where.
+      ['says it did not run for want of a baseline', { G2: 'not run: no baseline available' }, {}],
+      ['reports a failure that mentions no baseline', { G2: 'fail: 3 of 16 images differ from the last good commit; no baseline on the base' },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'no baseline on the base' }] }],
+      ['says there is no baseline without the outputs it kept', { G2: 'no baseline: the base does not start on this configuration' }, {}],
+      ['says it skipped the comparison, with outputs somewhere', { G2: 'skipped, no baseline; an earlier round wrote RUN_DIR/outputs/fix-5d6e7f8' }, {}],
+      ['says it did not run, and names a directory', { G2: 'not run: no baseline; RUN_DIR/outputs/fix-5d6e7f8 holds an earlier round\'s outputs' }, {}],
+      ['says the comparison failed, with no baseline and a directory', { G2: 'fail: no baseline, outputs in RUN_DIR/outputs/fix-5d6e7f8' }, {}],
+      // A comparison among the round's failures is not excused by a known issue, whatever the gate says.
+      ['calls the comparison a pass and lists it among its failures', { G2: "pass: 13 of 16 images match the base's; 3 differ, as KI-002 says" },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-002' }] }],
     ]) {
       const skipped = await run(scripted, compared(gates, more));
       const said2 = (skipped.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
@@ -1616,6 +1627,26 @@ const scenarios = [
       check(/accepted without the result of its output comparison: G2 is ("|not reported)/.test(said2)
         && /G2 of such a fix is the task's output_script, run on the base and on the fix/.test(said2), `and the run record says why: ${said2}`);
     }
+    // A difference the comparison reports is never the baseline's to keep: where the investigator finds the same on
+    // the base, the script cannot tell the fix from noise. No known issue is recorded, which would excuse every
+    // later miss, and the run stops for a human after that one round.
+    const noisy = await run(scripted, { ...compared({ G2: 'fail: 3 of 16 images differ beyond the tolerance' },
+      { all_pass: false, failures: [{ gate: 'G2', blocking: true, evidence: 'PSNR 31 dB on 3 of 16, the script asks 35' }] }),
+    'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-7', title: 'the base differs from itself' },
+      summary: 'two runs of the base differ as much' }) });
+    const noisyWhy = (noisy.result.phases.filter((p) => p.phase === 'Investigate').pop() || {}).summary || '';
+    check(noisy.result.status === 'blocked' && noisy.result.stopped_at === 'Verify' && !(noisy.result.known_issues || []).length
+      && noisy.calls.filter((c) => c.key === 'verify_engineer:verify').length === 1 && !noisy.keys.some((k) => k.startsWith('pr_engineer'))
+      && /no known issue excuses a difference the comparison reports/.test(noisyWhy) && /a human decides/.test(noisyWhy),
+      `a comparison that differs on the base as well stops the run for a human, with no known issue: ${noisy.result.status} at ${
+        noisy.result.stopped_at}, ${JSON.stringify(noisy.result.known_issues)} | ${noisyWhy}`);
+    // gsm8k on a model that answers text questions is judged as before: a failure the baseline shares is a known issue.
+    const shared = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { ...DEFAULTS['verify_engineer:verify'](), all_pass: false,
+        failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 on both arms' }] } : DEFAULTS['verify_engineer:verify']()),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'gsm8k is low on the base too' }, summary: 'on the base too' }) });
+    check(shared.result.status === 'ready_for_review' && (shared.result.known_issues || []).some((k) => k.id === 'KI-8'),
+      `a text model's G2 that the baseline shares is a known issue, as before: ${shared.result.status}`);
     // The verify engineer has the server, and the last word on what the model is, either way. A model Setup took
     // for one that answers no text questions and that answers them after all is measured on gsm8k: the later
     // roles read it so, and the guard for the comparison does not apply. A round that does not say changes nothing.

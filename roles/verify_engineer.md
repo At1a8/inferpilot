@@ -140,13 +140,19 @@ clock can start before your session does.
        "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline: the base's are the
        black images the issue reports"`). InferPilot accepts a round for such a model only on one of
        those two results, a `pass` or outputs kept with `no baseline`: never leave G2 out, and never
-       report it `not run` where the task names the script. Write both commands in the ledger, with
-       the directory and the commit of each arm, where the report's *Before pushing* section finds
-       them. What the model is shows on its server: where one Setup took for such a model answers
-       text questions all the same (the server has chat completions, and answers one), run gsm8k as
-       for any other fix, leave the task's script unrun, and say so in `gates` and with
-       `"text_model": true` in your answer, so that the later rounds and the report read the model as
-       what it is.
+       report it `not run` where the task names the script. The second is that form and nothing
+       looser: it names the outputs that were kept and the directory they are in, and a G2 that
+       begins `not run` or `fail` is neither, whatever it says of a baseline. Step 4 excuses nothing
+       here: the comparison runs on fixed inputs and seeds, so no entry of `known_issues` makes an
+       output that differs by more than the script tolerates pass, or fail without blocking, and a
+       comparison listed among the round's failures is not accepted. Where the base differs from
+       itself as much, the script cannot tell the fix from noise: the run stops for a human, and
+       records no known issue. Write both commands in the ledger, with the directory and the commit
+       of each arm, where the report's *Before pushing* section finds them. What the model is shows
+       on its server: where one Setup took for such a model answers text questions all the same (the
+       server has chat completions, and answers one), run gsm8k as for any other fix, leave the
+       task's script unrun, and say so in `gates` and with `"text_model": true` in your answer, so
+       that the later rounds and the report read the model as what it is.
      - With no `output_script` there is nothing to compare the outputs of such a model with, and
        gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
        `"G2": "not run: the model answers no text questions, and the task names no output_script"`
