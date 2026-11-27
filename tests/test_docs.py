@@ -447,6 +447,311 @@ class EnvironmentTest(unittest.TestCase):
                               for name in sorted(table_names(EN)) if ENV_NAME.match(name) and name not in read])
 
 
+class ExistingFixFailsTest(unittest.TestCase):
+    """An existing fix PR is verified, not repaired (knowledge/issue_triage.md §4). Where it does not pass, the
+    run drafts the comment that says so for that pull request, takes it off the task branch and fixes the
+    failure itself; the comment is written whatever comes of that fix."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_falls_back_to_a_fix_of_its_own(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const PR_COMMENT = S({ comment_path: str, summary: str, branch_findings: str }, ['comment_path']);",
+                 "the comment has no answer to give, or cannot say what the leak scan found on the pull request's branch"),
+                ("async function existingFailed(prs, at, why) {", "nothing happens when an existing fix does not pass"),
+                # what the PR phase prepared from the discarded branch is not the run's output
+                ("  delete R.pr;\n  Object.assign(C, { pr_body_path: '', pr_work_packages: [], leak_scan_findings: [] });",
+                 "a pull request prepared before the fall-back is still reported as the run's"),
+                # what the comment phase says besides the path is kept with the result
+                ("if (summary) C.existing_pr_result.comment_summary = summary.slice(0, 600);", "what the comment says is dropped"),
+                ("C.existing_pr_result.branch_findings = found;", "what the leak scan found on the pull request's branch never reaches the report"),
+                ("const cm = await call('pr_engineer', 'comment', inputs({ failed_at: at, failure: why }), PR_COMMENT);", "no comment is drafted for the pull request"),
+                ("ROLLBACK, 'implementer:rollback:existing');", "the pull request stays on the branch the run's own fix is made on"),
+                ("R.done.length = 0;", "the pull request's package still counts as a verified one"),
+                ("async function verifyLoop(extraGates, existing) {", "the verify loop does not know that the fix is someone else's"),
+                # only what is shown to be the pull request's counts against it
+                ("if (existing && inv.in_additions !== true\n"
+                 "      && (inv.verdict === 'fix_needed' || (inv.verdict === 'inconclusive' && inv.attributed === true))) {",
+                 "what the pull request lacks is repaired on top of it, a comparison that decided nothing counts against it, or a failure "
+                 "in what the run added does"),
+                ("attributed: bool,", "the investigator cannot say that the controls attribute a failure it cannot explain"),
+                ("in_additions: bool,", "the investigator cannot say that what fails is what the run added on top of the pull request"),
+                # what the run added on top is the run's to repair, and its failure is never the pull request's
+                ("failed_in: { type: 'string', enum: ['pr', 'additions', ''] },", "the unit gate cannot say whose failure it is"),
+                ("        if (existing && ut.failed_in === 'pr') {\n          theirs = true;\n          break;\n        }",
+                 "a gate the pull request failed is repaired in a later round, or a failure of the run's own test is held against it"),
+                ("        if (existing && ut.failed_in !== 'additions') {", "a gate that does not say whose failure it is goes on to a repair round"),
+                ("time_limit_min: exactMinutes(timeoutFor('test_engineer')), ...(existing ? { verify_only: true } : {}),\n"
+                 "        ...(over ? { added_to: over } : {}) };", "the test engineer is not told that the package is someone else's pull request, "
+                                                                    "or added on top of one"),
+                # the run's own packages on top of the pull request: repaired like any, and only what their gate places in the pull request is its
+                ("async function implementAll(wps, existing, over) {", "a package added on top of the pull request is not known for one"),
+                ("        if (over && ut.failed_in === 'pr') {\n          theirs = true;\n          break;\n        }",
+                 "a defect of the pull request that an addition's gate shows is repaired on the author's commits, or ends the run without its comment"),
+                ("const fix = await implementAll(wps, undefined, existing);\n"
+                 "    if (!fix.ok) return { ok: false, at: 'Implement', ...(fix.theirs ? { theirs: true, reason: fix.reason } : {}) };",
+                 "the unit gate of a review addition forgets the pull request"),
+                ("const fix = await implementAll(pr.wps, undefined, existing);\n"
+                 "    if (!fix.ok) return fix.theirs ? failed({ theirs: true, reason: fix.reason }, 'Implement') : finish('blocked', 'Implement');",
+                 "the unit gate of a PR-phase addition forgets the pull request"),
+                ("const fix = await implementAll(inv.work_packages, undefined, existing);\n", "the unit gate of a repair to the additions "
+                                                                                             "forgets the pull request"),
+                # such a failure was found in Implement: the fall-back is recorded there, and a stop named for Implement holds there
+                ("      if (!fix.ok) return fix.theirs ? { ...theirs(fix.reason), at: 'Implement' } : { ok: false, reason: `fix ${fix.failed_wp || ''} "
+                 "failed: ${fix.reason}` };", "a defect of the pull request that a repair's gate shows is recorded as a Verify failure"),
+                # the pull request stays on the branch until its comment is drafted
+                ("    if (!passed && theirs) {\n", "the pull request's package is rolled back before the comment for it reads the branch"),
+                ("return existing && inv.in_additions === true ? { ok: false, reason } : theirs(reason);",
+                 "a failure of the fix's own gate that is the additions' is held against the pull request"),
+                ("integrated_kernels: integratedKernels, ...(existing ? { verify_only: true } : {}) }),",
+                 "the investigator is not told that the change is someone else's pull request"),
+                # a failure of the pull request found in a repair round is still the pull request's
+                ("async function reviewLoop(extraGates, perfClaim, runPerf, existing) {", "the review's repair round forgets the pull request"),
+                ("async function repaired(extraGates, perfClaim, runPerf, existing) {", "a repair round forgets the pull request"),
+                ("const ver = await verifyLoop(extraGates, existing);\n  // A failure the round attributes to someone else's pull request goes back as such",
+                 "a repair round verifies someone else's pull request as a fix of the run's own"),
+                ("return ver.stopped ? ver : { ok: false, at: ver.at || 'Verify', ...(ver.theirs ? { theirs: true, reason: ver.reason } : {}) };",
+                 "a failure of the pull request found in a repair round ends the run without its comment"),
+                ("const failed = (r, at) => (existing && r.theirs ? existingFailed(existing, r.at || at, r.reason) : ended(r, at));",
+                 "a round that ends on a failure of the pull request is not answered with the comment"),
+                ("const rev = await reviewLoop(extraGates, perfClaim, runPerf, existing);\n  if (!rev.ok) return failed(rev, rev.at);",
+                 "the review round is not told of the pull request"),
+                ("const stop = await repaired(extraGates, perfClaim, runPerf, existing);\n    if (stop) return failed(stop, stop.at);",
+                 "the PR phase's round is not told of the pull request"),
+                ("if (!impl.ok) return existing && impl.theirs && !impl.held ? existingFailed(existing, 'Implement', impl.reason) : finish('blocked', 'Implement');",
+                 "a pull request that does not apply ends the run, one whose gate may still be running is rolled back, or a missing answer "
+                 "counts against it"),
+                ("...(existing ? { verify_only: true } : {}), ...(over ? { added_to: over } : {}) }), IMPL, imLabel);",
+                 "the implementer is not told to leave the pull request as it is, or that its package is added on top of one"),
+                ("conflicts: strs,", "the implementer cannot say that the pull request no longer applies"),
+                ("if (existing && conflicts.length) {", "a package blocked for another reason counts as the pull request's failure"),
+                # nothing is rolled back or fixed next to what may still be running
+                ("}, ['wp', 'unit_pass', 'feature_off_unchanged', 'fails_without_change', 'incomplete', 'left_running']);",
+                 "a unit answer that leaves out what it could not stop is taken for a gate that cleaned up"),
+                ("if (leftBy(ut)) return gateLeftRunning(wp, im.commit, leftBy(ut));", "a call to finish the gate, a fix round or a rollback starts "
+                                                                                      "next to what the gate could not stop"),
+                ("if (leftBy(fin)) return gateLeftRunning(wp, im.commit, leftBy(fin));", "the call that finishes a gate is not held to the same"),
+                ("const leftOn = String(v.left_running || '').trim();", "a Verify round cannot say what it could not stop"),
+                ("      if (!passedRound) {\n        const why = `the round could not stop what it started (${leftOn}): nothing is investigated, "
+                 "repaired or rolled back next to it`;", "an investigation or a rollback starts next to what a failed round could not stop"),
+                # a failed round that does not say whether it cleaned up: the GPUs are checked before anything else works on them
+                ("      if (typeof answer.left_running === 'string' || asked.has(answer)) return !unconfirmed;\n"
+                 "      const label = `verify_engineer:gpus#after${round}${asked.size ? '+time' : ''}`;\n      asked.add(answer);\n"
+                 "      const after = await call('verify_engineer', 'gpus', inputs({ round: `after ${round}` }), ROUND_CLEANUP, label);",
+                 "a round that does not say whether it cleaned up is taken for one that did"),
+                ("    const refused = () => stopped(v);", "a round that is refused is not asked what it left"),
+                # the check says what it could not stop, in every answer: a process that holds no GPU shows nowhere else
+                ("const ROUND_CLEANUP = S({ in_use: str, in_use_gpus: arr({ type: ['string', 'integer'] }), left_running: str },\n"
+                 "  ['in_use', 'in_use_gpus', 'left_running']);", "idle GPUs are taken for a round that stopped everything, or the GPUs in use "
+                                                                 "are read from words"),
+                ("      else if (left) unconfirmed = `${unsaid}the check after it could not stop ${left}`;",
+                 "what the check could not stop is investigated next to"),
+                # the GPUs are compared by their numbers: another job on one of them excuses that one alone
+                ("const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\\bGPU\\s+(\\d+)\\s*:/g)].map((m) => m[1]))];",
+                 "the GPUs an answer names are not read by their numbers"),
+                ("      const fresh = ids.filter((g) => !gpusNamed(inUse).includes(g));",
+                 "a job on one GPU before the round excuses a server the round left on another"),
+                ("      const unread = ids.some((g) => !/^\\d+$/.test(g)) || (!!held && !ids.length) || gpusNamed(held).some((g) => !ids.includes(g));",
+                 "a GPU in use that the list does not give by its number is taken for none"),
+                # a round that asks for more time is run again at once: one that does not say what it left is checked first
+                ("    const needs = limit && r ? Math.ceil(Number(await needsOf(r)) || 0) : 0;", "a caller cannot check anything before a round is run again"),
+                ("        return Number(r.needs_min) > 0 && (await stopped(r)) ? r.needs_min : 0;",
+                 "a round that does not say what it left is run again next to it"),
+                ("    const wantsTime = v.all_pass !== true && Number(v.needs_min) > 0 && !(v.failures || []).some((f) => f.blocking !== false);\n"
+                 "    if (wantsTime && (leftOn || unconfirmed)) {", "a round held for what it left is investigated as a failure, or passes on "
+                                                                    "failures that do not block with gates it never ran"),
+                ("    if (!passedRound) await refused();", "a failed round is not asked whether it cleaned up"),
+                # a pass that is refused is asked the same: no script for a model with no text answers, no comparison, no score
+                ("    if (C.server_code_changed && outputsLacking()) {\n      await refused();", "a refused pass is taken for a round that cleaned up"),
+                ("      && (comparisonFailed || !(/^pass\\b/i.test(compared) || keptOutputs))) {\n      await refused();",
+                 "a pass without its output comparison is taken for a round that cleaned up"),
+                ("    if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\\b/i.test(claimGate)) {\n"
+                 "      await refused();", "a pass without the score is taken for a round that cleaned up"),
+                ("      else if (fresh.length) unconfirmed = `${unsaid}GPU ${fresh.join(', ')}, not in use before it, is in use after it (${held})`;",
+                 "a GPU the round still holds is investigated next to"),
+                ("        leftRunning.push(unconfirmed);", "the closing phases launch on GPUs the run could not confirm free"),
+                ("    if (unconfirmed) {\n      note('Verify', 'fail', `${unconfirmed}: nothing is investigated or repaired next to it`);",
+                 "an investigation starts where the round may still hold the GPUs"),
+                ("        if (String(r.left_running || '').trim() || r.all_pass === true || (r.failures || []).some((f) => f.blocking !== false)) return 0;",
+                 "a round that could not stop what it started is run again with more time next to it"),
+                ("const live = [...TIMED_OUT_CALLS].map((c) => `${c} timed out and may still be running`).concat(leftRunning);\n  if (live.length) {",
+                 "a rollback starts next to a call that timed out, or to what a round left running"),
+                # the run's own fix starts on the task's base and on no other commit
+                ("base_commit: str,", "Setup cannot return the commit the task branch was made on"),
+                ("C.base_commit = String(s.base_commit || '').trim();", "the run does not know the task's base"),
+                ("if (!sameCommit(target, base)) {", "the run's own fix starts on a branch that is not at the task's base"),
+                # a stop named for the phase the pull request failed in holds
+                ("if (stopHere(at)) {\n    note(at, 'stopped', `stop_after=${at}: ${prs} did not pass", "the run's own fix starts past the phase the operator named"),
+                # the run's own fix is prepared as any fix, at the priority the problem has without a usable fix PR
+                ("C.existing_prs = [];", "the PR phase writes a verification comment for the run's own fix"),
+                ("priority_without_pr: { type: 'string', enum: ['P0', 'P1', 'P2', ''] },", "Triage cannot say the priority without the pull request"),
+                ("const without = String(tri.priority_without_pr || '').trim();\n    if (without && without !== C.priority) {",
+                 "a failure that was P1 only for its open fix PR stays P1 once that PR has failed"),
+                ("${status === 'ready_for_review' ? \"; once the run's own pull request is open, add its link to that comment\" : ''}",
+                 "the user is told to link a pull request the run does not have"),
+                ("const ver = await verifyLoop(extraGates, existing);\n  if (!ver.ok) return failed(ver, 'Verify');",
+                 "a failure that is not the pull request's is decided against it"),
+                # every check a trusted measurement failed, by its own name, and none that was not judged
+                ("if (existing && perf.trusted && perf.failed.length) {", "a measurement that was not trusted is decided against the pull request, "
+                                                                          "or a slower guard workload is not"),
+                ("const judged = !!claim && !unjudged;", "a number that had no baseline to be judged against is said to have failed"),
+                ("judged && HELD_OUT && p.held_out_ok !== true && 'the result does not hold at the held-out operating point',",
+                 "a result that does not hold at the held-out point is said as a missed number, or left out next to one"),
+                ("p.guards_ok !== true && 'on a guard workload it is slower than the baseline beyond the noise band',", "the run cannot tell a guard that failed"),
+                ("return existingFailed(existing, 'Performance', `${perf.failed.join('; ')}${perf.summary ? ` (${perf.summary})` : ''}`);",
+                 "the comment is written from a reason that names a check which did not fail"),
+                ("const tried = await deliver([wp], gates, issueClaim, runPerf, prs || 'the existing fix PR');", "an issue's existing fix is not verified as someone else's"),
+                ("if (tried !== EXISTING_FAILED) return tried;", "the run ends where its own fix should begin")):
+            self.assertIn(said, src, why)
+        issue = src[src.index("async function runIssue() {"):src.index("async function runCi() {")]
+        self.assertLess(issue.index("if (tried !== EXISTING_FAILED) return tried;"), issue.index("enter('Diagnose');"),
+                        "the run's own fix does not start with a diagnosis")
+        # The repair of a fix of the run's own is unchanged: the check for someone else's comes first.
+        self.assertLess(src.index("if (existing && inv.in_additions !== true\n"),
+                        src.index("const fix = await implementAll(inv.work_packages, undefined, existing);"))
+        # The comment is drafted before anything stops the run, and the branch is rolled back before a stop holds.
+        fb = src[src.index("async function existingFailed(prs, at, why) {"):src.index("async function deliver(")]
+        self.assertLess(fb.index("ROLLBACK, 'implementer:rollback:existing');"), fb.index("if (!sameCommit(target, base)) {"))
+        self.assertLess(fb.index("if (!sameCommit(target, base)) {"), fb.index("R.done.length = 0;"),
+                        "the pull request's record is cleared before the branch is known to be at the base")
+        self.assertLess(fb.index("const cm = await call('pr_engineer', 'comment'"), fb.index("if (live.length) {"))
+        self.assertLess(fb.index("if (live.length) {"), fb.index("ROLLBACK, 'implementer:rollback:existing');"))
+        self.assertLess(fb.index("ROLLBACK, 'implementer:rollback:existing');"), fb.index("if (stopHere(at)) {"))
+
+    def test_the_documents_say_it(self):
+        role = (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8")
+        self.assertIn("\n## PHASE=comment (issue: an existing fix PR that did not pass verification)\n", role)
+        phase = " ".join(role[role.index("## PHASE=comment"):].split())
+        for said in ("Its author is owed what the run saw, whatever becomes of the fix the run now makes itself",
+                     "You change no code and run nothing: every number comes from the ledger",
+                     "`RUN_DIR/pr_comment.md`", "the commit of it the run applied",
+                     "what passed, since a comment that lists only failures misleads",
+                     "no verdict on the pull request, no request to close it, and no attribution line",
+                     # the comment is written before the run knows what becomes of its own fix
+                     "Promise nothing about what follows", "it ends with what was measured, and names no pull request to come",
+                     "its result tells the human to add that pull request's link when posting",
+                     "Run the leak scan on it as on a PR body",
+                     # the branch still carries the pull request: its findings are not the comment's
+                     "rewrite the comment until the scan finds nothing in it",
+                     "a finding there is not the comment's, and not yours to clear",
+                     "name what the scan found on the branch in `branch_findings`, empty when it found nothing there",
+                     '"branch_findings": "<what the leak scan found on the pull request\'s branch | \'\'>"',
+                     '"comment_path": "/abs/RUN_DIR/pr_comment.md"'):
+            self.assertIn(said, phase)
+        for path, said in (
+                ("knowledge/issue_triage.md", "**An existing fix that does not pass is answered, then replaced.**"),
+                ("knowledge/issue_triage.md", "nothing is repaired on top of it"),
+                ("knowledge/issue_triage.md", "goes on to Diagnose and a fix of its own, as for an issue nobody had opened a pull request for"),
+                ("knowledge/issue_triage.md", "That fix's pull request names the earlier one and says in one sentence what it did not pass"),
+                ("knowledge/issue_triage.md", "a measurement that could not be trusted decides nothing"),
+                ("knowledge/issue_triage.md", "where it does not pass, the comment says so and the run fixes the failure itself |"),
+                ("roles/investigator.md", "**After an existing fix PR that did not pass** (`existing_pr_result`"),
+                ("roles/investigator.md", "plan from the root cause, not as a patch on that pull request"),
+                ("roles/issue_triager.md", "With `existing_pr_result` an open fix PR was verified first and did not pass"),
+                ("roles/issue_triager.md", "Say that the fix now offered is another one only for `ready_for_review`, where the run has one"),
+                ("roles/issue_triager.md", "for any other ending say what the run reached after it (a diagnosis, a stop), and promise no fix"),
+                ("roles/issue_triager.md", "return `priority_without_pr` as well, the priority it has when no usable fix PR exists"),
+                ("roles/issue_triager.md", '"priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>"'),
+                ("roles/director.md", "With `existing_pr_result`, say that the run first verified that pull request"),
+                ("roles/director.md", "only `ready_for_review` has a pull request to link from that comment, and the comment itself promises none"),
+                # the run's own fix after it is prepared as any fix
+                ("roles/pr_engineer.md", "With `existing_pr_result` the run first verified someone else's open fix, which did not pass"),
+                ("roles/pr_engineer.md", "Step 5 writes a PR body for it, with the attribution line, and not a verification comment, whatever the "
+                                         "triage record says of an existing PR"),
+                # verified as it is
+                ("roles/implementer.md", "`verify_only` (true when the package applies someone else's pull request that the run verifies as it is"),
+                ("roles/implementer.md", "A cherry-pick that conflicts is not resolved: `git cherry-pick --abort`"),
+                ("roles/implementer.md", "return `blocked` with the files that conflict in `conflicts`"),
+                ("roles/implementer.md", "name the files only when git reported the conflict, never for another reason you could not go on"),
+                ("roles/implementer.md", "the author's code and tests stay as they are, and where they fail, that is what the run reports"),
+                ("roles/test_engineer.md", "`left_running` says what is left and where"),
+                ("roles/test_engineer.md", "InferPilot then starts no fix round and no rollback next to it"),
+                ("roles/test_engineer.md", '"left_running": ""'),
+                # every answer says it; what the run added on top of the pull request is told apart from the pull request
+                ("roles/test_engineer.md", "every answer gives it: one that leaves it out is taken for no answer, not for a gate that cleaned up"),
+                ("roles/test_engineer.md", "nor the call that would finish the gate"),
+                ("roles/test_engineer.md", "a gate that fails says in `failed_in` whose the failure is"),
+                ("roles/test_engineer.md", "`additions`: only what the run added on top fails, a test the implementer wrote in a commit of its own "
+                                           "after the author's"),
+                ("roles/test_engineer.md", "Where both fail, it is `pr`"),
+                ("roles/test_engineer.md", '"failed_in": "<verify_only, a failed gate: pr | additions>"'),
+                ("roles/test_engineer.md", "Its `left_running` speaks for the gate as a whole: what the call before could not stop is named there "
+                                           "too"),
+                ("roles/test_engineer.md", "With `added_to` the package is the run's own, added on top of such a pull request"),
+                ("roles/test_engineer.md", "`pr` there is a defect of the pull request that the addition shows"),
+                ("roles/implementer.md", "`added_to` (the pull request under verification that this package is added on top of"),
+                ("roles/implementer.md", "A test of the PR's that cannot fail (the test engineer finds that it passes without the change) is treated "
+                                         "the same way: that is no failure of the fix, so add a test of your own that can fail"),
+                ("roles/verify_engineer.md", "gives a round that asks for more time (`needs_min`) none while something is"),
+                ("roles/verify_engineer.md", "Where a round it does not accept leaves the field out (one that failed, or a pass it refuses: one "
+                                             "without the result the fix is accepted on), it calls PHASE=gpus once more before anything else "
+                                             "works on these GPUs (`round: after <n>`)"),
+                ("roles/verify_engineer.md", "A GPU idle before the round and in use after that stop counts as one the round still holds"),
+                ("roles/verify_engineer.md", "With `round: after <n>` the call follows round `<n>`, which did not say whether it left anything "
+                                             "running, and was not accepted or asked to be run again with more time"),
+                ("roles/verify_engineer.md", "Such a call returns two fields more, in every answer. `left_running`: what you could not stop or "
+                                             "could not find the log of, the empty string when all of it stopped"),
+                ("roles/verify_engineer.md", "A driver or a suite that holds no GPU shows nowhere else"),
+                ("roles/verify_engineer.md", "And `in_use_gpus`: the HIP number of every pinned GPU still in use, as a list (`[\"0\", \"1\"]`), "
+                                             "empty when none is"),
+                ("roles/verify_engineer.md", "InferPilot compares the numbers of the list, and reads no words for them"),
+                ("roles/verify_engineer.md", 'Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | \'\'", "in_use_gpus": ["1"], '
+                                             '"left_running": ""}`'),
+                ("roles/verify_engineer.md", "A round that needs more time and is not run again, for that or for what its own `left_running` "
+                                             "names, is unfinished: InferPilot does not accept it, also where every failure it lists is one that "
+                                             "does not block"),
+                # what a PR phase exported from the branch that was rolled back does not stay next to the next export
+                ("roles/implementer.md", "once the rollback of `ALL` is clean, move `RUN_DIR/patches`, `RUN_DIR/patches_additions` and "
+                                         "`RUN_DIR/pr_body.md` to `RUN_DIR/failed/` where they exist"),
+                ("roles/implementer.md", "`git am patches/*.patch` (README step 5) would replay the commits that were rolled back with the fix "
+                                         "that replaces them"),
+                ("roles/verify_engineer.md", "A round that asks for more time without the field is checked the same way before it is run again, "
+                                             "and is not run again where the check could not stop something"),
+                ("roles/investigator.md", "Say `in_additions` with whatever verdict you return for a failure that is the additions'"),
+                ("knowledge/issue_triage.md", "The pull request stays on the branch until the comment for it is drafted, which reads the branch"),
+                ("knowledge/issue_triage.md", "after a Verify round that is not accepted and does not say, the verify engineer stops what is left "
+                                              "and checks the GPUs first, and nothing is investigated where it could not stop something, or where "
+                                              "a GPU that was idle before the round is in use"),
+                ("knowledge/issue_triage.md", "A measurement that fails after the pull request passed one is not the pull request's to answer for"),
+                ("roles/verify_engineer.md", "`left_running` names one you cannot stop, and a GPU the round still holds, and is the empty string "
+                                             "when everything stopped: say one or the other in every answer"),
+                ("roles/verify_engineer.md", "After a round that failed, InferPilot starts no investigation, repair or rollback next to what is left"),
+                ("roles/investigator.md", 'Add `"in_additions": true` when what fails is in what the run added on top of it'),
+                ("roles/investigator.md", "your work packages then repair those additions and leave the author's commits alone"),
+                ("roles/investigator.md", "Without it the failure is the pull request's: the run reports it there, and nothing is repaired"),
+                ("roles/implementer.md", "`reset_to` is the commit the branch is at once you are done, as `git -C <worktree> rev-parse HEAD` gives "
+                                         "it then, not the one you meant to reach"),
+                ("roles/implementer.md", "it compares the two, and starts nothing on a branch that is elsewhere"),
+                ("roles/director.md", "Return it (`base_commit`): a rollback of the whole task has to come back to that commit"),
+                ("roles/director.md", '"base_commit": "<full sha>"'),
+                ("roles/director.md", "With `branch_findings`, give what the leak scan found on that pull request's own branch"),
+                ("knowledge/issue_triage.md", "What the run adds on top of the pull request is the run's own, and stays apart from it"),
+                ("knowledge/issue_triage.md", "A failure there is repaired there (the unit gate says `failed_in`, the investigator `in_additions`), "
+                                              "and is never held against the pull request"),
+                ("knowledge/issue_triage.md", "a failure of the pull request found then is answered as one found the first time"),
+                ("knowledge/issue_triage.md", "every round has to have said that it left nothing running (`left_running`, in every unit and Verify "
+                                              "answer;"),
+                ("knowledge/issue_triage.md", "the branch has to be at the task's base (`base_commit`, which Setup returns): the run's own fix "
+                                              "starts on no other commit"),
+                ("roles/investigator.md", 'Add `"attributed": true` when the controls show that the failure is the change\'s although you cannot explain it'),
+                ("roles/investigator.md", "Leave it out where a control was interrupted, ended another way or was not run"),
+                ("knowledge/issue_triage.md", "Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that fails"),
+                ("knowledge/issue_triage.md", "And only what is shown to be the pull request's counts against it"),
+                ("knowledge/issue_triage.md", "A comparison that decided nothing, a package blocked for another reason and an answer that never came "
+                                              "prove nothing"),
+                ("knowledge/issue_triage.md", "Nothing is rolled back next to a call that may still be running"),
+                ("knowledge/issue_triage.md", "A stop named for the phase the pull request failed in holds as well"),
+                ("knowledge/issue_triage.md", "That fix has the priority the problem has without a usable fix PR"),
+                ("knowledge/issue_triage.md", "The comment promises no fix: it is written before the run knows what becomes of its own"),
+                ("knowledge/pr_playbook.md", "names that PR and says in one sentence what it did not pass"),
+                ("templates/issue_triage.md", "the comment drafted for it (`pr_comment.md`)"),
+                ("README.md", "| `pr_comment.md` |"), ("README.zh-CN.md", "| `pr_comment.md` |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class LongContextScriptTest(unittest.TestCase):
     """G3 runs the task's own long-context test, `long_context_script`, as G4 keeps up the task's own client
     (knowledge/validation_doctrine.md): the user who asks for the gate says what it runs. A task with

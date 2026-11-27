@@ -64,7 +64,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      writing to it. A resume keeps it: that SHA is `<base>` throughout, and `run.json` keeps it. A new
      attempt resolves the base's full SHA after the fetch (`git -C <framework_dir> rev-parse <base>`)
      and writes it to `run.json` as `base_commit`; a retry does so only after the earlier branch is
-     taken care of (next item).
+     taken care of (next item). Return it (`base_commit`): a rollback of the whole task has to come
+     back to that commit, and InferPilot builds nothing on a branch that is elsewhere.
    - A retry runs every phase again, Reproduce and the baseline included, and they must not see the
      earlier attempt's fix: its branch starts from the base like a new one. Before the `checkout -b`,
      when the earlier branch is still in `framework_dir`, refresh `RUN_DIR/branch.bundle` from it
@@ -241,7 +242,8 @@ Return:
 ```json
 {"lock": "acquired | busy", "run_dir": "/abs/RUN_DIR", "baseline_status": "pass | fail | skip",
  "baseline": "<suites, runs, spread; or why it failed or was skipped>",
- "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "gpu_ids": "0,1,2,3",
+ "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "base_commit": "<full sha>",
+ "gpu_ids": "0,1,2,3",
  "server_script": "/abs/RUN_DIR/scripts/server.sh", "client_script": "/abs/RUN_DIR/scripts/perf.sh",
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
@@ -426,6 +428,12 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed. With
   `component_issue`, name the component the root cause is in and the draft a human is to file in its
   repository.
+- With `existing_pr_result`, say that the run first verified that pull request, where it did not pass
+  and why, and give the comment drafted for it (`comment_path`), which a human posts there. Say
+  what became of the run's own fix as the status has it: only `ready_for_review` has a pull request
+  to link from that comment, and the comment itself promises none. With `branch_findings`, give
+  what the leak scan found on that pull request's own branch: the comment is clean, and whoever
+  posts it should know what the branch it is about holds.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when

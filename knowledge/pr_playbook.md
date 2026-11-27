@@ -55,7 +55,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 (sglang #42297 and #44588 for speculative decoding).
 
 - **Motivation:** at most 100 words, why the PR exists: the problem and what the change brings. Few or
-  no numbers; the results sections carry them. `Depends on #NNNN` for unmerged dependencies.
+  no numbers; the results sections carry them. `Depends on #NNNN` for unmerged dependencies. A fix
+  that follows an open PR for the same failure which did not pass verification (`existing_pr_result`)
+  names that PR and says in one sentence what it did not pass: a reviewer who sees two PRs for one
+  failure asks why.
 - **Modifications:** one sentence per changed file, saying what changed in it; every file of the diff
   appears once. For an AMD change, open with **This is HIP-only and doesn't touch the CUDA path.** and
   say how the diff makes sure of it (an `is_hip()` gate, a ROCm-only file, a startup rejection on other

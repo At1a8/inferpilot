@@ -37,7 +37,13 @@ clock can start before your session does; on the call that finishes a gate, `inc
    `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the call's first launch
    and again after the stop (*Killing*): a GPU idle before and in use after is one the call still
    holds, unless a check left running for the call that finishes the gate uses it. One you cannot
-   stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it.
+   stop fails the gate, and so does a GPU the call still holds: `failure_summary` names it, and
+   `left_running` says what is left and where (`"the smoke server, pid 4242, on GPU 0-7"`).
+   InferPilot then starts no fix round and no rollback next to it, nor the call that would finish
+   the gate: the package stops with its commit, and a human stops what is left. `left_running` is
+   empty when everything stopped, and every answer gives it: one that leaves it out is taken for
+   no answer, not for a gate that cleaned up. It is not where a check goes that still runs for the
+   call that finishes the gate: that is `incomplete`'s.
 
    **A gate without a result.** When a check cannot finish in this call, or cannot run at all, return
    with `incomplete`: each check without a result, why, and for one still running its PID and its
@@ -51,6 +57,8 @@ clock can start before your session does; on the call that finishes a gate, `inc
    call before returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger
    first. This call leaves nothing running: before it returns it stops what the call before left, by
    the `<log>`s that call gave, with what it started itself, and the GPUs it checks are free of both.
+   Its `left_running` speaks for the gate as a whole: what the call before could not stop is named
+   there too, also where that call's own answer could not be used and said nothing of it.
    No fix round is spent on it; a gate still without a result after this call stops the package for a
    human, its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
@@ -126,8 +134,21 @@ Return:
 
 ```json
 {"wp": "WP1", "unit_pass": true, "feature_off_unchanged": true, "fails_without_change": "parent | mutant | no | n/a",
- "incomplete": "", "failure_summary": "", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
+ "incomplete": "", "failure_summary": "", "left_running": "",
+ "failed_in": "<verify_only, a failed gate: pr | additions>",
+ "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}
 ```
+
+With `verify_only` the package is someone else's pull request, which the run verifies as it is
+(`issue_triage.md` §4), and a gate that fails says in `failed_in` whose the failure is. `pr`: a test
+the pull request brought fails, or an existing test of the repository, or its own code. `additions`:
+only what the run added on top fails, a test the implementer wrote in a commit of its own after the
+author's. Where both fail, it is `pr`. InferPilot repairs only what the run added, answers a failure
+of the pull request with a comment on it, and stops for a human where the gate does not say which.
+With `added_to` the package is the run's own, added on top of such a pull request (a test the review
+asked for): say `failed_in` in the same way when its gate fails. `pr` there is a defect of the pull
+request that the addition shows, in the author's code or tests; anything else is the addition's,
+which the next round repairs.
 
 Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
 gate names nothing there, and a check it did not run stays `null`. A gate with checks still without a
