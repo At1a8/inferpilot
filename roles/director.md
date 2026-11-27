@@ -77,7 +77,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
      update-ref -d refs/inferpilot/restored/<slug>`), so an earlier retry's commits are not taken again;
      `RUN_DIR/failed/branch.bundle` alone means every commit was rolled back, and still holds them: say
-     so.
+     so. A branch of that name can also be left by a run of the task on another definition, which
+     step 1 does not match: the run that asked a question this one answers (a model, a script,
+     `text_model`). It is an earlier attempt's all the same: refresh its bundle and rename it in the
+     same way, so that `checkout -b` never meets it and nothing of it is lost.
    - A resume skips the phases before it, so its branch is the one it stopped with. When it is not in
      `framework_dir` (a preempted node, a job past its time limit, a replaced container), restore it
      from the bundle after the fetch: `git -C <framework_dir> fetch RUN_DIR/branch.bundle
@@ -239,7 +242,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      *G2 for a model that answers no text questions*): a run that can reach a fix without one
      stops after Setup and asks for it. Never write that test in the task's place, and never
      leave the field out for such a model: without it the run takes the model for one that
-     answers text questions, and finds out at Verify, after the fix is written.
+     answers text questions, and finds out at Verify, after the fix is written. Say what you
+     find also where the task gives `text_model`: that is the user's word, which stands in
+     yours until Verify launches the model, and the run record says where the two differ. It is
+     among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the
+     rest, so that a retry of the task is matched on it too, and judge the model as if it were
+     not there.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 

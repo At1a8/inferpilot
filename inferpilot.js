@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: a fix that changes code the server runs is measured against the base, G2 on gsm8k and G5 on args.client_script; with stop_after at a phase before the fix it needs neither), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci task that can reach a fix: runs the workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the task\'s workload, only when the user takes it and gives the whole workload; on it a feature is judged only to be no slower than the baseline, never on its source\'s gain), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none, since a pull request runs its author\'s code on this machine), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.output_script (issue, ci: the user\'s own test that compares the outputs of a model that answers no text questions, a diffusion, speech or embedding model: the fix\'s with a baseline\'s, which is the base, or the last commit that served the configuration where the base cannot or where its outputs are the failure being fixed; where the run knows no such commit, the fix\'s outputs are kept and reported, not judged; G2 runs it in gsm8k\'s place, and a task that can reach a fix on such a model without one is asked for it after Setup, since InferPilot has no template for it), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: a fix that changes code the server runs is measured against the base, G2 on gsm8k and G5 on args.client_script; with stop_after at a phase before the fix it needs neither), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci task that can reach a fix: runs the workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the task\'s workload, only when the user takes it and gives the whole workload; on it a feature is judged only to be no slower than the baseline, never on its source\'s gain), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none, since a pull request runs its author\'s code on this machine), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.output_script (issue, ci: the user\'s own test that compares the outputs of a model that answers no text questions, a diffusion, speech or embedding model: the fix\'s with a baseline\'s, which is the base, or the last commit that served the configuration where the base cannot or where its outputs are the failure being fixed; where the run knows no such commit, the fix\'s outputs are kept and reported, not judged; G2 runs it in gsm8k\'s place, and a task that can reach a fix on such a model without one is asked for it after Setup, since InferPilot has no template for it), args.text_model (issue, ci: true or false, the user\'s word on whether the model answers text questions, where Setup took it for the wrong kind; with true G2 runs gsm8k on it and no output_script is asked for), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -127,7 +127,8 @@ const shq = (s) => (/^[\w@%+=:,./-]+$/.test(String(s)) ? String(s) : `'${String(
 // stay outside it.
 // ---------------------------------------------------------------------------
 const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_path', 'platform', 'gpu_ids',
-  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness', 'apply_prs', 'sources', 'since',
+  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'text_model', 'harness', 'apply_prs',
+  'sources', 'since',
   'stop_after', 'resume_from', 'run_dir',
   'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
@@ -184,6 +185,17 @@ const asObject = (v) => {
     return {};
   }
 };
+// The user's word on what the model of a fix is (text_model): true when it answers text questions, false when it
+// answers none, null when it says neither. A word is a boolean or a string: an array or an object that reads
+// "true" once it is made a string is not what the user said, and is asked about (missingFields).
+const modelWord = (v) => {
+  const said = typeof v === 'boolean' || typeof v === 'string' ? String(v).trim().toLowerCase() : '';
+  return said === 'true' ? true : said === 'false' ? false : null;
+};
+// Only what the caller gave counts, the field or, where the field says neither, the answer: the word is there
+// to correct Setup, which judges by the model's files and the command that serves it.
+const callersModelWord = (raw) => (modelWord(raw.text_model) === null ? modelWord(asObject(raw.answers).text_model)
+  : modelWord(raw.text_model));
 // The pull requests a task names for the run to apply (apply_prs), as the words they were given in. The user's
 // word is what the caller gave: the field or, where the field is blank, the answer. What the Intake read into a
 // request is its reading, not that word (existingFix).
@@ -308,6 +320,12 @@ function missingFields(a) {
   }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
+  // So would the user's word on what the model is: read as nothing, it would leave Setup's word standing.
+  if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && modelWord(a.text_model) === null) {
+    ask('text_model', 'Does the model answer text questions (true), or is it one that answers none, a diffusion, speech or embedding '
+      + 'model (false)?', `text_model takes true or false, and ${JSON.stringify(a.text_model)} is neither: Setup's word on the model would stand`,
+    ['true', 'false']);
+  }
   for (const [field, gate] of [['long_context', 'G3, the long-context gate'], ['stability', 'G4, the stability run of more than 48 hours']]) {
     if (a[field] != null && a[field] !== '' && !['true', 'false'].includes(asked(a[field]))) {
       ask(field, `Should the run include ${gate}?`,
@@ -404,8 +422,15 @@ async function intakeStage(raw) {
   if (!request && missingFields({ ...answers, ...given }).length === 0) return { args: { ...raw, ...answers, ...given } };
   enter('Intake');
   const res = await call('intake', 'define', { request, given, answers, inferpilot_dir: INFERPILOT }, INTAKE, 'intake');
-  const merged = { ...(res && res.task_def ? pick(res.task_def, TASK_KEYS) : {}), ...answers, ...given };
-  const asked = res && res.status === 'needs_input' ? (res.questions || []) : [];
+  // What the Intake returns is its reading, and the user's word on the model (text_model) is not its to give:
+  // taken from its definition, the word would go into the run's record, and from there into a follow-up or a
+  // rerun as the caller's own.
+  const merged = { ...(res && res.task_def ? pick(res.task_def, TASK_KEYS.filter((k) => k !== 'text_model')) : {}), ...answers, ...given };
+  // Nor does the Intake ask against that word. With the caller's word that the model answers text questions, a
+  // question for its output comparison is not put: an Intake that takes the model for another kind, as Setup
+  // did, would stop the run before Setup hears the word.
+  const asked = (res && res.status === 'needs_input' ? (res.questions || []) : [])
+    .filter((q) => !(callersModelWord(raw) === true && q && q.field === 'output_script'));
   const questions = [...asked, ...missingFields(merged).filter((q) => !asked.some((a) => a.field === q.field))];
   const provenance = (res && res.provenance) || {};
   const assumptions = (res && res.assumptions) || [];
@@ -463,6 +488,11 @@ const GUARDS = on(A.guards);
 const SWEEP = on(A.sweep);
 const TUNE = on(A.tune);
 const BISECT_FIXED = on(A.bisect_fixed);
+// The user's word on what the model of a fix is (callersModelWord): null when the caller did not say.
+const MODEL_WORD = callersModelWord(RAW);
+// Set by Setup where that word made the model one that answers text questions and Setup took it for one that
+// answers none: the run then asks for no output comparison, on the word alone, and Verify holds it to gsm8k.
+let wordAgainstSetup = false;
 // Correctness gates that take hours or days, each off unless the task asks for it: G3 (long context)
 // and G4 (stability: one throughput test of more than 48 hours, validation_doctrine.md).
 const LONG_CONTEXT = on(A.long_context);
@@ -1222,9 +1252,9 @@ const OPERATOR_KEYS = ['exp_root', 'max_fix_rounds', 'max_investigate_rounds', '
   'agent_timeout_ms', 'agent_retries', 'review_model'];
 // What a run measures a fix with, the GPUs it is pinned to among it (a TP8 problem does not fit a run on two): a
 // problem on another model or launch configuration brings its own. The script that compares the outputs of a
-// model that answers no text questions is one model's as well.
+// model that answers no text questions is one model's as well, and so is the user's word on what the model is.
 const MEASURED_WITH = ['model_path', 'server_script', 'client_script', 'accuracy_script', 'workload', 'harness', 'long_context_script',
-  'gpu_ids', 'output_script'];
+  'gpu_ids', 'output_script', 'text_model'];
 // The issue a task names, without the problem an earlier follow-up added to it ("<issue>: <problem>"): a
 // follow-up of a follow-up names one problem, not two. An issue is named by its URL, with whatever follows its
 // number there (a slash, a query, a comment's fragment), or as <owner>/<repo>#<n>, <repo>#<n> or #<n>.
@@ -1247,7 +1277,7 @@ function issueOf(task) {
 function afterMismatch(out, at, last, report) {
   const earlier = asObject(RAW.answers);
   Object.assign(out.rerun_with, pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),
-    Object.fromEntries(MEASURED_WITH.filter((k) => A[k]).map((k) => [k, ''])),
+    Object.fromEntries(MEASURED_WITH.filter((k) => A[k] != null && A[k] !== '').map((k) => [k, ''])), // a word can be false
     { request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: the model, the launch and the workload of `
       + "this task are that configuration's, not those of the run that stopped.", reported_on: R.model_mismatch });
   out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), ...out.rerun_with.answers };
@@ -1281,8 +1311,9 @@ function nextSteps(status, at) {
     // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
     // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
     // fields and no further: an answer or a request it put next to them would stand for the user's word.
+    // Nor is what a model is the scan's to say for the user (text_model): Setup says, and the user corrects it.
     const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
-      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
+      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
       .map((t) => ({ rank: t.rank, task: t.task, args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
@@ -1333,7 +1364,12 @@ function nextSteps(status, at) {
   // it is the same work on the same issue. A problem the report puts on another model takes none of what this
   // run measured with: its model, its scripts and its workload are asked for, as of any new task.
   if ((R.other_problems || []).length && !out.start) {
-    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
+    // The user's word on the model goes with a follow-up on the same model, unless this run's Verify, which
+    // launched the model, said the opposite: a word that was disproved is not handed on. The record of this
+    // run keeps it as it was given.
+    const disproved = MODEL_WORD !== null && typeof C.text_model === 'boolean' && C.text_model !== MODEL_WORD;
+    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)
+      && !(disproved && k === 'text_model')));
     const issue = issueOf(def.task);
     out.start = R.other_problems.map((p, i) => {
       const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;
@@ -1474,7 +1510,7 @@ async function start(requireBaseline) {
   const lacking = BEFORE_A_FIX[MODE] && stop !== 'now' && !BEFORE_A_FIX[MODE].includes(stop) ? outputsLacking() : null;
   if (lacking) {
     note('Setup', 'needs_input', lacking.why);
-    R.questions = [lacking];
+    R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];
     return finish('needs_input', 'Setup');
   }
   return null;
@@ -1519,6 +1555,14 @@ function askWorkload(spec) {
 // file lifted. It stops here and asks, before any code changes; null when it lacks nothing.
 const FIX_NEEDS = { model_path: 'the model', client_script: 'the client', workload: "the whole workload of InferPilot's client" };
 FIX_NEEDS.output_script = "the script that compares the model's outputs"; // where the model answers no text questions
+// Setup can take a model that answers text questions for one that does not, and only the user can say so before
+// a server is launched: where it is Setup's word that asks for the script, the run asks this as well.
+if (MODEL_WORD === null) FIX_NEEDS.output_script += ', or say that the model answers text questions after all (text_model)';
+const MODEL_ASK = () => ({ field: 'text_model',
+  question: 'Or does the model answer text questions after all? Say true, and no script is needed: G2 then runs gsm8k on it.',
+  why: `Setup took ${C.model_path || 'the model'} for one that answers no text questions, by its files and the command that serves it, `
+    + 'and can be wrong. Your word stands in its place; the verify engineer, who launches the model, has the last word either way',
+  options: ['true'] });
 // A model that answers no text questions (a diffusion, speech or embedding model) has no gsm8k to run: G2 for its
 // fix is an output comparison, the fix's outputs against the base's on the same inputs and seeds, by the task's
 // own test (validation_doctrine.md, G2 for a model that answers no text questions). InferPilot has no template
@@ -1557,6 +1601,7 @@ function askForFix(at) {
     output_script: OUTPUTS_ASK,
   };
   R.questions = lacks.map((k) => ({ field: k, question: ask[k], why }));
+  if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());
   return finish('needs_input', at);
 }
 
@@ -1565,6 +1610,9 @@ function askForFix(at) {
 // the run (nothing was created in either case).
 async function setup(requireBaseline) {
   enter('Setup');
+  // The caller's word on the model goes to Setup with the rest of the task: the run's record of its inputs has
+  // it, and a retry is matched on it. Setup still says what it finds itself (below).
+  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null) C.text_model = MODEL_WORD;
   const s = await call('director', 'setup', inputs({ require_baseline: requireBaseline, image: IMAGE_WANTED,
     image_ok: IMAGE_OK }), SETUP);
   if (s && s.lock === 'skipped') return { ask: s.image || {} };
@@ -1586,8 +1634,16 @@ async function setup(requireBaseline) {
     client_script: own(C.client_script) || own(s.client_script),
     accuracy_script: own(C.accuracy_script) || own(s.accuracy_script) });
   // What Setup says of the model a fix is measured on: one that answers no text questions has no gsm8k to run
-  // (outputsLacking). A Setup that does not say counts the model as one that answers them.
-  if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;
+  // (outputsLacking). A Setup that does not say counts the model as one that answers them. The user's word
+  // (MODEL_WORD) stands in its place where the caller gave one, either way; the run record says where the two differ.
+  const setupSays = s.text_model !== false;
+  if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;
+  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;
+  if (wordAgainstSetup) C.text_model_unconfirmed = true; // for the verify engineer, until a round says what the server showed
+  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null && MODEL_WORD !== setupSays) {
+    note('Setup', 'text_model', `the task says that the model ${MODEL_WORD ? 'answers' : 'answers no'} text questions (text_model), and Setup `
+      + `took it for one that ${setupSays ? 'answers them' : 'answers none'}: the task's word stands until Verify launches the model`);
+  }
   if (!C.gpu_ids) {
     note('Setup', 'fail', 'no GPU set pinned (gpu_ids)');
     return false;
@@ -1924,6 +1980,8 @@ async function verifyLoop(extraGates, existing) {
     // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
     // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
+    // Whoever launched the model has said what it is: the user's word on it is confirmed, or corrected (below).
+    if (typeof v.text_model === 'boolean') delete C.text_model_unconfirmed;
     // Setup says what the model is, and no fix for one that answers no text questions starts without the task's
     // output comparison (outputsLacking). The verify engineer, who has the server, has the last word either way,
     // for the later rounds and the report; a round that does not say leaves what is known. A round that finds
@@ -1964,6 +2022,24 @@ async function verifyLoop(extraGates, existing) {
       const why = `the model answers no text questions, and the round was accepted without the result of its output comparison: G2 is ${
         compared ? `"${compared}"` : 'not reported'}${comparisonFailed ? ', and the round lists it among its failures' : ''}. `
         + "G2 of such a fix is the task's output_script, run on the base and on the fix";
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
+    // The user's word made the model one that answers text questions where Setup took it for one that answers
+    // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. Whoever launches
+    // the model says which it is: the verify engineer is told that the word is not confirmed yet
+    // (text_model_unconfirmed), and a round is accepted there only once a round's answer has said text_model, as
+    // the server showed it, and with a G2 that ran. Said false, the task lacks its output comparison (above).
+    // What G2's words say beyond that is the verify engineer's report, as for any fix: the run reads no scores
+    // out of prose, which cannot show that a measurement was complete, or the fix's own.
+    const ranG2 = !!compared && !/^(not[ _-]?run|skip)/i.test(compared);
+    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))
+      && (C.text_model_unconfirmed || !ranG2)) {
+      await refused(); // a pass that is refused is asked what it left running, like the others (above)
+      const why = 'the task says that the model answers text questions (text_model) where Setup took it for one that answers none, and the '
+        + `round was accepted ${C.text_model_unconfirmed ? 'without saying which the server showed (text_model)' : "without gsm8k's result on it"}`
+        + `: G2 is ${compared ? `"${compared}"` : 'not reported'}. The word stands once the verify engineer, who launches the model, has `
+        + 'said the same and put gsm8k to it; where the model answers none after all, name its output comparison (output_script)';
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }
@@ -2696,7 +2772,7 @@ async function runIssue() {
   // serves none, a distributed test): it is asked for the inputs that do not fit, each of them. One that pins
   // nothing was set up by Setup alone, before the run knew which problem it takes: the GPUs Setup chose are the
   // run's all the same, and Reproduce may use no others, so the run stops there too and asks for them.
-  const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);
+  const pinned = MEASURED_WITH.filter((k) => !['model_path', 'text_model'].includes(k) && A[k]); // a word pins nothing
   if (elsewhere) {
     R.model_mismatch = elsewhere;
     const why = C.model_path
