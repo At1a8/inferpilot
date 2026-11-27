@@ -8,10 +8,16 @@ starts from this image, and the director compares the image a run uses with it.
     python3 scripts/latest_image.py --variant rocm10-mi30x   # another GPU or ROCm
     python3 scripts/latest_image.py --compare rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261105
         # one line: "current", "older <newest image>", "unknown" (Docker Hub not readable) or "not-daily"
+    python3 scripts/latest_image.py --base v0.5.23-rocm10-mi35x
+        # the newest date of one base tag (release, ROCm and GPU), as a CI lane takes its image
 
 Only the daily sglang builds count (v<version>-<variant>-<YYYYMMDD>); the miles images in the same
-repository are for reinforcement learning and are skipped. Prints nothing and exits 1 when Docker Hub
-cannot be read or has no such tag; --compare always exits 0. Standard library only.
+repository are for reinforcement learning and are skipped. The newest of a variant goes by the date,
+whatever the release: an older release built on a later day wins it, and a release and its .post1
+built on one day are told apart by their push time alone. A CI lane takes the newest date of one
+exact base tag instead, and --base answers for that: the tags <base>-<YYYYMMDD> and no other.
+Prints nothing and exits 1 when Docker Hub cannot be read or has no such tag; --compare always
+exits 0. Standard library only.
 """
 from __future__ import annotations
 
@@ -45,6 +51,22 @@ def pick(results: list, variant: str) -> str:
         key = key + (t.get("last_updated") or "",)
         if best_key is None or key > best_key:
             best, best_key = t["name"], key
+    return best
+
+
+def base_date(name: str, base: str):
+    """The date of a tag of exactly this base (<base>-<YYYYMMDD>), None for any other tag."""
+    m = re.fullmatch(r"%s-(\d{8})" % re.escape(base), name)
+    return m.group(1) if m else None
+
+
+def pick_base(results: list, base: str) -> str:
+    """The newest date among the tags of one exact base (release, ROCm and GPU), '' if none."""
+    best, best_date = "", ""
+    for t in results:
+        date = base_date(t.get("name", ""), base)
+        if date and date > best_date:
+            best, best_date = t["name"], date
     return best
 
 
@@ -88,6 +110,8 @@ def main(argv=None) -> int:
     ap.add_argument("--repo", default=REPO)
     ap.add_argument("--variant", default=VARIANT, help="ROCm and GPU part of the tag (default %(default)s)")
     ap.add_argument("--compare", metavar="IMAGE", help="say whether IMAGE is the newest daily image of its variant")
+    ap.add_argument("--base", metavar="TAG", help="print the newest date of one exact base tag instead, "
+                                                  "e.g. v0.5.23-rocm10-mi35x (release, ROCm and GPU)")
     ap.add_argument("--timeout", type=float, default=20, help="seconds per request (default %(default)s)")
     a = ap.parse_args(argv)
     if a.compare:
@@ -98,13 +122,15 @@ def main(argv=None) -> int:
             results = None
         print(compare(a.compare, results))
         return 0
+    base = (a.base or "").strip()
     try:
-        tag = pick(fetch(a.repo, a.variant, a.timeout), a.variant)
+        tag = pick_base(fetch(a.repo, base, a.timeout), base) if base else pick(fetch(a.repo, a.variant, a.timeout), a.variant)
     except (OSError, ValueError) as e:
         print("latest_image: cannot read the %s tags on Docker Hub (%s)" % (a.repo, e), file=sys.stderr)
         return 1
     if not tag:
-        print("latest_image: no daily %s tag for %s" % (a.repo, a.variant), file=sys.stderr)
+        print("latest_image: no %s tag of the base %s" % (a.repo, base) if base
+              else "latest_image: no daily %s tag for %s" % (a.repo, a.variant), file=sys.stderr)
         return 1
     print("%s:%s" % (a.repo, tag))
     return 0

@@ -181,6 +181,43 @@ class LatestImageTest(unittest.TestCase):
         self.assertEqual(latest_image.daily_key("v0.5.22.post1-rocm10-mi35x-20261103", "rocm10-mi35x"),
                          ("20261103", (0, 5, 22)))
 
+    def test_newest_date_of_one_exact_base(self):
+        # A CI lane takes the newest date of its own base tag (release, ROCm and GPU). The newest of the variant
+        # goes by the date: an older release built later wins it, and is an image the lane never ran.
+        tags = self.TAGS + [{"name": "v0.5.22-rocm10-mi35x-20261104", "last_updated": "2026-11-04T09:00:00Z"},
+                            {"name": "v0.5.23-rocm10-mi35x-20261101", "last_updated": "2026-11-05T12:00:00Z"}]  # re-pushed
+        self.assertEqual(latest_image.pick(tags, "rocm10-mi35x"), "v0.5.22-rocm10-mi35x-20261104", "by the date, whatever the release")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.23-rocm10-mi35x"), "v0.5.23-rocm10-mi35x-20261103")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.22-rocm10-mi35x"), "v0.5.22-rocm10-mi35x-20261104")
+        # a release and its .post1 are two bases, and a tag with something after the date is no daily one
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.22.post1-rocm10-mi35x"), "v0.5.22.post1-rocm10-mi35x-20261103")
+        self.assertIsNone(latest_image.base_date("v0.5.22.post1-rocm10-mi35x-20261103", "v0.5.22-rocm10-mi35x"))
+        self.assertIsNone(latest_image.base_date("v0.5.23-rocm10-mi35x-20261103-debug", "v0.5.23-rocm10-mi35x"))
+        self.assertIsNone(latest_image.base_date("v0.5.23-rocm10-mi35x", "v0.5.23-rocm10-mi35x"))
+        self.assertIsNone(latest_image.base_date("v0.5.23-rocm10-mi35xx-20261103", "v0.5.23-rocm10-mi35x"), "the base whole, not a prefix")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.24-rocm10-mi35x"), "", "the registry has no image of that base")
+
+    def test_the_command_answers_for_a_base_or_for_a_variant(self):
+        tags = self.TAGS + [{"name": "v0.5.22-rocm10-mi35x-20261104", "last_updated": "2026-11-04T09:00:00Z"}]
+        asked = []
+
+        def fetch(repo, name, timeout):
+            asked.append(name)
+            return tags
+
+        def run(*argv):
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(latest_image, "fetch", fetch), redirect_stdout(out), redirect_stderr(err):
+                code = latest_image.main(list(argv))
+            return code, out.getvalue().strip(), err.getvalue().strip()
+
+        self.assertEqual(run("--variant", "rocm10-mi35x"), (0, "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261104", ""))
+        self.assertEqual(run("--base", "v0.5.23-rocm10-mi35x"), (0, "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261103", ""))
+        self.assertEqual(asked, ["rocm10-mi35x", "v0.5.23-rocm10-mi35x"], "the registry is asked for the tags of the base")
+        code, out, err = run("--base", "v0.5.24-rocm10-mi35x")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no rocm/sgl-dev tag of the base v0.5.24-rocm10-mi35x", err)
+
     def test_compare_with_the_newest_of_the_same_variant(self):
         self.assertEqual(latest_image.parse_daily("rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261102"),
                          ("rocm/sgl-dev", "rocm10-mi35x", "20261102"))

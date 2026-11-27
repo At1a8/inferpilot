@@ -2151,11 +2151,27 @@ class CiOnMainTest(unittest.TestCase):
                 # the variant is the ROCm and the GPU together: the newest tag of the ROCm alone can be the other GPU family's
                 ("roles/ci_guardian.md", "The variant is the ROCm and the GPU of the tag together (`rocm720-mi35x`, `rocm724-mi30x`)"),
                 ("roles/ci_guardian.md", "the newest tag of the ROCm alone can be the other family's, which this lane never ran"),
-                ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names it for a lane that "
-                                         "runs the daily sglang image"),
+                ("roles/ci_guardian.md", "It is the newest tag of the lane's variant and release in the registry"),
+                ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names the newest of a variant "
+                                         "for a lane that runs the daily sglang image, by the date and whatever the release"),
+                # the lane takes the newest date of one base tag (the release too): the newest of the variant can be another release's
+                ("roles/ci_guardian.md", "The lane goes by its base tag, the release with the ROCm and the GPU (`v0.5.23-rocm720-mi35x`): the base "
+                                         "its workflow passes, or the framework's newest release, and of that exact base the newest date"),
+                ("roles/ci_guardian.md", "An older release built on a later day, or a release and its `.post1` built on one day, give the two "
+                                         "different answers"),
+                ("roles/ci_guardian.md", "So hold the tag that command prints against the lane's base as the lane resolves it now; the image "
+                                         "of its latest run on main shows the base that run had"),
+                ("roles/ci_guardian.md", "With the lane's base, it is the lane's newest image"),
+                ("roles/ci_guardian.md", "With another, the lane's is the newest date of its own base: `latest_image.py --base "
+                                         "<release>-<rocm>-<gpu>`"),
+                ("roles/ci_guardian.md", "Where the registry has no image of that base yet (a release cut since the last build), the lane's is "
+                                         "what its start script falls back to"),
+                ("roles/ci_guardian.md", "Where you cannot establish a lane's image, its base included, that lane was not run (below)"),
+                ("knowledge/ci_triage.md", "and of the lane's base tag (its release too, `v0.5.23-rocm720-mi35x`: the lane takes the newest date of "
+                                           "that one base, and an older release can have a later build)"),
                 # a lane on another family of images (MILES) has a newest tag of its own, which that script skips
-                ("roles/ci_guardian.md", "the MILES nightly runs `miles-<rocm>-<gpu>-<date>`, which that script skips, and resolves it in its "
-                                         "workflow"),
+                ("roles/ci_guardian.md", "the MILES nightly runs `miles-<rocm>-<gpu>-<date>`, which `latest_image.py` skips, and resolves it "
+                                         "in its workflow"),
                 ("roles/ci_guardian.md", "Take such a lane's image from its workflow and its latest run on main, never the sglang image of the "
                                          "same ROCm and GPU"),
                 ("knowledge/ci_triage.md", "the newest tag of the lane's variant in the registry (its ROCm and its GPU together, "
