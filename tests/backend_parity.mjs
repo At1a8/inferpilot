@@ -93,8 +93,10 @@ function check(cond, msg) {
   else { failed++; console.error(`  FAIL: ${msg}`); }
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-// A role told its limit gets the moment it ends, which no two runs share.
-const timeless = (prompt) => prompt.replace(/^- deadline_utc: .*$/gm, '- deadline_utc: <its call\'s start plus the limit>');
+// What no two runs share: the moment a role's limit ends, which a role told its limit gets, and the name of the
+// record the check on the latest main keeps of the image's packages, which is its invocation's (RECHECK_ENV_ID).
+const timeless = (prompt) => prompt.replace(/^- deadline_utc: .*$/gm, '- deadline_utc: <its call\'s start plus the limit>')
+  .replace(/^(- env_record: .*\/recheck_env\.)[0-9a-z]+(\.txt)$/gm, '$1<this invocation>$2');
 const INFERPILOT_JS = path.join(INFERPILOT, 'inferpilot.js');
 const taskArgs = (args) => ({ inferpilot_dir: INFERPILOT, framework_dir: '/tmp/sglang', agent_retries: 1, ...MODE_DEFAULTS[args.mode], ...args });
 

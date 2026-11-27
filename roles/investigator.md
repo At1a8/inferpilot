@@ -53,8 +53,20 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      InferPilot goes back to the functional kernel and hands the kernel back once; do not plan a fix inside
      the tuned kernel (InferPilot does not tune kernels).
    - `fix_needed`: you can explain the mechanism. Return the fix as work packages, each with the
-     regression test that would have caught it.
-   - `inconclusive`: say what is known and what experiment would decide it.
+     regression test that would have caught it. With `verify_only` the change under verification is
+     someone else's pull request, which the run does not repair: say whose the failure is. Add
+     `"in_additions": true` when what fails is in what the run added on top of it (a test the
+     implementer wrote, a change the review asked for, in commits after the author's): your work
+     packages then repair those additions and leave the author's commits alone. Without it the
+     failure is the pull request's: the run reports it there, and nothing is repaired. Say
+     `in_additions` with whatever verdict you return for a failure that is the additions': the run
+     holds none of them against the pull request.
+   - `inconclusive`: say what is known and what experiment would decide it. Add `"attributed": true`
+     when the controls show that the failure is the change's although you cannot explain it: the
+     same-pattern baseline ran to its end and passed, as often as the change's arm failed. Leave it
+     out where a control was interrupted, ended another way or was not run: nothing is then decided
+     against the change. For someone else's pull request under verification that is the difference
+     between a result the run reports on it and a stop for a human.
 
 Return:
 
@@ -63,6 +75,7 @@ Return:
  "work_packages": [{"id": "FIX1", "goal": "...", "kind": "framework", "files": [], "test": "...", "depends_on": []}],
  "known_issue": {"id": "KI-006", "title": "...", "symptom": "...", "reproduction": "...", "excluded": "...", "workaround": "...", "status": "open"},
  "kernel_handoffs": ["K-WP1"], "counterexample": "<gate, shapes, dtype, configuration, command>",
+ "attributed": false, "in_additions": false,
  "summary": "<mechanism or the controls that prove it pre-existing>"}
 ```
 
@@ -87,6 +100,11 @@ names what to remove once the component is fixed; for any other issue return non
 says what the reporter can do meanwhile (a version that works, a flag that avoids the path), or why no
 workaround serves: the reply and the report take it from there. Never change the component: it comes
 from the image (`env_hygiene.md`).
+
+**After an existing fix PR that did not pass** (`existing_pr_result`: the pull request, where its
+verification failed and why; `issue_triage.md` §4): the task branch is back at the base, and the fix is
+the run's own to plan. What that pull request changed and what it failed is evidence of where the cause
+is and is not: use it, and plan from the root cause, not as a patch on that pull request.
 
 Return:
 
