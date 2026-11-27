@@ -975,6 +975,73 @@ class RecheckOnMainTest(unittest.TestCase):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
 
 
+class G2NumbersTest(unittest.TestCase):
+    """G2 is accepted on numbers the verify engineer returns apart from its words (g2), which the run checks
+    wherever gsm8k is put to the change: a sentence in `gates` can stand over a set that was cut short, over
+    another commit's scores, or over a percentage (knowledge/validation_doctrine.md, *G2 is accepted on its
+    numbers*)."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_holds_an_accepted_round_to_the_numbers(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst VERIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        self.assertIn("g2: S({ commit: str, base_commit: str, no_baseline: str, sets: arr(G2_SET) }, ['commit', 'sets']),", body,
+                      "the Verify answer has no place for G2's numbers")
+        for line, broken in (
+                ("const G2_SET = S({ set: str, gate: str, fix: num, base: num, questions: num, answered: num, base_answered: num },\n"
+                 "  ['set', 'fix', 'questions', 'answered']);", "a set's numbers lack a score, the questions or the answers"),
+                ("const G2_POINT = 0.01;", "the bound is no longer a point"),
+                ("if (!g2 || typeof g2 !== 'object' || !Array.isArray(g2.sets) || !g2.sets.length) return 'it gives no scores (g2)';",
+                 "a round without numbers is accepted on its words"),
+                ("const head = String((R.done[R.done.length - 1] || {}).commit || '').trim();", "the commit under verification is not the last verified one"),
+                ("if (head && !sameCommit(commit, head)) return `its scores are of ${commit}, and the commit under verification is ${head}`;",
+                 "another commit's scores are taken for the change's"),
+                ("if (baseCommit && sameCommit(baseCommit, commit)) return `the baseline it names is the change's own commit (${commit})`;",
+                 "a baseline measured on the change itself is taken for a baseline"),
+                ("const fraction = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;", "a percentage passes for a score"),
+                ("if (Number(s.answered) !== asked) {", "a set the change did not answer whole has a score"),
+                ("if (Number(s.base_answered) !== asked) return", "a baseline that did not answer the set whole is compared with"),
+                ("if (!noBase) return `${name}: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)`;",
+                 "a score without a baseline is accepted without the reason"),
+                ("if (s.fix < s.base - G2_POINT - 1e-9 && !listed.has(gate)) {",
+                 "a set more than a point below its baseline is accepted although the round does not list it, or one it lists is refused"),
+                # where gsm8k is put to the change, and only for a round the run would accept
+                ("const g2Due = (!BEFORE_A_FIX[MODE] || C.server_code_changed) && C.text_model !== false;",
+                 "a fix to tests alone or an output comparison is asked for scores, or a feature is not"),
+                ("const unsound = g2Due && (v.all_pass === true || (failures.length && !blocking.length)) ? g2Unsound(v.g2, failures) : '';",
+                 "a failing round is held to its numbers and not investigated, or an accepted one is not held to them")):
+            self.assertIn(line, src, broken)
+        loop = src[src.index("async function verifyLoop("):]
+        self.assertLess(loop.index("const unsound = g2Due"), loop.index("note('Verify', 'pass',"), "the numbers are checked after the round is accepted")
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("knowledge/validation_doctrine.md", "**G2 is accepted on its numbers.**"),
+                ("knowledge/validation_doctrine.md", "can stand over a set that was cut short, over another commit's scores, or over a percentage"),
+                ("knowledge/validation_doctrine.md", "So the verify engineer returns G2's numbers apart from its words (`g2`)"),
+                ("knowledge/validation_doctrine.md", "every question answered on both arms, the commit the one under verification and not the baseline's, "
+                                                     "and no set more than a point below its baseline unless the round lists that set's gate among its "
+                                                     "failures"),
+                ("knowledge/validation_doctrine.md", "A round that gives none has shown nothing, and the run stops there for a human"),
+                ("roles/verify_engineer.md", "Give G2's numbers apart from the words, in `g2` (*Return*): InferPilot accepts a round on those, and "
+                                             "reads no score out of the sentence in `gates`"),
+                ("roles/verify_engineer.md", '"sets": [{"set": "gsm8k", "fix": 0.895, "base": 0.901, "questions": 1319, "answered": 1319, '
+                                             '"base_answered": 1319}]'),
+                ("roles/verify_engineer.md", "`g2` gives G2 as numbers, whenever gsm8k was put to the change in this round"),
+                ("roles/verify_engineer.md", "A round that ran no gsm8k has none (a fix to tests, documentation or CI files alone; an output "
+                                             "comparison)"),
+                ("roles/verify_engineer.md", "`fix` and `base` are its scores as fractions of 1 (0.895, never 89.5)"),
+                ("roles/verify_engineer.md", "The change's scores are this round's, of this commit: an earlier round's, or another commit's, are not"),
+                ("roles/verify_engineer.md", "leave `base` and `base_answered` out, and say why in `no_baseline`: the score is then reported, not "
+                                             "judged"),
+                ("roles/verify_engineer.md", "A round that passes in words and gives no sound numbers is not accepted: the run stops there for a "
+                                             "human")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
+
 class LongGatesTest(unittest.TestCase):
     """G3 and G4 run only when the task sets `long_context` or `stability`, two fields inferpilot.js takes
     and hands to every role. G4 is the task's performance client run back to back for more than 48 hours

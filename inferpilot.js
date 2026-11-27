@@ -972,9 +972,18 @@ const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean'
 // The comment for an existing fix PR that did not pass verification: what a human may post on it.
 // branch_findings: what the leak scan found on the pull request's branch, which the comment does not clear.
 const PR_COMMENT = S({ comment_path: str, summary: str, branch_findings: str }, ['comment_path']);
+// G2 as numbers, one entry a data set (gsm8k first): the score on the change and on the baseline as fractions,
+// how many questions the set has and how many of them each arm answered, and the gate the set is reported under
+// where that is not G2 (an item of the acceptance matrix). base is left out where there is no baseline.
+const G2_SET = S({ set: str, gate: str, fix: num, base: num, questions: num, answered: num, base_answered: num },
+  ['set', 'fix', 'questions', 'answered']);
 const VERIFY = S({
   all_pass: bool,
   gates: obj,
+  // G2's result as numbers, which the run holds an accepted round to (g2Unsound): the commit of the change that
+  // was measured, the baseline's, and each set. gates.G2 says the same in words, for the reader; no score is read
+  // out of those. no_baseline: why no baseline was measured (the base does not start on this configuration).
+  g2: S({ commit: str, base_commit: str, no_baseline: str, sets: arr(G2_SET) }, ['commit', 'sets']),
   // blocking false: a report-only item of the acceptance matrix, or a G4 failure the investigator found on the
   // baseline too (a known issue): reported, and not investigated (again)
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
@@ -1908,6 +1917,47 @@ const ROUND_CLEANUP = S({ in_use: str, in_use_gpus: arr({ type: ['string', 'inte
 // numbers. One it names another way is not read, and excuses nothing after the round.
 const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\bGPU\s+(\d+)\s*:/g)].map((m) => m[1]))];
 
+// G2 is judged on numbers the verify engineer returns apart from its words (g2), wherever gsm8k is put to the
+// change: always for a feature or a performance change, and for a fix that changes code the server runs on a
+// model that answers text questions. A round the run accepts has to show them sound: scores that are fractions,
+// every question answered on both arms (a set where one got no answer has no score), the commit of the change
+// the one under verification and not the baseline's, and no set more than a point below its baseline unless the
+// round lists that set's gate among its failures. Returns what is wrong, '' when nothing is.
+const G2_POINT = 0.01;
+function g2Unsound(g2, failures) {
+  if (!g2 || typeof g2 !== 'object' || !Array.isArray(g2.sets) || !g2.sets.length) return 'it gives no scores (g2)';
+  const head = String((R.done[R.done.length - 1] || {}).commit || '').trim();
+  const commit = String(g2.commit || '').trim();
+  const baseCommit = String(g2.base_commit || '').trim();
+  const noBase = String(g2.no_baseline || '').trim();
+  if (!commit) return 'its scores name no commit of the change (g2.commit)';
+  if (head && !sameCommit(commit, head)) return `its scores are of ${commit}, and the commit under verification is ${head}`;
+  if (baseCommit && sameCommit(baseCommit, commit)) return `the baseline it names is the change's own commit (${commit})`;
+  const fraction = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
+  const listed = new Set((failures || []).map((f) => String(f.gate || '').trim()));
+  for (const s of g2.sets) {
+    const name = String((s && s.set) || '').trim() || 'a set without a name';
+    if (!s || !fraction(s.fix)) return `${name}: the change's score is no fraction between 0 and 1 (${JSON.stringify(s && s.fix)})`;
+    const asked = Number(s.questions);
+    if (!(Number.isInteger(asked) && asked > 0)) return `${name}: it does not say how many questions the set has`;
+    if (Number(s.answered) !== asked) {
+      return `${name}: the change answered ${JSON.stringify(s.answered)} of ${asked} questions, and a set where a question got no answer has no score`;
+    }
+    if (s.base == null) {
+      if (!noBase) return `${name}: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)`;
+      continue;
+    }
+    if (!fraction(s.base)) return `${name}: the baseline's score is no fraction between 0 and 1 (${JSON.stringify(s.base)})`;
+    if (!baseCommit) return `${name}: the baseline's score names no commit (g2.base_commit)`;
+    if (Number(s.base_answered) !== asked) return `${name}: the baseline answered ${JSON.stringify(s.base_answered)} of ${asked} questions`;
+    const gate = String(s.gate || '').trim() || 'G2';
+    if (s.fix < s.base - G2_POINT - 1e-9 && !listed.has(gate)) {
+      return `${name}: ${s.fix} is more than a point below the baseline's ${s.base}, and ${gate} is not among the round's failures`;
+    }
+  }
+  return '';
+}
+
 // Verify against the same-pattern baseline; a failure goes to the investigator,
 // whose verdict decides: fix work packages (implemented, then re-verified), a
 // baseline bug (recorded; the gate is re-judged on what remains) or a stop.
@@ -2081,6 +2131,17 @@ async function verifyLoop(extraGates, existing) {
         + `round was accepted ${C.text_model_unconfirmed ? 'without saying which the server showed (text_model)' : "without gsm8k's result on it"}`
         + `: G2 is ${compared ? `"${compared}"` : 'not reported'}. The word stands once the verify engineer, who launches the model, has `
         + 'said the same and put gsm8k to it; where the model answers none after all, name its output comparison (output_script)';
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
+    // G2 on its numbers (g2Unsound), wherever gsm8k is put to the change. The words of gates.G2 are the round's
+    // report; what the run accepts is what the numbers show, and a round that gives none has shown nothing.
+    const g2Due = (!BEFORE_A_FIX[MODE] || C.server_code_changed) && C.text_model !== false;
+    const unsound = g2Due && (v.all_pass === true || (failures.length && !blocking.length)) ? g2Unsound(v.g2, failures) : '';
+    if (unsound) {
+      await refused();
+      const why = `the round was accepted, and G2's numbers do not bear it out: ${unsound}. G2 is `
+        + `${compared ? `"${compared}"` : 'not reported'} in words; the run goes by the scores, the answers and the commits in g2`;
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }

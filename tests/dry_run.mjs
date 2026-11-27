@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRuntime, scriptBody } from '../runtime/engine.mjs';
-import { CMD, DEFAULTS, MODE_DEFAULTS, ROLE_RE, RUN, WP, parseInputs, withKernelHandoff } from './fixtures/answers.mjs';
+import { CMD, DEFAULTS, MODE_DEFAULTS, ROLE_RE, RUN, WP, parseInputs, soundG2, withKernelHandoff } from './fixtures/answers.mjs';
 
 const INFERPILOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(INFERPILOT, 'inferpilot.js');
@@ -46,7 +46,10 @@ function makeBackend(overrides) {
     const f = (overrides && overrides[key]) || DEFAULTS[key];
     if (!f) throw new Error(`no scripted answer for ${key}`);
     const ans = await f(ins, n);
-    return { text: JSON.stringify(ans) };
+    // A Verify answer that says nothing of G2's numbers measured it soundly, on the commit under verification:
+    // a scenario about anything else need not spell them out. One about them gives its own g2, or g2: null for none.
+    const full = key === 'verify_engineer:verify' && ans && typeof ans === 'object' && !('g2' in ans) ? { ...ans, g2: soundG2(ins) } : ans;
+    return { text: JSON.stringify(full) };
   };
   return { backend: b, calls };
 }
@@ -395,6 +398,84 @@ const scenarios = [
       'the known issue is recorded, and someone hears of it');
     check(r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'pass' && /missed without blocking: G4/.test(p.summary)),
       'the Verify note says G4 failed');
+  }],
+  ['verify: a round is accepted on G2\'s numbers, which the run checks, and not on the words they are reported in', async () => {
+    // gates.G2 is a sentence: "pass 0.893 vs 0.895 (1319 q)" can stand over a set that was cut short, over another
+    // commit's scores, or over a percentage. The answer carries the numbers apart (g2), and a round the run would
+    // accept is held to them wherever gsm8k is put to the change.
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const gsm8k = (over) => ({ set: 'gsm8k', fix: 0.893, base: 0.895, questions: 1319, answered: 1319, base_answered: 1319, ...over });
+    const numbers = (over, sets) => ({ commit: 'c_WP2', base_commit: 'base0f1e2d3c', sets: sets || [gsm8k()], ...over });
+    const round = (g2, more) => ({ 'verify_engineer:verify': () => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' },
+      failures: [], ...more, g2 }) });
+    const feature = { mode: 'feature', task: 't' };
+    const refusedFor = (r, why) => r.result.status === 'blocked' && r.result.stopped_at === 'Verify' && !r.keys.includes('investigator:investigate')
+      && r.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'fail'
+        && p.summary.startsWith("the round was accepted, and G2's numbers do not bear it out: ") && p.summary.includes(why));
+    const why = (r) => (r.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary;
+
+    const fine = await run(feature, round(numbers()));
+    check(fine.result.status === 'ready_for_review', `sound numbers of the commit under verification: ${ended(fine)}`);
+    for (const [what, g2, reason] of [
+      ['no numbers', undefined, 'it gives no scores (g2)'],
+      ['no set', numbers({}, []), 'it gives no scores (g2)'],
+      ['a percentage in place of a fraction', numbers({}, [gsm8k({ fix: 89.3 })]), "gsm8k: the change's score is no fraction between 0 and 1 (89.3)"],
+      ['a baseline score that is no fraction', numbers({}, [gsm8k({ base: 89.5 })]), "gsm8k: the baseline's score is no fraction between 0 and 1 (89.5)"],
+      ['no number of questions', numbers({}, [gsm8k({ questions: 0, answered: 0 })]), 'gsm8k: it does not say how many questions the set has'],
+      ['a question the change did not answer', numbers({}, [gsm8k({ answered: 1300 })]), 'gsm8k: the change answered 1300 of 1319 questions'],
+      ['a question the baseline did not answer', numbers({}, [gsm8k({ base_answered: 1000 })]), 'gsm8k: the baseline answered 1000 of 1319 questions'],
+      ["another commit's scores", numbers({ commit: 'c_WP1' }), 'its scores are of c_WP1, and the commit under verification is c_WP2'],
+      ['no commit', numbers({ commit: '' }), 'its scores name no commit of the change (g2.commit)'],
+      ['a baseline measured on the change itself', numbers({ base_commit: 'c_WP2' }), "the baseline it names is the change's own commit (c_WP2)"],
+      ['a baseline score of no commit', numbers({ base_commit: '' }), "gsm8k: the baseline's score names no commit (g2.base_commit)"],
+      ['more than a point below the baseline', numbers({}, [gsm8k({ fix: 0.84, base: 0.89 })]),
+        "gsm8k: 0.84 is more than a point below the baseline's 0.89, and G2 is not among the round's failures"],
+      ['no baseline and no reason', numbers({ base_commit: '' }, [gsm8k({ base: undefined, base_answered: undefined })]),
+        'gsm8k: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)'],
+      ['a second set that was cut short', numbers({}, [gsm8k(), { set: 'gpqa_diamond', gate: 'ACC-2', fix: 0.41, base: 0.42, questions: 198, answered: 150,
+        base_answered: 198 }]), 'gpqa_diamond: the change answered 150 of 198 questions'],
+    ]) {
+      const r = await run(feature, round(g2));
+      check(refusedFor(r, reason), `${what}: the round is not accepted on its words: ${ended(r)}, ${why(r)}`);
+    }
+    // The bound is a point: exactly a point below passes, as the doctrine has it.
+    const atBound = await run(feature, round(numbers({}, [gsm8k({ fix: 0.885, base: 0.895 })])));
+    check(atBound.result.status === 'ready_for_review', `a point below the baseline is within the bound: ${ended(atBound)}`);
+    // No baseline, with the reason: the score is reported and not judged.
+    const alone = await run(feature, round(numbers({ base_commit: '', no_baseline: 'the base does not start on this configuration' },
+      [gsm8k({ base: undefined, base_answered: undefined })])));
+    check(alone.result.status === 'ready_for_review', `a score without a baseline, with the reason, is reported and not judged: ${ended(alone)}`);
+    // A set that misses under a gate of its own, which the round lists among its failures as one that does not
+    // block (a report-only item of the acceptance matrix): the round is accepted as it was. Not listed, it is not.
+    const second = { set: 'simple_qa', gate: 'ACC-3', fix: 0.30, base: 0.36, questions: 4326, answered: 4326, base_answered: 4326 };
+    const reportOnly = await run(feature, round(numbers({}, [gsm8k(), second]), { all_pass: false, failures: [{ gate: 'ACC-3', blocking: false }] }));
+    check(reportOnly.result.status === 'ready_for_review', `a miss the round lists as one that does not block is its own report: ${ended(reportOnly)}`);
+    const unlisted = await run(feature, round(numbers({}, [gsm8k(), second])));
+    check(refusedFor(unlisted, "simple_qa: 0.3 is more than a point below the baseline's 0.36, and ACC-3 is not among the round's failures"),
+      `the same miss, not listed, is not accepted: ${ended(unlisted)}, ${why(unlisted)}`);
+    // A round that fails is not held to its numbers: its failure is investigated, as before.
+    const failing = await run(feature, { 'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, left_running: '', g2: undefined,
+      failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 against 0.89' }] } : DEFAULTS['verify_engineer:verify']()) });
+    check(failing.result.status === 'ready_for_review' && failing.keys.includes('investigator:investigate'),
+      `a failing round goes to the investigator whatever its numbers: ${ended(failing)}`);
+
+    // A fix is held to them where gsm8k is put to it: when it changes code the server runs, on a model that answers
+    // text questions. The commit is the fix's.
+    const issue = { mode: 'issue', task: 'i' };
+    const fixed = await run(issue, round(numbers({ commit: 'c_WP1' })));
+    const stale = await run(issue, round(numbers({ commit: 'base0f1e2d3c', base_commit: 'aaa1111' })));
+    check(fixed.result.status === 'ready_for_review' && refusedFor(stale, 'its scores are of base0f1e2d3c, and the commit under verification is c_WP1'),
+      `a fix's scores are those of the fix's commit: ${ended(fixed)}, ${ended(stale)}`);
+    const none = await run(issue, round(undefined));
+    check(refusedFor(none, 'it gives no scores (g2)'), `a fix that changes code the server runs has numbers to show: ${ended(none)}`);
+    // A fix to tests, documentation or CI files alone has no G2, and no numbers to show.
+    const testsOnly = await run(issue, round(undefined, { gates: { G2: 'not run: no code the server runs changed' }, server_code_changed: false }));
+    check(testsOnly.result.status === 'ready_for_review', `a fix that changes no code the server runs is not asked for them: ${ended(testsOnly)}`);
+    // A model that answers no text questions has no gsm8k: its G2 is the task's output comparison, judged as before.
+    const images = await run({ ...issue, output_script: '/s/compare.sh' }, {
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }),
+      ...round(undefined, { gates: { G2: 'pass: 16 images of c_WP1 in RUN_DIR/outputs/fix-c_WP1 match the base\'s' }, text_model: false }) });
+    check(images.result.status === 'ready_for_review', `an output comparison has no scores to give: ${ended(images)}`);
   }],
   ['feature: a verify round that would not fit says what it needs and runs again with it, once; nobody chooses a time', async () => {
     const r = await run({ mode: 'feature', task: 't' }, {

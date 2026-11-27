@@ -52,6 +52,16 @@ Notes per gate:
   composition, kernel choice and speculative verification all flip near-ties, and chasing those flips
   costs runs without finding a defect. A token comparison is a diagnosis aid (the failure taxonomy
   below) or the subject of a determinism task, never the accuracy gate.
+- **G2 is accepted on its numbers.** A sentence such as `pass 0.893 vs 0.895 (1319 q)` can stand
+  over a set that was cut short, over another commit's scores, or over a percentage. So the verify
+  engineer returns G2's numbers apart from its words (`g2`): for each set the score on the change
+  and on the baseline as fractions, how many questions the set has and how many of them each arm
+  answered, and the commits that were measured. The run holds a round it would accept to them,
+  wherever gsm8k is put to the change: every question answered on both arms, the commit the one
+  under verification and not the baseline's, and no set more than a point below its baseline unless
+  the round lists that set's gate among its failures. A round that gives none has shown nothing,
+  and the run stops there for a human. Where there is no baseline (the base does not start on this
+  configuration), the answer says why, and the score is reported and not judged.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
   report was about, when it changes anything but tests, documentation and CI files: gsm8k (1319) on
   the fix and on the base, each once, with the run's launch script and model, the fix at most 1 point

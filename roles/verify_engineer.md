@@ -127,7 +127,8 @@ clock can start before your session does.
      `accuracy_script` (`<accuracy_script> gsm8k`: the task's own, or InferPilot's `accuracy.sh`, which
      runs `scripts/eval_accuracy.sh` with the run's settings; the same for both arms): once per arm, at
      most 1 point below the baseline, with no token-level comparison. A set where a question got no
-     answer has no score.
+     answer has no score. Give G2's numbers apart from the words, in `g2` (*Return*): InferPilot
+     accepts a round on those, and reads no score out of the sentence in `gates`.
    - **A fix (issue, ci: `extra_gates` holds `issue_repro` or `failing_test`) is measured on gsm8k too,
      when it changes anything but tests, documentation and CI files** (`validation_doctrine.md`, *G2
      for a fix*). That gate of `extra_gates` runs first: a fix that does not fix has no accuracy worth
@@ -374,6 +375,8 @@ Return:
 ```json
 {"all_pass": false,
  "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "fail", "G4": "not run: not asked"},
+ "g2": {"commit": "<the commit measured: the task worktree's HEAD>", "base_commit": "<the baseline's commit>",
+        "sets": [{"set": "gsm8k", "fix": 0.895, "base": 0.901, "questions": 1319, "answered": 1319, "base_answered": 1319}]},
  "failures": [{"gate": "G3", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g3_*.json", "blocking": true}],
  "ledger_path": "/abs/RUN_DIR/experiment_ledger.md", "summary": "<one line per gate>",
  "left_running": ""}
@@ -381,6 +384,23 @@ Return:
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
 did not run are `not run`.
+
+`g2` gives G2 as numbers, whenever gsm8k was put to the change in this round: every round of a
+feature or a performance change, and for a fix whenever it changes code the server runs on a model
+that answers text questions. A round that ran no gsm8k has none (a fix to tests, documentation or
+CI files alone; an output comparison). `commit` is the commit the change's arm ran, the task
+worktree's `HEAD`, and `base_commit` the baseline's. Each entry of `sets` is one data set, gsm8k
+first: `fix` and `base` are its scores as fractions of 1 (0.895, never 89.5), `questions` how many
+the set has, `answered` and `base_answered` how many of them each arm answered. A set reported
+under a gate of its own (an item of the acceptance matrix) names it in `gate`; without one the set
+is G2's. The change's scores are this round's, of this commit: an earlier round's, or another
+commit's, are not. The baseline's come from the ledger only for the commit they were measured on.
+Where there is no baseline (the base does not start on this configuration), leave `base` and
+`base_answered` out, and say why in `no_baseline`: the score is then reported, not judged.
+InferPilot holds a round it would accept to these numbers: every question answered on both arms,
+the commit the one under verification and not the baseline's, and no set more than a point below
+its baseline unless that set's gate is among `failures`. A round that passes in words and gives no
+sound numbers is not accepted: the run stops there for a human.
 
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
 `false` only when every file the fix changes is a test, a documentation file or a CI file. It adds
