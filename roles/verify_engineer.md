@@ -159,21 +159,27 @@ clock can start before your session does.
        for a model that answers no text questions*): the same inputs with the same seeds on both
        arms, and the fix's outputs compared with the baseline's. Run it unchanged, once per arm, each
        against a server launched with the run's launch script on the same GPUs, each in a directory
-       of its own that you make first, named for the commit it runs. The baseline arm first: `mkdir
-       RUN_DIR/outputs/base-<commit>`, then `PORT=<port> OUT_DIR=RUN_DIR/outputs/base-<commit> bash
-       <output_script>`. Then the fix, with the baseline's outputs, in a directory that no earlier
-       execution wrote to: `mkdir RUN_DIR/outputs/fix-<commit>` (which must not find it there: a
-       commit that runs again takes `fix-<commit>-2`, and so on), then `PORT=<port>
-       OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base-<commit> bash
-       <output_script>`, which compares, and exits non-zero when an output differs by more than the
-       script tolerates. A retry or a repaired fix never writes where an earlier execution wrote:
+       of its own that you make first, named for the commit it runs. Make their parent once, `mkdir
+       -p RUN_DIR/outputs`, and each arm's directory with a plain `mkdir`, which fails where the
+       name is taken and so writes over nothing. The baseline arm first: `mkdir
+       RUN_DIR/outputs/base-<base commit>`, then `PORT=<port> OUT_DIR=RUN_DIR/outputs/base-<base
+       commit> bash <output_script>`. `<base commit>` is the commit the baseline arm runs, the base
+       or the last commit that served the configuration: not the fix's. Then the fix, with the
+       baseline's outputs, in a directory that no earlier execution wrote to: `mkdir
+       RUN_DIR/outputs/fix-<commit>` (which must not find it there: a commit that runs again takes
+       `fix-<commit>-2`, and so on), then `PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit>
+       BASE_DIR=<the baseline's directory> bash <output_script>`, which compares, and exits
+       non-zero when an output differs by more than the script tolerates. `BASE_DIR` is the
+       baseline directory this round uses, by its exact name: the one whose run finished, with its
+       suffix where the baseline was measured again (`base-<base commit>-2`). A retry or a repaired
+       fix never writes where an earlier execution wrote:
        that would overwrite the evidence of its round, and an output the script did not write again
        would be compared as this round's. Only the baseline's directory is reused, and only the one
        of the commit this round's baseline is, whose run the ledger records as finished. A retry of
        the task can find the run directory with the outputs of another base (main has moved), or of
        a run that was cut short: neither is this round's baseline. Leave such a directory as it is,
-       the evidence of its own round, and measure the baseline again next to it (`base-<commit>-2`
-       where the name is taken).
+       the evidence of its own round, and measure the baseline again next to it (`base-<base
+       commit>-2` where the name is taken).
        Never write such a test yourself, and never change the task's: its inputs, the seeds, the
        measure and the tolerance are the user's. `gates` says what it compared, of which commit,
        where and with what: `"G2": "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match
