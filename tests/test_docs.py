@@ -1141,7 +1141,7 @@ class OutputComparisonTest(unittest.TestCase):
         for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
             body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
             self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
-        self.assertIn("if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;", src,
+        self.assertIn("const setupSays = s.text_model !== false;\n  if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;", src,
                       "what Setup says of the model does not reach the roles; left out, the model answers text questions")
         self.assertIn("function outputsLacking() {\n  if (C.text_model !== false || C.output_script) return null;", src)
         # Asked after Setup of a task that can reach a fix, at the fix of a run whose stop before it was lifted, and
@@ -1270,6 +1270,63 @@ class OutputComparisonTest(unittest.TestCase):
                 self.assertIn(words, row[0], "%s: the output_script row" % name)
         self.assertRegex(EN, r"the question after Setup\s+for the script that compares outputs \(`output_script`\)", "README.md does not list the question")
         self.assertIn("Setup 之后会问比较输出的脚本（`output_script`）", ZH, "README.zh-CN.md does not list the question")
+
+
+class ModelWordTest(unittest.TestCase):
+    """Setup says what the model of a fix is, by its files and the command that serves it, and can take a model that
+    answers text questions for one that does not: the run would then ask for an output comparison the model needs
+    none of. The user's word (the task's `text_model`) stands in Setup's place, either way, and the question for
+    the script offers it; the verify engineer, who launches the model, has the last word."""
+
+    FIELD = "text_model"
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_users_word_stands_in_setups_place(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the user's word on the model")
+        for said, why in (
+                # only what the caller gave counts, as a field or as an answer: not what the Intake read into a request
+                ("const MODEL_WORD = modelWord(RAW.text_model) === null ? modelWord(asObject(RAW.answers).text_model) : modelWord(RAW.text_model);",
+                 "the word is read from somewhere else than the caller's arguments"),
+                ("const modelWord = (v) => (['true', 'false'].includes(String(v).trim().toLowerCase()) ? on(String(v).trim()) : null);",
+                 "a value that is neither true nor false is read as one of them"),
+                ("if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && !['true', 'false'].includes(asked(a.text_model))) {",
+                 "a value that is neither is not asked about, and Setup's word stands without a word of it"),
+                ("R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];", "the question for the script does not offer the correction"),
+                ("if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());",
+                 "a run whose stop before the fix was lifted is not offered the correction"),
+                ("if (MODEL_WORD === null) FIX_NEEDS.output_script += ', or say that the model answers text questions after all (text_model)';",
+                 "the result does not say that there is another answer"),
+                # the verify engineer still has the last word
+                ("if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;", "the user's word outlasts the server's")):
+            self.assertIn(said, src, why)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        self.assertNotIn("text_model", intake, "the Intake can return a word that is the user's to give")
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("templates/task_definition.md", "**`text_model`** is your word on what the model is"),
+                ("templates/task_definition.md", "the question for the script comes with a second one, and `text_model: true` answers it"),
+                ("templates/task_definition.md", "Your word stands in Setup's place until a server is up: the verify engineer, who launches the "
+                                                 "model, has the last word either way"),
+                ("knowledge/validation_doctrine.md", "Setup judges by the model's files and the command that serves it, and can be wrong"),
+                ("knowledge/validation_doctrine.md", "the user's word (`text_model`) stands in Setup's place, either way"),
+                ("roles/intake.md", "`text_model` is the user's word on what the model is"),
+                ("roles/intake.md", "Never set it yourself, from the request's wording or the model's name"),
+                ("roles/director.md", "Say what you find also where the task gives `text_model`"),
+                ("README.md", "`issue` and `ci`: your word on what the model is, where Setup's is wrong"),
+                ("README.zh-CN.md", "Setup 把模型判断错了时，由你来说它是哪一类")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the user's word on the model")
+        for readme in ("README.md", "README.zh-CN.md"):
+            text = (ROOT / readme).read_text(encoding="utf-8")
+            self.assertEqual(len([line for line in text.splitlines() if line.startswith("| `%s` |" % self.FIELD)]), 1, "%s has no row for it" % readme)
 
 
 class FixPerformanceTest(unittest.TestCase):

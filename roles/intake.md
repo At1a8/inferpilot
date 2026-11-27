@@ -58,6 +58,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      InferPilot has no template for one, and never write it for the user. Where you cannot tell what
      the model is, leave the field out: Setup says, and the run asks then. Never ask it of a model
      that answers text questions, which G2 measures on gsm8k.
+   - `text_model` is the user's word on what the model is, given as a field or as an answer where
+     Setup took the model for the wrong kind (`task_definition.md` §1.1). Never set it yourself,
+     from the request's wording or the model's name: InferPilot reads it only where the caller
+     gave it. A value that is neither `true` nor `false` is asked about.
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
      a context length, thinking off. Only what the request states; the feature's source and the
      templates fill the rest at Setup. The accuracy sets come from `goal`, never from here.

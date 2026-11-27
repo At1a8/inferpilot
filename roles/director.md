@@ -232,7 +232,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      *G2 for a model that answers no text questions*): a run that can reach a fix without one
      stops after Setup and asks for it. Never write that test in the task's place, and never
      leave the field out for such a model: without it the run takes the model for one that
-     answers text questions, and finds out at Verify, after the fix is written.
+     answers text questions, and finds out at Verify, after the fix is written. Say what you
+     find also where the task gives `text_model`: that is the user's word, which stands in
+     yours until Verify launches the model, and the run record says where the two differ.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 

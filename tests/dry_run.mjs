@@ -1532,8 +1532,9 @@ const scenarios = [
   }],
   ['issue: the fix for a model that answers no text questions is measured by the task\'s own output comparison, which a task that names none is asked for after Setup', async () => {
     const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
-    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script'])
-      && 'output_script' in ((((r.result.next || {}).rerun_with || {}).answers) || {});
+    // The script is asked for, and with it whether Setup took the model for the wrong kind: either answer goes on.
+    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model'])
+      && eqList(Object.keys((((r.result.next || {}).rerun_with || {}).answers) || {}), ['output_script', 'text_model']);
     const none = await run({ mode: 'issue', task: 'i' }, noText);
     const q = ((none.result.next || {}).ask || [])[0] || {};
     check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup' && asked(none)
@@ -1545,8 +1546,52 @@ const scenarios = [
       `the question says what the script does, and offers nothing in its place: ${JSON.stringify(q)}`);
     check(/\/models\/m answers no text questions, so gsm8k cannot be put to it/.test(q.why || '') && /the same inputs and seeds on the base and on the fix/.test(q.why || '')
       && /with stop_after set to a phase before the fix, no script is needed/.test(q.why || ''), `and why it is asked: ${q.why}`);
-    check(/Give the script that compares the model's outputs, and run the task again/.test(none.result.next.say),
-      `the result says what to give: ${none.result.next.say}`);
+    check(/Give the script that compares the model's outputs, or say that the model answers text questions after all \(text_model\), and run the task again/
+      .test(none.result.next.say), `the result says what to give: ${none.result.next.say}`);
+    // Setup judges by the model's files and the command that serves it, and can be wrong: only the user can say so
+    // before a server is launched. The second question offers that word, and the word stands in Setup's place.
+    const q2 = ((none.result.next || {}).ask || [])[1] || {};
+    check(q2.field === 'text_model' && /^Or does the model answer text questions after all\? Say true, and no script is needed/.test(q2.question)
+      && /Setup took \/models\/m for one that answers no text questions/.test(q2.why) && /the verify engineer, who launches the model, has the last word/.test(q2.why)
+      && eqList(q2.options, ['true']), `the user is offered the word that corrects Setup: ${JSON.stringify(q2)}`);
+    for (const [how, word] of [['an answer', { answers: { text_model: 'true' } }], ['an answer given as a boolean', { answers: { text_model: true } }],
+      ['a field of the task', { text_model: true }], ['a field given as a word', { text_model: ' True ' }]]) {
+      const corrected = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, ...word }, noText);
+      const cv = corrected.calls.find((c) => c.key === 'verify_engineer:verify');
+      check(corrected.result.status === 'ready_for_review' && cv && cv.ins.text_model === true && !cv.ins.output_script
+        && corrected.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'text_model'
+          && /the task says that the model answers text questions \(text_model\), and Setup took it for one that answers none/.test(p.summary)),
+        `said as ${how}, the user's word stands in Setup's place, and gsm8k is put to the model: ${corrected.result.status}, ${cv && cv.ins.text_model}`);
+    }
+    // Only what the caller gave is the user's word: what the Intake read into a request is its reading, and corrects nothing.
+    const readIn = await run({ mode: 'issue', task: 'i', request: 'the issue; it is a chat model, I think' }, { ...noText,
+      'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, text_model: true } }) });
+    check(readIn.result.status === 'needs_input' && readIn.result.stopped_at === 'Setup' && asked(readIn),
+      `a word the Intake read into the request does not stand in Setup's place: ${readIn.result.status} at ${readIn.result.stopped_at}`);
+    // The verify engineer launches the model, and has the last word: where the user was wrong, the round passes nothing.
+    const wrongWord = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, server_code_changed: true,
+        gates: { issue_repro: 'pass', G2: 'not run: the model answers no text questions, and the task names no output_script' } }) });
+    check(wrongWord.result.status === 'blocked' && wrongWord.result.stopped_at === 'Verify'
+      && /Name the script \(output_script\)/.test(wrongWord.result.next.say),
+      `a word the server contradicts does not get the fix past Verify: ${wrongWord.result.status} at ${wrongWord.result.stopped_at}`);
+    // The word goes both ways: a model Setup took for one that answers text questions, and the user says answers none.
+    const saysNone = await run({ mode: 'issue', task: 'i', text_model: false });
+    check(saysNone.result.status === 'needs_input' && saysNone.result.stopped_at === 'Setup'
+      && eqList((saysNone.result.next.ask || []).map((x) => x.field), ['output_script'])
+      && /Give the script that compares the model's outputs, and run the task again/.test(saysNone.result.next.say),
+      `the user's word that the model answers none asks for the script, and for nothing the user has already said: ${
+        saysNone.result.status}, ${JSON.stringify((saysNone.result.next.ask || []).map((x) => x.field))}`);
+    const saysNoneWith = await run({ mode: 'issue', task: 'i', text_model: 'false', output_script: '/s/outputs.sh' });
+    const sv = saysNoneWith.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sv && sv.ins.text_model === false && sv.ins.output_script === '/s/outputs.sh',
+      `and with the script the verify engineer is told what the user said: ${sv && JSON.stringify([sv.ins.text_model, sv.ins.output_script])}`);
+    // A value that is neither is asked about at Intake: read as nothing, it would leave Setup's word standing.
+    for (const odd of ['yes', 1, 'text']) {
+      const unclear = await run({ mode: 'issue', task: 'i', text_model: odd }, noText);
+      check(asks(unclear, 'text_model'), `text_model ${JSON.stringify(odd)} is asked about before anything is set up: ${unclear.result.status} at ${
+        unclear.result.stopped_at}`);
+    }
     const given = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, answers: { output_script: ' /s/outputs.sh ' } }, noText);
     const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
     check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
@@ -1578,7 +1623,8 @@ const scenarios = [
       && !lifted.keys.includes('implementer:implement') && lifted.keys.includes('director:report'),
       `a stop the control file lifts starts no fix without the script: ${lifted.result.status} at ${lifted.result.stopped_at}`);
     check(/G2 on the task's own output comparison, since the model answers no text questions/.test(lifted.result.next.say)
-      && /Give the script that compares the model's outputs, and run the task again/.test(lifted.result.next.say),
+      && /Give the script that compares the model's outputs, or say that the model answers text questions after all \(text_model\), and run the task again/
+        .test(lifted.result.next.say),
       `and says what the fix lacks, and why: ${lifted.result.next.say}`);
     // Setup took the model for one that answers text questions, and the round finds that it does not: no gsm8k ran, and
     // there is no script to compare outputs with. The fix has no G2, and the round passes nothing.
@@ -1673,7 +1719,7 @@ const scenarios = [
     const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
     const none = await run({ mode: 'ci', task: 'c' }, noText);
     check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup'
-      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !none.keys.includes('ci_guardian:classify'),
+      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model']) && !none.keys.includes('ci_guardian:classify'),
       `asked after Setup, before the failure is classified: ${none.result.status} at ${none.result.stopped_at}`);
     const given = await run({ mode: 'ci', task: 'c', output_script: '/s/outputs.sh' }, noText);
     const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
@@ -1692,7 +1738,7 @@ const scenarios = [
       },
     }, { control: () => (classified ? { stop_after: '' } : {}) });
     check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Bisect'
-      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !lifted.keys.includes('implementer:implement'),
+      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model']) && !lifted.keys.includes('implementer:implement'),
       `a stop the control file lifts starts no fix without it: ${lifted.result.status} at ${lifted.result.stopped_at}`);
   }],
   ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
@@ -3370,6 +3416,9 @@ const scenarios = [
     check(feature.result.status !== 'needs_input', `a feature task is not asked about it: ${feature.result.status}`);
     const noText = await run({ mode: 'feature', task: 't' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
     check(noText.result.status === 'ready_for_review', `nor does what Setup says of the model stop a feature: ${noText.result.status}`);
+    // Nor is it asked what its model is: the user's word on that (text_model) is for a fix, whatever value it has.
+    const word = await run({ mode: 'feature', task: 't', text_model: 'yes' });
+    check(word.result.status === 'ready_for_review', `a feature task is not asked what its model is: ${word.result.status}`);
   }],
   ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);

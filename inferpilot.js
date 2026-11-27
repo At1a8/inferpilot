@@ -127,7 +127,8 @@ const shq = (s) => (/^[\w@%+=:,./-]+$/.test(String(s)) ? String(s) : `'${String(
 // stay outside it.
 // ---------------------------------------------------------------------------
 const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_path', 'platform', 'gpu_ids',
-  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness', 'apply_prs', 'sources', 'since',
+  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'text_model', 'harness', 'apply_prs',
+  'sources', 'since',
   'stop_after', 'resume_from', 'run_dir',
   'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
@@ -308,6 +309,12 @@ function missingFields(a) {
   }
   // A gate's field the caller set to anything but true or false would leave the gate out without a word.
   const asked = (v) => String(v).trim().toLowerCase();
+  // So would the user's word on what the model is: read as nothing, it would leave Setup's word standing.
+  if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && !['true', 'false'].includes(asked(a.text_model))) {
+    ask('text_model', 'Does the model answer text questions (true), or is it one that answers none, a diffusion, speech or embedding '
+      + 'model (false)?', `text_model takes true or false, and ${JSON.stringify(a.text_model)} is neither: Setup's word on the model would stand`,
+    ['true', 'false']);
+  }
   for (const [field, gate] of [['long_context', 'G3, the long-context gate'], ['stability', 'G4, the stability run of more than 48 hours']]) {
     if (a[field] != null && a[field] !== '' && !['true', 'false'].includes(asked(a[field]))) {
       ask(field, `Should the run include ${gate}?`,
@@ -458,6 +465,11 @@ const GUARDS = on(A.guards);
 const SWEEP = on(A.sweep);
 const TUNE = on(A.tune);
 const BISECT_FIXED = on(A.bisect_fixed);
+// The user's word on what the model of a fix is (text_model): true when it answers text questions, false when it
+// answers none, null when the caller did not say. Only what the caller gave counts, as a field or as an answer:
+// it is there to correct Setup, which judges by the model's files and the command that serves it.
+const modelWord = (v) => (['true', 'false'].includes(String(v).trim().toLowerCase()) ? on(String(v).trim()) : null);
+const MODEL_WORD = modelWord(RAW.text_model) === null ? modelWord(asObject(RAW.answers).text_model) : modelWord(RAW.text_model);
 // Correctness gates that take hours or days, each off unless the task asks for it: G3 (long context)
 // and G4 (stability: one throughput test of more than 48 hours, validation_doctrine.md).
 const LONG_CONTEXT = on(A.long_context);
@@ -1312,7 +1324,7 @@ async function start(requireBaseline) {
   const lacking = BEFORE_A_FIX[MODE] && stop !== 'now' && !BEFORE_A_FIX[MODE].includes(stop) ? outputsLacking() : null;
   if (lacking) {
     note('Setup', 'needs_input', lacking.why);
-    R.questions = [lacking];
+    R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];
     return finish('needs_input', 'Setup');
   }
   return null;
@@ -1357,6 +1369,14 @@ function askWorkload(spec) {
 // file lifted. It stops here and asks, before any code changes; null when it lacks nothing.
 const FIX_NEEDS = { model_path: 'the model', client_script: 'the client', workload: "the whole workload of InferPilot's client" };
 FIX_NEEDS.output_script = "the script that compares the model's outputs"; // where the model answers no text questions
+// Setup can take a model that answers text questions for one that does not, and only the user can say so before
+// a server is launched: where it is Setup's word that asks for the script, the run asks this as well.
+if (MODEL_WORD === null) FIX_NEEDS.output_script += ', or say that the model answers text questions after all (text_model)';
+const MODEL_ASK = () => ({ field: 'text_model',
+  question: 'Or does the model answer text questions after all? Say true, and no script is needed: G2 then runs gsm8k on it.',
+  why: `Setup took ${C.model_path || 'the model'} for one that answers no text questions, by its files and the command that serves it, `
+    + 'and can be wrong. Your word stands in its place; the verify engineer, who launches the model, has the last word either way',
+  options: ['true'] });
 // A model that answers no text questions (a diffusion, speech or embedding model) has no gsm8k to run: G2 for its
 // fix is an output comparison, the fix's outputs against the base's on the same inputs and seeds, by the task's
 // own test (validation_doctrine.md, G2 for a model that answers no text questions). InferPilot has no template
@@ -1395,6 +1415,7 @@ function askForFix(at) {
     output_script: OUTPUTS_ASK,
   };
   R.questions = lacks.map((k) => ({ field: k, question: ask[k], why }));
+  if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());
   return finish('needs_input', at);
 }
 
@@ -1423,8 +1444,14 @@ async function setup(requireBaseline) {
     client_script: own(C.client_script) || own(s.client_script),
     accuracy_script: own(C.accuracy_script) || own(s.accuracy_script) });
   // What Setup says of the model a fix is measured on: one that answers no text questions has no gsm8k to run
-  // (outputsLacking). A Setup that does not say counts the model as one that answers them.
-  if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;
+  // (outputsLacking). A Setup that does not say counts the model as one that answers them. The user's word
+  // (MODEL_WORD) stands in its place where the caller gave one, either way; the run record says where the two differ.
+  const setupSays = s.text_model !== false;
+  if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;
+  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null && MODEL_WORD !== setupSays) {
+    note('Setup', 'text_model', `the task says that the model ${MODEL_WORD ? 'answers' : 'answers no'} text questions (text_model), and Setup `
+      + `took it for one that ${setupSays ? 'answers them' : 'answers none'}: the task's word stands until Verify launches the model`);
+  }
   if (!C.gpu_ids) {
     note('Setup', 'fail', 'no GPU set pinned (gpu_ids)');
     return false;
