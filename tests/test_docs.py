@@ -1498,12 +1498,15 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "Or `task` names the issue alone and none of its problems is on the task's: take the most "
                                                       "urgent of all then"),
                            ("roles/issue_triager.md", "one without a model that pins two GPUs does not fit a problem at TP8 either"),
-                           ("roles/issue_triager.md", "one that names no model and pins nothing has nothing to mismatch"),
-                           ("roles/issue_triager.md", "for the problem's model where the task has one, and otherwise for each input it pins, not for a "
-                                                      "model the task has no use for"),
+                           ("roles/issue_triager.md", "Where the task pins none of them, it is what Setup chose for the run before the problem was "
+                                                      "known, the `gpu_ids` you are given"),
+                           ("roles/issue_triager.md", "for the problem's model where the task has one, otherwise for each input it pins, and where "
+                                                      "it pins none for the GPUs, never for a model the task has no use for"),
                            ("knowledge/issue_triage.md", "It is then asked for those inputs, each of them, and not for a model"),
-                           ("knowledge/issue_triage.md", "A task that names no model and pins nothing is asked nothing, and reproduces the problem as "
-                                                         "reported"),
+                           ("knowledge/issue_triage.md", "A task that names no model and pins nothing was set up by Setup alone, before the run knew "
+                                                         "which problem it takes"),
+                           ("knowledge/issue_triage.md", "the run stops as well and asks for the GPUs, since Reproduce uses the ones the run is set up "
+                                                         "with and no others"),
                            ("knowledge/issue_triage.md", "So it does where the task names the issue alone and no problem of the report is on the "
                                                          "run's model and configuration"),
                            ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
@@ -1520,13 +1523,16 @@ class TriageCasesTest(unittest.TestCase):
                 ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
                  "a follow-up loses the operator's settings, or the model the report names for it"),
                 ("'gpu_ids'];", "a problem on another configuration is pinned to this run's GPUs"),
-                ("const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);\n  if (elsewhere && !C.model_path && !pinned.length) {",
-                 "a task that names no model and pins nothing is stopped for a mismatch it cannot have"),
-                ("  } else if (elsewhere) {\n    R.model_mismatch = elsewhere;",
-                 "a problem on another model or configuration is reproduced on the task's, with a model of its own or without"),
-                # a task without a model is asked for what it pins, not for a model
-                (": pinned.map((k) => ({ field: k, question: `The task's ${k} (${JSON.stringify(String(A[k]).slice(0, 120))}) is another `",
+                ("const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);\n  if (elsewhere) {\n    R.model_mismatch = elsewhere;",
+                 "a problem on another model or configuration is reproduced on what the run is set up with, whoever chose it"),
+                # a task without a model is asked for what it pins, not for a model; one that pins nothing, for the GPUs Setup chose
+                (": pinned.length ? pinned.map((k) => ({ field: k, question: `The task's ${k} (${given(k)}) is another `",
                  "a task without a model is asked for a model"),
+                (": [{ field: 'gpu_ids', question: `Which GPUs should the run use for ${elsewhere} (HIP numbers)? Setup chose ${C.gpu_ids} `",
+                 "a run Setup alone set up for another configuration reproduces on GPUs that do not fit"),
+                # an input given as an object is shown as it was given
+                ("const given = (k) => JSON.stringify((typeof A[k] === 'string' ? A[k] : JSON.stringify(A[k])).slice(0, 120));",
+                 "a workload or a harness given as an object is shown as [object Object]"),
                 ("  } else if (status === 'needs_input' && R.model_mismatch) {\n", "the result of a mismatch on what a task pins (its GPUs alone) "
                                                                                  "does not say what to give, or how to run again"),
                 ("if (R.model_mismatch) afterMismatch(out, at, last, report);", "the rerun after a mismatch brings the old configuration back"),

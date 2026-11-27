@@ -2053,24 +2053,28 @@ async function runIssue() {
   // GPUs for a problem at TP8.
   const elsewhere = String(tri.model_mismatch || '').trim();
   // What the task pins besides a model. A task without a model has no model to be asked for (a reproduction that
-  // serves none, a distributed test): it is asked for the inputs that do not fit, each of them, and one that
-  // pins nothing has nothing that could be wrong for the problem.
+  // serves none, a distributed test): it is asked for the inputs that do not fit, each of them. One that pins
+  // nothing was set up by Setup alone, before the run knew which problem it takes: the GPUs Setup chose are the
+  // run's all the same, and Reproduce may use no others, so the run stops there too and asks for them.
   const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);
-  if (elsewhere && !C.model_path && !pinned.length) {
-    note('Triage', 'reproduce', `the problem this run takes is on ${elsewhere}; the task names no model and pins no script, workload or GPU `
-      + 'that could be another configuration\'s: the run goes on to reproduce it as reported');
-  } else if (elsewhere) {
+  if (elsewhere) {
     R.model_mismatch = elsewhere;
     const why = C.model_path
       ? `the problem this run takes is on ${elsewhere}, and the task's model is ${C.model_path}: G2 and G5 measure on what the run is set up with`
-      : `the problem this run takes is on ${elsewhere}, and the task is set up for another configuration (its ${
-        pinned.join(', ')}): reproduced on that, the problem would not show`;
+      : pinned.length ? `the problem this run takes is on ${elsewhere}, and the task is set up for another configuration (its ${
+        pinned.join(', ')}): reproduced on that, the problem would not show`
+        : `the problem this run takes is on ${elsewhere}, and Setup set the run up before it was known (GPUs ${C.gpu_ids}): reproduced `
+          + 'on that, the problem would not show';
     note('Triage', 'needs_input', why);
+    // The value as the task gave it: a workload or a harness can be an object.
+    const given = (k) => JSON.stringify((typeof A[k] === 'string' ? A[k] : JSON.stringify(A[k])).slice(0, 120));
     R.questions = C.model_path
       ? [{ field: 'model_path', question: `Which model on this machine is ${elsewhere} (local path)? The task's scripts, `
         + 'workload and GPUs are set up again for it.', why }]
-      : pinned.map((k) => ({ field: k, question: `The task's ${k} (${JSON.stringify(String(A[k]).slice(0, 120))}) is another `
-        + `configuration's. What should it be for ${elsewhere}? Leave it out to have the run set it up itself.`, why }));
+      : pinned.length ? pinned.map((k) => ({ field: k, question: `The task's ${k} (${given(k)}) is another `
+        + `configuration's. What should it be for ${elsewhere}? Leave it out to have the run set it up itself.`, why }))
+        : [{ field: 'gpu_ids', question: `Which GPUs should the run use for ${elsewhere} (HIP numbers)? Setup chose ${C.gpu_ids} `
+          + 'before the run knew which problem it takes. Leave it out to have Setup choose again for that configuration.', why }];
     return finish('needs_input', 'Triage');
   }
 

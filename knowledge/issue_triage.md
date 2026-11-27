@@ -101,7 +101,9 @@ the run asks for what that one is on. A task without a model, one that stops bef
 the most urgent problem of all; what it pins all the same (its GPUs, its scripts) has to fit that
 problem, or the run stops before Reproduce in the same way. It is then asked for those inputs, each
 of them, and not for a model: a reproduction that serves none has none to give. A task that names
-no model and pins nothing is asked nothing, and reproduces the problem as reported.
+no model and pins nothing was set up by Setup alone, before the run knew which problem it takes:
+where the GPUs Setup chose do not fit that problem, the run stops as well and asks for the GPUs,
+since Reproduce uses the ones the run is set up with and no others.
 
 ## 5. Reproduction
 

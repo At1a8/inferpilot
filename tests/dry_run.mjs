@@ -2094,13 +2094,32 @@ const scenarios = [
       && fittedSetup && fittedSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
       `with the answer the run takes the GPUs the problem needs and reproduces it: ${fitted.result.status} at ${fitted.result.stopped_at}, ${
         fittedSetup && fittedSetup.ins.gpu_ids}`);
-    // A task that names no model and pins nothing has nothing that could be another configuration's: it is
-    // asked nothing, and reproduces the problem as reported.
+    // A task that names no model and pins nothing was set up by Setup alone, before the run knew which problem it
+    // takes. The GPUs Setup chose are the run's all the same, and Reproduce may use no others: the run stops
+    // there too, and asks for them, saying whose choice they were.
     const free = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce' }, mismatch);
-    check(free.result.status === 'stopped' && free.result.stopped_at === 'Reproduce' && free.keys.includes('issue_triager:reproduce')
-      && !free.result.model_mismatch && !(free.result.next.ask || []).length
-      && free.result.phases.some((p) => p.phase === 'Triage' && /pins no script, workload or GPU that could be another configuration's/.test(p.summary)),
-      `a task that pins nothing is asked nothing, and the run record says why it went on: ${free.result.status} at ${free.result.stopped_at}`);
+    const freeAsk = free.result.next.ask || [];
+    check(free.result.status === 'needs_input' && free.result.stopped_at === 'Triage' && !free.keys.includes('issue_triager:reproduce')
+      && eqList(freeAsk.map((q) => q.field), ['gpu_ids'])
+      && /^Which GPUs should the run use for DeepSeek-V4\.1, --tp-size 8 \(HIP numbers\)\? Setup chose 0,1 before the run knew which problem it takes\./.test(freeAsk[0].question)
+      && /Setup set the run up before it was known \(GPUs 0,1\)/.test(freeAsk[0].why)
+      && /Give what that configuration needs in place of the task's gpu_ids/.test(free.result.next.say),
+      `a task that pins nothing is not reproduced on the GPUs Setup chose for another configuration: ${free.result.status} at ${
+        free.result.stopped_at}, ${freeAsk[0] && freeAsk[0].question}`);
+    const refit = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce',
+      ...free.result.next.rerun_with, answers: { ...free.result.next.rerun_with.answers, gpu_ids: '0,1,2,3,4,5,6,7' } });
+    const refitSetup = refit.calls.find((c) => c.key === 'director:setup');
+    check(refit.result.status === 'stopped' && refit.result.stopped_at === 'Reproduce' && refitSetup && refitSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `with the answer the next run is set up on the GPUs the problem needs: ${refit.result.status} at ${refit.result.stopped_at}`);
+    // An input the task gave as an object is shown as it was given, not as "[object Object]".
+    const shaped = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce',
+      workload: { isl: 8192, osl: 1024, conc: 64 }, harness: { rounds: 3 } }, mismatch);
+    const shapedAsk = shaped.result.next.ask || [];
+    check(eqList(shapedAsk.map((q) => q.field), ['workload', 'harness'])
+      && shapedAsk[0].question.startsWith('The task\'s workload ("{\\"isl\\":8192,\\"osl\\":1024,\\"conc\\":64}") is another configuration\'s.')
+      && shapedAsk[1].question.startsWith('The task\'s harness ("{\\"rounds\\":3}") is another configuration\'s.')
+      && shapedAsk.every((q) => !/\[object Object\]/.test(q.question)),
+      `an input given as an object is shown as it was given: ${JSON.stringify(shapedAsk.map((q) => q.question))}`);
     // A run that stops at Triage has triaged, which is all it was asked: a mismatch stops nothing there.
     const bare = await run({ mode: 'issue', task: 'i', model_path: '', client_script: '', stop_after: 'Triage' }, {
       'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1',

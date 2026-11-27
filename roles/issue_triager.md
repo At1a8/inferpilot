@@ -41,9 +41,11 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    the issue alone and none of its problems is on the task's: take the most urgent of all then, since
    there is no other to take. What a task is set up with is its `model_path` and whatever else it
    pins (`gpu_ids`, its scripts, its workload): one without a model that pins two GPUs does not fit a
-   problem at TP8 either, and one that names no model and pins nothing has nothing to mismatch. On a
-   `model_mismatch` the run stops before Reproduce and asks: for the problem's model where the task
-   has one, and otherwise for each input it pins, not for a model the task has no use for.
+   problem at TP8 either. Where the task pins none of them, it is what Setup chose for the run before
+   the problem was known, the `gpu_ids` you are given: two GPUs do not fit that problem whoever
+   picked them. On a `model_mismatch` the run stops before Reproduce and asks: for the problem's
+   model where the task has one, otherwise for each input it pins, and where it pins none for the
+   GPUs, never for a model the task has no use for.
    `priority`, `category`, `action` and `existing_prs` are then
    that problem's and no other's: a fix PR for another problem of the report is listed in the triage
    record only, since the run would apply it and check it against this problem's reproduction. Return
