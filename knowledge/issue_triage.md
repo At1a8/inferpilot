@@ -87,12 +87,13 @@ another repository (a component's), which the run cannot apply. Where none is le
 all, or the one verified did not pass and no other is open), the problem has the priority it has
 without one. One the user declines is still open, and keeps it. A pull request the task names is looked
 up and returned whether or not it fixes the problem: one the triage does not itself find to fix it
-(`fixes: false`) keeps no priority. One pull request is verified in a run, the one the user names; the
-others are named in the run record. A pull request the task names is looked up whatever the triage's
-action: where the triage returns it open it is verified on that word, and where it does not, the record
-says why it was not. The word covers the reproduction as well: a reporter's commit that is on no main
-and no release, a pull request's head or a fork's branch, is its author's code, and that arm runs only
-where the task names that pull request.
+(`fixes: false`) keeps no priority, and the user is told what the triage found where the run asks which
+one to verify. One pull request is verified in a run, the one the user names; the others are named in
+the run record. A pull request the task names is looked up whatever the triage's action: where the
+triage returns it open it is verified on that word, and where it does not, the record says why it was
+not. The word covers the reproduction as well: a reporter's commit that is on no main and no release, a
+pull request's head or a fork's branch, is its author's code, and that arm runs only where the user's
+own word names that pull request, and does not say `none` as well.
 
 **An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
 it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for

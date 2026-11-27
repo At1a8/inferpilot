@@ -88,11 +88,11 @@ request names for the run to verify, or none).
    or not your own search found it, and return it with its `state` as the API gives it now (`open`,
    `closed`, `merged` or `not_found`): the run applies one only where you return it open. One of
    them that your reading of its diff does not find to fix this problem is returned all the same,
-   marked `"fixes": false`: the run still verifies it on the user's word, and does not count it as
-   an open fix where it decides the priority. One of another repository goes under its full name
-   (`<owner>/<repo>#<n>`), never as this repository's `#<n>`. Every action that leads to a code
-   change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate
-   the fix must pass.
+   marked `"fixes": false`: the run tells the user what you found where it asks which one to
+   verify, still verifies it on the user's word, and does not count it as an open fix where it
+   decides the priority. One of another repository goes under its full name (`<owner>/<repo>#<n>`),
+   never as this repository's `#<n>`. Every action that leads to a code change, `push_existing_pr`
+   included, is reproduced on main first; that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.

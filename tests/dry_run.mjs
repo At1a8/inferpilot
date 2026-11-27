@@ -3486,6 +3486,9 @@ const scenarios = [
       ["the component's pull request has merged", [{ ...aiterFix, state: 'merged' }], 'P0'],
       ["the component's open pull request is only what the task names, and no fix by the triage's reading", [{ ...aiterFix, fixes: false }], 'P0'],
       ["the other open one of this repository is only what the task names", [{ pr: '#40901', state: 'open', fixes: false }], 'P0'],
+      // The pull request that failed, listed a second time, is no other fix: by its number alone, or with its repository.
+      ['the triage lists the pull request that failed twice', ['#40872'], 'P0'],
+      ['the triage lists it again with its repository', [{ pr: '#40872', repo: 'sgl-project/sglang', state: 'open' }], 'P0'],
     ]) {
       const left = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, alsoListed(more));
       check(left.result.priority === priority && fellBack(left, 'Verify') && left.result.status === (priority === 'P0' ? 'ready_for_review' : 'diagnosed'),
@@ -3708,6 +3711,38 @@ const scenarios = [
         && asked.result.next.rerun_with.apply_prs === '' && asked.result.next.rerun_with.answers.apply_prs === null,
         `and the result says how to answer: ${JSON.stringify(asked.result.next)}`);
     }
+    // The same pull request listed twice is asked about once.
+    const twice = await run({ mode: 'issue', task: 'i' }, triage(['#40872', '#40872', theirs]));
+    const tq = ((twice.result.next || {}).ask || [])[0] || {};
+    check(twice.result.status === 'needs_input' && eqList(tq.options || [], ['#40872', 'none'])
+      && (tq.question || '').startsWith('#40872 by mallory (contributor): open, and said to fix this failure.'),
+      `a pull request listed twice is one candidate, with what the fuller entry says of it: ${JSON.stringify(tq.options)}, ${tq.question}`);
+    const fuller = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage(['#40872', theirs]));
+    check(applied(fuller).goal.startsWith('apply the existing fix #40872 at def5678 ') && applied(fuller).repo === 'sgl-project/sglang',
+      `and it is applied at the commit and from the repository that entry gives: ${JSON.stringify(applied(fuller))}`);
+    // The triage returns what the task names as well, whether or not it fixes the problem. One it does not find to
+    // fix it is not put to the user as a fix: the question, the record and the note of what was verified say what
+    // the triage found, since the user decides on them whether that author's code runs here.
+    const noFix = { ...theirs, fixes: false };
+    const notAFix = 'named by the task, and not found to fix this failure by the triage';
+    const askedNoFix = await run({ mode: 'issue', task: 'i', request: 'the crash at TP8; someone opened 40872 for it' },
+      { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, mode: 'issue', task: 'i', apply_prs: ['#40872'] } }),
+        ...triage([noFix]) });
+    const nq = ((askedNoFix.result.next || {}).ask || [])[0] || {};
+    check(askedNoFix.result.status === 'needs_input' && (nq.question || '').startsWith(`#40872 by mallory (contributor): open, ${notAFix}. Verifying a pull request runs`)
+      && !/said to fix/.test(nq.question)
+      && askedNoFix.result.phases.some((ph) => ph.verdict === 'needs_input'
+        && ph.summary.startsWith('#40872 by mallory (contributor): open, named by the task, and not found to fix this problem by the triage. Verifying it runs')),
+      `a pull request the triage does not find to fix the problem is not asked about as a fix: ${nq.question}`);
+    const mixed = await run({ mode: 'issue', task: 'i' }, triage([other, noFix]));
+    const mq = ((mixed.result.next || {}).ask || [])[0] || {};
+    check((mq.question || '').startsWith(`#40901 by alice (member), #40872 by mallory (contributor): open. #40901: said to fix this failure. #40872: ${notAFix}. Verifying`),
+      `where one is a fix and one is not, the question says which: ${mq.question}`);
+    const verifiedNoFix = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage([noFix]));
+    check(verifiedNoFix.result.status === 'ready_for_review' && applied(verifiedNoFix).kind === 'apply_pr'
+      && notes(verifiedNoFix, 'Reproduce').some((t) => t.startsWith('#40872 by mallory (contributor): open, named by the task, and not found to fix this problem by the '
+        + "triage; verified in place of a fix of the run's own")),
+      `verified on the user's word, it is recorded as what the triage found it to be: ${JSON.stringify(notes(verifiedNoFix, 'Reproduce'))}`);
     // The word, as the field or as the answer: the pull request is applied, at the commit the triage gave where it gave one.
     for (const [how, args] of [['the field', { apply_prs: ['#40872'] }], ['the answer', { answers: { apply_prs: '#40872' } }]]) {
       const yes = await run({ mode: 'issue', task: 'i', ...args }, triage([theirs, other]));
@@ -3759,6 +3794,16 @@ const scenarios = [
         ...triage([theirs]) });
     const refusedAll = await run({ mode: 'issue', task: 'i', apply_prs: 'none' }, triage([theirs]));
     const ranIt = (r) => r.keys.includes('issue_triager:reproduce');
+    // A word that names a pull request and says "none" at once decides nothing, and is asked about. A run that
+    // stops before its fix is not asked yet, and reproduces: the pull request it also names is not approved by it.
+    for (const [how, args] of [['the field', { apply_prs: ['none', '#40872'] }], ['the answer', { answers: { apply_prs: ['none', '#40872'] } }]]) {
+      for (const stop of ['Reproduce', 'Diagnose']) {
+        const both = await run({ mode: 'issue', task: 'i', stop_after: stop, ...args }, triage([theirs]));
+        check(both.result.status === 'stopped' && ranIt(both) && !(word(both) || []).length && !both.keys.includes('implementer:implement'),
+          `"none" and a pull request at once, by ${how}, stopping after ${stop}: nothing is approved for the reproduction: ${ended(both)}, ${
+            JSON.stringify(word(both))}`);
+      }
+    }
     check(eqList(word(placed), ['#40872']) && ranIt(readOnly) && !(word(readOnly) || []).length && ranIt(refusedAll) && !(word(refusedAll) || []).length,
       `the reproduction knows the user's word, and takes no reading or "none" for it: ${JSON.stringify([word(placed), word(readOnly), word(refusedAll)])}`);
     // The triager is given what the task names, to look it up, as Classify is.
@@ -3891,6 +3936,11 @@ const scenarios = [
     check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Reproduce' && !lifted.keys.includes('implementer:implement')
       && (((lifted.result.next || {}).ask || [])[0] || {}).field === 'apply_prs',
       `a stop the control file lifts after the reproduction leaves the question to be asked there: ${ended(lifted)}`);
+    // Asked there, the reproduction has run the reporter's commit: the result says that no pull request was
+    // applied, and does not say that nothing but main has run.
+    check(/^The run stopped after Reproduce, before it applied any pull request: /.test(lifted.result.next.say)
+      && !/any code that is not on main/.test(lifted.result.next.say),
+      `asked after the reproduction, the result promises only what holds there: ${lifted.result.next.say}`);
     // A report with several problems: the run on another one asks for itself. The word was given for this run's problem.
     const several = await run({ mode: 'issue', task: 'i', apply_prs: ['#40872'] }, triage([theirs], {
       other_problems: [{ problem: 'the TP2 startup failure', task: 'sgl-project/sglang#41299: the TP2 startup failure', priority: 'P1' }] }));
@@ -4184,6 +4234,13 @@ const scenarios = [
       && !unplaced.result.phases.some((ph) => /did not find it/.test(ph.summary)),
       `a pull request the classification does not place in the repository the word names is asked about, not applied: ${ended(unplaced)}, ${uq.question}`);
 
+    // What the classification says of a pull request the task names goes to the user as it is: one it does not
+    // find to fix the failure is not asked about as a fix.
+    const lookedUp = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ ...theirs, fixes: false }] }));
+    const lq = ((lookedUp.result.next || {}).ask || [])[0] || {};
+    check(lookedUp.result.status === 'needs_input' && / open, named by the task, and not found to fix this failure by the classification\. Verifying/.test(lq.question || '')
+      && !/said to fix/.test(lq.question || ''),
+      `a pull request the classification does not find to fix the failure is not asked about as a fix: ${lq.question}`);
     // With the repository of origin known from Setup, a pull request that came back without one is origin's: the
     // word that names origin is a word for it, and the run asks nothing. One placed elsewhere is not applied.
     const atOrigin = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), origin_repo: 'sgl-project/sglang' }) };

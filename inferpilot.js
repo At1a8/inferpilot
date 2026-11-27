@@ -205,6 +205,13 @@ function namedPrs() {
   const said = field.length ? field : prWords(asObject(RAW.answers).apply_prs);
   return { said, read: said.length ? [] : prWords(A.apply_prs) };
 }
+// The pull requests the user's own word approves: the ones the field or an answer names. None where that word
+// says "none" as well: it names a pull request and refuses all of them at once, decides nothing, and is asked
+// about (existingFix), so nothing runs on it before then. Never what the Intake read into a request.
+function approvedPrs() {
+  const { said } = namedPrs();
+  return said.some((w) => /^"?none"?$/i.test(w)) ? [] : said.map((p) => prRef(p)).filter(Boolean);
+}
 // A pull request as a task names it: #50231, 50231, PR 50231, <owner>/<repo>#50231 or its URL. A word that names
 // its repository keeps it (<owner>/<repo>#<n>), through the lookup and the choice: its number alone names
 // another pull request in the framework's repository, and a word given for the one would run the other. The
@@ -549,7 +556,7 @@ const C = {
   // issue: the ones the user's own word names (the field, or an answer), and not what the Intake read into a
   // request. Their code may run on this machine: a reproduction on a reporter's commit that is a pull request's
   // head runs only for one of these (issue_triager.md, PHASE=reproduce)
-  approved_prs: MODE === 'issue' ? namedPrs().said.map((p) => prRef(p)).filter(Boolean) : [],
+  approved_prs: MODE === 'issue' ? approvedPrs() : [],
   branch: String(A.branch || ''),
   worktree: String(A.worktree || ''),
 };
@@ -904,7 +911,7 @@ const CLASSIFY = S({
   // (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, ...), for the user to read; head: the commit its branch is at;
   // state: open, closed, merged or not_found, also for the ones the task names (named_prs), which are looked up;
   // repo: the <owner>/<repo> the pull request is in, which a word that names its repository is matched with
-  existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str }, ['pr'])),
+  existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str, fixes: bool }, ['pr'])),
   window: str,
   // the test fails on a number it measures (a throughput, a latency, a speed threshold), not on an error:
   // perf_claim is the number the fix must restore, as an issue's reproduction states it
@@ -1376,7 +1383,10 @@ function nextSteps(status, at) {
     // The answer replaces the client the task gave, which would otherwise win over it.
     out.rerun_with = { client_script: '', answers: { client_script: null } };
   } else if (status === 'needs_input' && (R.questions || []).some((q) => q.field === 'apply_prs')) {
-    out.say = `The run stopped after ${at}, before it ran any code that is not on main: ${last}. Answer with the pull request to verify, `
+    // Asked after Triage or Classify, nothing but main has run. Asked after Reproduce (a stop that was lifted),
+    // the reporter's commit has: the run says what it did not do, and the record has what it ran.
+    const before = at === 'Reproduce' ? 'before it applied any pull request' : 'before it ran any code that is not on main';
+    out.say = `The run stopped after ${at}, ${before}: ${last}. Answer with the pull request to verify, `
       + `or "none" to have the run fix the failure itself, and run the task again: it starts over.${report}`;
     out.ask = R.questions;
     // A field the task set blank (an empty list, spaces) would win over the answer and be asked about again.
@@ -2864,7 +2874,7 @@ async function runIssue() {
   const worded = namedPrs();
   const theirs = tri.action === 'push_existing_pr' || worded.said.length || worded.read.length ? existingFix(tri.existing_prs, false) : null;
   const askWhich = (at) => {
-    note(at, 'needs_input', `${theirs.ask.who}: open, and said to fix this problem. Verifying it runs its code on this machine: `
+    note(at, 'needs_input', `${theirs.ask.who}: ${saidOf(theirs.ask.candidates, 'problem', 'triage')}. Verifying it runs its code on this machine: `
       + 'the run applies it only on the user\'s word');
     R.questions = [theirs.ask.question];
     return finish('needs_input', at);
@@ -2882,6 +2892,8 @@ async function runIssue() {
   const withoutUsablePr = (before) => {
     const without = String(tri.priority_without_pr || '').trim();
     if (!without || without === C.priority) return;
+    // The pull request the run verified is not among these, however often the triage listed it (existingFix
+    // keeps one entry for one pull request).
     if ([...theirs.others, ...theirs.foreign].some((p) => p.state === 'open' && p.fixes)) return;
     note('Triage', 'priority', `${C.priority} while ${before}, ${without} without a usable one: the run goes on as ${without}`);
     C.priority = R.priority = without;
@@ -2981,7 +2993,7 @@ async function runIssue() {
     // each. The PR phase writes the comment for it, and the result says to post that, not to push a branch.
     const { pr: prs, head } = theirs.apply;
     C.existing_prs = [prs];
-    note('Reproduce', 'existing_fix', `${describePr(theirs.apply)}: open, and said to fix this problem; verified in place of a fix of the `
+    note('Reproduce', 'existing_fix', `${describePr(theirs.apply)}: ${saidOf([theirs.apply], 'problem', 'triage')}; verified in place of a fix of the `
       + `run's own${theirs.others.length ? `. Not verified in this run, which takes one: ${theirs.others.map((p) => p.pr).join(', ')}` : ''}`);
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs}${head ? ` at ${head}` : ''} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [], ...placedIn(theirs.apply) };
@@ -3051,6 +3063,16 @@ async function runIssue() {
 // number alone: `needHead` false takes such a one for open, and leaves the commit to the implementer, whose
 // fetch the ledger records.
 const describePr = (p) => `${p.pr}${p.author ? ` by ${p.author}` : ''}${p.association ? ` (${p.association.toLowerCase()})` : ''}`;
+// What is said of open pull requests where the user decides whether their code runs here: a fix the triage or
+// the classification found, or one the task names that it does not itself find to fix the problem (fixes:
+// false). The user is told which, and not that every one of them is said to be a fix.
+function saidOf(prs, what, by) {
+  const lookedUp = prs.filter((p) => !p.fixes).map((p) => p.pr);
+  if (!lookedUp.length) return `open, and said to fix this ${what}`;
+  const not = `named by the task, and not found to fix this ${what} by the ${by}`;
+  if (lookedUp.length === prs.length) return `open, ${not}`;
+  return `open. ${prs.filter((p) => p.fixes).map((p) => p.pr).join(', ')}: said to fix this ${what}. ${lookedUp.join(', ')}: ${not}`;
+}
 // A repository as <owner>/<repo>, from that or from a remote's URL (https or ssh, with or without .git).
 function repoName(v) {
   const m = /([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(String(v || '').trim());
@@ -3080,7 +3102,17 @@ function existingFix(found, needHead = true) {
       const origin = String(C.origin_repo || '');
       if (!isPr(p.pr) || !origin) return p;
       return p.repo && p.repo !== origin ? { ...p, pr: `${p.repo}${p.pr}` } : { ...p, repo: origin };
-    });
+    })
+    // The same pull request listed twice is one: a candidate once, and gone with it where it fails. It is the same
+    // under one name where the repositories agree or one entry gives none; the first entry stays, with what a
+    // later one adds of where the pull request is and which commit its branch is at.
+    .reduce((kept, p) => {
+      const i = kept.findIndex((q) => q.pr === p.pr && (!q.repo || !p.repo || q.repo === p.repo));
+      if (i < 0) return [...kept, p];
+      const q = kept[i];
+      kept[i] = { ...q, repo: q.repo || p.repo, head: q.head || p.head, author: q.author || p.author, association: q.association || p.association };
+      return kept;
+    }, []);
   const here = named.filter((p) => isPr(p.pr));
   const usable = here.filter((p) => p.state === 'open' && (p.head || !needHead));
   const refs = (words) => [...new Set(words.map(prRef).filter(Boolean))];
@@ -3113,8 +3145,8 @@ function existingFix(found, needHead = true) {
   if (!decided && candidates.length) {
     const who = candidates.map(describePr).join(', ');
     const confirm = first.map((p) => p.pr);
-    out.ask = { who, question: { field: 'apply_prs',
-      question: `${who}: open, and said to fix this failure. Verifying a pull request runs its code and its tests on this machine, next `
+    out.ask = { who, candidates, question: { field: 'apply_prs',
+      question: `${who}: ${saidOf(candidates, 'failure', needHead ? 'classification' : 'triage')}. Verifying a pull request runs its code and its tests on this machine, next `
         + 'to the keys the agents hold, so the run applies one only on your word. '
         + `${said.length && !worded ? `${JSON.stringify(said.join(', '))} does not say which: it names no pull request, or one and "none" at once. ` : ''}`
         + `${confirm.length ? `The request seems to name ${confirm.join(', ')}: say so here to confirm it. ` : ''}`
@@ -3225,7 +3257,7 @@ async function runCi() {
     }
   }
   if (fix.ask) {
-    note('Classify', 'needs_input', `${fix.ask.who}: open, and said to fix this failure. Verifying it runs its code on this machine: `
+    note('Classify', 'needs_input', `${fix.ask.who}: ${saidOf(fix.ask.candidates, 'failure', 'classification')}. Verifying it runs its code on this machine: `
       + 'the run applies it only on the user\'s word');
     R.questions = [fix.ask.question];
     return finish('needs_input', 'Classify');
@@ -3236,7 +3268,7 @@ async function runCi() {
     const { pr, head } = fix.apply;
     C.existing_prs = [pr];
     C.existing_pr = fix.apply;
-    note('Classify', 'existing_fix', `${describePr(fix.apply)}: open, and said to fix this failure; verified in place of a fix of the run's `
+    note('Classify', 'existing_fix', `${describePr(fix.apply)}: ${saidOf([fix.apply], 'failure', 'classification')}; verified in place of a fix of the run's `
       + `own${fix.others.length ? `. Not verified in this run, which takes one: ${fix.others.map((p) => p.pr).join(', ')}` : ''}`);
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`,
       test: 'the failing test passes on every lane it failed on; the PR\'s own tests pass', files: [], depends_on: [], ...placedIn(fix.apply) };

@@ -39,7 +39,11 @@ attempt's ledger names the tip it called "the PR as applied": first the commits 
 the author's; then write this attempt's tip in the ledger (`git rev-parse HEAD`, "the PR as
 applied"); then the commits after it, the run's additions. Where the earlier ledger names no such
 tip, or the ref does not hold it, take nothing from the ref for this package: apply the PR from
-step 3, which records the tip.
+step 3, which records the tip. Nor where that ledger does not show the commits to be this package's
+PR: the same number, fetched from the repository `origin` is now, and the one the package names
+(`repo`) where it names one. A retry can find `origin` changed, and the same number there is another
+PR, whose code nobody asked to run: where the earlier ledger names no repository for the fetch, or
+another, apply the PR from step 3, which checks `origin` first.
 
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:
@@ -67,7 +71,9 @@ step 3, which records the tip.
      and `origin`'s PR of the same number is another one, whose code nobody asked to run. Then
      fetch the PR (`git fetch origin pull/<n>/head`), cherry-pick onto the task branch,
      resolve conflicts following upstream's intent, keep the author's commits intact. Write the head
-     you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit.
+     you fetched in the ledger (`git rev-parse FETCH_HEAD`), with the PR's number and the repository
+     you fetched it from (`origin`, as `<owner>/<repo>`): results are for the PR at that commit, and
+     a retry reuses its commits only for the same PR of the same repository.
      Where the package names a head and the PR has moved since, say so in `notes`, and go on with what
      you fetched. What you add (a missing test, a fix on top) is commits of your own after the
      author's, never folded into theirs. One thing cannot be kept apart: a conflict resolved during

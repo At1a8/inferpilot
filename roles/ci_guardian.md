@@ -134,7 +134,9 @@ Then:
    The pull requests in `named_prs` are the ones the task or the request names for verification: look
    each of them up, whether or not your own search found it, and return it in `existing_prs` as well,
    with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`) and, for an
-   open one, its author, association and head commit. One that is a pull request of another
+   open one, its author, association and head commit. Where your reading of its diff does not find
+   it to fix this failure, mark it `"fixes": false`: the user is told so where the run asks which
+   one to verify. One that is a pull request of another
    repository goes under its full name (`<owner>/<repo>#<n>`), never as this repository's `#<n>`. A
    name that carries its repository (`<owner>/<repo>#<n>`, from a URL the user gave) is looked up in
    that repository, never by its number in the framework's: aiter's `#777` and the framework's `#777`

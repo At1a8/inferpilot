@@ -277,7 +277,7 @@ class CiExistingFixTest(unittest.TestCase):
     def test_the_run_applies_one_pull_request_on_the_users_word_without_a_bisect(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
-        self.assertIn("existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str }, ['pr'])),", body,
+        self.assertIn("existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str, fixes: bool }, ['pr'])),", body,
                       "the classification cannot say who wrote an open fix, which repository and commit it is at, or whether it is still open")
         for said, why in (
                 # the user's word is what the caller gave: the field or, where it is blank, the answer; not the Intake's reading
@@ -396,7 +396,8 @@ class CiExistingFixTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "One in another repository (a component's) is not listed either"),
                 ("roles/ci_guardian.md", '"existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>", '
                                          '"association": "<author_association>", "head": "<sha>", "state": "open | closed | merged | not_found"}],'),
-                ("roles/implementer.md", "Write the head you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit"),
+                ("roles/implementer.md", "Write the head you fetched in the ledger (`git rev-parse FETCH_HEAD`), with the PR's number and the "
+                                         "repository you fetched it from"),
                 ("roles/implementer.md", "What you add (a missing test, a fix on top) is commits of your own after the author's"),
                 # a conflict resolved in a cherry-pick is part of that commit: said, not hidden
                 ("roles/implementer.md", "a conflict resolved during a cherry-pick is staged before `git cherry-pick --continue`, and so is part of "
@@ -623,6 +624,9 @@ class ExistingFixFailsTest(unittest.TestCase):
                 # the triage's priority holds while a pull request it lists as a fix is open and has not failed here
                 ("if ([...theirs.others, ...theirs.foreign].some((p) => p.state === 'open' && p.fixes)) return;",
                  "the priority changes while another fix is open, or a pull request that was only looked up keeps it"),
+                # the pull request that failed, listed a second time, is no other fix: one entry for one pull request
+                ("const i = kept.findIndex((q) => q.pr === p.pr && (!q.repo || !p.repo || q.repo === p.repo));",
+                 "a pull request listed twice is two candidates, and the one that failed keeps the priority under its second entry"),
                 ("fixes: p.fixes !== false }))", "a pull request the triage does not find to fix the problem counts as an open fix"),
                 ("      + `requests the run may apply (apply_prs: ${theirs.said.join(', ')}), and none of these. The run fixes the problem itself`);\n"
                  "    withoutUsablePr('the triage took a fix PR for open');",
@@ -645,8 +649,13 @@ class ExistingFixFailsTest(unittest.TestCase):
                  "a pull request placed in another repository is fetched from origin under its number, or a bare number is placed nowhere"),
                 ("files: [], depends_on: [], ...placedIn(theirs.apply) };", "an issue's package names no repository"),
                 ("files: [], depends_on: [], ...placedIn(fix.apply) };", "a ci task's package names no repository"),
-                ("approved_prs: MODE === 'issue' ? namedPrs().said.map((p) => prRef(p)).filter(Boolean) : [],",
-                 "the reproduction is told the Intake's reading for the user's word, or nothing"),
+                ("approved_prs: MODE === 'issue' ? approvedPrs() : [],", "the reproduction is not told the user's word"),
+                ("return said.some((w) => /^\"?none\"?$/i.test(w)) ? [] : said.map((p) => prRef(p)).filter(Boolean);",
+                 "the reproduction is told the Intake's reading for the user's word, or a word that says none as well approves a pull request"),
+                # the user is told what the triage found of a pull request, and what the run had run when it asks
+                ("if (!lookedUp.length) return `open, and said to fix this ${what}`;", "a pull request that is no fix by the triage is put to the user as one"),
+                ("const before = at === 'Reproduce' ? 'before it applied any pull request' : 'before it ran any code that is not on main';",
+                 "a run that asks after the reproduction says that nothing but main has run"),
                 ("${status === 'ready_for_review' ? \"; once the run's own pull request is open, add its link to that comment\" : ''}",
                  "the user is told to link a pull request the run does not have"),
                 ("const ver = await verifyLoop(extraGates, existing);\n  if (!ver.ok) return failed(ver, 'Verify');",
@@ -749,10 +758,22 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("knowledge/issue_triage.md", "one the triage does not itself find to fix it (`fixes: false`) keeps no priority"),
                 ("knowledge/issue_triage.md", "The word covers the reproduction as well: a reporter's commit that is on no main and no release, a "
                                               "pull request's head or a fork's branch, is its author's code, and that arm runs only where the "
-                                              "task names that pull request"),
+                                              "user's own word names that pull request, and does not say `none` as well"),
+                ("knowledge/issue_triage.md", "keeps no priority, and the user is told what the triage found where the run asks which one to "
+                                              "verify"),
+                ("roles/issue_triager.md", "the run tells the user what you found where it asks which one to verify, still verifies it on the "
+                                           "user's word, and does not count it as an open fix where it decides the priority"),
+                ("roles/ci_guardian.md", "Where your reading of its diff does not find it to fix this failure, mark it `\"fixes\": false`: the user "
+                                         "is told so where the run asks which one to verify"),
+                ("roles/implementer.md", "Nor where that ledger does not show the commits to be this package's PR: the same number, fetched from "
+                                         "the repository `origin` is now, and the one the package names (`repo`) where it names one"),
+                ("roles/implementer.md", "where the earlier ledger names no repository for the fetch, or another, apply the PR from step 3, which "
+                                         "checks `origin` first"),
+                ("roles/implementer.md", "with the PR's number and the repository you fetched it from (`origin`, as `<owner>/<repo>`): results "
+                                         "are for the PR at that commit, and a retry reuses its commits only for the same PR of the same "
+                                         "repository"),
                 ("roles/issue_triager.md", "One of them that your reading of its diff does not find to fix this problem is returned all the same, "
-                                           "marked `\"fixes\": false`: the run still verifies it on the user's word, and does not count it as an "
-                                           "open fix where it decides the priority"),
+                                           "marked `\"fixes\": false`"),
                 ("roles/issue_triager.md", "`approved_prs` (the pull requests the user's own word names for the run to apply, or none)"),
                 ("knowledge/issue_triage.md", "A commit that is the repository's own (on main or a release) runs as it is. One that is only on a "
                                               "pull request's branch or on a fork is its author's code, and runs only on the user's word (§4)"),
