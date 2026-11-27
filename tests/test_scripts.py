@@ -34,6 +34,7 @@ import find_skill  # noqa: E402
 import gpu_status  # noqa: E402
 import harness  # noqa: E402
 import propose_knowledge  # noqa: E402
+import run_fingerprint  # noqa: E402
 import run_lock  # noqa: E402
 import scan_ci  # noqa: E402
 import scan_issues  # noqa: E402
@@ -2321,6 +2322,237 @@ class BaselineCacheTest(unittest.TestCase):
         with redirect_stderr(err), self.assertRaises(SystemExit):
             baseline_cache.main(["lookup", *["origin/main" if x == "b" * 40 else x for x in common]], env=self.env)
         self.assertIn("full SHA", err.getvalue())
+
+
+class RunFingerprintTest(unittest.TestCase):
+    """scripts/run_fingerprint.py: what a run measures with outside its run directory (the model's files, the
+    GPUs it is pinned to, InferPilot's accuracy harness), recorded once and held against at a resume."""
+
+    GIB = 2 ** 30
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.run_dir = self.root / "run"
+        self.run_dir.mkdir()
+        self.model = self.root / "model"
+        self.model.mkdir()
+        (self.model / "config.json").write_text('{"num_hidden_layers": 36}')
+        (self.model / "model.safetensors").write_bytes(b"\0" * 64)
+        self.harness = self.root / "eval_accuracy.sh"
+        self.harness.write_text("evalscope eval --datasets gsm8k\n")
+        self.accuracy = self.root / "accuracy.sh"
+        self.accuracy.write_text('exec bash "$INFERPILOT_DIR/scripts/eval_accuracy.sh" "$@"\n')
+        self.kfd, self.drm = self.root / "kfd", self.root / "drm"
+        # Six GPUs after two CPU nodes: HIP 0-3 and 5 are one kind, HIP 4 has less memory
+        for hip in range(6):
+            self.gpu(hip, total=(192 if hip == 4 else 288) * self.GIB)
+
+    def gpu(self, hip, total, gfx=90500, device=0x75a3):
+        node = self.kfd / "topology" / "nodes" / str(hip + 2)
+        node.mkdir(parents=True, exist_ok=True)
+        (node / "gpu_id").write_text("%d\n" % (1000 + hip))
+        (node / "properties").write_text("simd_count 1216\ngfx_target_version %d\nvendor_id 4098\n%slocation_id %d\ndomain 0\n"
+                                         "drm_render_minor %d\n" % (gfx, "device_id %d\n" % device if device else "", (hip + 1) << 8, 128 + hip))
+        dev = self.drm / ("renderD%d" % (128 + hip)) / "device"
+        dev.mkdir(parents=True, exist_ok=True)
+        (dev / "mem_info_vram_total").write_text("%d\n" % total)
+        for cpu in (0, 1):
+            (self.kfd / "topology" / "nodes" / str(cpu)).mkdir(parents=True, exist_ok=True)
+            (self.kfd / "topology" / "nodes" / str(cpu) / "gpu_id").write_text("0\n")
+
+    def run_main(self, cmd, gpus="0,1,2,3", model=True, accuracy=True, env=None, extra=()):
+        args = [cmd, "--run-dir", str(self.run_dir), "--gpus", gpus, "--kfd", str(self.kfd), "--drm", str(self.drm),
+                "--harness", str(self.harness), *(["--model", str(self.model)] if model else []),
+                *(["--accuracy-script", str(self.accuracy)] if accuracy else []), *extra]
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = run_fingerprint.main(args, env={} if env is None else env)
+        return rc, json.loads(out.getvalue())
+
+    def test_the_record_names_the_model_files_the_gpus_and_the_harness_the_accuracy_script_runs(self):
+        rc, out = self.run_main("record")
+        self.assertEqual(rc, 0)
+        rec = json.loads((self.run_dir / "fingerprint.json").read_text())
+        self.assertEqual(sorted(rec), ["gpus", "harness", "model_files"])
+        self.assertEqual(rec["model_files"], baseline_cache.model_fingerprint(str(self.model)))
+        self.assertEqual(rec["gpus"], [{"device": "0x75a3", "arch": "gfx950", "vram_bytes": 288 * self.GIB}] * 4)
+        self.assertEqual(rec["harness"], baseline_cache.sha_of(str(self.harness)))
+        self.assertEqual({k: out[k] for k in rec}, rec)
+        self.assertFalse((self.run_dir / "fingerprint.json.part").exists())
+        self.assertEqual(self.run_main("check"), (0, {"same": True}))
+
+    def test_a_model_replaced_at_its_path_is_another_model(self):
+        self.run_main("record")
+        (self.model / "config.json").write_text('{"num_hidden_layers": 48}')  # a small file, by its contents
+        rc, out = self.run_main("check")
+        self.assertEqual((rc, out["differs"]), (1, ["model_files"]))
+        (self.model / "config.json").write_text('{"num_hidden_layers": 36}')
+        self.assertEqual(self.run_main("check")[0], 0)
+        (self.model / "model.safetensors").write_bytes(b"\0" * 65)  # weights, by name and size
+        self.assertEqual(self.run_main("check")[1]["differs"], ["model_files"])
+        # a link that points at another directory now keeps its path
+        other = self.root / "other"
+        shutil.copytree(self.model, other)
+        (other / "model.safetensors").write_bytes(b"\0" * 64)
+        shutil.rmtree(self.model)
+        os.symlink(other, self.model)
+        self.assertEqual(self.run_main("check")[0], 0, "the same files behind a link are the same model")
+        (other / "tokenizer.json").write_text("{}")
+        self.assertEqual(self.run_main("check")[1]["differs"], ["model_files"])
+
+    def test_the_gpus_are_how_many_and_what_each_is_not_which_numbers_they_have(self):
+        self.run_main("record")
+        self.assertEqual(self.run_main("check", gpus="3,2,1,0")[0], 0)
+        self.assertEqual(self.run_main("check", gpus="1, 2, 3, 5")[0], 0, "another set of the same GPUs is the same")
+        for gpus, why in [("0,1", "fewer GPUs"), ("0,1,2,3,5", "more"), ("0,1,2,4", "one with less memory")]:
+            rc, out = self.run_main("check", gpus=gpus)
+            self.assertEqual((rc, out["differs"]), (1, ["gpus"]), why)
+            self.assertEqual(len(out["was"]["gpus"]), 4)
+        self.gpu(3, total=288 * self.GIB, gfx=90402)  # another architecture with as much memory
+        self.assertEqual(self.run_main("check")[1]["differs"], ["gpus"])
+        # Two products of one architecture, with as much memory, are told apart by their device ids
+        self.gpu(3, total=288 * self.GIB, device=0x75a0)
+        rc, out = self.run_main("check")
+        self.assertEqual((rc, out["differs"]), (1, ["gpus"]))
+        self.assertEqual([g["device"] for g in out["now"]["gpus"]], ["0x75a0", "0x75a3", "0x75a3", "0x75a3"])
+        self.gpu(3, total=288 * self.GIB)
+        self.assertEqual(self.run_main("check")[0], 0)
+        # A set of two kinds is the same set whichever of them comes first by number
+        self.assertEqual(self.run_main("record", gpus="2,4", extra=["--replace"])[0], 0)
+        self.assertEqual(self.run_main("check", gpus="4,5")[0], 0)
+        self.assertEqual(self.run_main("check", gpus="5,4")[0], 0)
+        self.assertEqual(self.run_main("check", gpus="5,3")[1]["differs"], ["gpus"], "two of one kind are not one of each")
+
+    def test_the_harness_counts_only_for_an_accuracy_script_that_runs_it(self):
+        self.run_main("record")
+        self.harness.write_text("evalscope eval --datasets gsm8k --limit 100\n")
+        rc, out = self.run_main("check")
+        self.assertEqual((rc, out["differs"]), (1, ["harness"]))
+        # A task's own accuracy script that does not run InferPilot's harness is not measured with it
+        self.accuracy.write_text("python3 my_eval.py --port $PORT\n")
+        rc, out = self.run_main("record", extra=["--replace"])
+        self.assertEqual((rc, out["harness"]), (0, ""))
+        self.harness.write_text("evalscope eval --datasets gsm8k --limit 200\n")
+        self.assertEqual(self.run_main("check")[0], 0)
+        # Nor is a run without a model or an accuracy script: its record says so, and so must the check
+        rc, out = self.run_main("record", model=False, accuracy=False, extra=["--replace"])
+        self.assertEqual((rc, out["model_files"], out["harness"]), (0, "", ""))
+        self.assertEqual(self.run_main("check", model=False, accuracy=False)[0], 0)
+        self.assertEqual(self.run_main("check", accuracy=False)[1]["differs"], ["model_files"])
+
+    def test_a_record_is_not_replaced_unless_the_run_measures_everything_again(self):
+        self.assertEqual(self.run_main("record")[0], 0)
+        before = (self.run_dir / "fingerprint.json").read_text()
+        rc, out = self.run_main("record")
+        self.assertEqual((rc, out["unchanged"]), (0, True), "a record that says the same stays")
+        rc, out = self.run_main("record", gpus="0,1")
+        self.assertEqual((rc, out["recorded"], out["differs"]), (1, False, ["gpus"]))
+        self.assertIn("--replace", out["reason"])
+        self.assertEqual((self.run_dir / "fingerprint.json").read_text(), before, "a resumed run cannot compare its own settings with themselves")
+        rc, out = self.run_main("record", gpus="0,1", extra=["--replace"])
+        self.assertEqual((rc, len(out["gpus"])), (0, 2))
+        self.assertEqual(self.run_main("check", gpus="4,5")[1]["differs"], ["gpus"])
+        self.assertEqual(self.run_main("check", gpus="0,5")[0], 0)
+        # One that cannot be read is no record to keep, and none to write over without a word
+        (self.run_dir / "fingerprint.json").write_text("{not json")
+        rc, out = self.run_main("record", gpus="0,1")
+        self.assertEqual((rc, out["recorded"]), (1, False))
+        self.assertIn("cannot be read", out["reason"])
+
+    def test_a_retry_that_cannot_tell_what_it_measures_with_leaves_no_record_of_the_attempt_before_it(self):
+        self.assertEqual(self.run_main("record")[0], 0)
+        record = self.run_dir / "fingerprint.json"
+        # Without --replace the record is the run's, whatever this call could not tell
+        rc, out = self.run_main("record", gpus="0,9")
+        self.assertEqual((rc, "removed" in out, record.exists()), (2, False, True))
+        self.assertEqual(self.run_main("check", gpus="0,9")[0], 2)
+        self.assertTrue(record.exists(), "a check removes nothing")
+        # A retry measures everything again: what the attempt before it measured with is not what it does
+        rc, out = self.run_main("record", gpus="0,9", extra=["--replace"])
+        self.assertEqual((rc, out["removed"]), (2, str(record)))
+        self.assertIn("GPU 9 is not among", out["error"])
+        self.assertFalse(record.exists())
+        rc, out = self.run_main("check")
+        self.assertEqual(rc, 1, "and a run without a record is not resumed")
+        rc, out = self.run_main("record", gpus="0,9", extra=["--replace"])
+        self.assertEqual((rc, "removed" in out), (2, False), "nothing to remove is nothing to say")
+
+    def test_a_run_directory_without_a_record_fails_the_check(self):
+        rc, out = self.run_main("check")
+        self.assertEqual((rc, out["same"]), (1, False))
+        self.assertIn("nothing shows what the run measured with", out["reason"])
+        for text in ("{not json", "[]", '"gfx950"'):
+            (self.run_dir / "fingerprint.json").write_text(text)
+            self.assertEqual(self.run_main("check")[0], 1, text)
+        # A record that lacks a part says nothing of it: the part differs
+        (self.run_dir / "fingerprint.json").write_text(json.dumps(
+            {"gpus": [{"device": "0x75a3", "arch": "gfx950", "vram_bytes": 288 * self.GIB}] * 4}))
+        self.assertEqual(self.run_main("check")[1]["differs"], ["model_files", "harness"])
+
+    def test_what_it_cannot_tell_stops_it(self):
+        for kwargs, says in [({"gpus": "0-3"}, "comma-separated"), ({"gpus": ""}, "comma-separated"), ({"gpus": "0,,1"}, "comma-separated"),
+                             ({"gpus": "0,0"}, "twice"), ({"gpus": "0,9"}, "GPU 9 is not among the GPUs KFD lists (0, 1, 2, 3, 4, 5)"),
+                             ({"env": {"ROCR_VISIBLE_DEVICES": "1,2"}}, "ROCR_VISIBLE_DEVICES is set ('1,2')"),
+                             ({"env": {"ROCR_VISIBLE_DEVICES": ""}}, "ROCR_VISIBLE_DEVICES is set ('')")]:
+            for cmd in ("record", "check"):
+                rc, out = self.run_main(cmd, **kwargs)
+                self.assertEqual(rc, 2, (cmd, kwargs))
+                self.assertIn(says, out["error"])
+        self.assertFalse((self.run_dir / "fingerprint.json").exists(), "nothing is recorded of what cannot be told")
+        (self.drm / "renderD129" / "device" / "mem_info_vram_total").unlink()
+        rc, out = self.run_main("record")
+        self.assertEqual(rc, 2)
+        self.assertIn("GPU 1: its device id, its architecture or its memory cannot be read", out["error"])
+        self.assertEqual(self.run_main("record", gpus="0,2,3")[0], 0, "a GPU the run is not pinned to is not read")
+        self.gpu(2, total=288 * self.GIB, device=0)  # properties without a device id
+        self.assertIn("GPU 2: its device id", self.run_main("check", gpus="0,2,3")[1]["error"])
+        self.gpu(2, total=288 * self.GIB)
+        self.gpu(3, total=288 * self.GIB, gfx=0)
+        self.assertIn("GPU 3: its device id, its architecture", self.run_main("check", gpus="0,2,3")[1]["error"])
+        self.gpu(3, total=288 * self.GIB)
+        self.assertEqual(self.run_main("check", gpus="0,2,3")[0], 0)
+        (self.kfd / "topology" / "nodes" / "3" / "gpu_id").write_text("")  # dropped, the HIP numbers after it would shift
+        rc, out = self.run_main("check", gpus="0,2,3")
+        self.assertEqual(rc, 2)
+        self.assertIn("node 3", out["error"])
+        self.gpu(1, total=288 * self.GIB)
+        shutil.rmtree(self.model)
+        rc, out = self.run_main("check")
+        self.assertEqual(rc, 2)
+        self.assertIn("not a local model directory", out["error"])
+        self.model.mkdir()
+        self.accuracy.unlink()
+        rc, out = self.run_main("check")
+        self.assertEqual(rc, 2)
+        self.assertIn("accuracy.sh", out["error"])
+        self.accuracy.write_text("bash scripts/eval_accuracy.sh\n")
+        self.harness.unlink()
+        rc, out = self.run_main("check")
+        self.assertEqual(rc, 2)
+        self.assertIn("eval_accuracy.sh", out["error"])
+        self.harness.write_text("evalscope eval\n")
+        (self.run_dir / "fingerprint.json.part").mkdir()  # the record cannot be written
+        self.assertEqual(self.run_main("record")[0], 1, "the record there says otherwise: nothing is written")
+        self.assertTrue((self.run_dir / "fingerprint.json").exists())
+        rc, out = self.run_main("record", extra=["--replace"])
+        self.assertEqual((rc, out["removed"]), (2, str(self.run_dir / "fingerprint.json")))
+        self.assertIn("fingerprint.json.part", out["error"])
+        rc, out = self.run_main("record")
+        self.assertEqual((rc, "removed" in out), (2, False), "and so is one that had no record to replace")
+        self.assertFalse((self.run_dir / "fingerprint.json").exists())
+        shutil.rmtree(self.run_dir)
+        rc, out = self.run_main("check", accuracy=False)
+        self.assertEqual(rc, 2)
+        self.assertIn("--run-dir", out["error"])
+
+    def test_the_harness_it_reads_by_default_is_the_one_the_baseline_cache_fingerprints(self):
+        ns = argparse.Namespace(model="", accuracy_script=str(self.accuracy), harness=baseline_cache.HARNESS, gpus="0",
+                                kfd=str(self.kfd), drm=str(self.drm))
+        self.assertEqual(run_fingerprint.fingerprint(ns, {})["harness"], baseline_cache.sha_of(str(SCRIPTS / "eval_accuracy.sh")))
+        rendered = (SCRIPTS.parent / "templates" / "harness" / "accuracy.sh").read_text(encoding="utf-8")
+        self.assertIn(os.path.basename(baseline_cache.HARNESS), rendered, "InferPilot's accuracy script no longer names the harness it runs")
 
 
 class LeakScanTest(unittest.TestCase):

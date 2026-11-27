@@ -1209,6 +1209,80 @@ const scenarios = [
       && restore.includes('as the row under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or `no`)'),
       'and a resume takes them from those rows');
   }],
+  ['setup: a run resumed from Verify measures nothing on another model, on other GPUs or by another accuracy harness than the run\'s', async () => {
+    // The run directory holds the scripts the run measures with, and run.json the model by its path. The model's
+    // files, the GPUs the run was pinned to and the harness InferPilot's accuracy script runs from this checkout
+    // lie outside it, and change under the same names: Setup wrote them down (scripts/run_fingerprint.py), and a
+    // resume holds what it would measure with against that record before anything runs.
+    const resumed = (mode, extra, more = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...extra }), ...more });
+    const why = (r) => r.result.phases.filter((p) => p.phase === 'Setup' && p.verdict === 'fail').map((p) => p.summary).join(' | ');
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}: ${why(r)}`;
+    const measured = (r) => r.keys.some((k) => ['verify_engineer:verify', 'perf_engineer:perf_eval', 'reviewer:review'].includes(k));
+    const stopped = (r) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !measured(r);
+    const differs = '{"same": false, "differs": ["gpus"], "was": {"gpus": "4 x gfx942, 192 GiB"}, "now": {"gpus": "2 x gfx942, 192 GiB"}}';
+    for (const mode of ['issue', 'ci', 'feature', 'perf']) {
+      const changed = await resumed(mode, { fingerprint_ok: false, fingerprint: differs });
+      check(stopped(changed) && why(changed).includes('what the run measures with outside its directory is not as its Setup recorded it (fingerprint.json')
+        && why(changed).includes('"differs": ["gpus"]') && why(changed).includes('on another model, on other GPUs or by another harness'),
+        `${mode}: on fewer GPUs than the run was pinned to, nothing is measured, and the stop says what differs: ${ended(changed)}`);
+      const same = await resumed(mode, {});
+      check(same.result.stopped_at !== 'Setup' && same.keys.includes('verify_engineer:verify'), `${mode}: with all of it as it was, the resume goes on: ${ended(same)}`);
+    }
+    // A check that did not pass has no other reason to give: the stop names the record all the same.
+    const bare = await resumed('feature', { fingerprint_ok: false });
+    check(stopped(bare) && why(bare).includes('fingerprint.json: the model\'s files, the GPUs it is pinned to, InferPilot\'s accuracy harness);'),
+      `a check that failed without a word stops the resume too: ${ended(bare)}`);
+    // What the script printed is the director's to pass on, at any length: the stop keeps its start.
+    const long = await resumed('issue', { fingerprint_ok: false, fingerprint: `${differs} ${'x'.repeat(2000)}` });
+    check(stopped(long) && why(long).includes('"differs": ["gpus"]') && !why(long).includes('x'.repeat(400)), 'and a long answer is cut');
+    // The reasons add up: a resume on a branch that moved and on another model says both.
+    const both = await resumed('issue', { head_ok: false, head: 'f00d', fingerprint_ok: false, fingerprint: '{"differs": ["model_files"]}' });
+    check(stopped(both) && why(both).includes('f00d') && why(both).includes('"differs": ["model_files"]'), `each reason is given: ${ended(both)}`);
+    // Setup looks first, before its smoke, and stops there with what the script printed; the resume phase is not reached.
+    const early = await run({ mode: 'feature', task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', gpu_ids: '',
+        baseline: `run_fingerprint.py check: ${differs}` }) });
+    check(stopped(early) && why(early).includes('run_fingerprint.py check') && !early.keys.includes('director:resume') && early.result.run_dir === RUN,
+      `Setup's own check stops the run before a smoke is launched: ${ended(early)}`);
+    // A run that is no resume is held against nothing.
+    const fresh = await run({ mode: 'feature', task: 't' });
+    check(fresh.result.status === 'ready_for_review' && !fresh.keys.includes('director:resume'), 'a run from its start has no record to be held against');
+    const read = (...p) => readFileSync(path.join(INFERPILOT, ...p), 'utf8');
+    const setup = phaseSection(read('roles', 'director.md'), 'setup').replace(/\s+/g, ' ');
+    check(setup.includes('Some of what the run measured with lies outside its directory, and changes under the same name: the model\'s files, '
+      + 'the GPUs it was pinned to, and `scripts/eval_accuracy.sh`, which InferPilot\'s accuracy script runs from this checkout')
+      && setup.includes('scripts/run_fingerprint.py check --run-dir RUN_DIR --gpus <the GPU set this run pins> --model <model_path> '
+        + '--accuracy-script <the run\'s accuracy script>')
+      && setup.includes('Only exit 0 passes: what differs, a run directory without that record and what the script cannot tell (exit 2) fail the check'),
+      'Setup holds them against the run\'s record before its smoke');
+    check(setup.includes('Pin for it the GPU set the task gives or, when it gives none, as many GPUs as that record lists (`gpus`), not as many as you would choose now')
+      && setup.includes('the launch script the run has was written for that many, and is not written again')
+      && setup.includes('Another set of the same GPUs is the same; fewer, more or GPUs of another kind are a run of their own')
+      && setup.includes('A run resumed from Verify that is given no set takes as many as the run it resumes was pinned to (`RUN_DIR/fingerprint.json`, step 1)'),
+      'a resume takes as many GPUs as the run had, and another set of the same GPUs is no change');
+    check(setup.includes('scripts/run_fingerprint.py record --run-dir RUN_DIR --gpus <gpu_ids> --model <model_path> --accuracy-script <the run\'s accuracy script>')
+      && setup.includes('A resume writes none: the run keeps the record it was set up with, and the script replaces no record that says otherwise')
+      && setup.includes('A retry, which measures everything again, adds `--replace`')
+      && setup.includes('each GPU of the set by its device id, its architecture and its memory')
+      && setup.includes('What the script cannot tell or write (exit 2) goes in `notes` with its `error`, and the run goes on: nothing but a resume from Verify '
+        + 'reads the record, and a run without one is not resumed from there')
+      && [...setup.matchAll(/\(`--model` when the task names a `model_path`, `--accuracy-script` when the run has an accuracy script; run it where the servers run\)/g)].length === 2,
+      'every Setup that is no resume writes the record, and only a retry replaces one; a record that could not be written stops no run but a resume');
+    const restore = phaseSection(read('roles', 'director.md'), 'resume').replace(/\s+/g, ' ');
+    check(restore.includes('`fingerprint_ok` is true only when `scripts/run_fingerprint.py check`, run again as Setup ran it before its smoke (step 1 there), '
+      + 'with the GPU set Setup pinned (`gpu_ids`), exits 0')
+      && restore.includes('Otherwise `false`, with what it printed in `fingerprint`, and the resume stops'),
+      'and the resume phase says what the check says, as it does for the branch');
+    // The script the two steps name is there, takes the flags they give it, and is described where the scripts are.
+    const script = read('scripts', 'run_fingerprint.py');
+    const flags = [...new Set(`${setup} ${restore}`.match(/(?<=run_fingerprint\.py (?:record|check)[^`]*)--[a-z-]+/g) || [])];
+    check(flags.length >= 4 && flags.every((f) => script.includes(`"${f}"`)), `run_fingerprint.py takes every flag the director is told to give it: ${flags}`);
+    for (const [readme, row, table] of [['README.md', '| `scripts/run_fingerprint.py` | ', '| `fingerprint.json` | '],
+      ['README.zh-CN.md', '| `scripts/run_fingerprint.py` | ', '| `fingerprint.json` | ']]) {
+      check(read(readme).includes(row) && read(readme).includes(table), `${readme} names the script and the record it writes`);
+    }
+  }],
   ['issue: resume_from verify runs Verify again on the commit the run verified, gated on its reproduction, then Reply', async () => {
     const r = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);

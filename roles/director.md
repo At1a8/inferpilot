@@ -61,7 +61,19 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    client, where the user took it), is still, byte for
    byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
    however the file at it was edited since, and an edited script would measure otherwise than the run
-   did. A script with no copy there fails the check as well: nothing shows what the run ran. Check too
+   did. A script with no copy there fails the check as well: nothing shows what the run ran. Some of
+   what the run measured with lies outside its directory, and changes under the same name: the
+   model's files, the GPUs it was pinned to, and `scripts/eval_accuracy.sh`, which InferPilot's
+   accuracy script runs from this checkout. `python3 <inferpilot_dir>/scripts/run_fingerprint.py check
+   --run-dir RUN_DIR --gpus <the GPU set this run pins> --model <model_path> --accuracy-script <the
+   run's accuracy script>` (`--model` when the task names a `model_path`, `--accuracy-script` when the
+   run has an accuracy script; run it where the servers run) holds them against
+   `RUN_DIR/fingerprint.json`, which the run's Setup wrote (step 3). Only exit 0 passes: what
+   differs, a run directory without that record and what the script cannot tell (exit 2) fail the
+   check, with what it printed. Pin for it the GPU set the task gives or, when it gives none, as many
+   GPUs as that record lists (`gpus`), not as many as you would choose now: the launch script the run
+   has was written for that many, and is not written again. Another set of the same GPUs is the
+   same; fewer, more or GPUs of another kind are a run of their own. Check too
    that the call whose Verify had no result is over: one that timed out is
    not cancelled, and its agent may still be running and start more servers, which idle GPUs do not
    show.
@@ -142,7 +154,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    many as the task needs; step 0 found them all idle. With `reported_on` (the model and launch
    configuration the report puts the task's problem on; the result of an earlier run gives it, where
    that run was set up for another one), the task needs what that configuration needs: a problem at
-   TP8 takes eight GPUs, whatever the run before this one chose. `gpu_status.py` lists them by HIP
+   TP8 takes eight GPUs, whatever the run before this one chose. A run resumed from Verify that is
+   given no set takes as many as the run it resumes was pinned to (`RUN_DIR/fingerprint.json`,
+   step 1). `gpu_status.py` lists them by HIP
    number, the
    order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
@@ -221,6 +235,18 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      authors once one is set. Never set it yourself.
    - An image too old for the worktree (sgl-kernel or aiter rejected at import or startup) fails the
      baseline; `baseline` names the newer image to start a container from.
+   - Write down what the run measures with that lies outside its directory, once the GPU set is
+     pinned and the run's scripts are there: `python3 <inferpilot_dir>/scripts/run_fingerprint.py
+     record --run-dir RUN_DIR --gpus <gpu_ids> --model <model_path> --accuracy-script <the run's
+     accuracy script>` (`--model` when the task names a `model_path`, `--accuracy-script` when the
+     run has an accuracy script; run it where the servers run) writes `RUN_DIR/fingerprint.json`:
+     the model's files, each GPU of the set by its device id, its architecture and its memory, and
+     the contents of `scripts/eval_accuracy.sh` when the accuracy script runs it. A run resumed
+     from Verify is held against it (step 1). A resume writes none: the run keeps the record it was
+     set up with, and the script replaces no record that says otherwise. A retry, which measures
+     everything again, adds `--replace`. What the script cannot tell or write (exit 2) goes in
+     `notes` with its `error`, and the run goes on: nothing but a resume from Verify reads the
+     record, and a run without one is not resumed from there.
 4. **Baseline.**
    - First, one discarded warm-up per GPU set: a launch and a short run of the client, so the first
      launch in a fresh container, which compiles kernels and is slower, is not measured.
@@ -323,6 +349,12 @@ on the commit the run's last Verify round ran on. Change nothing.
    that commit, the worktree is clean, and every verified package's commit is in its history: that head
    may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
    that moved after the round started (a commit, an edit, a reset) is not what the run verified.
+   `fingerprint_ok` is true only when `scripts/run_fingerprint.py check`, run again as Setup ran it
+   before its smoke (step 1 there), with the GPU set Setup pinned (`gpu_ids`), exits 0: the model's
+   files, the GPUs and InferPilot's accuracy harness are as `RUN_DIR/fingerprint.json` has them.
+   Otherwise `false`, with what it printed in `fingerprint`, and the resume stops: what the run
+   measured before would be held against a measurement on another model, on other GPUs or by
+   another harness.
 2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
    word for word from the *reproduction command* row of `issue_triage.md`); `ci`, the failing test
    (`failing_test_cmd`, word for word from the *failing test command* row of `ci_triage.md`). Leave it
@@ -415,7 +447,8 @@ on the commit the run's last Verify round ran on. Change nothing.
 Return:
 
 ```json
-{"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
+{"head_ok": true, "head": "<sha>", "fingerprint_ok": true,
+ "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
  "known_issues": [], "handoffs": [], "run_state": {"text_model": true}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
  "perf_cost": false, "accuracy_required": false, "design_auto_approved": false,

@@ -1071,6 +1071,9 @@ const K_COLLECT = S({
 const RESUMED = S({
   head_ok: bool,
   head: str,
+  // scripts/run_fingerprint.py check: what the run measures with outside its directory is as its Setup recorded it
+  fingerprint_ok: bool,
+  fingerprint: str, // what the check printed, where it did not pass
   // [] when the run's report says none was left (a kernel-only plan whose integration was reverted), null
   // when the run directory does not record them
   verified_work_packages: { type: ['array', 'null'], items: S({ wp: str, commit: str, evidence: str }, ['wp', 'commit']) },
@@ -1090,8 +1093,8 @@ const RESUMED = S({
   design_path: str,
   analysis_path: str,
   notes: str,
-}, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'run_state', 'task_definition', 'perf_required', 'perf_claim',
-  'perf_cost', 'accuracy_required', 'design_auto_approved']);
+}, ['head_ok', 'fingerprint_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'run_state', 'task_definition', 'perf_required',
+  'perf_claim', 'perf_cost', 'accuracy_required', 'design_auto_approved']);
 // What a resumed run must measure as the run it resumes did, the gates its task asked for (G3, G4) and the
 // test G3 runs among them; the machine, the task's wording and the operator settings may differ. GIVEN holds
 // them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
@@ -2831,6 +2834,14 @@ async function resumeVerify(claimOf) {
   const why = !rs ? ['the director restored nothing from the run directory'] : [
     rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
       + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
+    // What the run measures with that its directory does not hold, and that changes under the same name: the
+    // model's files at their path, how many GPUs it is pinned to and what each is (the launch script, which a
+    // resume does not write again, was rendered for that many), and the harness its accuracy script runs from
+    // this checkout. Setup recorded them (scripts/run_fingerprint.py) and checks them before a resume's smoke;
+    // the director says here what the check says, as for the branch.
+    rs.fingerprint_ok !== true && 'what the run measures with outside its directory is not as its Setup recorded it (fingerprint.json: '
+      + `the model's files, the GPUs it is pinned to, InferPilot's accuracy harness)${rs.fingerprint ? `: ${String(rs.fingerprint).slice(0, 300)}` : ''}; `
+      + 'what the run measured before would be held against a measurement on another model, on other GPUs or by another harness',
     !saved && 'the run directory records no task definition (run.json)',
     untasked && 'run.json records no task: the one this run was given would stand in for the run\'s, whose triage record, gate command '
       + 'and reply are about its own',

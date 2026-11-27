@@ -260,6 +260,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `pr_comment.md` | 已有的修复 PR 验证不通过时，写给那个 PR 的评论草稿，说明运行测到了什么（由你来发） |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `handoffs.json`、`known_issues.json`、`run_state.json` | report 时的 kernel 交接记录、基线自带的失败，以及这次运行在 Verify 之前确定下来的东西（代替自己的修复去验证的那个 PR，或 issue 任务先验证而没有通过的那个 PR、精度问题要恢复到的分数、根因所在的组件、ci 任务里没有检查的部分、issue 或 ci 任务的模型是否回答文本问题）；从 Verify 续跑时据此恢复 |
+| `fingerprint.json` | 这次运行测量时用到、但不在运行目录里的东西，按 Setup 当时看到的样子记下（`scripts/run_fingerprint.py`）：模型的文件、固定使用的 GPU、InferPilot 的精度评测脚本。从 Verify 续跑时，它们必须没有变 |
 | `component_issue.md` | 根因在框架之外的 AMD 组件（aiter、MoRI、ROCm、PyTorch 的 ROCm 版）时，给那个组件的仓库起草的 issue（由你来提） |
 | `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
 | `daily_report.md`、`task_queue.md` | scan 的日报，已作为 issue 分享，或由你来分享（见下文）；带本机细节的排好序的任务，每项附可以启动它的任务定义，旁边是各个来源找到的内容（`<source>.json`） |
@@ -345,7 +346,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `reported_on` | `issue`：报告里这个问题所在的模型和启动配置（如 `DeepSeek-V4.1, --tp-size 8`）。一次运行如果发现它要处理的问题不在自己准备好的配置上，会在 Reproduce 之前停下，并在结果里把这个字段交给下一次运行（`next.rerun_with`；报告里其他问题用 `next.start`）：没有给 `gpu_ids` 时，Setup 按这个配置需要的数量选 GPU，并按它写启动脚本 |
 | `confirm_leads` | 默认 `false`：线索（角色遇到的、不属于本任务的问题）在报告里列出，附上复现方法，Spinoff 不占用 GPU；为 `true` 时，在报告前把每条线索放到 base 提交上确认，能复现的起草 issue |
 | `stop_after` | 在该模式的指定阶段之后停下（例如 `Design`、`Reproduce`）；填了该模式没有的阶段，会作为问题返回 |
-| `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行。除 `scan` 外的所有模式：`verify` 在一个 Verify 没有结果就结束的运行里，对 Implement 验证过的那个 commit 重新跑 Verify 及其后的阶段（分支在那之后变过，或任务自带的脚本在那之后被改过，就停下）；这样的运行会在 `next.rerun_with` 里给出这一项 |
+| `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行。除 `scan` 外的所有模式：`verify` 在一个 Verify 没有结果就结束的运行里，对 Implement 验证过的那个 commit 重新跑 Verify 及其后的阶段（分支在那之后变过，或任务自带的脚本在那之后被改过，就停下；模型文件、GPU 或精度评测脚本和这次运行的 `fingerprint.json` 里记的不一样，也停下）；这样的运行会在 `next.rerun_with` 里给出这一项 |
 | `auto_approve_design` | `feature`，默认 `true`：architect 标记需要人审的设计和 L3 任务直接进入 Implement，报告会写明设计没有经过人审。设为 `false` 时，这样的设计会停在 Design 等人审（`awaiting_design_review`）。`stop_after` 仍然生效 |
 | `held_out`、`guards`、`sweep` | 任务 workload 和 goal 之外的性能检查，默认都不开启：`held_out` 在 held-out 工作点（一半并发）上再测一次收益，并要求收益在那里同样成立；`guards` 在 goal 指定的守护负载之外，再加 InferPilot 自己选的守护负载；`sweep` 测 workload 之外的点（更多并发或长度） |
 | `tune` | `feature`，默认 `false`：功能按目标 PR 或设计的配置运行（FLy 就是 vLLM 的 window 2、threshold 0.3、top-k 3），并要在这个配置下达标；设为 `true` 时增加一个通过测量来选参数的工作包 |
@@ -386,6 +387,7 @@ python3 scripts/run_lock.py release --force   # 那个运行已经中断时，�
 | `scripts/audit_host_syncs.py` | 热路径上的 host-device 同步和拷贝候选点（供 profile 参考的线索） |
 | `scripts/baseline_cache.py` | 把基线测量结果保存在 `<exp_root>/baseline_cache` 里复用，键是框架 commit、模型文件、server、client 和精度脚本的内容、负载、精度测试集连同 `scripts/eval_accuracy.sh` 的内容、它读取的设置和 evalscope 版本、GPU、正在运行的镜像，以及测量时遵循的规则（所有 GPU 空闲）；Setup 命中 7 天内的结果，精度和性能都不再重测，只保存通过了的基线，命中时仍会用几道题检查精度评测环境 |
 | `scripts/gpu_status.py` | 按 HIP 编号列出 GPU（也就是 `HIP_VISIBLE_DEVICES` 用的编号，即 KFD 节点的顺序，rocm-smi 的 Device 编号可能与之不同），以及每张卡的 VRAM% 和 GPU%（与 rocm-smi 显示的一致）、任何容器里在卡上占用显存的进程；只要有卡在用（任一项达到 5%），`--check all` 就失败，除 scan 外的每种模式在开始时和每次性能测量前都会运行它 |
+| `scripts/run_fingerprint.py` | 一次运行测量时用到、不在运行目录里、名字不变内容却可能变的东西：模型的文件、运行固定使用的每张 GPU 的设备 ID、架构和显存（换成另一组同样的 GPU 算相同），以及 `scripts/eval_accuracy.sh` 的内容（运行的精度脚本调用它时）。Setup 把它写进运行的 `fingerprint.json`（`record`）；从 Verify 续跑时做比较（`check`），模型换了、GPU 变少、变多或换了型号、评测脚本改过，就在任何测量之前停下 |
 | `scripts/leak_scan.py` | 一个分支会把这台机器的哪些信息公开出去（上游代码里没有出现过的本地路径、主机名、内部站点、`root` 提交），检查范围是每个提交新增的行（后来的提交删掉的也算，推送会把历史一起公开）、提交信息和 PR 描述；PR engineer 交出分支前会运行它 |
 
 `scripts/restore_owner.sh`（POSIX sh）把 root 在容器里写到宿主机挂载目录中的文件还给属主（`/workspace` 里的不用还）；每个 agent 在 git 写操作之后都会运行它（[`knowledge/env_hygiene.md`](knowledge/env_hygiene.md)）。`scripts/check_framework_skills.py --framework-dir <dir>` 拿 skill 索引和框架 checkout 对照：索引里提到但已经不存在的 skill，以及索引还没收录的新 skill（scout 每次 scan 都会运行它）。`scripts/find_skill.py "<query>"` 按匹配程度列出标签、id 或特性名出现在请求或任务标题里的 feature skill（intake 和 director 会运行它）。`scripts/latest_image.py [--variant rocm10-mi30x]` 输出最新的每日 sglang 镜像（`run_docker.sh` 从它启动；director 拿运行所用的镜像和它比较）。`scripts/run_lock.py` 保证一台机器同时只跑一个 InferPilot 任务（`acquire`、`release`、`status`）。`scripts/daily_report.py check` 检查日报能否公开（没有密钥、本地路径、主机名或内部站点）、每个 PR 和 issue 是否除了编号还写了标题、是否放得进一个 issue；`latest` 找出在 InferPilot 仓库里分享过的最新一份日报，下一次 scan 不管在哪个容器里，都从它接着扫。两者都只读。`scripts/share_daily_report.py` 用 `GITHUB_TOKEN` 把通过检查的日报作为 issue 分享到 InferPilot 仓库，以日报的日期为标题，当天的日报已经在那里时不再重复发（Dispatch 成功的 scan 结束时，director 运行它）。`scripts/propose_knowledge.py` 把 curator 在 `knowledge/` 下的改动，放在一个临时 worktree 里基于当前的 main 做成从 `inferpilot/knowledge/<run>` 到 main 的 PR，然后把 checkout 里的 `knowledge/` 恢复原样，这样之后的运行只会读到合并过的知识。`scripts/weekly_report.py` 收集周报（`templates/weekly_release.md`）要统计的内容：一个时间范围里 InferPilot 合入、关闭或仍开着的 PR，范围默认从 7 天前的 00:00 到现在（UTC+8），也可以用 `--since` 和 `--until` 指定，范围起止时的 main 和两者之间的改动，以及来自 InferPilot 工作的 sglang PR。它只读。
