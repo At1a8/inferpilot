@@ -12,7 +12,10 @@ worktree.
 ## PHASE=implement
 
 Inputs: `work_package`, `round` (0 for the first attempt), `feedback` (the test engineer's finding from
-the previous round), `verified_work_packages`.
+the previous round), `verified_work_packages`, `verify_only` (true when the package applies someone
+else's pull request that the run verifies as it is: step 6), `added_to` (the pull request under
+verification that this package is added on top of: the package is yours and is written and repaired
+like any other, in commits of its own after the author's, which stay as they are).
 
 On a retry, Setup leaves what the earlier attempt committed on `refs/inferpilot/restored/<slug>`
 (`director.md`, Setup step 2). Take from it only when `round` is 0 and `feedback` is empty: a later
@@ -88,13 +91,26 @@ step 3, which records the tip.
    settings, with nothing left out: the test engineer runs it in full either way.
 6. If the package cannot be done without a human decision or a missing dependency, return
    `status: "blocked"` with the reason in `notes`; do not improvise around it.
+   With `verify_only` the package is someone else's open fix, verified as it is (`issue_triage.md`
+   §4), and nothing of it is repaired, whatever step 3 says of an `apply_pr` package. A cherry-pick
+   that conflicts is not resolved: `git cherry-pick --abort`, leave the branch where it was, and
+   return `blocked` with the files that conflict in `conflicts`. That is the pull request's result
+   (it no longer applies), which the run reports on it, not a decision you wait for: name the files
+   only when git reported the conflict, never for another reason you could not go on. Where the PR
+   brings no test for the failure, add one in a commit of your own after the author's. A test of
+   the PR's that cannot fail (the test engineer finds that it passes without the change) is treated
+   the same way: that is no failure of the fix, so add a test of your own that can fail, and say in
+   `notes` which of the PR's tests proves nothing, for the comment. In a later
+   round, correct only what is yours (that test); the author's code and tests stay as they are, and
+   where they fail, that is what the run reports.
 
 Return:
 
 ```json
 {"wp": "WP1", "status": "done | blocked", "commit": "<sha>", "unit_test_cmd": "cd /abs/wt && python ...",
  "files_changed": ["python/sglang/srt/..."],
- "kernel_handoff": null, "notes": "<what changed; for blocked: why>"}
+ "kernel_handoff": null, "notes": "<what changed; for blocked: why>",
+ "conflicts": ["<verify_only, blocked: each file the pull request conflicts in>"]}
 ```
 
 `commit` is required with `status: "done"`: a package reported done without one counts as a failed
@@ -122,4 +138,12 @@ Return:
 ```
 
 `clean` is true only when `git status` in the worktree is clean after the reset; `false` puts the
-worktree on the report's list of state a human must clean up.
+worktree on the report's list of state a human must clean up. `reset_to` is the commit the branch is
+at once you are done, as `git -C <worktree> rev-parse HEAD` gives it then, not the one you meant to
+reach. For `ALL` that is the task's base (`base_commit`): where InferPilot goes on to a fix of its own
+after someone else's pull request did not pass, it compares the two, and starts nothing on a branch
+that is elsewhere. What a PR phase exported from the branch that is gone goes with it: once the
+rollback of `ALL` is clean, move `RUN_DIR/patches`, `RUN_DIR/patches_additions` and
+`RUN_DIR/pr_body.md` to `RUN_DIR/failed/` where they exist. The next export writes its patches
+under other names next to them, and `git am patches/*.patch` (README step 5) would replay the
+commits that were rolled back with the fix that replaces them.

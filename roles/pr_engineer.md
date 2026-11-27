@@ -12,7 +12,11 @@ skills in your rows of `knowledge/frameworks/<framework>/skills.md`, read from t
 
 ## PHASE=pr
 
-Inputs: `round` (1 after the work packages of an earlier round were made).
+Inputs: `round` (1 after the work packages of an earlier round were made). With `existing_pr_result`
+the run first verified someone else's open fix, which did not pass (PHASE=comment), and the branch
+now holds a fix of the run's own: prepare it as any fix. Step 5 writes a PR body for it, with the
+attribution line, and not a verification comment, whatever the triage record says of an existing
+PR; its Motivation names that pull request and what it did not pass (`pr_playbook.md` §Description).
 
 1. **Check, do not fix:** lint with the target repository's tools on the branch's changed files
    (sglang: `pre-commit run --files <files>` in a throwaway worktree, `env_hygiene.md`); no debug
@@ -128,4 +132,44 @@ Return:
  "leak_scan_findings": [], "diff_stat": "20 files, +1304/-26", "launch_checked": true,
  "work_packages": [],
  "pr_body_path": "/abs/RUN_DIR/pr_body.md", "push_command": "git -C /sgl-workspace/sglang push <remote> inferpilot/<slug>"}
+```
+
+## PHASE=comment (issue: an existing fix PR that did not pass verification)
+
+Inputs: `existing_pr_result` (`prs`: the pull request the run applied; `failed_at`: Implement, Verify
+or Performance; `why`: what failed there), `failed_at` and `failure`, the same two; the ledger.
+
+The run verified someone else's open fix, and it did not pass. Its author is owed what the run saw,
+whatever becomes of the fix the run now makes itself: write the comment a human may post on that pull
+request. You change no code and run nothing: every number comes from the ledger.
+
+1. `RUN_DIR/pr_comment.md`, written to the pull request's author, the way a person writes:
+   - what was verified: the pull request and the commit of it the run applied, the base commit, the
+     image, the GPUs, the model and the command;
+   - what did not pass, with the gate, the counts and short log excerpts: it no longer applies to main
+     (the files that conflict), its own tests fail, the reproduction still fails, its accuracy or its
+     speed against the base (both arms' numbers);
+   - what the investigator found, as a finding where an experiment showed it and as a hypothesis where
+     none did;
+   - what passed, since a comment that lists only failures misleads.
+2. Say what was measured, and nothing beyond it: no verdict on the pull request, no request to close
+   it, and no attribution line (`pr_playbook.md` §Attribution: a verification comment has none).
+3. Promise nothing about what follows. The comment is written before the run knows what becomes of
+   its own fix, which may end in a diagnosis or a stop: it ends with what was measured, and names no
+   pull request to come. Where the run does end with a fix of its own, its result tells the human
+   to add that pull request's link when posting.
+4. Nothing private (`guardrails.md`): model ids, not local paths; no name of this machine. Run the
+   leak scan on it as on a PR body (PHASE=pr step 5, `--body RUN_DIR/pr_comment.md`), and rewrite
+   the comment until the scan finds nothing in it. The scan reads the task branch as well (the
+   lines its commits add, their file names, messages and identities), and the branch still carries
+   that pull request: a finding there is not the comment's, and not yours to clear, since you
+   change no code and the branch is rolled back next. Return the comment once its own text is
+   clean, and name what the scan found on the branch in `branch_findings`, empty when it found
+   nothing there: the run keeps it for the report, apart from the comment.
+
+Return:
+
+```json
+{"comment_path": "/abs/RUN_DIR/pr_comment.md", "summary": "<what the comment says, in one sentence>",
+ "branch_findings": "<what the leak scan found on the pull request's branch | ''>"}
 ```

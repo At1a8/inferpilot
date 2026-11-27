@@ -10,13 +10,45 @@ read from the task worktree.
 
 ## PHASE=gpus (before every Verify round)
 
-Inputs: `round`. Stop what this run left running on its GPUs (the servers its records name: a test
-engineer's, an earlier round's), then `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>`,
-where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses, with its VRAM%, GPU% and
-pids, in `in_use`, empty when they are idle: InferPilot warns the user before the round starts, and the
-round goes on. Start nothing.
+Inputs: `round` (`recheck` when it follows a check on the latest main that left no answer:
+PHASE=recheck). Stop what this run left running on its GPUs (the servers its records
+name: a test engineer's, an earlier round's), then `python3 <inferpilot_dir>/scripts/gpu_status.py
+--check <gpu_ids>`, where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses,
+with its VRAM%, GPU% and pids, in `in_use`, empty when they are idle: InferPilot warns the user before
+the round starts, and the round goes on. Start nothing.
 
-Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
+With `round: recheck`, look at the image's environment as well, once the launches have stopped. The
+check is told to install nothing in place, and one that left no answer cannot say that it did not:
+compare the image's packages with the record it wrote first (`env_record`, PHASE=recheck step 1), put
+back what differs (the recorded versions, and `RUN_DIR/env_restore.sh` where a call wrote one), and
+compare again. `env_record` is this invocation's record, and the only one that counts: a
+`recheck_env.*.txt` under another name is an earlier invocation's, which a retry of the task in
+another container can find in the run directory it reuses, and describes another image. Never
+compare with that one, and never restore from it. `env_changed` names what you could not put back,
+and is empty when the image is as recorded, or when the check ended before it wrote the record:
+InferPilot prepares no pull request in an image that is not the one the fix was verified in. Give
+it in every answer to this round, the empty string included: an answer without it is taken for no
+answer, and the run stops.
+
+Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`, and with `round: recheck` also
+`"env_changed": "<what could not be put back | ''>"`.
+
+With `round: after <n>` the call follows round `<n>`, which did not say whether it left anything
+running, and was not accepted or asked to be run again with more time: what that round started is
+this run's to stop too. Stop each of its launches by its log (`python3
+<inferpilot_dir>/scripts/stop_launch.py <log>...`, until it exits 0), then check the GPUs as above.
+Such a call returns two fields more, in every answer. `left_running`: what you could not stop or
+could not find the log of, the empty string when all of it stopped. A driver or a suite that holds
+no GPU shows nowhere else. And `in_use_gpus`: the HIP number of every pinned GPU still in use, as a
+list (`["0", "1"]`), empty when none is. `in_use` says the same in words, each GPU as `GPU <HIP
+number>:` as before the round, for the user to read: InferPilot compares the numbers of the list,
+and reads no words for them. It takes a GPU that was idle before the round for one the round
+still holds. Next to that, to what `left_running` names, or where the list does not give every
+GPU in use by its number, it starts no investigation, repair or rollback, and does not run the
+round again.
+
+Return for it: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "in_use_gpus": ["1"],
+"left_running": ""}`
 
 ## PHASE=verify
 
@@ -41,7 +73,18 @@ clock can start before your session does.
    unless given: with less than 90 seconds to `deadline_utc`, give it a third of them. Its exit 0 is
    confirmed on the GPUs, `python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before the
    round's first launch and again after the stop (*Killing*): a GPU idle before and in use after is one
-   the round still holds. `summary` names one you cannot stop, and a GPU the round still holds.
+   the round still holds. `left_running` names one you cannot stop, and a GPU the round still holds,
+   and is the empty string when everything stopped: say one or the other in every answer. After a
+   round that failed, InferPilot starts no investigation, repair or rollback next to what is left,
+   and gives a round that asks for more time (`needs_min`) none while something is. Where a round
+   it does not accept leaves the field out (one that failed, or a pass it refuses: one without the
+   result the fix is accepted on), it calls PHASE=gpus once more before anything else works on these
+   GPUs (`round: after <n>`): stop what the run left there and check them, as before a round. A GPU
+   idle before the round and in use after that stop counts as one the round still holds. A round
+   that asks for more time without the field is checked the same way before it is run again, and
+   is not run again where the check could not stop something. A round that needs more time and is
+   not run again, for that or for what its own `left_running` names, is unfinished: InferPilot
+   does not accept it, also where every failure it lists is one that does not block.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
@@ -303,7 +346,8 @@ Return:
 {"all_pass": false,
  "gates": {"G0": "pass", "G2": "pass 0.895 vs 0.901 (1319 q)", "G3": "fail", "G4": "not run: not asked"},
  "failures": [{"gate": "G3", "failure_class": "catastrophic collapse", "counts": "25/32, 31/32, 24/32, 30/32", "evidence": "/abs/RUN_DIR/logs/g3_*.json", "blocking": true}],
- "ledger_path": "/abs/RUN_DIR/experiment_ledger.md", "summary": "<one line per gate>"}
+ "ledger_path": "/abs/RUN_DIR/experiment_ledger.md", "summary": "<one line per gate>",
+ "left_running": ""}
 ```
 
 A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking failure, and the gates it
@@ -320,3 +364,98 @@ A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the
 baseline's is in `failures` with `"blocking": false`, and in `gates` as
 `"G4": "fail on 1a2b3c4: crash at hour 31, the baseline's control at hour 27 (KI-007)"`.
+
+## PHASE=recheck (issue, ci: before the pull request)
+
+Inputs: `env_record` (the file this call records the image's packages in: step 1),
+`extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command), `claim` (the
+number the fix of a performance problem must restore; empty for any other fix), `accuracy_claim` (the
+score, for a CI failure on one), `time_limit_min` (minutes from this call's start, 0 when there is
+none) and `deadline_utc`, that moment.
+
+The run verified the fix against the commit it began on, and main has moved since. A failure that main
+no longer shows needs no pull request: this call finds out, and changes nothing. Its answer can drop a
+verified fix, so `passes` is said only on proof; anything short of it is `inconclusive`, and the pull
+request is prepared.
+
+1. First write the image's packages to `env_record` (`python3 -m pip freeze`, where the servers
+   run): this call installs nothing in place (step 3), and the record is what shows it afterwards.
+   Where that file is there already, an earlier attempt of this check wrote it in this invocation
+   of the run: keep it, compare the image with it, and put back what differs before anything else.
+   A `RUN_DIR/recheck_env.*.txt` under another name is an earlier invocation's (a retry of the task
+   can reuse the run directory in another container): it describes another image, so leave it
+   alone, and never restore from it. Then `git -C <framework_dir> fetch
+   origin` (in the framework's checkout: this call's own directory is InferPilot's, and a bare fetch
+   there leaves `origin/main` of the framework where it was), and a throwaway worktree of the latest
+   main, without the fix
+   (`git -C <framework_dir> worktree add --detach RUN_DIR/recheck origin/main`). `main` is its commit.
+   A `RUN_DIR/recheck` an earlier call left behind is removed first (`git -C <framework_dir> worktree
+   remove --force RUN_DIR/recheck`, or the directory itself where git no longer knows it): it is a
+   tree of main and holds nothing of the task. Before removing it, stop what that call launched: it
+   may have ended without an answer and left a server that still reads this tree. Stop every launch
+   whose log is under `RUN_DIR/logs/recheck/` (`python3 <inferpilot_dir>/scripts/stop_launch.py
+   <log>...`, until it exits 0) and confirm it on the GPUs (`gpu_status.py --check <gpu_ids>`). Where
+   you cannot confirm that nothing of it still runs, leave the tree as it is, run nothing, and
+   answer `inconclusive` with `left_running` naming what is left.
+2. Point the gate at that tree, and at nothing else. Its command was written for the task worktree,
+   which has the fix: set `TREE` to the recheck worktree (an issue's reproduction script reads it),
+   put that tree first on `PYTHONPATH` (`env_hygiene.md`, *The code under test*), and replace every
+   path of the task worktree in the command itself (`cd /abs/wt && ...`). The first log of each run
+   prints where the framework was imported from (sglang: `sglang.__file__`): return that path as
+   `main_import`. For a failing test, return the file it was collected from as `test_path`: a test
+   the fix corrected is still the fixed one when it is taken from the task worktree. InferPilot
+   counts `passes` only when both lie in `RUN_DIR/recheck`. A command you cannot point at that tree
+   decides nothing.
+3. Main runs in the environment its own files call for (`validation_doctrine.md`, *What a fix changes
+   decides its gates*): where main has changed a dependency declaration or the Dockerfile since
+   `<base>`, that may be its fix, and the image this run began on does not have it. Put the change
+   into effect for these runs in a directory of the check's own, as step 1 of PHASE=verify does for
+   an arm (a package in `RUN_DIR/env/recheck`, first on `PYTHONPATH`; a variable for these processes
+   alone). Never in place: this call changes nothing, the pull request is checked in this image
+   after it, and a call that ends without an answer cannot put anything back. Where main's change
+   must replace a package of the image, or cannot be put into effect at all, answer `inconclusive`.
+4. Run it as you ran it on the base: the same model and settings, on the GPUs in `gpu_ids`, and as
+   many times as the base needed to show the failure (the ledger has the counts), at least 6 for a
+   failure that did not show on every run there (`validation_doctrine.md`, *Noise characterization*):
+   one clean run after an intermittent failure is not evidence. With `time_limit_min` above 0, plan
+   from `deadline_utc` and keep a quarter of the time to it, at most 15 minutes, for step 6; runs
+   that do not fit are not run.
+5. The answer, `on_main`:
+   - `fails`: it fails as before, the same error, the same test, the number still short of the claim.
+   - `passes`: every run passed, and each exercised what failed. The failing test was collected and
+     ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
+     step that failed. A number reaches `claim` and a score `accuracy_claim`, as the run established
+     them, not a threshold main has lowered since. `fixed_by` names the pull request or the commit
+     that fixed it, when the log of main since `<base>` shows one.
+   - `inconclusive`: anything else. A run that fails another way (an import error, a server that
+     stops for another reason); fewer runs than step 4 asks for, or some of them failing; a test
+     main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
+     (`issue_triage.md` §3); a command that could not be pointed at the recheck worktree.
+
+   `evidence` gives the runs and their counts, the logs, and for `inconclusive` what kept the check
+   from deciding. Write the same in the ledger (`RUN_DIR/experiment_ledger.md`), with main's commit
+   and the two paths, and keep each run's log under `RUN_DIR/logs/`, not in the worktree: a reply
+   that says main has fixed the failure is checked against them. The log of each launch goes in
+   `RUN_DIR/logs/recheck/`, where a later attempt finds what this one started (step 1).
+6. Stop what you started (`env_hygiene.md`, *Servers*), and confirm it on the GPUs
+   (`python3 <inferpilot_dir>/scripts/gpu_status.py --check <gpu_ids>` before your first launch and
+   after the stop). What you could not stop goes in `left_running`, whatever the answer, and an
+   empty string when all of it stopped: say one or the other. InferPilot prepares no pull request
+   next to it. Remove the worktree once everything you started has stopped: one a live process may
+   still read stays where it is, and `left_running` names it. Then compare the image's packages
+   with `env_record`: they are the same, since nothing was installed in place. A
+   difference you find all the same is put back, and one you cannot put back goes in `left_running`
+   too (`"the image's environment: aiter 0.1.9 in place of 0.1.7"`): the pull request is not
+   prepared in an image other than the one the fix was verified in. Give `.git` back
+   (`scripts/restore_owner.sh`).
+
+Return:
+
+```json
+{"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>",
+ "main_import": "/abs/RUN_DIR/recheck/python/sglang/__init__.py",
+ "test_path": "/abs/RUN_DIR/recheck/test/registered/...py",
+ "fixed_by": "<#n or sha, when main passes because of it>",
+ "evidence": "<the runs and their counts, the logs, and what they show>",
+ "left_running": ""}
+```

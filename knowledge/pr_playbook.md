@@ -55,7 +55,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
 (sglang #42297 and #44588 for speculative decoding).
 
 - **Motivation:** at most 100 words, why the PR exists: the problem and what the change brings. Few or
-  no numbers; the results sections carry them. `Depends on #NNNN` for unmerged dependencies.
+  no numbers; the results sections carry them. `Depends on #NNNN` for unmerged dependencies. A fix
+  that follows an open PR for the same failure which did not pass verification (`existing_pr_result`)
+  names that PR and says in one sentence what it did not pass: a reviewer who sees two PRs for one
+  failure asks why.
 - **Modifications:** one sentence per changed file, saying what changed in it; every file of the diff
   appears once. For an AMD change, open with **This is HIP-only and doesn't touch the CUDA path.** and
   say how the diff makes sure of it (an `is_hip()` gate, a ROCm-only file, a startup rejection on other
@@ -68,11 +71,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*), or, for a
   model that answers no text questions, what the task's own test compared in their place: the
   inputs, the measure and its tolerance, and how the fix's outputs stood against the baseline's (*G2
-  for a model that answers no text questions*); where the
-  base cannot serve the configuration, next to the last commit that served it, named, or alone,
-  saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
-  changes no code the server runs, and gives no table; one for a model that answers no text questions
-  says that instead. The fix of an accuracy problem in CI (a test that failed on a score it measures)
+  for a model that answers no text questions*); where the base cannot serve the configuration, next
+  to the last commit that served it, named, or alone, saying that it has no baseline. A fix to
+  tests, documentation or CI files alone says that it changes no code the server runs, and gives no
+  table. The fix of an accuracy problem in CI (a test that failed on a score it measures)
   shows the score that fell and the score it restores, whatever it changes, a fix to the test alone
   included: by the test's own measurement as it stood before the fix (the set, the number of
   questions, the model, the sampling), with the claim and the command that measures it.
@@ -135,6 +137,13 @@ Developed with the [InferPilot](https://github.com/At1a8/inferpilot) AI agent; r
 
 ## Keeping up with main
 
+- A fix (issue, ci) is checked against main once more before its PR is prepared: the reproduction or
+  the failing test runs on the latest main without the fix. Where it no longer fails, main has fixed
+  the failure while the run worked on it (another pull request merged, an existing fix PR among them):
+  no PR is prepared, and the run ends as fixed on main, with the reply an issue gets for that. A
+  verified fix is dropped only on proof: the runs were made on that commit's own tree, as many as
+  showed the failure, and each exercised what failed (a test main now skips, or a threshold it has
+  lowered, hides a failure and fixes none). A check that decides less than that prepares the PR.
 - Before the PR exists, InferPilot only trial-merges main to report conflicts; it does not update a
   verified branch. Updating it is the owner's step, and the gates run again on the merged tree.
 - Prefer merging main into the PR branch (no force push, review history kept); maintainers squash at

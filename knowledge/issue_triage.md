@@ -63,7 +63,7 @@ Judgement calls, decided once so they are applied the same way every time:
 | Action | When | Output |
 |---|---|---|
 | `reproduce` | no usable fix exists | reproduction on the reporter's configuration, then diagnosis and a fix PR |
-| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR |
+| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
 | `close_fixed` | the fix is merged and covers every point | verification on main and a closing comment draft |
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
@@ -72,6 +72,47 @@ Judgement calls, decided once so they are applied the same way every time:
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
+it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for
+a fix of the run's own. Where it does not pass (it no longer applies to main, its own tests fail, the
+reproduction still fails, it loses accuracy or speed against the base), nothing is repaired on top of
+it. The run drafts a comment for that pull request with what it measured (`RUN_DIR/pr_comment.md`, for
+a human to post), takes the pull request off the task branch, and goes on to Diagnose and a fix of its
+own, as for an issue nobody had opened a pull request for. That fix's pull request names the earlier
+one and says in one sentence what it did not pass. A failure the baseline shares is not the pull
+request's (`validation_doctrine.md`, *Same-pattern baseline control*), and a measurement that could not
+be trusted decides nothing: the run stops for a human then, as for any fix.
+
+Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that
+fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's counts
+against it: a conflict, a gate it failed, a failure the investigator explains or one the controls
+attribute to it (the baseline ran to its end and passed), a trusted measurement that is slower on
+the task's client or on a guard workload. A comparison that decided nothing, a package blocked for
+another reason and an answer that never came prove nothing: the run stops for a human, with no
+comment. Nothing is rolled back next to a call that may still be running (one that timed out, a
+gate that could not stop what it started): the comment is drafted, and the run stops. A stop named
+for the phase the pull request failed in holds as well: the comment is there, the branch is back at
+the base, and the run's own fix is not started. That fix has the priority the problem has without a
+usable fix PR (§2 makes a default-configuration failure P1 only while one is open), since only a P0
+gets a workaround here for a component's defect. The comment promises no fix: it is written before
+the run knows what becomes of its own.
+
+What the run adds on top of the pull request is the run's own, and stays apart from it: a test where
+the pull request brought none, a change the review or the PR phase asked for. A failure there is
+repaired there (the unit gate says `failed_in`, the investigator `in_additions`), and is never held
+against the pull request; a gate that cannot say whose failure it is stops the run for a human.
+The gates run again after such additions, the unit gate of each addition and Verify, and a failure
+of the pull request found then is answered as one found the first time. The pull request stays on
+the branch until the comment for it is drafted, which reads the branch, and is taken off with
+everything else after that. Before it is, every round has to have said that it left nothing running
+(`left_running`, in every unit and Verify answer; after a Verify round that is not accepted and
+does not say, the verify engineer stops what is left and checks the GPUs first, and nothing is
+investigated where it could not stop something, or where a GPU that was idle before the round is
+in use), and after it the branch has to be at the task's base
+(`base_commit`, which Setup returns): the run's own fix starts on no other commit. A measurement
+that fails after the pull request passed one is not the pull request's to answer for: what changed
+between the two is the run's own additions, or noise, and a human decides.
 
 **A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
 the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails
@@ -91,7 +132,24 @@ priority, category, action and existing fix PRs are that problem's. The reply co
 this run showed for the problem it took, and for each of the others its known state (a fix linked to
 it, open or merged, or nothing yet) and that this run did not cover it. Each of them starts as a run of
 its own, with the issue and the problem's name as its `task`: the run's result offers those runs
-(`next.start`), each on this run's own definition.
+(`next.start`), each on this run's own definition and with the operator's settings this run was given.
+A run that has a model takes a problem on that model and configuration: G2 and G5 measure on what
+the run was set up with. A problem the report puts on another one, were it another workload alone
+(32k input where the run measures 8k), is offered as a follow-up that asks for its own model,
+scripts and GPUs; where the task itself names such a problem, the run stops
+before Reproduce and asks for them. So it does where the task names the issue alone and no problem
+of the report is on the run's model and configuration: the most urgent of all is taken then, and
+the run asks for what that one is on. A task without a model, one that stops before its fix, takes
+the most urgent problem of all; what it pins all the same (its GPUs, its scripts) has to fit that
+problem, or the run stops before Reproduce in the same way, whether or not a less urgent problem
+would fit: that one is offered as a follow-up. It is then asked for those inputs, each
+of them, and not for a model: a reproduction that serves none has none to give. A task that names
+no model and pins nothing was set up by Setup alone, before the run knew which problem it takes:
+where the GPUs Setup chose do not fit that problem, the run stops as well and asks for the GPUs,
+since Reproduce uses the ones the run is set up with and no others. The run after such a stop, and
+a follow-up on another configuration, is told which one the problem is on (`reported_on`): Setup
+works before Triage, and one left to choose again takes the GPUs that configuration needs, not the
+same ones.
 
 ## 5. Reproduction
 

@@ -32,6 +32,10 @@ nowhere, whatever the request says of a stop.
      G2 compares its outputs with the task's `output_script` (below), since gsm8k cannot be put to it.
    - `gpu_ids`: GPUs that exist, by HIP number (`scripts/gpu_status.py`); leave it empty to let Setup
      pick free ones.
+   - `reported_on` (issue): the model and launch configuration the report puts the task's problem on.
+     The result of an earlier run gives it, and it goes on to Setup as given, which picks as many
+     GPUs as that configuration needs: never fill it yourself. With it in `given`, the `model_path`
+     and the scripts you fill are that configuration's.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
    - `workload` and any target number: only what the request states or the user answers; never invent
      numbers.

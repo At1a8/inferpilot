@@ -55,7 +55,7 @@ kernel 级的工作——调优 InferPilot 为某个特性写的 kernel，或者
 | `ci_guardian` | Classify、Bisect | 给变红的 job 分类（代码回归、依赖升级、测试缺陷、偶发、基础设施），后两类移交出去；判断它是不是性能问题，是的话给出修复必须恢复的数值；找到并确认引入问题的 commit，规划修复；对已在 main 上修复的 issue，设置 `bisect_fixed` 时找出修复它的 commit |
 | `implementer` | Implement | 一次一个工作包，diff 尽量小，关闭特性时行为不变，只影响 HIP 或放在开关后面，提交时已通过 lint、测试已注册；编写带单元测试的功能性 kernel（调优走 hand-off）；应用现成的 PR 和验证过的 kernel 收益；回滚失败的工作包 |
 | `test_engineer` | Implement | 在每个工作包的 commit 上重新运行它的单元测试，检查这个测试确实可能失败（改变行为的改动在父 commit 上验证，不改变行为的改动在故意改坏的副本上验证），并检查关闭特性时行为不变（没有开关的工作包，改为检查它涉及的模块已有的测试通过，或者和在父 commit 上失败的方式相同） |
-| `verify_engineer` | Verify | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数 |
+| `verify_engineer` | Verify、PR | 在全新启动的服务上对照同模式基线运行正确性门禁（G0、G2、组合性、模式专属门禁，任务要求时再加 G3 和 G4），对每个失败分类计数；修复提 PR 之前，在最新的 main 上不带修复重跑一次它的 gate，main 上已经不失败的不提 PR |
 | `investigator` | Investigate、Diagnose | 先跑对照实验，再一次只验证一个机制，并维护假设台账；返回修复工作包、基线同样存在的已知问题、无法定论的结论，或者（对 issue 而言）不在 AMD 这一侧的根因；探测代码只放在开关后面 |
 | `perf_engineer` | Profile、Performance | 先确认运行走了预期的路径，再把稳态 trace 整理成固定的表格（kernel、重叠、融合模式、层）、指标和带上限的优化机会；在固定负载上以同等预算评估改动，对照噪声和任务指定的守护负载（任务要求时再加 held-out 工作点和更多守护负载），并逐项检查已知的测量类 hack；对照 base 测量修复，以及性能问题必须恢复的数值 |
 | `reviewer` | Review、Reply | 像维护者一样阅读 diff 和证据，以已知 reward hack 目录为起点：shape、dtype、并行布局、graph、回退路径、不造成损害、框架的惯例、公平的基准测试；要求的修改，以及为每个确认的 hack 写的测试，以工作包形式返回；在报告前把 issue 的回复草稿逐条对照运行记录核对；可以换用另一个模型（`review_model`） |
@@ -257,6 +257,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 | `experiment_ledger.md` | 环境、基线和每一次测量 |
 | `logs/` | 每次启动服务或 benchmark 一个日志，`<tag>_<time>_XXXXXX.log`，由 `mktemp` 生成，旁边是它的 `.pid` 和 `.exit` |
 | `pr_body.md`、`patches/` | PR 描述，以及导成 patch 的分支 commit |
+| `pr_comment.md` | 已有的修复 PR 验证不通过时，写给那个 PR 的评论草稿，说明运行测到了什么（由你来发） |
 | `reply_draft.md`、`reply_check.md` | issue 的回复草稿（由你来发），以及 reviewer 对照运行记录核对它的结果 |
 | `component_issue.md` | 根因在框架之外的 AMD 组件（aiter、MoRI、ROCm、PyTorch 的 ROCm 版）时，给那个组件的仓库起草的 issue（由你来提） |
 | `knowledge_pr.md`、`knowledge.patch` | curator 向 InferPilot 仓库提的 PR 的描述，以及它的改动；`scripts/propose_knowledge.py --patch` 之后可以在任何 checkout 里把它提出来 |
@@ -340,6 +341,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`：为 `true` 时，若报告者的 commit 失败而 main 通过，就以复现脚本为测试在两者之间做 bisect，找出修复它的提交 |
+| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置（如 `DeepSeek-V4.1, --tp-size 8`）。一次运行如果发现它要处理的问题不在自己准备好的配置上，会在 Reproduce 之前停下，并在结果里把这个字段交给下一次运行（`next.rerun_with`；报告里其他问题用 `next.start`）：没有给 `gpu_ids` 时，Setup 按这个配置需要的数量选 GPU，并按它写启动脚本 |
 | `confirm_leads` | 默认 `false`：线索（角色遇到的、不属于本任务的问题）在报告里列出，附上复现方法，Spinoff 不占用 GPU；为 `true` 时，在报告前把每条线索放到 base 提交上确认，能复现的起草 issue |
 | `stop_after` | 在该模式的指定阶段之后停下（例如 `Design`、`Reproduce`）；填了该模式没有的阶段，会作为问题返回 |
 | `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行 |
@@ -356,7 +358,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型或 client 时，会先问要用哪个，用的是 InferPilot 的 client 而 `workload` 只给了一部分时也会先问；这类运行的模型不回答文本问题时，Setup 之后会问比较输出的脚本（`output_script`）；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
-每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
+每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行及其参数：scan 排在前面的任务，issue 报告里的其他问题；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 
 **一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用（按它能拿到的最长加时算）的时间里（默认 24 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
 

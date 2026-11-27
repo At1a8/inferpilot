@@ -64,7 +64,8 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      writing to it. A resume keeps it: that SHA is `<base>` throughout, and `run.json` keeps it. A new
      attempt resolves the base's full SHA after the fetch (`git -C <framework_dir> rev-parse <base>`)
      and writes it to `run.json` as `base_commit`; a retry does so only after the earlier branch is
-     taken care of (next item).
+     taken care of (next item). Return it (`base_commit`): a rollback of the whole task has to come
+     back to that commit, and InferPilot builds nothing on a branch that is elsewhere.
    - A retry runs every phase again, Reproduce and the baseline included, and they must not see the
      earlier attempt's fix: its branch starts from the base like a new one. Before the `checkout -b`,
      when the earlier branch is still in `framework_dir`, refresh `RUN_DIR/branch.bundle` from it
@@ -95,7 +96,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
    and return it as `gpu_ids`: the given one, or, when none was given, the first GPUs by HIP number, as
-   many as the task needs; step 0 found them all idle. `gpu_status.py` lists them by HIP number, the
+   many as the task needs; step 0 found them all idle. With `reported_on` (the model and launch
+   configuration the report puts the task's problem on; the result of an earlier run gives it, where
+   that run was set up for another one), the task needs what that configuration needs: a problem at
+   TP8 takes eight GPUs, whatever the run before this one chose. `gpu_status.py` lists them by HIP
+   number, the
    order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
@@ -109,7 +114,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
-   template's or the cookbook's flags. A report or a job that starts no server at all (a unit test, an
+   template's or the cookbook's flags. Where the report gives several commands, it is the one for the
+   problem `task` names, and with `reported_on` the one for that configuration. A report or a job
+   that starts no server at all (a unit test, an
    import that fails) leaves nothing to write it from: when the task has a `model_path`, render
    InferPilot's server template for it (below), the one template a run takes without the user's
    answer, and say so in `notes` for the report. Return the one or the other as `server_script`: G2
@@ -241,7 +248,8 @@ Return:
 ```json
 {"lock": "acquired | busy", "run_dir": "/abs/RUN_DIR", "baseline_status": "pass | fail | skip",
  "baseline": "<suites, runs, spread; or why it failed or was skipped>",
- "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "gpu_ids": "0,1,2,3",
+ "branch": "inferpilot/<slug>", "worktree": "/sgl-workspace/sglang", "base_commit": "<full sha>",
+ "gpu_ids": "0,1,2,3",
  "server_script": "/abs/RUN_DIR/scripts/server.sh", "client_script": "/abs/RUN_DIR/scripts/perf.sh",
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
@@ -398,8 +406,13 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
   review, approve, post or hand over); stopped at PR, each of `leak_scan_findings` (where it is and what it
   shows) and of `pr_work_packages` (what the branch still lacks). For `fixed_on_main`, say on which code
-  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, and otherwise give the
-  `bisect_fixed` run that would.
+  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, or the check on the
+  latest main before the pull request. Where neither names it, say that the change that fixed it is
+  not named, and give the range it lies in: from the commit the run began on to the main the check
+  ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
+  `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
+  at PR, the run had verified a fix of its own before main moved: say that its branch was not
+  proposed, and where it is.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
@@ -421,6 +434,12 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   rename that file to `<id>.unconfirmed.md` and say in the report that it is not to be filed. With
   `component_issue`, name the component the root cause is in and the draft a human is to file in its
   repository.
+- With `existing_pr_result`, say that the run first verified that pull request, where it did not pass
+  and why, and give the comment drafted for it (`comment_path`), which a human posts there. Say
+  what became of the run's own fix as the status has it: only `ready_for_review` has a pull request
+  to link from that comment, and the comment itself promises none. With `branch_findings`, give
+  what the leak scan found on that pull request's own branch: the comment is clean, and whoever
+  posts it should know what the branch it is about holds.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when

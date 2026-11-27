@@ -27,18 +27,53 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    its duplicates: what they add (a configuration, a log, a second model) goes into this triage record
    and into the reproduction.
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
+   Where an open fix PR is what makes the problem P1 (§2: a default-configuration failure that
+   already has one), return `priority_without_pr` as well, the priority it has when no usable fix
+   PR exists: the run takes it when that pull request does not pass verification and it goes on to
+   a fix of its own.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
    names that issue and what this report adds to it. A report with several problems is several tasks:
    list each in the triage record with its own category, priority and fix PRs, take the one `task`
-   names or else the most urgent, and say which in `reason`. `priority`, `category`, `action` and
-   `existing_prs` are then that problem's and no other's: a fix PR for another problem of the report is
-   listed in the triage record only, since the run would apply it and check it against this problem's
-   reproduction. Return the others as `other_problems`, each with its `problem` in a few words, its
-   `priority`, and the `task` that starts a run on it (the issue and the problem's name): the run's
-   result offers them. The reply covers every problem. `existing_prs` lists the open fix PRs (`#<n>`).
-   Every action that leads to a code change, `push_existing_pr` included, is reproduced on main first;
-   that reproduction is the gate the fix must pass.
+   names or else the most urgent, and say which in `reason`. Where the task has a `model_path`, "the
+   most urgent" is said of the problems on that model and configuration: Setup has rendered the run's
+   scripts for it, and G2 and G5 measure on them, so a problem the report puts on another model is one
+   of the others, however urgent. A task without a model (one that stops before its fix) takes the
+   most urgent of all. Whichever problem you take, hold it against what the task is set up with,
+   and return `model_mismatch` (its model and configuration) whenever it is not on that: the rule
+   is for the problem taken, whether or not another problem of the report would fit. Three cases
+   lead there. `task` itself names a problem on another model or configuration than the task's. Or
+   `task` names the issue alone and none of its problems is on the task's: take the most urgent of
+   all then, since there is no other to take. Or the task has no model, and the most urgent of all
+   is not on what it pins although a less urgent one is (a P0 at TP8 and a P1 at TP2, for a task
+   that pins two GPUs): the P0 is still the one you take, with `model_mismatch`, and the P1 is one
+   of the others, offered on this run's GPUs. What a task is set up with is its `model_path` and
+   whatever else it pins (`gpu_ids`, its scripts, its workload): one without a model that pins two
+   GPUs does not fit a problem at TP8 either. Where the task pins none of them, it is what Setup
+   chose for the run before the problem was known, the `gpu_ids` you are given: two GPUs do not
+   fit that problem whoever picked them. On a `model_mismatch` the run stops before Reproduce and
+   asks: for the problem's model where the task has one, otherwise for each input it pins, and
+   where it pins none for the GPUs, never for a model the task has no use for. The run after it is
+   given your `model_mismatch` as `reported_on`, as a run on one of the others is given its `model`:
+   Setup, which works before you, chooses the GPUs and writes the launch for it. So say it as the
+   report does, the launch flags with the model (`DeepSeek-V4.1, --tp-size 8`). A `reported_on` you
+   are given is where an earlier run found the problem this one takes.
+   `priority`, `category`, `action` and `existing_prs` are then
+   that problem's and no other's: a fix PR for another problem of the report is listed in the triage
+   record only, since the run would apply it and check it against this problem's reproduction. Return
+   the others as `other_problems`, each with its `problem` in a few words, its `priority`, the `task`
+   that starts a run on it (the issue and the problem's name), and its `model` where the report gives
+   it another model, launch configuration or workload than this run's. A difference in the workload
+   alone counts (32k input where this run measures 8k): the run's client and workload would measure
+   another problem. Say the marker whole, as the report puts it, and never by reference to this
+   run: the model, the launch flags and the workload (`DeepSeek-V4.1, --tp-size 8, 32k input`), not
+   "the same model at 32k". The follow-up starts without this run's model and settings, which may
+   have come from the caller and not from the report, and has nothing to read "the same" against.
+   So it is with `model_mismatch`. The run's result offers them, and one with
+   a `model` asks for its own model, scripts and GPUs instead of taking this run's. The reply covers
+   every problem. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code
+   change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the
+   fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -49,10 +84,13 @@ Return:
 
 ```json
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
+ "priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>",
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "duplicate_of": "<with duplicate: #n, the original>",
- "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>"}],
+ "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>",
+                     "model": "<its model, launch flags and workload, whole, when not this run's>"}],
+ "model_mismatch": "<the model and configuration of the problem task names, when not the task's>",
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```
 
@@ -176,8 +214,9 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    the Triage draft promised that did not happen, and say what was not covered.
    - `ready_for_review`: what the fix changes and how it was verified; a `<PR link>` placeholder, since
      the human opens the PR.
-   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit when Bisect
-     named one, and a request to confirm on a current image.
+   - `fixed_on_main`: on which code it fails and on which it passes, the fixing commit or pull request
+     when the run named one (`fixed_by`), and a request to confirm on a current image. Stopped at PR,
+     main fixed it while the run worked on a fix of its own, which is not offered.
    - `not_reproduced`, `diagnosed`: the environment, duration and counts, or the root cause, and the
      exact information or test that would move it on.
    - `blocked`, `stopped`: what was done so far, without a conclusion.
@@ -190,6 +229,11 @@ evidence in `RUN_DIR/experiment_ledger.md`), `known_issues`, and what the run pr
    placeholder, since the human files that issue. `diagnosed`: what the reporter can do meanwhile,
    as the diagnosis gave it (`component_issue.summary`). `ready_for_review`: that the pull request is
    a workaround, and what it leaves to the component.
+   With `existing_pr_result` an open fix PR was verified first and did not pass: say so in one
+   sentence, with what it did not pass. Say that the fix now offered is another one only for
+   `ready_for_review`, where the run has one; for any other ending say what the run reached after
+   it (a diagnosis, a stop), and promise no fix. The comment for that pull request is a draft of
+   its own (`comment_path`), not part of this reply.
 2. Update the *Reply draft* section of `RUN_DIR/issue_triage.md` to the same text.
 3. The reviewer then checks the draft against the run (`reviewer.md`, PHASE=reply). Called again with
    `reply_findings`, leave `reply_draft_triage.md` as it is, correct in `reply_draft.md` each claim they

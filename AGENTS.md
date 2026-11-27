@@ -72,8 +72,8 @@ The result file ends with `next`, what comes after the run, the same Claude Code
 - put each question of `next.ask` to the user, never answering one yourself, then start the runner again
   with the same arguments plus `next.rerun_with`, its answers filled in from the user's (they merge with the
   answers already given);
-- offer each of `next.start` (a scan's top tasks) as a new run with its arguments, and start the one the
-  user picks;
+- offer each of `next.start` (a scan's top tasks, the other problems of an issue's report) as a new run
+  with its arguments, and start the one the user picks;
 - `next.user` is what only the user does: the push, a reply to post, a daily report the director could
   not share.
 

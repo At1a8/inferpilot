@@ -103,7 +103,7 @@ the roles:
 | `ci_guardian` | Classify, Bisect | classifies a red job (code regression, dependency bump, test bug, flaky, infrastructure) and hands the last two over; says whether it is a performance problem, and then the number the fix must restore; finds and confirms the culprit commit and plans the fix; for an issue fixed on main, with `bisect_fixed`, the commit that fixed it |
 | `implementer` | Implement | one work package at a time, smallest diff, neutral with the feature off, HIP-only or behind a switch, committed lint-clean with its tests registered; functional kernels with unit tests (tuning is a hand-off); applies existing PRs and verified kernel gains; rolls back a failed package |
 | `test_engineer` | Implement | re-runs each package's unit test on its commit, checks that the test can fail (on the parent commit when the change alters behaviour, on a broken copy when it keeps it) and that behaviour with the feature off is unchanged (for a package without a switch, that the existing tests of the modules it touched pass, or fail as they do on its parent) |
-| `verify_engineer` | Verify | runs the correctness gates (G0, G2, composability, the mode's gate, and G3 and G4 when the task asks) on fresh servers against a same-pattern baseline, classifying and counting every failure |
+| `verify_engineer` | Verify, PR | runs the correctness gates (G0, G2, composability, the mode's gate, and G3 and G4 when the task asks) on fresh servers against a same-pattern baseline, classifying and counting every failure; before the PR of a fix, runs its gate again on the latest main without the fix, and a failure main no longer shows gets no PR |
 | `investigator` | Investigate, Diagnose | runs the controls first, then one-mechanism-at-a-time experiments with a hypothesis ledger; returns fix work packages, a known issue the baseline shares, an inconclusive verdict, or (for an issue) a root cause outside the AMD side; probes only behind switches |
 | `perf_engineer` | Profile, Performance | checks the run took the intended path, turns a steady-state trace into fixed tables (kernels, overlap, fuse patterns, layers), metrics and opportunities with upper bounds; evaluates changes at equal budget on the fixed workload, against noise and the guard workloads the task names (a held-out point and more guards when the task asks), checking the known measurement hacks; measures a fix against its base, and the number a performance problem must get back |
 | `reviewer` | Review, Reply | reads the diff and its evidence as a maintainer would, starting from the catalog of known reward hacks: shapes, dtypes, parallel layouts, graphs, fallbacks, do-no-harm, the framework's conventions, a fair benchmark; requested changes, and a test for every confirmed hack, come back as work packages; checks an issue's reply draft against the run, claim by claim, before the report; can run on another model (`review_model`) |
@@ -479,6 +479,7 @@ the container with its status. A run directory holds:
 | `experiment_ledger.md` | the environment, the baseline and every measurement |
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>_XXXXXX.log` from `mktemp`, with its `.pid` and `.exit` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
+| `pr_comment.md` | for an existing fix PR that did not pass verification: the comment that says what the run measured, for you to post on that PR |
 | `reply_draft.md`, `reply_check.md` | an issue's reply draft, for you to post, and the reviewer's check of it against the run |
 | `component_issue.md` | an issue drafted for the AMD component a root cause is in (aiter, MoRI, ROCm, the ROCm build of PyTorch), for you to file in its repository |
 | `knowledge_pr.md`, `knowledge.patch` | the description of the curator's pull request to InferPilot's repository, and its change, which `scripts/propose_knowledge.py --patch` proposes later from any checkout |
@@ -599,6 +600,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`: `true` bisects between the reporter's commit and main, with the reproduction as the test, when the first fails and the second passes, and names the commit that fixed it |
+| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on (`DeepSeek-V4.1, --tp-size 8`). A run that finds its problem on another configuration than the one it was set up for stops before Reproduce, and its result gives this to the run after it (`next.rerun_with`; `next.start` for the report's other problems): with no `gpu_ids` given, Setup takes as many GPUs as that configuration needs, and writes the launch for it |
 | `confirm_leads` | default `false`: leads, the problems roles met that are not the task's, are listed in the report with how to reproduce them, and Spinoff runs nothing on the GPUs; `true` checks each on the base commit before the report and drafts an issue for those that show there |
 | `stop_after` | stop after the named phase of the mode (e.g. `Design`, `Reproduce`); a phase the mode does not run comes back as a question |
 | `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md` |
@@ -631,8 +633,8 @@ status; one that ends at the Intake (questions, a rejection) or before Setup cre
 Every result ends with `next`, what comes after the run, the same for Claude Code, a Cursor agent and the
 runner's log: `say`, a sentence for you; `ask`, questions only you answer; `rerun_with`, the arguments to
 set before running it again with the rest unchanged (answers merge with those already given); `start`, new
-runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
-post, a daily report the director could not share.
+runs it offers, with their arguments: a scan's top tasks, the other problems of an issue's report;
+`user`, what only you do: the push, a reply to post, a daily report the director could not share.
 
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and
