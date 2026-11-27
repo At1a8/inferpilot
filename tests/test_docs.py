@@ -1953,6 +1953,11 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 # the restored score is shown to whoever merges, also for a fix to the test alone
                 ("knowledge/pr_playbook.md", "shows the score that fell and the score it restores, whatever it changes, a fix to the test alone included"),
                 ("templates/validation_report.md", "| accuracy claim (a CI failure on a score its test measures) |"),
+                # the same-pattern column holds what this run measured, not the failed job's score from another commit and lane
+                ("templates/validation_report.md", "the score on the base by that measurement, as this run measured it on this machine "
+                                                   "(Classify's runs on main: the commit, each run's score), or `not measured`"),
+                ("templates/validation_report.md", "Never the failed job's own score, which is another commit's on another machine: that one is "
+                                                   "named apart, with its commit and its lane"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
                 ("roles/reviewer.md", "the `accuracy_claim` entry of the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against "
