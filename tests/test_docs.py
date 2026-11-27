@@ -1142,6 +1142,11 @@ class OutputComparisonTest(unittest.TestCase):
         self.assertIn("args.%s (issue, ci: the user\\'s own test that compares the outputs of a model that answers no text questions" % self.FIELD,
                       use, "inferpilot.js's whenToUse does not tell the caller of the script")
         self.assertIn("asked for it after Setup, since InferPilot has no template for it", use)
+        # The base is not always the reference (validation_doctrine.md, G2 for a model that answers no text questions).
+        self.assertIn("the fix\\'s with a baseline\\'s, which is the base, or the last commit that served the configuration where the base "
+                      "cannot or where its outputs are the failure being fixed", use, "whenToUse makes the base the reference in every case")
+        self.assertIn("where the run knows no such commit, the fix\\'s outputs are kept and reported, not judged", use)
+        self.assertNotIn("on the base and on the fix; G2 runs it", use)
         for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
             body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
             self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
