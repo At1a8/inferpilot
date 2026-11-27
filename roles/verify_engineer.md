@@ -19,14 +19,19 @@ the round starts, and the round goes on. Start nothing.
 
 With `round: recheck`, look at the image's environment as well, once the launches have stopped. The
 check is told to install nothing in place, and one that left no answer cannot say that it did not:
-compare the image's packages with the record it wrote first (`RUN_DIR/recheck_env.txt`, PHASE=recheck
-step 1), put back what differs (the recorded versions, and `RUN_DIR/env_restore.sh` where a call
-wrote one), and compare again. `env_changed` names what you could not put back, and is empty when
-the image is as recorded, or when the check ended before it wrote the record: InferPilot prepares no
-pull request in an image that is not the one the fix was verified in.
+compare the image's packages with the record it wrote first (`env_record`, PHASE=recheck step 1), put
+back what differs (the recorded versions, and `RUN_DIR/env_restore.sh` where a call wrote one), and
+compare again. `env_record` is this invocation's record, and the only one that counts: a
+`recheck_env.*.txt` under another name is an earlier invocation's, which a retry of the task in
+another container can find in the run directory it reuses, and describes another image. Never
+compare with that one, and never restore from it. `env_changed` names what you could not put back,
+and is empty when the image is as recorded, or when the check ended before it wrote the record:
+InferPilot prepares no pull request in an image that is not the one the fix was verified in. Give
+it in every answer to this round, the empty string included: an answer without it is taken for no
+answer, and the run stops.
 
-Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''", "env_changed": "<round recheck: what
-could not be put back | ''>"}`
+Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`, and with `round: recheck` also
+`"env_changed": "<what could not be put back | ''>"`.
 
 ## PHASE=verify
 
@@ -258,7 +263,8 @@ baseline's is in `failures` with `"blocking": false`, and in `gates` as
 
 ## PHASE=recheck (issue, ci: before the pull request)
 
-Inputs: `extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command), `claim` (the
+Inputs: `env_record` (the file this call records the image's packages in: step 1),
+`extra_gates` (the fix's gate, `issue_repro` or `failing_test`, with its command), `claim` (the
 number the fix of a performance problem must restore; empty for any other fix), `accuracy_claim` (the
 score, for a CI failure on one), `time_limit_min` (minutes from this call's start, 0 when there is
 none) and `deadline_utc`, that moment.
@@ -268,10 +274,13 @@ no longer shows needs no pull request: this call finds out, and changes nothing.
 verified fix, so `passes` is said only on proof; anything short of it is `inconclusive`, and the pull
 request is prepared.
 
-1. First write the image's packages to `RUN_DIR/recheck_env.txt` (`python3 -m pip freeze`, where the
-   servers run): this call installs nothing in place (step 3), and the record is what shows it
-   afterwards. Where an earlier attempt of this check wrote it, keep it, compare the image with it,
-   and put back what differs before anything else. Then `git -C <framework_dir> fetch
+1. First write the image's packages to `env_record` (`python3 -m pip freeze`, where the servers
+   run): this call installs nothing in place (step 3), and the record is what shows it afterwards.
+   Where that file is there already, an earlier attempt of this check wrote it in this invocation
+   of the run: keep it, compare the image with it, and put back what differs before anything else.
+   A `RUN_DIR/recheck_env.*.txt` under another name is an earlier invocation's (a retry of the task
+   can reuse the run directory in another container): it describes another image, so leave it
+   alone, and never restore from it. Then `git -C <framework_dir> fetch
    origin` (in the framework's checkout: this call's own directory is InferPilot's, and a bare fetch
    there leaves `origin/main` of the framework where it was), and a throwaway worktree of the latest
    main, without the fix
@@ -330,7 +339,7 @@ request is prepared.
    empty string when all of it stopped: say one or the other. InferPilot prepares no pull request
    next to it. Remove the worktree once everything you started has stopped: one a live process may
    still read stays where it is, and `left_running` names it. Then compare the image's packages
-   with `RUN_DIR/recheck_env.txt`: they are the same, since nothing was installed in place. A
+   with `env_record`: they are the same, since nothing was installed in place. A
    difference you find all the same is put back, and one you cannot put back goes in `left_running`
    too (`"the image's environment: aiter 0.1.9 in place of 0.1.7"`): the pull request is not
    prepared in an image other than the one the fix was verified in. Give `.git` back

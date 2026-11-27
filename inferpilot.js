@@ -866,7 +866,7 @@ const VERIFY = S({
   summary: str,
 }, ['all_pass', 'failures']);
 // in_use: '' when the pinned GPUs are idle; otherwise each one another job uses, its VRAM%, GPU% and pids
-const GPU_CHECK = S({ in_use: str, env_changed: str }, ['in_use']); // env_changed: after a check on main that left no answer
+const GPU_CHECK = S({ in_use: str }, ['in_use']);
 const INVESTIGATE = S({
   verdict: { type: 'string', enum: ['fix_needed', 'baseline_bug', 'kernel_regression', 'inconclusive'] },
   work_packages: WPS,
@@ -924,6 +924,9 @@ const PR = S({
 // is stopped, and required, since an answer that does not say is not one that says nothing is left.
 const RECHECK = S({ on_main: { type: 'string', enum: ['fails', 'passes', 'inconclusive'] }, main: str, main_import: str,
   test_path: str, fixed_by: str, evidence: str, left_running: str }, ['on_main', 'left_running']);
+// The call that cleans up after a check on the latest main that left no answer: it also says what it could not
+// put back in the image. Required, so that an answer that leaves it out is no answer, and never a clean image.
+const RECHECK_CLEANUP = S({ in_use: str, env_changed: str }, ['in_use', 'env_changed']);
 const K_PACKAGE = S({
   task_dir: str,
   mode: { type: 'string', enum: ['optimize', 'author'] },
@@ -1751,9 +1754,15 @@ function stoppedUnmeasured() {
 // pull request, and the run record says what the check showed.
 // Returns { fixed: true } (no pull request), { stop: reason } (the check may still hold the GPUs), or {}.
 // claim: the number a performance problem's fix must restore, which main has to reach as well.
+// The check first records the image's packages, and the record is this invocation's: a retry of the task can
+// reuse the run directory in another container, whose image an earlier record does not describe, and restoring
+// from that one would put the old image's versions into the new one. The check and the call that cleans up
+// after it are given the same path, which holds across the check's own retries and no further.
+const RECHECK_ENV_ID = Date.now().toString(36);
 async function recheckOnMain(extraGates, claim) {
   enter('PR');
   const label = 'verify_engineer:recheck';
+  const envRecord = `${C.run_dir}/recheck_env.${RECHECK_ENV_ID}.txt`;
   // The check runs the fix's gate again: it has at least the time the run granted the reproduction (a Verify
   // round's grant is the verify engineer's own already; never past a timeout the user gave, under which nothing
   // is granted).
@@ -1762,7 +1771,8 @@ async function recheckOnMain(extraGates, claim) {
   // Like a Verify round, the call is one session: an answer that cannot be used goes to the next attempt, which
   // has a limit of its own, not to a second session under what is left of the first's.
   const rc = await call('verify_engineer', 'recheck',
-    inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('verify_engineer', 'recheck')) }),
+    inputs({ extra_gates: extraGates, claim: claim || '', time_limit_min: minutes(timeoutFor('verify_engineer', 'recheck')),
+      env_record: envRecord }),
     RECHECK, label, ONE_SESSION);
   const stopped = (why, left) => {
     note('PR', 'fail', why);
@@ -1778,11 +1788,14 @@ async function recheckOnMain(extraGates, claim) {
       return stopped('the check on the latest main timed out and may still be running on the GPUs: no pull request is prepared next to it. '
         + `${kept}; stop the check, then run the task again`, 'the check on the latest main timed out and may have left its servers running');
     }
-    const gpus = await call('verify_engineer', 'gpus', inputs({ round: 'recheck' }), GPU_CHECK, 'verify_engineer:gpus#recheck');
+    const gpus = await call('verify_engineer', 'gpus', inputs({ round: 'recheck', env_record: envRecord }), RECHECK_CLEANUP,
+      'verify_engineer:gpus#recheck');
+    // No answer, or one that does not say whether the image is as it was recorded: neither is a clean image.
     if (!gpus) {
-      ATTENTION.push({ call: label, issue: 'returned no answer and may have left its servers running: stop them before reusing its GPUs' });
-      return stopped('the check on the latest main returned nothing, and what it left on the GPUs could not be stopped or checked: '
-        + `no pull request is prepared next to it. ${kept}`, 'the check on the latest main may have left its servers running');
+      ATTENTION.push({ call: label, issue: 'returned no answer and may have left its servers running, or the image changed: stop them, and '
+        + `compare the image's packages with ${envRecord}, before reusing its GPUs` });
+      return stopped('the check on the latest main returned nothing, and what it left on the GPUs and in the image could not be stopped '
+        + `or checked: no pull request is prepared next to it. ${kept}`, 'the check on the latest main may have left its servers running');
     }
     // The check installs nothing in place, and one that left no answer cannot say that it did not: the same call
     // compares the image's packages with the record the check wrote first, and puts back what differs. What it

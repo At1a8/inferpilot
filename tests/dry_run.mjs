@@ -919,7 +919,7 @@ const scenarios = [
         && prPhase(silent).some((p) => p.verdict === 'recheck' && /was not run again on the latest main.*what it left was stopped$/.test(p.summary)),
         `${mode}: without an answer the pull request is prepared once what the check left is stopped: ${ended(silent)}`);
       const busy = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
-        'verify_engineer:gpus': (ins) => ({ in_use: ins.round === 'recheck' ? 'GPU 1: VRAM 12%, pids 777' : '' }) });
+        'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? { in_use: 'GPU 1: VRAM 12%, pids 777', env_changed: '' } : { in_use: '' }) });
       check(busy.result.status === 'ready_for_review' && prPhase(busy).some((p) => /another job uses a pinned GPU: GPU 1/.test(p.summary)),
         `${mode}: another job on a GPU is said, and stops nothing, as before a Verify round: ${ended(busy)}`);
       const unknown = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null,
@@ -940,6 +940,21 @@ const scenarios = [
         'verify_engineer:gpus': () => ({ in_use: '', env_changed: '' }) });
       check(clean.result.status === 'ready_for_review' && clean.keys.includes('pr_engineer:pr'),
         `${mode}: one that is as recorded stops nothing: ${ended(clean)}`);
+      // An answer that does not say whether the image is as recorded is no answer: silence is not a clean image.
+      const unsaid = await run({ mode, task: 't' }, { 'verify_engineer:recheck': () => null, 'verify_engineer:gpus': () => ({ in_use: '' }) });
+      check(unsaid.result.status === 'blocked' && unsaid.result.stopped_at === 'PR' && !unsaid.keys.includes('pr_engineer:pr')
+        && unsaid.result.attention.some((a) => a.call === 'verify_engineer:recheck' && /or the image changed/.test(a.issue))
+        && prPhase(unsaid).some((p) => p.verdict === 'fail' && /on the GPUs and in the image could not be stopped or checked/.test(p.summary)),
+        `${mode}: a cleanup that leaves env_changed out prepares no pull request: ${ended(unsaid)}`);
+      // The record of the image's packages is this invocation's: the check and the cleanup after it get the same
+      // path, which no earlier invocation's record in the same run directory has.
+      const rcIns = (silent.calls.find((c) => c.key === 'verify_engineer:recheck') || { ins: {} }).ins;
+      const record = rcIns.env_record || '';
+      check(new RegExp(`^${RUN}/recheck_env\\.[0-9a-z]+\\.txt$`).test(record) && stops[0].ins.env_record === record,
+        `${mode}: the check and its cleanup are given one record of this invocation: ${record} / ${stops[0].ins.env_record}`);
+      // Before an ordinary Verify round the same role checks the GPUs alone, and is asked nothing of the image.
+      const before = silent.calls.find((c) => c.key === 'verify_engineer:gpus' && c.ins.round !== 'recheck');
+      check(before && !('env_record' in before.ins), `${mode}: an ordinary GPU check is given no record: ${before && JSON.stringify(Object.keys(before.ins).filter((k) => k.startsWith('env')))}`);
     }
     // A test the fix corrected is still the fixed one when it is collected from the task worktree: for a failing test, the
     // test file is from main too. An issue's reproduction has no such file.

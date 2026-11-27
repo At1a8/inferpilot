@@ -20,7 +20,8 @@ export const DEFAULTS = {
   'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', files_changed: ['x.py'], kernel_handoff: null }),
   'implementer:rollback': () => ({ wp: 'x', reset_to: 'base', clean: true }),
   'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
-  'verify_engineer:gpus': () => ({ in_use: '' }),
+  // the call after a check on the latest main that left no answer also says what it could not put back in the image
+  'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? { in_use: '', env_changed: '' } : { in_use: '' }),
   'verify_engineer:verify': () => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass' }, failures: [], ledger_path: `${RUN}/experiment_ledger.md` }),
   'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'race in hook' }),
   'investigator:diagnose': () => ({ verdict: 'fix_needed', root_cause: 'stale import', work_packages: [WP('WP1')] }),
