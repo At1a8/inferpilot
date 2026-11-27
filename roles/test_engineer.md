@@ -57,6 +57,8 @@ clock can start before your session does; on the call that finishes a gate, `inc
    call before returned no answer, find what that call started from `RUN_DIR/logs/` and the ledger
    first. This call leaves nothing running: before it returns it stops what the call before left, by
    the `<log>`s that call gave, with what it started itself, and the GPUs it checks are free of both.
+   Its `left_running` speaks for the gate as a whole: what the call before could not stop is named
+   there too, also where that call's own answer could not be used and said nothing of it.
    No fix round is spent on it; a gate still without a result after this call stops the package for a
    human, its commit kept.
 1. Check out `commit` in the task worktree; confirm it is the commit you were given and the tree is
@@ -136,6 +138,10 @@ the pull request brought fails, or an existing test of the repository, or its ow
 only what the run added on top fails, a test the implementer wrote in a commit of its own after the
 author's. Where both fail, it is `pr`. InferPilot repairs only what the run added, answers a failure
 of the pull request with a comment on it, and stops for a human where the gate does not say which.
+With `added_to` the package is the run's own, added on top of such a pull request (a test the review
+asked for): say `failed_in` in the same way when its gate fails. `pr` there is a defect of the pull
+request that the addition shows, in the author's code or tests; anything else is the addition's,
+which the next round repairs.
 
 Every answer has `incomplete`, `""` when every check has a result or one that ran has failed: a failed
 gate names nothing there, and a check it did not run stays `null`. A gate with checks still without a

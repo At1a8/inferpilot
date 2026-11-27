@@ -102,11 +102,16 @@ What the run adds on top of the pull request is the run's own, and stays apart f
 the pull request brought none, a change the review or the PR phase asked for. A failure there is
 repaired there (the unit gate says `failed_in`, the investigator `in_additions`), and is never held
 against the pull request; a gate that cannot say whose failure it is stops the run for a human.
-Verify runs again after such additions, and a failure of the pull request found then is answered
-as one found the first time. Before the pull request is taken off the branch, every round has to
-have said that it left nothing running (`left_running`, in every unit and Verify answer), and after
-it the branch has to be at the task's base (`base_commit`, which Setup returns): the run's own fix
-starts on no other commit.
+The gates run again after such additions, the unit gate of each addition and Verify, and a failure
+of the pull request found then is answered as one found the first time. The pull request stays on
+the branch until the comment for it is drafted, which reads the branch, and is taken off with
+everything else after that. Before it is, every round has to have said that it left nothing running
+(`left_running`, in every unit and Verify answer; after a failed Verify round that does not say,
+the GPUs are checked first, and nothing is investigated where they cannot be, or where one that was
+idle before the round is in use), and after it the branch has to be at the task's base
+(`base_commit`, which Setup returns): the run's own fix starts on no other commit. A measurement
+that fails after the pull request passed one is not the pull request's to answer for: what changed
+between the two is the run's own additions, or noise, and a human decides.
 
 **A duplicate is answered, not worked on twice.** Two reports are one failure when the signature and
 the path that fails are the same, not when the titles are alike: a second model, GPU or flag that fails

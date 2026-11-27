@@ -13,7 +13,9 @@ worktree.
 
 Inputs: `work_package`, `round` (0 for the first attempt), `feedback` (the test engineer's finding from
 the previous round), `verified_work_packages`, `verify_only` (true when the package applies someone
-else's pull request that the run verifies as it is: step 6).
+else's pull request that the run verifies as it is: step 6), `added_to` (the pull request under
+verification that this package is added on top of: the package is yours and is written and repaired
+like any other, in commits of its own after the author's, which stay as they are).
 
 On a retry, Setup leaves what the earlier attempt committed on `refs/inferpilot/restored/<slug>`
 (`director.md`, Setup step 2). Take from it only when `round` is 0 and `feedback` is empty: a later
@@ -78,7 +80,10 @@ the commits like any other. Commits no package of this attempt names stay on the
    return `blocked` with the files that conflict in `conflicts`. That is the pull request's result
    (it no longer applies), which the run reports on it, not a decision you wait for: name the files
    only when git reported the conflict, never for another reason you could not go on. Where the PR
-   brings no test for the failure, add one in a commit of your own after the author's. In a later
+   brings no test for the failure, add one in a commit of your own after the author's. A test of
+   the PR's that cannot fail (the test engineer finds that it passes without the change) is treated
+   the same way: that is no failure of the fix, so add a test of your own that can fail, and say in
+   `notes` which of the PR's tests proves nothing, for the comment. In a later
    round, correct only what is yours (that test); the author's code and tests stay as they are, and
    where they fail, that is what the run reports.
 

@@ -51,7 +51,9 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      `"in_additions": true` when what fails is in what the run added on top of it (a test the
      implementer wrote, a change the review asked for, in commits after the author's): your work
      packages then repair those additions and leave the author's commits alone. Without it the
-     failure is the pull request's: the run reports it there, and nothing is repaired.
+     failure is the pull request's: the run reports it there, and nothing is repaired. Say
+     `in_additions` with whatever verdict you return for a failure that is the additions': the run
+     holds none of them against the pull request.
    - `inconclusive`: say what is known and what experiment would decide it. Add `"attributed": true`
      when the controls show that the failure is the change's although you cannot explain it: the
      same-pattern baseline ran to its end and passed, as often as the change's arm failed. Leave it

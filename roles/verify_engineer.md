@@ -16,6 +16,11 @@ where the servers run (`env_hygiene.md`). Name each pinned GPU another job uses,
 pids, in `in_use`, empty when they are idle: InferPilot warns the user before the round starts, and the
 round goes on. Start nothing.
 
+With `round: after <n>` the call follows round `<n>`, which failed and did not say whether it left
+anything running: what that round started is this run's to stop too, and a GPU still in use after the
+stop is named in `in_use` as above. InferPilot takes one that was idle before the round for one the
+round still holds, and starts no investigation, repair or rollback next to it.
+
 Return: `{"in_use": "GPU 1: VRAM 12%, GPU 40%, pids 777 | ''"}`
 
 ## PHASE=verify
@@ -43,7 +48,11 @@ clock can start before your session does.
    round's first launch and again after the stop (*Killing*): a GPU idle before and in use after is one
    the round still holds. `left_running` names one you cannot stop, and a GPU the round still holds,
    and is the empty string when everything stopped: say one or the other in every answer. After a
-   round that failed, InferPilot starts no investigation, repair or rollback next to what is left.
+   round that failed, InferPilot starts no investigation, repair or rollback next to what is left,
+   and gives a round that asks for more time (`needs_min`) none while something is. Where a failed
+   round leaves the field out, it calls PHASE=gpus once more before anything else works on these
+   GPUs (`round: after <n>`): stop what the run left there and check them, as before a round. A GPU
+   idle before the round and in use after that stop counts as one the round still holds.
    For a fix (issue, ci), launch nothing for G2 until its gate of `extra_gates` has passed and its diff
    has shown that G2 runs (step 2): the base may be the server that does not start, and the
    reproduction needs the GPUs. Then launch only the arms G2 measures.
