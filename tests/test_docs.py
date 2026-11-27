@@ -1138,6 +1138,10 @@ class OutputComparisonTest(unittest.TestCase):
         self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the script")
         self.assertIn("\n  %s: str," % self.FIELD, intake, "the intake cannot return the script")
         self.assertIn("\n  %s: String(A.%s || '').trim()," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
+        use = re.search(r"\n  whenToUse: '(.*)',\n", src).group(1)
+        self.assertIn("args.%s (issue, ci: the user\\'s own test that compares the outputs of a model that answers no text questions" % self.FIELD,
+                      use, "inferpilot.js's whenToUse does not tell the caller of the script")
+        self.assertIn("asked for it after Setup, since InferPilot has no template for it", use)
         for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
             body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
             self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
@@ -1255,6 +1259,11 @@ class OutputComparisonTest(unittest.TestCase):
             for stale in ("What its outputs are worth is the reproduction's or the failing test's to show", "G2 says that gsm8k cannot be put to it",
                           "nor one for a model that answers no text questions"):
                 self.assertNotIn(stale, self.flat(path), "%s still leaves such a fix unmeasured" % path)
+        # The playbook said that the fix for such a model gives no table: it gives what the comparison showed.
+        self.assertNotIn("one for a model that answers no text questions says that instead", self.flat("knowledge/pr_playbook.md"),
+                         "knowledge/pr_playbook.md still has such a fix say that it changes nothing the server runs")
+        self.assertIn("A fix to tests, documentation or CI files alone says that it changes no code the server runs, and gives no table.",
+                      self.flat("knowledge/pr_playbook.md"))
 
     def test_the_task_definition_and_both_readmes_list_the_script(self):
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")

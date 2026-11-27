@@ -68,11 +68,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*), or, for a
   model that answers no text questions, what the task's own test compared in their place: the
   inputs, the measure and its tolerance, and how the fix's outputs stood against the baseline's (*G2
-  for a model that answers no text questions*); where the
-  base cannot serve the configuration, next to the last commit that served it, named, or alone,
-  saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
-  changes no code the server runs, and gives no table; one for a model that answers no text questions
-  says that instead. The fix of an accuracy problem in CI (a test that failed on a score it measures)
+  for a model that answers no text questions*); where the base cannot serve the configuration, next
+  to the last commit that served it, named, or alone, saying that it has no baseline. A fix to
+  tests, documentation or CI files alone says that it changes no code the server runs, and gives no
+  table. The fix of an accuracy problem in CI (a test that failed on a score it measures)
   shows the score that fell and the score it restores, whatever it changes, a fix to the test alone
   included: by the test's own measurement as it stood before the fix (the set, the number of
   questions, the model, the sampling), with the claim and the command that measures it.
