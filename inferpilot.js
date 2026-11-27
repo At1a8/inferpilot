@@ -1,7 +1,7 @@
 export const meta = {
   name: 'inferpilot',
   description: 'InferPilot: the framework agent for open-source LLM inference frameworks on AMD GPUs (sglang first). It turns one task (an upstream feature to bring to AMD, an AMD user issue, a red AMD CI job, a system-level performance gap) into a verified, reviewable pull request: correct first (independent unit gates, G0 and G2 against a same-pattern baseline, G3 and G4 when the task asks, an investigation loop with controls), then fast (equal-budget G5), within the community rules of knowledge/guardrails.md. mode=scan writes the day\'s report on the framework (the AMD CI on main, user issues by priority, upstream changes AMD needs to follow) and ranks the tasks in it, changing no code. InferPilot never pushes and never posts upstream: it prepares the branch, the PR body and the reply drafts for a human; what it posts goes to its own repository, only with the user\'s GITHUB_TOKEN: the knowledge a run proved, as a pull request for a human to merge, and a scan\'s daily report, as an issue (when the token cannot write there, a local file for a human to share).',
-  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: a fix that changes code the server runs is measured against the base, G2 on gsm8k and G5 on args.client_script; with stop_after at a phase before the fix it needs neither), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci task that can reach a fix: runs the workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the task\'s workload, only when the user takes it and gives the whole workload; on it a feature is judged only to be no slower than the baseline, never on its source\'s gain), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none, since a pull request runs its author\'s code on this machine), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.output_script (issue, ci: the user\'s own test that compares the outputs of a model that answers no text questions, a diffusion, speech or embedding model: the fix\'s with a baseline\'s, which is the base, or the last commit that served the configuration where the base cannot or where its outputs are the failure being fixed; where the run knows no such commit, the fix\'s outputs are kept and reported, not judged; G2 runs it in gsm8k\'s place, and a task that can reach a fix on such a model without one is asked for it after Setup, since InferPilot has no template for it), args.text_model (issue, ci: true or false, the user\'s word on whether the model answers text questions, where Setup took it for the wrong kind; with true G2 runs gsm8k on it and no output_script is asked for), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
+  whenToUse: 'Pass args.inferpilot_dir (absolute path of the InferPilot checkout, required) and the task, either as args.request (the user\'s words, any language; the Intake phase turns it into a task definition) or as the task-definition fields of templates/task_definition.md: args.mode (feature | issue | ci | perf | scan), args.task (the upstream PR or design, issue URL, CI job or tracker cluster, or performance goal), args.framework_dir (the framework checkout; for sglang the image\'s /sgl-workspace/sglang by default), args.model_path (required for feature and perf, and for an issue or a ci task that can reach a fix: a fix that changes code the server runs is measured against the base, G2 on gsm8k and G5 on args.client_script; with stop_after at a phase before the fix it needs neither), args.workload (required for perf: the fixed benchmark every measurement uses), args.server_script (required for feature and perf: a script that starts the baseline server; InferPilot sets PORT, HIP_VISIBLE_DEVICES and PYTHONPATH, and EXTRA_ARGS carries the feature flags; or "template", InferPilot\'s templates/harness/server.sh after the model\'s sglang cookbook recipe, only when the user takes it) and args.client_script (required for feature and perf, where G5 measures every change, and for an issue or a ci task that can reach a fix: runs the workload against PORT and writes to OUT_DIR; or "template", InferPilot\'s templates/harness/perf.sh on the task\'s workload, only when the user takes it and gives the whole workload; on it a feature is judged only to be no slower than the baseline, never on its source\'s gain), args.accuracy_script (optional: the user\'s own, run against API_URL with TAG and RESULT_ROOT; without one InferPilot\'s templates/harness/accuracy.sh runs scripts/eval_accuracy.sh), args.harness (values for the templates Setup renders with scripts/harness.py, e.g. {"CONTEXT_LENGTH": 8192}: each parameter takes the task\'s value, else the one the tests of the feature\'s source use, else, for the server, the model\'s sglang cookbook recipe, else the template\'s default), args.goal (what done means), args.framework (default sglang), args.platform, args.gpu_ids, args.container, args.apply_prs (perf: candidate PRs to apply; issue, ci: the open fix PR the run may verify, or none, since a pull request runs its author\'s code on this machine), args.sources, args.since, args.upstream_repos and args.rescan (scan: a report from the last 24 hours makes the run ask before scanning again), args.image (the image a task must run on; by default the newest daily one, and another stops Setup to ask) and args.image_ok, args.bisect_fixed (issue: when the reporter\'s code fails and main does not, find the commit that fixed it), args.confirm_leads (default false: leads, the problems roles met that are not the task\'s, are listed with how to reproduce them; true checks each on the base commit before the report and drafts an issue for those that show there), args.stop_after (a phase title), args.resume_from="implement" with args.run_dir (feature: continue after a human approved design.md), args.auto_approve_design (feature, default true: a design the architect flags, or L3 work, goes on to Implement and the report says no human approved it; false makes it wait at Design for a human; stop_after still stops), args.held_out, args.guards and args.sweep (performance checks beyond the workload and goal of the task, each off by default: a held-out operating point the gain must also hold at, guard workloads InferPilot picks, and points beyond those of the workload), args.tune (feature, default false: the feature runs at the configuration of the target PR or design; true lets a work package choose its knobs by measurement), args.long_context and args.stability (correctness gates that run only when the task asks, each off by default: G3, args.long_context_script, the user\'s own needle-in-a-haystack test on long prompts, asked for when a task with long_context on names none since InferPilot has no template for it, and G4, args.client_script run back to back for more than 48 hours against one server, once in a run, which needs a client_script), args.output_script (issue, ci: the user\'s own test that compares the outputs of a model that answers no text questions, a diffusion, speech or embedding model: the fix\'s with a baseline\'s, which is the base, or the last commit that served the configuration where the base cannot or where its outputs are the failure being fixed; where the run knows no such commit, the fix\'s outputs are kept and reported, not judged; G2 runs it in gsm8k\'s place, and a task that can reach a fix on such a model without one is asked for it after Setup, since InferPilot has no template for it), args.text_model (issue, ci: true or false, the user\'s word on whether the model answers text questions, where Setup took it for the wrong kind; with true G2 runs gsm8k on it and no output_script is asked for), args.kernel_backend (none | geak | command) with args.kernel_backend_dir (geak: the GEAK checkout, whose kernel lane runs as an outside program) or args.kernel_backend_command (command; for geak it replaces the default command), args.kernel_budget ({budget} in the command). A definition that lacks something its mode needs returns status=needs_input and starts nothing. Every result ends with next, what comes after the run: tell the user next.say; put each question of next.ask to the user, never answering one yourself, then run inferpilot.js again with the same args plus next.rerun_with, its answers filled in from the user\'s (they merge with the answers already given); offer each of next.start (a scan\'s top tasks) as a new run with its args, and start the one the user picks; next.user is what only the user does (the push, a reply to post, a daily report the director could not share). Operator settings: args.exp_root, args.review_model (the reviewer\'s model, where the runtime takes one per call), args.max_fix_rounds, args.max_investigate_rounds, args.max_review_rounds, args.max_work_packages, args.agent_retries, args.agent_timeout_ms.',
   phases: [
     { title: 'Intake', detail: 'intake: turn a request, or a definition with gaps, into a complete task definition; questions when something is missing' },
     { title: 'Setup', detail: 'director: run dir, the task\'s branch in the framework checkout, the server and client scripts, baseline (not in scan)' },
@@ -543,8 +543,9 @@ const C = {
   lock_idle_hours: String(LOCK_IDLE_HOURS),
   run_dir: '',
   resume_run_dir: String(A.run_dir || ''),
-  // ci: the pull requests the task or the request names for verification, for Classify to look up (existingFix)
-  named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],
+  // issue, ci: the pull requests the task or the request names for verification, for Triage or Classify to look
+  // up (existingFix)
+  named_prs: MODE === 'ci' || MODE === 'issue' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],
   branch: String(A.branch || ''),
   worktree: String(A.worktree || ''),
 };
@@ -839,7 +840,10 @@ const TRIAGE = S({
   // the problem the task names is on another model or launch configuration than the task's own: which one
   model_mismatch: str,
   reason: str,
-  existing_prs: strs,
+  // the open pull requests that fix the problem, the likeliest first, each as Classify gives one (pr, repo,
+  // author, association, head, state: see CLASSIFY) or by its number alone ("#40872"), and the ones the task
+  // names (named_prs), looked up, with their state. The run verifies one on the user's word (existingFix).
+  existing_prs: arr(),
   triage_path: str,
   reply_draft_path: str,
 }, ['priority', 'category', 'action', 'triage_path']);
@@ -1332,12 +1336,12 @@ function nextSteps(status, at) {
       + (unknown.length ? ` ${named(unknown)} ${unknown.length === 1 ? 'has' : 'have'} no effort estimate: how long `
         + `${unknown.length === 1 ? 'it takes' : 'they take'} is unknown.` : '')
       + `${shared}${report}`;
-    // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
-    // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
+    // A scan names what it found, not what the user allows: the pull request an issue or a ci run may apply is not
+    // offered with the task, so that the run started from it asks. The task definition a model wrote is taken by its
     // fields and no further: an answer or a request it put next to them would stand for the user's word.
     // Nor is what a model is the scan's to say for the user (text_model): Setup says, and the user corrects it.
     const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
-      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
+      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && ['ci', 'issue'].includes(String(def.mode).trim().toLowerCase()))));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
       .map((t) => ({ rank: t.rank, task: t.task, ...(t.effort ? { effort: t.effort } : {}),
         long: t.long === true ? true : gpuHours(t) === null ? null : false,
@@ -1394,7 +1398,9 @@ function nextSteps(status, at) {
     // launched the model, said the opposite: a word that was disproved is not handed on. The record of this
     // run keeps it as it was given.
     const disproved = MODEL_WORD !== null && typeof C.text_model === 'boolean' && C.text_model !== MODEL_WORD;
-    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)
+    // Nor does the word to apply a pull request go with it (apply_prs): it was given for this run's problem, and
+    // the run on another problem asks for its own.
+    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir', 'apply_prs'].includes(k)
       && !(disproved && k === 'text_model')));
     const issue = issueOf(def.task);
     out.start = R.other_problems.map((p, i) => {
@@ -2560,6 +2566,7 @@ async function existingFailed(prs, at, why) {
   C.existing_pr_result = R.existing_pr_result = { prs, failed_at: at, why: String(why || '').slice(0, 1200), comment_path: '' };
   // What is on the branch from here on is the run's own: the PR phase writes no verification comment for it.
   C.existing_prs = [];
+  delete C.existing_pr;
   const cm = await call('pr_engineer', 'comment', inputs({ failed_at: at, failure: why }), PR_COMMENT);
   const path = cm ? String(cm.comment_path || '').trim() : '';
   if (path) C.existing_pr_result.comment_path = path;
@@ -2835,6 +2842,23 @@ async function runIssue() {
     return finish('needs_input', 'Triage');
   }
 
+  // An open pull request that fixes the problem is verified in place of a fix of the run's own (push_existing_pr).
+  // That runs its author's code on this machine, so the run applies one only on the user's word, as for a CI
+  // failure (existingFix): the task names it (apply_prs) or says none. A run that can reach the fix without that
+  // word is asked here, before the reproduction: asked after it, the answer would cost the reproduction again.
+  // One that stops before its fix applies nothing, and is not asked. A pull request the task names is looked up
+  // whatever the triage decided (named_prs): the word is for that pull request, and the record says what became of it.
+  const worded = namedPrs();
+  const theirs = tri.action === 'push_existing_pr' || worded.said.length || worded.read.length ? existingFix(tri.existing_prs, false) : null;
+  const askWhich = (at) => {
+    note(at, 'needs_input', `${theirs.ask.who}: open, and said to fix this problem. Verifying it runs its code on this machine: `
+      + 'the run applies it only on the user\'s word');
+    R.questions = [theirs.ask.question];
+    return finish('needs_input', at);
+  };
+  const stopAt = liveStopAfter();
+  if (theirs && theirs.ask && stopAt !== 'now' && !BEFORE_A_FIX.issue.includes(stopAt)) return askWhich('Triage');
+
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
   // also for an existing fix PR.
   enter('Reproduce');
@@ -2908,23 +2932,32 @@ async function runIssue() {
   if (stopHere('Reproduce')) return finish('stopped', 'Reproduce');
 
   const gates = [{ gate: 'issue_repro', cmd: reproCmd, expect: 'fixed' }];
-  if (tri.action === 'push_existing_pr') {
+  if (theirs) {
+    if (theirs.foreign.length) {
+      note('Reproduce', 'existing_fix', `${theirs.foreign.map((p) => p.pr).join(', ')}: named as a fix, but not as a pull request of this `
+        + 'repository (#<n>); not applied');
+    }
+    if (theirs.refused.length) note('Reproduce', 'existing_fix', `named for verification, and not applied: ${theirs.refused.join('; ')}`);
     // An existing fix has no Diagnose phase: a stop named for it still ends the run before the fix is applied.
-    if (stopHere('Diagnose')) {
+    if ((theirs.apply || theirs.ask) && stopHere('Diagnose')) {
       note('Reproduce', 'stopped', 'stop_after=Diagnose: an existing fix PR is applied without a Diagnose phase, so the run stops before applying it');
       return finish('stopped', 'Reproduce');
     }
+    // The word is still missing where the stop that made the question idle was lifted since (the control file).
+    if (theirs.ask) return askWhich('Reproduce');
+  }
+  if (theirs && theirs.apply) {
     const lacking = askForFix('Reproduce');
     if (lacking) return lacking;
     // One pull request is verified in a run, as for a CI failure: several applied together would show nothing of
     // each. The PR phase writes the comment for it, and the result says to post that, not to push a branch.
-    const listed = (tri.existing_prs || []).map((p) => String(p || '').trim()).filter(Boolean);
-    const prs = listed[0] || '';
-    if (prs) C.existing_prs = [prs];
-    if (listed.length > 1) note('Reproduce', 'existing_fix', `${prs} is verified. Not verified in this run, which takes one: ${listed.slice(1).join(', ')}`);
-    const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs} and complete what verification needs`,
+    const { pr: prs, head } = theirs.apply;
+    C.existing_prs = [prs];
+    note('Reproduce', 'existing_fix', `${describePr(theirs.apply)}: open, and said to fix this problem; verified in place of a fix of the `
+      + `run's own${theirs.others.length ? `. Not verified in this run, which takes one: ${theirs.others.map((p) => p.pr).join(', ')}` : ''}`);
+    const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${prs}${head ? ` at ${head}` : ''} and complete what verification needs`,
       test: 'the issue reproduction no longer fails; the PR\'s own tests pass', files: [], depends_on: [] };
-    const tried = await deliver([wp], gates, issueClaim, runPerf, prs || 'the existing fix PR');
+    const tried = await deliver([wp], gates, issueClaim, runPerf, prs);
     if (tried !== EXISTING_FAILED) return tried;
     // The existing fix did not pass: its comment is drafted, the task branch is back at the base, and the run goes
     // on to a fix of its own from here, as for an issue nobody had opened a pull request for. Its priority is the
@@ -2932,9 +2965,17 @@ async function runIssue() {
     // (issue_triage.md §2), and only a P0 gets a workaround here for a defect that is a component's.
     const without = String(tri.priority_without_pr || '').trim();
     if (without && without !== C.priority) {
-      note('Triage', 'priority', `${C.priority} while ${prs || 'a fix PR'} was open, ${without} without a usable one: the run goes on as ${without}`);
+      note('Triage', 'priority', `${C.priority} while ${prs} was open, ${without} without a usable one: the run goes on as ${without}`);
       C.priority = R.priority = without;
     }
+  } else if (theirs && theirs.others.length) {
+    // The user's word names none of the open pull requests, or says none: the run fixes the problem itself. A
+    // pull request is still open for it, so its priority stays the one it has with one.
+    note('Reproduce', 'existing_fix', `${theirs.others.map(describePr).join(', ')}: open, and not applied: the task names the pull `
+      + `requests the run may apply (apply_prs: ${theirs.said.join(', ')}), and none of these. The run fixes the problem itself`);
+  } else if (tri.action === 'push_existing_pr') {
+    note('Reproduce', 'existing_fix', 'the triage found an open fix (push_existing_pr) and returned no open pull request of this '
+      + 'repository to apply: the run fixes the problem itself');
   }
 
   enter('Diagnose');
@@ -2980,17 +3021,21 @@ async function runIssue() {
 // classification returns as open, with the commit its branch is at, is applied, so that a closed or a merged
 // one is not reported as an open fix and the run knows which revision it verified.
 // One pull request is verified in a run: several applied together would show nothing of each.
+// An issue goes by the same word (runIssue). Its triage lists the open pull requests, and may give one by its
+// number alone: `needHead` false takes such a one for open, and leaves the commit to the implementer, whose
+// fetch the ledger records.
 const describePr = (p) => `${p.pr}${p.author ? ` by ${p.author}` : ''}${p.association ? ` (${p.association.toLowerCase()})` : ''}`;
-function existingFix(found) {
+function existingFix(found, needHead = true) {
   const { said, read } = namedPrs();
   const isPr = (p) => /^#\d+$/.test(p);
-  const named = (Array.isArray(found) ? found : []).filter((p) => p && typeof p === 'object')
+  const named = (Array.isArray(found) ? found : [])
+    .map((p) => (typeof p === 'string' && !needHead ? { pr: p, state: 'open' } : p)).filter((p) => p && typeof p === 'object')
     .map((p) => ({ pr: String(p.pr || '').trim(), repo: String(p.repo || '').trim().toLowerCase(), author: String(p.author || '').trim(),
       association: String(p.association || '').trim().toUpperCase(), head: String(p.head || '').trim(),
       state: String(p.state || '').trim().toLowerCase() }))
     .filter((p) => p.pr);
   const here = named.filter((p) => isPr(p.pr));
-  const usable = here.filter((p) => p.state === 'open' && p.head);
+  const usable = here.filter((p) => p.state === 'open' && (p.head || !needHead));
   const refs = (words) => [...new Set(words.map(prRef).filter(Boolean))];
   const byUser = refs(said);
   const seems = refs(read); // what the Intake read into the request: asked about, first among the candidates
@@ -3002,7 +3047,7 @@ function existingFix(found) {
   // What the task or the request names and the run cannot apply, each with why.
   const refused = (byUser.length ? byUser : seems).filter((ref) => !usable.some((p) => samePr(ref, p))).map((ref) => {
     const p = here.find((x) => samePr(ref, x));
-    return `${ref}: ${!p ? 'the classification did not find it as a pull request of this repository'
+    return `${ref}: ${!p ? `the ${needHead ? 'classification' : 'triage'} did not find it as a pull request of this repository`
       : p.state !== 'open' ? `it is ${p.state || 'not said to be open'}` : 'the commit its branch is at is not known'}`;
   });
   const first = usable.filter((p) => seems.some((ref) => samePr(ref, p)));
@@ -3137,9 +3182,11 @@ async function runCi() {
       + `own${fix.others.length ? `. Not verified in this run, which takes one: ${fix.others.map((p) => p.pr).join(', ')}` : ''}`);
     const wp = { id: 'WP1', kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`,
       test: 'the failing test passes on every lane it failed on; the PR\'s own tests pass', files: [], depends_on: [] };
-    return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');
-  }
-  if (fix.others.length) {
+    const tried = await deliver([wp], gates, ciClaim, perfFailure ? true : 'fix', pr);
+    if (tried !== EXISTING_FAILED) return tried;
+    // The existing fix did not pass: its comment is drafted, the task branch is back at the base, and the run goes
+    // on to Bisect and a fix of its own, as for a failure nobody had opened a pull request for (ci_triage.md §2).
+  } else if (fix.others.length) {
     note('Classify', 'existing_fix', `${fix.others.map(describePr).join(', ')}: open, and not applied: the task names the pull requests `
       + `the run may apply (apply_prs: ${fix.said.join(', ')}), and none of these. The run fixes the failure itself`);
   }

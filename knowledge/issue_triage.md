@@ -63,7 +63,7 @@ Judgement calls, decided once so they are applied the same way every time:
 | Action | When | Output |
 |---|---|---|
 | `reproduce` | no usable fix exists | reproduction on the reporter's configuration, then diagnosis and a fix PR |
-| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
+| `push_existing_pr` | an open fix PR exists | on the user's word (`apply_prs`): verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
 | `close_fixed` | the fix is merged and covers every point | verification on main and a closing comment draft |
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
@@ -72,6 +72,18 @@ Judgement calls, decided once so they are applied the same way every time:
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**An existing fix is verified on the user's word.** Verifying a pull request runs its author's code and
+tests on this machine, next to the keys the agents hold. The run applies one only on the user's word,
+whoever wrote it, as for a CI failure (`ci_triage.md` §2, which says what counts as that word): the
+task names the pull request (`apply_prs`), or says `none`. The triage's action (`push_existing_pr`) is
+no such word. A run that can reach the fix without it stops after Triage and asks which one to verify,
+or none, before anything is reproduced: asked later, the answer would cost the reproduction a second
+time. A run that stops before its fix applies nothing, and is not asked. With `none` the run fixes the
+problem itself, with a diagnosis, at the priority the problem has while a pull request is open for it.
+One pull request is verified in a run, the one the user names; the others are named in the run record.
+A pull request the task names is looked up whatever the triage's action: where the triage returns it
+open it is verified on that word, and where it does not, the record says why it was not.
 
 **An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
 it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for

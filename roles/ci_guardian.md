@@ -125,7 +125,9 @@ Then:
    its author, the author's association with the repository as the API gives it
    (`author_association`), its head commit and its `state` (`open`). The run verifies one of them on
    this machine in place of finding the culprit and fixing the failure a second time (`ci_triage.md`
-   §2), and no bisect follows. It does so only on the user's word, whoever the author is: the
+   §2), and no bisect follows where it passes. One that does not pass gets a comment with what the
+   run measured, and the run then bisects and fixes the failure itself. It applies one only on the
+   user's word, whoever the author is: the
    association is for the user to read, and proves no right to put code on main. One that has merged
    is not listed: main has its fix, and what still fails there it does not fix. One in another
    repository (a component's) is not listed either: name it in the triage record.
@@ -160,6 +162,12 @@ Return:
 ```
 
 ## PHASE=bisect
+
+With `existing_pr_result`, a pull request for this failure was verified first and did not pass (the
+pull request, where its verification failed and why; `ci_triage.md` §2). The task branch is back at
+the base, and the fix is the run's own to plan. What that pull request changed and what it failed
+is evidence of where the cause is and is not: use it, and plan from the culprit, not as a patch on
+that pull request.
 
 1. Read the diffs of the commits merged in the window that touch the failing test's import graph
    first; the common AMD breakages are listed in `ci_triage.md` §3.

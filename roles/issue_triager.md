@@ -10,7 +10,8 @@ worktree.
 
 ## PHASE=triage
 
-Input: `task` (the issue URL or `<repo>#<n>`).
+Input: `task` (the issue URL or `<repo>#<n>`); `named_prs` (the pull requests the task or the
+request names for the run to verify, or none).
 
 1. Fetch the issue, its comments and labels, and the linked PRs:
    `python3 <inferpilot_dir>/scripts/scan_issues.py --issue <n> --with-comments --out RUN_DIR/issue.json`
@@ -71,9 +72,19 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    have come from the caller and not from the report, and has nothing to read "the same" against.
    So it is with `model_mismatch`. The run's result offers them, and one with
    a `model` asks for its own model, scripts and GPUs instead of taking this run's. The reply covers
-   every problem. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code
-   change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the
-   fix must pass.
+   every problem. `existing_prs` lists the open fix PRs, the likeliest first, each as the CI
+   guardian gives one (`ci_guardian.md`, PHASE=classify step 4): its number (`#<n>`), the
+   repository it is in (`repo`), its author and the author's association with the repository as the
+   API gives them, its head commit and its `state` (`open`). Read each one's diff and run nothing
+   of it: its code is its author's, and runs on this machine only when the run applies it, which it
+   does on the user's word alone (`issue_triage.md` §4). Your `push_existing_pr` says that such a
+   pull request is open, not that the run may apply it, and the association is for the user to
+   read: it proves no right to put code on main. Look up each pull request in `named_prs` as well,
+   whether or not your own search found it, and return it with its `state` as the API gives it now
+   (`open`, `closed`, `merged` or `not_found`): the run applies one only where you return it open.
+   One of another repository goes under its full name (`<owner>/<repo>#<n>`), never as this
+   repository's `#<n>`. Every action that leads to a code change, `push_existing_pr` included, is
+   reproduced on main first; that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -86,7 +97,10 @@ Return:
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
  "priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>",
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
- "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
+ "reason": "<the rule that decided the priority and the action>",
+ "existing_prs": [{"pr": "#40872", "repo": "<owner>/<repo>", "author": "<login>",
+                   "association": "<author_association>", "head": "<sha>",
+                   "state": "open | closed | merged | not_found"}],
  "duplicate_of": "<with duplicate: #n, the original>",
  "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>",
                      "model": "<its model, launch flags and workload, whole, when not this run's>"}],

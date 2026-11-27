@@ -134,7 +134,7 @@ Return:
  "pr_body_path": "/abs/RUN_DIR/pr_body.md", "push_command": "git -C /sgl-workspace/sglang push <remote> inferpilot/<slug>"}
 ```
 
-## PHASE=comment (issue: an existing fix PR that did not pass verification)
+## PHASE=comment (issue, ci: an existing fix PR that did not pass verification)
 
 Inputs: `existing_pr_result` (`prs`: the pull request the run applied; `failed_at`: Implement, Verify
 or Performance; `why`: what failed there), `failed_at` and `failure`, the same two; the ledger.
@@ -147,8 +147,8 @@ request. You change no code and run nothing: every number comes from the ledger.
    - what was verified: the pull request and the commit of it the run applied, the base commit, the
      image, the GPUs, the model and the command;
    - what did not pass, with the gate, the counts and short log excerpts: it no longer applies to main
-     (the files that conflict), its own tests fail, the reproduction still fails, its accuracy or its
-     speed against the base (both arms' numbers);
+     (the files that conflict), its own tests fail, the reproduction or the failing CI test still
+     fails, its accuracy or its speed against the base (both arms' numbers);
    - what the investigator found, as a finding where an experiment showed it and as a hypothesis where
      none did;
    - what passed, since a comment that lists only failures misleads.

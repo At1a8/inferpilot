@@ -98,8 +98,18 @@ that cites a failure does not always fix it. The run applies it to main and veri
 fix of its own: the failing test is its gate, on every lane it failed on, and its accuracy and speed
 are measured by what it changes (§4). It ends in a verification comment for that pull request, drafted
 for a human to post, with what was run, on which image and hardware, at which commit of the pull
-request, and the results (`pr_playbook.md` §Attribution). No second pull request is opened for the same
-failure. A fix that has merged needs none of this: main has it.
+request, and the results (`pr_playbook.md` §Attribution). No second pull request is opened for a
+failure that one fixes. A fix that has merged needs none of this: main has it.
+
+One that does not pass is answered, then replaced, as for an issue (`issue_triage.md` §4, *An
+existing fix that does not pass is answered, then replaced*). It is verified as it is, and nothing
+is repaired on top of it: where it no longer applies to main, its own tests fail, the failing test
+still fails, or it loses accuracy or speed against the base, the run drafts a comment for that pull
+request with what it measured (`RUN_DIR/pr_comment.md`, for a human to post), takes the pull request
+off the task branch, and goes on to Bisect and a fix of its own, as for a failure nobody had opened a
+pull request for. That fix's pull request names the earlier one, and says in one sentence what it
+did not pass. Only what is shown to be the pull request's counts against it: where that is not
+shown, the run stops for a human, as it does for an issue.
 
 Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents
 hold. The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks

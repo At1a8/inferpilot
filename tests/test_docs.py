@@ -291,19 +291,31 @@ class CiExistingFixTest(unittest.TestCase):
                 # the word decides when it names a pull request or says none, and one of the two only
                 ("const none = said.some((w) => /^\"?none\"?$/i.test(w));\n  const decided = none ? !byUser.length : byUser.length > 0;",
                  "an answer that names nothing is taken for none"),
-                ("const usable = here.filter((p) => p.state === 'open' && p.head);", "a closed or a merged pull request, or one at no known commit, is applied"),
+                ("const usable = here.filter((p) => p.state === 'open' && (p.head || !needHead));",
+                 "a closed or a merged pull request is applied, or a ci run applies one at no known commit"),
+                # an issue's triage may give a pull request by its number alone: it lists the open ones, and the implementer records the head
+                ("function existingFix(found, needHead = true) {", "a ci run takes a pull request without the commit its branch is at"),
+                (".map((p) => (typeof p === 'string' && !needHead ? { pr: p, state: 'open' } : p)).filter((p) => p && typeof p === 'object')",
+                 "an issue's pull request given by its number is dropped, or a ci run takes a bare number for an open pull request"),
                 ("const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;",
                  "a pull request the user did not name is applied, or several are applied together"),
                 ("if (!decided && candidates.length) {", "the user is not asked, is asked again after deciding, or is not asked again after an "
                                                          "answer that decides nothing"),
-                ("named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],",
-                 "Classify is not told which pull requests the task names, with their repositories, to look them up"),
+                ("named_prs: MODE === 'ci' || MODE === 'issue' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],",
+                 "Classify or Triage is not told which pull requests the task names, with their repositories, to look them up"),
                 ("out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };", "a field the task left blank wins over the answer, and the run asks again"),
                 ("const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))\n"
-                 "      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && ['ci', 'issue'].includes(String(def.mode).trim().toLowerCase()))));",
                  "a scan offers a ci task with a pull request to apply, as a field or as an answer a model wrote"),
-                # an issue's existing fix: one pull request, and the roles after it know which
-                ("const prs = listed[0] || '';\n    if (prs) C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several")):
+                # an issue's existing fix: the same word, asked for before the reproduction by a run that can reach its fix
+                ("const theirs = tri.action === 'push_existing_pr' || worded.said.length || worded.read.length ? existingFix(tri.existing_prs, false) : null;",
+                 "an issue's open fix is applied on the triage's action, without the user's word, or a pull request the task names is not looked at"),
+                ("if (theirs && theirs.ask && stopAt !== 'now' && !BEFORE_A_FIX.issue.includes(stopAt)) return askWhich('Triage');",
+                 "an issue is asked after the reproduction, which the answer then costs again, or a run that stops before its fix is asked"),
+                ("    if (theirs.ask) return askWhich('Reproduce');", "a stop the control file lifted lets an issue's pull request be applied without the word"),
+                ("const { pr: prs, head } = theirs.apply;\n    C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several"),
+                # a follow-up on another problem of the report asks for itself
+                ("!['stop_after', 'resume_from', 'run_dir', 'apply_prs'].includes(k)", "the word given for one problem is handed to the run on another")):
             self.assertIn(said, src, why)
         self.assertNotIn("MAINTAINERS", src, "the run still applies a pull request on what a model says of its author")
         ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
@@ -315,7 +327,8 @@ class CiExistingFixTest(unittest.TestCase):
                 ("C.existing_prs = [pr];", "the roles after Classify do not know which pull request is under verification"),
                 ("kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`",
                  "the pull request is not applied as a work package, or not at the commit the classification read"),
-                ("return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');", "the existing fix is not held to the failing test and the fix's gates")):
+                ("const tried = await deliver([wp], gates, ciClaim, perfFailure ? true : 'fix', pr);",
+                 "the existing fix is not held to the failing test and the fix's gates, or is not verified as someone else's")):
             self.assertIn(said, ci, why)
         self.assertLess(ci.index("const fix = existingFix(cl.existing_prs);"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
         self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("const fix = existingFix(cl.existing_prs);"),
@@ -333,7 +346,7 @@ class CiExistingFixTest(unittest.TestCase):
                 ("knowledge/ci_triage.md", "the failing test is its gate, on every lane it failed on, and its accuracy and speed are measured by what it changes"),
                 ("knowledge/ci_triage.md", "It ends in a verification comment for that pull request, drafted for a human to post"),
                 ("knowledge/ci_triage.md", "at which commit of the pull request"),
-                ("knowledge/ci_triage.md", "No second pull request is opened for the same failure"),
+                ("knowledge/ci_triage.md", "No second pull request is opened for a failure that one fixes"),
                 ("knowledge/ci_triage.md", "A fix that has merged needs none of this: main has it"),
                 # whose code the run executes
                 ("knowledge/ci_triage.md", "Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents hold"),
@@ -364,8 +377,8 @@ class CiExistingFixTest(unittest.TestCase):
                                            "goes no further"),
                 ("knowledge/ci_triage.md", "The word has to decide: it names a pull request, or it says `none`"),
                 ("knowledge/ci_triage.md", "Any other answer, or both at once, is asked about again"),
-                ("roles/ci_guardian.md", "It does so only on the user's word, whoever the author is: the association is for the user to read, and "
-                                         "proves no right to put code on main"),
+                ("roles/ci_guardian.md", "It applies one only on the user's word, whoever the author is: the association is for the user to read, "
+                                         "and proves no right to put code on main"),
                 ("roles/ci_guardian.md", "The pull requests in `named_prs` are the ones the task or the request names for verification: look each "
                                          "of them up"),
                 ("roles/ci_guardian.md", "with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`)"),
@@ -408,18 +421,21 @@ class CiExistingFixTest(unittest.TestCase):
                 ("roles/pr_engineer.md", "lists apart what the run added on top of it, commit by commit and why"),
                 ("roles/pr_engineer.md", "None for an existing PR's verification (`push_command` empty)"),
                 ("templates/ci_triage.md", "| open fix PRs |"),
-                ("templates/task_definition.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
-                ("README.md", "A CI failure that an open pull request already fixes skips Bisect"),
+                ("templates/task_definition.md", "`issue`, `ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.md", "An issue or a CI failure that an open pull request already fixes skips Diagnose or Bisect"),
+                ("README.md", "Where the pull request does not pass, the comment says so, and the run goes on to Diagnose or Bisect and fixes "
+                              "the failure itself"),
                 ("README.md", "It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say"),
                 ("README.md", "so the run applies one only when it is named here, whoever wrote it; without it the run asks"),
                 ("README.zh-CN.md", "那个 PR 的代码只有在你点名（`apply_prs`）之后才会在本机运行，任务里没说时运行会先问"),
                 ("README.zh-CN.md", "所以不论作者是谁，只有在这里点名的 PR 才会应用；没给时运行会先问"),
                 ("templates/task_definition.md", "so the run applies one only when it is named here, whoever wrote it"),
-                ("README.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
-                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect"),
-                ("README.zh-CN.md", "`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`")):
+                ("README.md", "`issue`, `ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.zh-CN.md", "issue 或 CI failure 已经有人提了修复 PR 且还开着时，跳过 Diagnose 或 Bisect"),
+                ("README.zh-CN.md", "那个 PR 没通过验证时，评论里会写明，运行接着走 Diagnose 或 Bisect，自己修这个 failure"),
+                ("README.zh-CN.md", "`issue`、`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
-        self.assertIn("args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none",
+        self.assertIn("args.apply_prs (perf: candidate PRs to apply; issue, ci: the open fix PR the run may verify, or none",
                       (ROOT / "inferpilot.js").read_text(encoding="utf-8").split("\n")[3], "whenToUse does not tell the caller of it")
         # The steps of the classification are numbered through: the new one did not leave two fourth steps.
         role = (ROOT / "roles" / "ci_guardian.md").read_text(encoding="utf-8")
@@ -603,12 +619,19 @@ class ExistingFixFailsTest(unittest.TestCase):
                 ("p.guards_ok !== true && 'on a guard workload it is slower than the baseline beyond the noise band',", "the run cannot tell a guard that failed"),
                 ("return existingFailed(existing, 'Performance', `${perf.failed.join('; ')}${perf.summary ? ` (${perf.summary})` : ''}`);",
                  "the comment is written from a reason that names a check which did not fail"),
-                ("const tried = await deliver([wp], gates, issueClaim, runPerf, prs || 'the existing fix PR');", "an issue's existing fix is not verified as someone else's"),
-                ("if (tried !== EXISTING_FAILED) return tried;", "the run ends where its own fix should begin")):
+                ("const tried = await deliver([wp], gates, issueClaim, runPerf, prs);", "an issue's existing fix is not verified as someone else's"),
+                # a ci task takes the same path: the pull request is verified as someone else's, and the run's own fix follows a bisect
+                ("const tried = await deliver([wp], gates, ciClaim, perfFailure ? true : 'fix', pr);",
+                 "a ci task's existing fix is repaired on top, or the run stops, where it does not pass"),
+                ("  C.existing_prs = [];\n  delete C.existing_pr;", "the roles after the comment are still told of a pull request under verification")):
             self.assertIn(said, src, why)
+        self.assertEqual(src.count("if (tried !== EXISTING_FAILED) return tried;"), 2, "an issue and a ci task both go on to a fix of their own")
         issue = src[src.index("async function runIssue() {"):src.index("async function runCi() {")]
         self.assertLess(issue.index("if (tried !== EXISTING_FAILED) return tried;"), issue.index("enter('Diagnose');"),
                         "the run's own fix does not start with a diagnosis")
+        ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
+        self.assertLess(ci.index("if (tried !== EXISTING_FAILED) return tried;"), ci.index("enter('Bisect');"),
+                        "a ci task's own fix does not start with a bisect")
         # The repair of a fix of the run's own is unchanged: the check for someone else's comes first.
         self.assertLess(src.index("if (existing && inv.in_additions !== true\n"),
                         src.index("const fix = await implementAll(inv.work_packages, undefined, existing);"))
@@ -623,7 +646,7 @@ class ExistingFixFailsTest(unittest.TestCase):
 
     def test_the_documents_say_it(self):
         role = (ROOT / "roles" / "pr_engineer.md").read_text(encoding="utf-8")
-        self.assertIn("\n## PHASE=comment (issue: an existing fix PR that did not pass verification)\n", role)
+        self.assertIn("\n## PHASE=comment (issue, ci: an existing fix PR that did not pass verification)\n", role)
         phase = " ".join(role[role.index("## PHASE=comment"):].split())
         for said in ("Its author is owed what the run saw, whatever becomes of the fix the run now makes itself",
                      "You change no code and run nothing: every number comes from the ledger",
@@ -641,7 +664,41 @@ class ExistingFixFailsTest(unittest.TestCase):
                      '"branch_findings": "<what the leak scan found on the pull request\'s branch | \'\'>"',
                      '"comment_path": "/abs/RUN_DIR/pr_comment.md"'):
             self.assertIn(said, phase)
+        self.assertIn("the reproduction or the failing CI test still fails", phase, "the comment phase serves a ci task too")
         for path, said in (
+                # a ci task takes the same path: the comment, then a bisect and a fix of the run's own
+                ("knowledge/ci_triage.md", "One that does not pass is answered, then replaced, as for an issue (`issue_triage.md` §4"),
+                ("knowledge/ci_triage.md", "the run drafts a comment for that pull request with what it measured (`RUN_DIR/pr_comment.md`, for a "
+                                           "human to post), takes the pull request off the task branch, and goes on to Bisect and a fix of its "
+                                           "own, as for a failure nobody had opened a pull request for"),
+                ("knowledge/ci_triage.md", "That fix's pull request names the earlier one, and says in one sentence what it did not pass"),
+                ("knowledge/ci_triage.md", "Only what is shown to be the pull request's counts against it: where that is not shown, the run stops "
+                                           "for a human, as it does for an issue"),
+                ("roles/ci_guardian.md", "and no bisect follows where it passes. One that does not pass gets a comment with what the run measured, "
+                                         "and the run then bisects and fixes the failure itself"),
+                ("roles/ci_guardian.md", "With `existing_pr_result`, a pull request for this failure was verified first and did not pass"),
+                ("roles/ci_guardian.md", "use it, and plan from the culprit, not as a patch on that pull request"),
+                # an issue goes by the user's word, as a ci task does, and is asked before the reproduction
+                ("knowledge/issue_triage.md", "**An existing fix is verified on the user's word.**"),
+                ("knowledge/issue_triage.md", "The run applies one only on the user's word, whoever wrote it, as for a CI failure (`ci_triage.md` §2, "
+                                              "which says what counts as that word): the task names the pull request (`apply_prs`), or says "
+                                              "`none`. The triage's action (`push_existing_pr`) is no such word"),
+                ("knowledge/issue_triage.md", "A run that can reach the fix without it stops after Triage and asks which one to verify, or none, "
+                                              "before anything is reproduced: asked later, the answer would cost the reproduction a second time"),
+                ("knowledge/issue_triage.md", "A run that stops before its fix applies nothing, and is not asked"),
+                ("knowledge/issue_triage.md", "A pull request the task names is looked up whatever the triage's action: where the triage returns it "
+                                              "open it is verified on that word, and where it does not, the record says why it was not"),
+                ("knowledge/issue_triage.md", "With `none` the run fixes the problem itself, with a diagnosis, at the priority the problem has while a "
+                                              "pull request is open for it"),
+                ("knowledge/issue_triage.md", "| `push_existing_pr` | an open fix PR exists | on the user's word (`apply_prs`): verify it on AMD "
+                                              "hardware"),
+                ("roles/issue_triager.md", "`named_prs` (the pull requests the task or the request names for the run to verify, or none)"),
+                ("roles/issue_triager.md", "each as the CI guardian gives one (`ci_guardian.md`, PHASE=classify step 4)"),
+                ("roles/issue_triager.md", "Your `push_existing_pr` says that such a pull request is open, not that the run may apply it"),
+                ("roles/issue_triager.md", "Look up each pull request in `named_prs` as well, whether or not your own search found it, and return it "
+                                           "with its `state` as the API gives it now"),
+                ("templates/task_definition.md", "so the run applies one only when it is named here, whoever wrote it | | optional | optional | "
+                                                 "optional | |"),
                 ("knowledge/issue_triage.md", "**An existing fix that does not pass is answered, then replaced.**"),
                 ("knowledge/issue_triage.md", "nothing is repaired on top of it"),
                 ("knowledge/issue_triage.md", "goes on to Diagnose and a fix of its own, as for an issue nobody had opened a pull request for"),
@@ -1504,8 +1561,8 @@ class FixAccuracyTest(unittest.TestCase):
         self.assertRegex(src, r"const FIX_NEEDS = \{ model_path: [^}]*\};", "the model is not among what a fix needs")
         for at in ("Reproduce", "Diagnose", "Bisect"):
             self.assertIn("const lacking = askForFix('%s');\n" % at, src, "a fix can start after %s without a model" % at)
-        self.assertRegex(src, r"if \(tri\.action === 'push_existing_pr'\) \{\n(?:\s*//.*\n)*\s*if \(stopHere\('Diagnose'\)\) \{",
-                         "a stop after Diagnose does not hold for an existing fix PR, which has no Diagnose")
+        self.assertIn("    if ((theirs.apply || theirs.ask) && stopHere('Diagnose')) {\n", src,
+                      "a stop after Diagnose does not hold for an existing fix PR, which has no Diagnose")
         for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
             self.assertRegex(text, r"reaches its\s+fix without\s+one|走到修复却还没有模型", "%s does not list the question" % name)
         fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
@@ -1823,7 +1880,7 @@ class ModelWordTest(unittest.TestCase):
                  "a value that is neither is not asked about, and Setup's word stands without a word of it"),
                 # only the caller gives the word: not the Intake's definition, not a task a scan offers
                 ("pick(res.task_def, TASK_KEYS.filter((k) => k !== 'text_model'))", "the Intake's reading of the model goes into the run's record"),
-                (".filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                (".filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && ['ci', 'issue'].includes(String(def.mode).trim().toLowerCase()))));",
                  "a scan says what a model is in the user's place"),
                 # nor does the Intake ask against it
                 ("    .filter((q) => !(callersModelWord(raw) === true && q && q.field === 'output_script'));",
