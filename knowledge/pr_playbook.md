@@ -65,7 +65,10 @@ footnotes, no definitions of your own shorthand. Read two or three merged PRs of
   baseline measured with the same harness; name the model, hardware, TP, harness and sampling. A loss the
   validation found elsewhere gets one sentence; other suites only when the change targets them (NIAH for
   a long-context feature). A fix that changes anything but tests, documentation and CI files gives
-  the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*); where the
+  the same two scores, the fix next to the base (`validation_doctrine.md`, *G2 for a fix*), or, for a
+  model that answers no text questions, what the task's own test compared in their place: the
+  inputs, the measure and its tolerance, and how the fix's outputs stood against the baseline's (*G2
+  for a model that answers no text questions*); where the
   base cannot serve the configuration, next to the last commit that served it, named, or alone,
   saying that it has no baseline. A fix to tests, documentation or CI files alone says that it
   changes no code the server runs, and gives no table; one for a model that answers no text questions

@@ -127,7 +127,7 @@ const shq = (s) => (/^[\w@%+=:,./-]+$/.test(String(s)) ? String(s) : `'${String(
 // stay outside it.
 // ---------------------------------------------------------------------------
 const TASK_KEYS = ['mode', 'task', 'goal', 'framework', 'framework_dir', 'model_path', 'platform', 'gpu_ids',
-  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs', 'sources', 'since',
+  'container', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness', 'apply_prs', 'sources', 'since',
   'stop_after', 'resume_from', 'run_dir',
   'auto_approve_design', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script',
   'kernel_backend', 'kernel_backend_dir', 'kernel_backend_command', 'kernel_budget', 'rescan', 'upstream_repos',
@@ -147,6 +147,7 @@ const TASK_DEF = S({
   server_script: str,
   client_script: str,
   accuracy_script: str,
+  output_script: str,
   harness: { type: ['object', 'string'] },
   apply_prs: strs,
   sources: strs,
@@ -250,6 +251,12 @@ function templateLoadGaps(a) {
 // The same in words, for a question: what the task says of the load InferPilot's client runs.
 const loadGapWords = (gaps) => (gaps.length < Object.keys(TEMPLATE_LOAD).length
   ? `gives no ${gaps.map((k) => TEMPLATE_LOAD[k][1]).join(' and no ')} for it` : 'names none');
+
+// The question for the script that stands in for gsm8k where a model answers no text questions (output_script).
+const OUTPUTS_ASK = "Which script compares the model's outputs for G2 (absolute path)? It puts its own inputs to the server at PORT, the "
+  + 'same inputs with the same seeds in every run, and writes each output to OUT_DIR; with BASE_DIR set, the directory its run on the '
+  + 'base wrote to, it compares its outputs with those and exits non-zero when they differ by more than it tolerates. InferPilot has '
+  + 'no template for it.';
 
 // What a definition still lacks before its mode can start; every gap is a question for the user.
 function missingFields(a) {
@@ -372,6 +379,15 @@ function missingFields(a) {
       + 'when it is on this machine.',
       'a fix that changes code the server runs is measured on gsm8k against the base; with stop_after set to a phase before the fix, no model is needed');
   }
+  // The fix for a model that answers no text questions is measured with the task's own output comparison, as G3
+  // runs the task's own long-context test: InferPilot has no template for one. Whether the model is such a one is
+  // Setup's to say, and the run asks for the script then (outputsLacking). What Intake can see is a value that
+  // names no script: left as it is, it would win over the answer to that question, and be asked about again.
+  const outputs = a.output_script == null ? '' : String(a.output_script);
+  if (BEFORE_A_FIX[mode] && outputs && (!outputs.trim() || isTemplate(outputs))) {
+    ask('output_script', OUTPUTS_ASK, `output_script is ${JSON.stringify(outputs)}, which names no script: InferPilot has no template for an `
+      + 'output comparison. Leave it unanswered for a model that answers text questions, which G2 measures on gsm8k');
+  }
   return qs;
 }
 
@@ -468,6 +484,7 @@ const C = {
   server_script: String(A.server_script || ''),
   client_script: String(A.client_script || ''),
   accuracy_script: String(A.accuracy_script || ''),
+  output_script: String(A.output_script || '').trim(),
   harness: A.harness ? (typeof A.harness === 'string' ? A.harness : JSON.stringify(A.harness)) : '',
   goal: String(A.goal || ''),
   held_out: HELD_OUT,
@@ -734,6 +751,9 @@ const SETUP = S({
   server_script: str,
   client_script: str,
   accuracy_script: str,
+  // a fix (issue, ci): false when the model answers no text questions (a diffusion, speech or embedding model), so
+  // that gsm8k cannot be put to it and G2 is the task's own output comparison; left out, it counts as one that does
+  text_model: bool,
   notes: str,
 }, ['lock', 'run_dir', 'baseline_status', 'gpu_ids']);
 // workload_gap: the task's client does not run the scenarios the source measured its gain on; the run asks.
@@ -902,6 +922,9 @@ const VERIFY = S({
   // a fix (issue, ci): false when every file it changes is a test, a documentation file or a CI file of the
   // repository, which G2 and G5 do not measure; left out, the fix counts as one that changes code the server runs
   server_code_changed: bool,
+  // a fix (issue, ci): false when the round found that the model answers no text questions; with the task's
+  // output_script G2 compared outputs, and without one it measured nothing (verifyLoop)
+  text_model: bool,
   ledger_path: str,
   summary: str,
 }, ['all_pass', 'failures']);
@@ -1282,6 +1305,16 @@ async function start(requireBaseline) {
   if (s === 'busy') return finish('busy', 'Setup');
   if (!s) return finish('blocked', 'Setup');
   if (stopHere('Setup')) return finish('stopped', 'Setup');
+  // A task that can reach a fix is asked here for what Setup found it lacks, before anything else runs: the
+  // script that compares the outputs of a model that answers no text questions. One that stops before its fix
+  // needs none, and a stop asked for now holds first.
+  const stop = liveStopAfter();
+  const lacking = BEFORE_A_FIX[MODE] && stop !== 'now' && !BEFORE_A_FIX[MODE].includes(stop) ? outputsLacking() : null;
+  if (lacking) {
+    note('Setup', 'needs_input', lacking.why);
+    R.questions = [lacking];
+    return finish('needs_input', 'Setup');
+  }
   return null;
 }
 
@@ -1323,16 +1356,34 @@ function askWorkload(spec) {
 // named a stop before the fix that its route skipped (an existing fix PR has no Diagnose) or that the control
 // file lifted. It stops here and asks, before any code changes; null when it lacks nothing.
 const FIX_NEEDS = { model_path: 'the model', client_script: 'the client', workload: "the whole workload of InferPilot's client" };
+FIX_NEEDS.output_script = "the script that compares the model's outputs"; // where the model answers no text questions
+// A model that answers no text questions (a diffusion, speech or embedding model) has no gsm8k to run: G2 for its
+// fix is an output comparison, the fix's outputs against the base's on the same inputs and seeds, by the task's
+// own test (validation_doctrine.md, G2 for a model that answers no text questions). InferPilot has no template
+// for such a test and no role writes one: Setup says what the model is, and a task that can reach a fix without
+// the script is asked for it. Returns that question, or null.
+function outputsLacking() {
+  if (C.text_model !== false || C.output_script) return null;
+  return { field: 'output_script', question: OUTPUTS_ASK,
+    why: `${C.model_path || 'the model'} answers no text questions, so gsm8k cannot be put to it: a fix that changes code the server runs `
+      + "is measured with the task's own output comparison instead, the same inputs and seeds on the base and on the fix; with "
+      + 'stop_after set to a phase before the fix, no script is needed' };
+}
 function askForFix(at) {
   const lacks = ['model_path', 'client_script'].filter((k) => !C[k]);
   // Setup rendered the template the task named with the workload the task had: what that leaves out the template
   // filled with lengths or a concurrency of its own, and G5 would judge the fix on a load nobody chose.
   const gaps = isTemplate(A.client_script) ? templateLoadGaps(A) : [];
   if (gaps.length) lacks.push('workload');
+  // Setup asks this of a task that can reach a fix; a run that named a stop before it comes here without.
+  const outputs = outputsLacking();
+  if (outputs) lacks.push('output_script');
   if (!lacks.length) return null;
-  const without = { model_path: 'a model', client_script: 'a client', workload: FIX_NEEDS.workload };
+  const without = { model_path: 'a model', client_script: 'a client', workload: FIX_NEEDS.workload,
+    output_script: "a script that compares the model's outputs" };
   const gate = { model_path: 'G2 on gsm8k', client_script: "G5 on the task's client",
-    workload: `G5 on InferPilot's serving benchmark, which runs the task's workload, and the task ${loadGapWords(gaps)}` };
+    workload: `G5 on InferPilot's serving benchmark, which runs the task's workload, and the task ${loadGapWords(gaps)}`,
+    output_script: "G2 on the task's own output comparison, since the model answers no text questions" };
   const why = `the run reached a fix without ${lacks.map((k) => without[k]).join(' and ')}, and a fix that changes code the server runs `
     + `is measured against the base: ${lacks.map((k) => gate[k]).join(', ')}`;
   note(at, 'needs_input', why);
@@ -1341,6 +1392,7 @@ function askForFix(at) {
       : 'The model the failing test serves'}, when it is on this machine.`,
     client_script: 'Which script runs the workload that G5 measures the fix on (absolute path)? It reads PORT and writes its logs to OUT_DIR.',
     workload: "Which workload should InferPilot's client run for the fix (input and output lengths, concurrency)?",
+    output_script: OUTPUTS_ASK,
   };
   R.questions = lacks.map((k) => ({ field: k, question: ask[k], why }));
   return finish('needs_input', at);
@@ -1370,6 +1422,9 @@ async function setup(requireBaseline) {
     server_script: own(C.server_script) || own(s.server_script),
     client_script: own(C.client_script) || own(s.client_script),
     accuracy_script: own(C.accuracy_script) || own(s.accuracy_script) });
+  // What Setup says of the model a fix is measured on: one that answers no text questions has no gsm8k to run
+  // (outputsLacking). A Setup that does not say counts the model as one that answers them.
+  if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;
   if (!C.gpu_ids) {
     note('Setup', 'fail', 'no GPU set pinned (gpu_ids)');
     return false;
@@ -1566,6 +1621,18 @@ async function verifyLoop(extraGates) {
     // What this round's diff says of a fix, for G5 and for the roles after it. A round that does not say counts
     // as one whose fix changes code the server runs, whatever an earlier round said: its fix is measured.
     if (BEFORE_A_FIX[MODE]) C.server_code_changed = v.server_code_changed !== false;
+    // Setup says what the model is, and no fix for one that answers no text questions starts without the task's
+    // output comparison (outputsLacking). The verify engineer, who has the server, has the last word either way,
+    // for the later rounds and the report; a round that does not say leaves what is known. A round that finds
+    // such a model all the same, where Setup took it for one that answers them, had no gsm8k to run and nothing
+    // to compare its outputs with: its fix has no G2, and the round passes nothing, whatever it reports.
+    if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;
+    if (C.server_code_changed && outputsLacking()) {
+      const why = 'the model answers no text questions, and the task names no output_script: G2 has no gsm8k to run on it and no test '
+        + "of the task's to compare the fix's outputs with. Name the script (output_script), and run the task again";
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     const failures = v.failures || [];
     const blocking = failures.filter((f) => f.blocking !== false);
     // An accuracy problem is fixed when its score comes back. The verify engineer measures that apart from G2's
@@ -1576,6 +1643,25 @@ async function verifyLoop(extraGates) {
     // The fix's own gates: what the task is there to fix (the reproduction, the failing test, the score to restore).
     const ownGates = [...(extraGates || []).map((g) => g.gate), ...(C.accuracy_claim ? ['accuracy_claim'] : [])];
     const own = (fs) => fs.filter((f) => ownGates.includes(String(f.gate || '').trim()));
+    // With the task's script, G2 of such a model is the comparison the script makes, and a round is accepted only
+    // on its result, whichever way the round is accepted: a pass, or outputs kept where the run has no baseline
+    // to compare them with (verify_engineer.md). Not on a G2 the round left out or did not run: the script the
+    // task names is no evidence until it has compared something.
+    const compared = String((v.gates || {}).G2 || '').trim();
+    // The second result is the documented one and nothing looser: the outputs that were kept and the directory
+    // they are in, with "no baseline" and why. A G2 that says it did not run or that it failed is neither,
+    // whatever else it says; nor is a comparison the round lists among its failures, blocking or not: what the
+    // user's script reports on fixed inputs and seeds is excused by no known issue (verify_engineer.md).
+    const keptOutputs = /\bno baseline\b/i.test(compared) && /\boutputs\/fix-/.test(compared) && !/^(not[ _-]?run|fail|skip)/i.test(compared);
+    const comparisonFailed = failures.some((f) => String(f.gate || '').trim() === 'G2');
+    if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))
+      && (comparisonFailed || !(/^pass\b/i.test(compared) || keptOutputs))) {
+      const why = `the model answers no text questions, and the round was accepted without the result of its output comparison: G2 is ${
+        compared ? `"${compared}"` : 'not reported'}${comparisonFailed ? ', and the round lists it among its failures' : ''}. `
+        + "G2 of such a fix is the task's output_script, run on the base and on the fix";
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
     if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
       note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
         + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);
@@ -1611,6 +1697,17 @@ async function verifyLoop(extraGates) {
     }
     note('Investigate', inv.verdict, inv.summary || '');
     if (inv.verdict === 'baseline_bug') {
+      // The output comparison of a model that answers no text questions runs the user's script on fixed inputs
+      // and seeds: a difference it reports is never the baseline's to keep. Where the base differs from itself
+      // as much, the script cannot tell the fix from noise, and a known issue would excuse every later miss:
+      // none is recorded, and a human decides, with the script.
+      if (C.text_model === false && C.output_script && blocking.some((f) => String(f.gate || '').trim() === 'G2')) {
+        const why = "the output comparison (G2) differs by more than the task's output_script tolerates, and the investigator finds the same "
+          + 'on the base: no known issue excuses a difference the comparison reports. As it stands the script cannot tell the fix from '
+          + 'noise: a human decides';
+        note('Investigate', 'fail', why);
+        return { ok: false, reason: why };
+      }
       // What the task is there to fix fails on the base by definition. A gate of the fix's own that still fails
       // is the fix not fixing, never a known issue: recorded as one, it would be excused in the next round.
       const mine = own(blocking).map((f) => f.gate);

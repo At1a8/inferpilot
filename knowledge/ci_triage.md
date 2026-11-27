@@ -177,8 +177,9 @@ from 10-02 to at least 10-25) had no owner.
 - A fix that changes anything but tests, documentation and CI files is measured on gsm8k as well (G2
   for a fix, `validation_doctrine.md`): at most 1 point below the base, or below the culprit's parent
   where the regression keeps the base from serving. A fix to tests, documentation or CI files alone
-  (a `test_bug`) is not, nor one for a model that answers no text questions (the Wan DiT failures of
-  §1).
+  (a `test_bug`) is not. One for a model that answers no text questions (the Wan DiT failures of
+  §1) is measured by the task's own output comparison in gsm8k's place (`output_script`; *G2 for a
+  model that answers no text questions*).
 - Such a fix is measured for speed as well (G5 for a fix, `validation_doctrine.md`), on the task's
   `client_script`: no slower than the base beyond the noise band, or than the culprit's parent where
   the regression keeps the base from serving. A fix to tests, documentation or CI files alone is not,
