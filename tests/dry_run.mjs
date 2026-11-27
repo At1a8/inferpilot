@@ -1687,6 +1687,21 @@ const scenarios = [
         && /not a known issue/.test(JSON.stringify(onBase.result.phases)),
         `${gate} failing as on the base is the failure itself: no known issue, no issue drafted for it, and the run stops for a human: ${ended(onBase)}`);
     }
+    // A fix that restores too little gets its repair round: the investigator says what it misses, and only where it
+    // cannot (or calls the failure the baseline's) does the run stop for a human.
+    const repair = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), ...below, failures: [{ gate: 'accuracy_claim', blocking: true, evidence: '0.871 on the fix' }] }
+        : { ...DEFAULTS['verify_engineer:verify'](), gates: restored }),
+      'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'the fix misses the second code path' }) });
+    check(repair.result.status === 'ready_for_review' && repair.keys.filter((k) => k === 'verify_engineer:verify').length === 2
+      && repair.keys.filter((k) => k === 'implementer:implement').length === 2,
+      `an incomplete fix is repaired and measured again: ${ended(repair)}`);
+    const stuck = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      ...verified({ ...below, failures: [{ gate: 'accuracy_claim', blocking: true, evidence: '0.871 on the fix' }] }),
+      'investigator:investigate': () => ({ verdict: 'inconclusive', summary: 'the threshold may be one no commit ever met' }) });
+    check(stuck.result.status === 'blocked' && stuck.result.stopped_at === 'Verify' && !(stuck.result.known_issues || []).length,
+      `where the investigator cannot say what the fix misses, the run stops for a human: ${ended(stuck)}`);
     // Any other gate that fails on the base as well is a known issue, as before: G2's gsm8k among them.
     for (const gate of ['G0', 'G2']) {
       const other = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
