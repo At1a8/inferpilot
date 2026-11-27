@@ -2195,8 +2195,10 @@ class CiOnMainTest(unittest.TestCase):
                 # a rebuild is the setup's build, patches and tree files included: the commit alone is not the package
                 ("roles/ci_guardian.md", "Where it rebuilds, the lane's package is that build, not the commit alone: the patches the setup applies "
                                          "again and the files it takes from the tested tree are part of it"),
-                ("roles/ci_guardian.md", "Build it as the setup does, into a directory of the run's own that goes first on `PYTHONPATH`, never in "
-                                         "place"),
+                # the lane's directory goes after the tree's own code, ahead of the image's packages: never in front of the code under test
+                ("roles/ci_guardian.md", "Build it as the setup does, into a directory of the run's own that goes on `PYTHONPATH` after the tree's "
+                                         "own code and ahead of the image's packages, never in place"),
+                ("roles/ci_guardian.md", "The tree stays first: what the lane installs must not stand in front of the code under test"),
                 ("roles/ci_guardian.md", "It tested another tree: what it installed is evidence, and not what to install for these"),
                 # the lane's environment is carried to the later phases as a script that makes it for a given tree, written
                 # wherever the setup can install over the image: another tree may need what Classify's trees did not
@@ -2204,8 +2206,8 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "So wherever the lane's setup can install or replace a package, also where it leaves the image as it is "
                                          "for the trees you run, write it as a script of the run, `RUN_DIR/lane_env.sh`"),
                 ("roles/ci_guardian.md", "given a tree, it takes the setup's decisions for that tree, builds what they call for where the run has "
-                                         "not built it yet, and prints the directory to put first on `PYTHONPATH`, or nothing where the setup "
-                                         "leaves the image as it is for that tree"),
+                                         "not built it yet, and prints the directory to put on `PYTHONPATH`, after the tree's own code and ahead "
+                                         "of the image's packages, or nothing where the setup leaves the image as it is for that tree"),
                 # jobs whose setups differ are different environments: the script takes the job, and a test runs in its own job's
                 ("roles/ci_guardian.md", "Jobs of the task whose flags or overrides differ have different environments: the script then takes "
                                          "the job as well (`lane_env.sh <tree> <job>`), and each test runs in the environment of its own job"),
@@ -2218,7 +2220,8 @@ class CiOnMainTest(unittest.TestCase):
                 # the command stays the test's own: it goes in the pull request as written, and the lane's environment is put around it
                 ("roles/ci_guardian.md", "The command is the test's own, with no path of the run in it: the pull request gives it as written"),
                 ("roles/ci_guardian.md", "Where the lane has a setup step, whoever runs the command puts the lane's environment around it, for "
-                                         "the tree it runs: what `RUN_DIR/lane_env.sh` prints goes on `PYTHONPATH`, after the tree's own code"),
+                                         "the tree it runs: what `RUN_DIR/lane_env.sh` prints goes on `PYTHONPATH`, after the tree's own code "
+                                         "and ahead of the image's packages"),
                 ("roles/pr_engineer.md", "A CI fix on a lane whose setup installs over its image is run the same way: the lane's environment is in "
                                          "effect for that run, as the triage record's script makes it for the final tree"),
                 ("roles/pr_engineer.md", "the body gives the lane's setup step with the command, as the lane's workflow runs it: the script in the "

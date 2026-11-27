@@ -51,27 +51,30 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
   build would replace what the lane runs. Where it rebuilds, the lane's package is that build, not
   the commit alone: the patches the setup applies again and the files it takes from the tested tree
   are part of it, so a package of the same commit that the image ships is not it. Build it as the
-  setup does, into a directory of the run's own that goes first on `PYTHONPATH`, never in place
-  (`verify_engineer.md`, PHASE=verify step 1), and name in `evidence` what the image has and what
-  the setup puts in effect for each tree. The failed job's log shows how the setup went and which
-  overrides it had. It tested another tree: what it installed is evidence, and not what to install
-  for these. The lane's environment holds for every later run of the task, and each tree has its
-  own: the pin can move within the window a bisect searches, and with the fix. So wherever the
-  lane's setup can install or replace a package, also where it leaves the image as it is for the
-  trees you run, write it as a script of the run, `RUN_DIR/lane_env.sh`: given a tree, it takes the
-  setup's decisions for that tree, builds what they call for where the run has not built it yet,
-  and prints the directory to put first on `PYTHONPATH`, or nothing where the setup leaves the
-  image as it is for that tree. It installs nothing in place, and fails where it cannot build. Jobs
-  of the task whose flags or overrides differ have different environments: the script then takes
-  the job as well (`lane_env.sh <tree> <job>`), and each test runs in the environment of its own
-  job. The triage record names the script, the setup step with each job's flags and overrides as
-  the workflow runs it, which tests go with which job, and what the script resolved for each tree
-  you ran. Every later run of the task is made in that environment: Bisect, the unit checks,
-  Verify, the check on the latest main and the pull request's command call the script for the tree
-  they run, the base included, and take what it prints. No tree is given the build Classify made
-  for another. Where you cannot make the lane's environment, or cannot tell what it is, those tests
-  did not run in it. That lane is then one this machine could not be (below): named in `unchecked`
-  where another part of the task was judged, and `on_main: "not_run"` only where no part of it was.
+  setup does, into a directory of the run's own that goes on `PYTHONPATH` after the tree's own code
+  and ahead of the image's packages, never in place (`verify_engineer.md`, PHASE=verify step 1),
+  and name in `evidence` what the image has and what the setup puts in effect for each tree. The
+  failed job's log shows how the setup went and which overrides it had. It tested another tree:
+  what it installed is evidence, and not what to install for these. The lane's environment holds
+  for every later run of the task, and each tree has its own: the pin can move within the window a
+  bisect searches, and with the fix. So wherever the lane's setup can install or replace a package,
+  also where it leaves the image as it is for the trees you run, write it as a script of the run,
+  `RUN_DIR/lane_env.sh`: given a tree, it takes the setup's decisions for that tree, builds what
+  they call for where the run has not built it yet, and prints the directory to put on
+  `PYTHONPATH`, after the tree's own code and ahead of the image's packages, or nothing where the
+  setup leaves the image as it is for that tree. The tree stays first: what the lane installs must
+  not stand in front of the code under test. It installs nothing in place, and fails where it
+  cannot build. Jobs of the task whose flags or overrides differ have different environments: the
+  script then takes the job as well (`lane_env.sh <tree> <job>`), and each test runs in the
+  environment of its own job. The triage record names the script, the setup step with each job's
+  flags and overrides as the workflow runs it, which tests go with which job, and what the script
+  resolved for each tree you ran. Every later run of the task is made in that environment: Bisect,
+  the unit checks, Verify, the check on the latest main and the pull request's command call the
+  script for the tree they run, the base included, and take what it prints. No tree is given the
+  build Classify made for another. Where you cannot make the lane's environment, or cannot tell
+  what it is, those tests did not run in it. That lane is then one this machine could not be
+  (below): named in `unchecked` where another part of the task was judged, and `on_main: "not_run"`
+  only where no part of it was.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one
@@ -148,8 +151,8 @@ Then:
    The command is the test's own, with no path of the run in it: the pull request gives it as
    written. Where the lane has a setup step, whoever runs the command puts the lane's environment
    around it, for the tree it runs: what `RUN_DIR/lane_env.sh` prints goes on `PYTHONPATH`, after
-   the tree's own code. The fix is then verified in the lane's environment, and a later phase that
-   points the command at another tree gets that tree's.
+   the tree's own code and ahead of the image's packages. The fix is then verified in the lane's
+   environment, and a later phase that points the command at another tree gets that tree's.
 4. Look for a fix someone has already opened: the pull request the tracker or the CI issue names for
    this failure, the pull requests linked to the issue or the job, and the open pull requests of the
    framework's repository that touch the failing test or name its error (the search API with
