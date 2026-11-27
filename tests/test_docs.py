@@ -1954,7 +1954,6 @@ class TriageCasesTest(unittest.TestCase):
                                                       "configuration"),
                            ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
                            ("roles/issue_triager.md", "A task without a model (one that stops before its fix) takes the most urgent of all"),
-                           ("roles/issue_triager.md", "in both you take that problem and return `model_mismatch`"),
                            ("roles/issue_triager.md", "`task` itself names a problem on another model or configuration than the task's"),
                            # a task that names the issue alone has a problem to take even where none is on its model
                            ("roles/issue_triager.md", "Or `task` names the issue alone and none of its problems is on the task's: take the most "
@@ -1973,6 +1972,21 @@ class TriageCasesTest(unittest.TestCase):
                                                          "run's model and configuration"),
                            ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
                            ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
+                           # the rule is for the problem taken, whether or not another would fit
+                           ("roles/issue_triager.md", "Whichever problem you take, hold it against what the task is set up with, and return "
+                                                      "`model_mismatch` (its model and configuration) whenever it is not on that"),
+                           ("roles/issue_triager.md", "Or the task has no model, and the most urgent of all is not on what it pins although a less "
+                                                      "urgent one is"),
+                           ("roles/issue_triager.md", "the P0 is still the one you take, with `model_mismatch`, and the P1 is one of the others, "
+                                                      "offered on this run's GPUs"),
+                           ("knowledge/issue_triage.md", "or the run stops before Reproduce in the same way, whether or not a less urgent problem "
+                                                         "would fit: that one is offered as a follow-up"),
+                           # a difference in the workload alone is another configuration
+                           ("roles/issue_triager.md", "its `model` where the report gives it another model, launch configuration or workload than "
+                                                      "this run's"),
+                           ("roles/issue_triager.md", "A difference in the workload alone counts"),
+                           ("knowledge/issue_triage.md", "A problem the report puts on another one, were it another workload alone (32k input where "
+                                                         "the run measures 8k), is offered as a follow-up"),
                            # Setup works before Triage: the run after a mismatch, and a follow-up, tell it the configuration
                            ("roles/issue_triager.md", "The run after it is given your `model_mismatch` as `reported_on`, as a run on one of the "
                                                       "others is given its `model`"),

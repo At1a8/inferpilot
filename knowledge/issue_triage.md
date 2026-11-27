@@ -93,13 +93,15 @@ it, open or merged, or nothing yet) and that this run did not cover it. Each of 
 its own, with the issue and the problem's name as its `task`: the run's result offers those runs
 (`next.start`), each on this run's own definition and with the operator's settings this run was given.
 A run that has a model takes a problem on that model and configuration: G2 and G5 measure on what
-the run was set up with. A problem the report puts on another one is offered as a follow-up that
-asks for its own model, scripts and GPUs; where the task itself names such a problem, the run stops
+the run was set up with. A problem the report puts on another one, were it another workload alone
+(32k input where the run measures 8k), is offered as a follow-up that asks for its own model,
+scripts and GPUs; where the task itself names such a problem, the run stops
 before Reproduce and asks for them. So it does where the task names the issue alone and no problem
 of the report is on the run's model and configuration: the most urgent of all is taken then, and
 the run asks for what that one is on. A task without a model, one that stops before its fix, takes
 the most urgent problem of all; what it pins all the same (its GPUs, its scripts) has to fit that
-problem, or the run stops before Reproduce in the same way. It is then asked for those inputs, each
+problem, or the run stops before Reproduce in the same way, whether or not a less urgent problem
+would fit: that one is offered as a follow-up. It is then asked for those inputs, each
 of them, and not for a model: a reproduction that serves none has none to give. A task that names
 no model and pins nothing was set up by Setup alone, before the run knew which problem it takes:
 where the GPUs Setup chose do not fit that problem, the run stops as well and asks for the GPUs,

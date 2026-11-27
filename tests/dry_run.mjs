@@ -2283,6 +2283,27 @@ const scenarios = [
     check(eqList((both.result.next.ask || []).map((q) => q.field), ['client_script', 'gpu_ids'])
       && /in place of the task's client_script, gpu_ids/.test(both.result.next.say),
       `each input it pins is asked about: ${JSON.stringify((both.result.next.ask || []).map((q) => q.field))}`);
+    // The rule is for the problem the run takes, whether or not another problem of the report would fit. A task
+    // without a model that pins two GPUs takes the P0 at TP8, and stops for it; the P1 at TP2 is one of the others,
+    // offered on this run's GPUs.
+    const mixed = await run({ mode: 'issue', task: 'sglang#41299', model_path: '', client_script: '', gpu_ids: '0,1', stop_after: 'Reproduce' }, {
+      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash at TP8, the more urgent of two',
+        model_mismatch: 'DeepSeek-V4.1, --tp-size 8', other_problems: [{ problem: 'GSM8K loses 4 points at TP2', priority: 'P1' }],
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const fits = (mixed.result.next.start || [])[0];
+    check(mixed.result.status === 'needs_input' && mixed.result.stopped_at === 'Triage' && !mixed.keys.includes('issue_triager:reproduce')
+      && eqList((mixed.result.next.ask || []).map((q) => q.field), ['gpu_ids']) && mixed.result.next.rerun_with.reported_on === 'DeepSeek-V4.1, --tp-size 8'
+      && fits && fits.args.task === 'sglang#41299: GSM8K loses 4 points at TP2' && fits.args.gpu_ids === '0,1' && !('reported_on' in fits.args),
+      `the problem taken is held against what the task pins although another would fit, and that other is offered on this run's GPUs: ${
+        mixed.result.status} at ${mixed.result.stopped_at}, ${JSON.stringify(fits && fits.args)}`);
+    // A difference in the workload alone puts a problem on another configuration too: the follow-up takes none of
+    // this run's workload and client, which would measure another problem.
+    const longer = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}' },
+      triaged([{ problem: 'TTFT doubles at 32k input', model: 'the same model and flags, at 32k input' }]));
+    const at32k = (longer.result.next.start || [])[0];
+    check(at32k && ['workload', 'client_script', 'model_path'].every((k) => !(k in at32k.args))
+      && at32k.args.reported_on === 'the same model and flags, at 32k input',
+      `a problem on another workload alone takes none of this run's workload and client: ${JSON.stringify(at32k && at32k.args)}`);
     // With the answer the run is set up for the problem, and reproduces it.
     const fitted = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
       ...pinnedAgain, answers: { ...pinnedAgain.answers, gpu_ids: '0,1,2,3,4,5,6,7' } });
