@@ -110,8 +110,55 @@ clock can start before your session does.
        find them. A change you cannot put into effect here is the blocking failure of step 1
        (`"failure_class": "environment"`): G2 is not measured on the image's environment instead.
      - When `model_path` is a model that answers no text questions (a diffusion, speech or embedding
-       model), there is no gsm8k to run on it: `"G2": "not run: the model answers no text
-       questions"`. What its outputs are worth is the reproduction's or the failing test's to show.
+       model; Setup says so with `text_model` false, and you say so in your answer when you find it
+       yourself), there is no gsm8k to run on it. G2 is an output comparison in its place, by the
+       task's own test, its `output_script` (`task_definition.md` §1.1; `validation_doctrine.md`, *G2
+       for a model that answers no text questions*): the same inputs with the same seeds on both
+       arms, and the fix's outputs compared with the baseline's. Run it unchanged, once per arm, each
+       against a server launched with the run's launch script on the same GPUs, each in a directory
+       of its own that you make first. The baseline arm first: `mkdir -p RUN_DIR/outputs/base`, then
+       `PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>`. Then the fix, with the
+       baseline's outputs, in a directory that no earlier execution wrote to, named for the commit it
+       runs: `mkdir RUN_DIR/outputs/fix-<commit>` (which must not find it there: a commit that runs
+       again takes `fix-<commit>-2`, and so on), then `PORT=<port>
+       OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash <output_script>`,
+       which compares, and exits non-zero when an output differs by more than the script tolerates. A
+       retry or a repaired fix never writes where an earlier execution wrote: that would overwrite
+       the evidence of its round, and an output the script did not write again would be compared as
+       this round's. Only the baseline's directory is reused, for the commit it was measured on.
+       Never write such a test yourself, and never change the task's: its inputs, the seeds, the
+       measure and the tolerance are the user's. `gates` says what it compared, of which commit,
+       where and with what: `"G2": "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match
+       the base's (output_script: PSNR >= 35 dB on each)"`. A difference beyond the tolerance is a
+       blocking failure (`gate: "G2"`), with the outputs that differ as its evidence. So is a fix arm
+       that compared nothing (a script that does not read `BASE_DIR`, or says nothing of a
+       comparison): never a pass on its exit status alone. The baseline arm is the one gsm8k would
+       have: the base, measured once and kept for the later rounds, or the last commit that served
+       the configuration where the base cannot (next items). Where the failure being fixed is in
+       these outputs (the base's are the wrong ones), the base is no reference either: compare with
+       that last commit, and where the run knows none, keep the fix's outputs and report them (`"G2":
+       "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline: the base's are the
+       black images the issue reports"`). InferPilot accepts a round for such a model only on one of
+       those two results, a `pass` or outputs kept with `no baseline`: never leave G2 out, and never
+       report it `not run` where the task names the script. The second is that form and nothing
+       looser: it names the outputs that were kept and the directory they are in, and a G2 that
+       begins `not run` or `fail` is neither, whatever it says of a baseline. Step 4 excuses nothing
+       here: the comparison runs on fixed inputs and seeds, so no entry of `known_issues` makes an
+       output that differs by more than the script tolerates pass, or fail without blocking, and a
+       comparison listed among the round's failures is not accepted. Where the base differs from
+       itself as much, the script cannot tell the fix from noise: the run stops for a human, and
+       records no known issue. Write both commands in the ledger, with the directory and the commit
+       of each arm, where the report's *Before pushing* section finds them. What the model is shows
+       on its server: where one Setup took for such a model answers text questions all the same (the
+       server has chat completions, and answers one), run gsm8k as for any other fix, leave the
+       task's script unrun, and say so in `gates` and with `"text_model": true` in your answer, so
+       that the later rounds and the report read the model as what it is.
+     - With no `output_script` there is nothing to compare the outputs of such a model with, and
+       gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
+       `"G2": "not run: the model answers no text questions, and the task names no output_script"`
+       in `gates`. InferPilot asks for the script after Setup, so this is a model Setup took for
+       one that answers text questions: the run stops here, and the user is told to name the
+       script. Never pass G2 for such a fix on the reproduction or the failing test alone.
      - Otherwise run gsm8k on the fix and on its baseline, with the run's launch script and
        `model_path`. Setup measured no baseline for a fix: measure the base arm yourself, once, in the
        first round that needs it (a throwaway worktree at `<base>`: an issue or a ci run has no
@@ -126,21 +173,45 @@ clock can start before your session does.
        that said (`"G2": "0.893 (1319 q), no baseline: the base does not start on this
        configuration"`); it is reported, not judged, and *Before pushing* measures the fix alone.
    - **An accuracy problem is measured where it showed, whatever the fix changes.** With
-     `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2
-     for an accuracy problem in CI*), run the failing test's own measurement on the fix, with its
-     set, model and settings as `failing_test_cmd` runs them, and read the score it measures, not
-     whether its assertion passes. Report it in `gates` under its own name, apart from G2's gsm8k
-     against the base: `"accuracy_claim": "pass 0.936, the claim is 0.93 (the test's GSM8K, 200
-     q)"`, with `pass` only for a score at the claim or above. A score below it is a blocking failure
-     (`gate: "accuracy_claim"`) although `failing_test` passes: a threshold moved in the test
-     restores nothing. Never leave it out, and never report it `not run`: the run accepts no round
-     without its `pass`. Step 4 excuses nothing here: the base of an accuracy problem scores low as
-     well, and that is the failure being fixed, so no entry of `known_issues` makes a score below
-     the claim pass, or fail without blocking. gsm8k against the base (G2) runs besides, by the
-     fix's files, as for any fix.
+     `accuracy_claim` set (a CI failure on a score its test measures: `validation_doctrine.md`, *G2 for
+     an accuracy problem in CI*), run the failing test's own measurement on the fix's code, and read
+     the score it measures, not whether its assertion passes. The measurement is the base's: the set,
+     the number of questions, the model and the sampling settings as the test has them at `<base>`,
+     since a fix can change what is measured as easily as the threshold. What is kept from the base is
+     everything that decides the score, wherever it lives: the test's own values, and the helpers,
+     scripts or data files that supply them. What is kept from the fix is its framework code and how it
+     launches the server, which a fix may well be about. So where the fix changes the test or what it
+     measures with, run the base's measurement against the fix's server (a throwaway copy under
+     `RUN_DIR` with the base's measuring parts), not the base's test as a whole. Report the score in
+     `gates` under its own name, apart from G2's gsm8k against the base: `"accuracy_claim": "pass
+     0.936, the claim is 0.93 (the test's GSM8K, 200 q, as at the base)"`, with `pass` only for a score
+     at the claim or above by that measurement. A score below it is a blocking failure (`gate:
+     "accuracy_claim"`) although `failing_test` passes: a threshold moved in the test restores nothing,
+     nor do fewer questions or another sampling. A fix that changes the measurement is a human's to
+     accept, whether or not it says that the old one was wrong: wherever the fix's measurement differs
+     from the base's (another set, number of questions, model or sampling), measure both ways and give
+     both scores, in `gates` and in the ledger (`"accuracy_claim": "pass 0.936 by the base's
+     measurement (200 q), 0.941 by the fix's (500 q); the claim is 0.93"`), and do not pass the claim
+     on the fix's alone; where the two measurements cannot be told apart in the test, say so, and give
+     what you could measure. The reviewer reads both: a change of the measurement that meets the claim
+     stops the run for a human with them (`roles/reviewer.md`, step 6). A `failing_test` that still
+     fails with the fix ends the round (step 2) and stays its blocking failure, and the gates after it
+     stay `not run`; this measurement is not one of them. The test that fails is the one that measures,
+     and whoever takes the run from there, the investigator or a human, decides on the scores: before
+     you return, give the score the fix reached, both ways where the fix changes the measurement, in
+     `gates`, in the ledger and as that failure's `evidence` (`"accuracy_claim": "fail 0.871 by the
+     base's measurement (200 q), 0.902 by the fix's (500 q); the claim is 0.93"`). Only where there is
+     no score to read (the server does not start with the fix, the test stops before it measures) say
+     that in its place (`"accuracy_claim": "fail: no score, the server does not start with the fix"`).
+     Never leave the gate out, and never report it `not run`: the run accepts no round without its
+     `pass`. Step 4 excuses nothing here: the base of an accuracy problem scores low as well, and that
+     is the failure being fixed, so no entry of `known_issues` makes a score below the claim pass, or
+     fail without blocking. gsm8k against the base (G2) runs besides, by the fix's files, as for any
+     fix.
    - G0 feature off, where the change has a switch (`validation_doctrine.md`; a change without one has
      no G0, and `gates` says so); every gate in `extra_gates`: `issue_repro` (the reproduction no longer
-     fails), `failing_test` (the failing CI test passes on every lane it failed on); composability gates
+     fails), `failing_test` (the failing CI test passes on every lane it failed on that this machine can
+     run: with `unchecked`, name beside the gate's result what it does not cover); composability gates
      for every dimension the task touches (acceptance length for speculative decoding, accuracy bounds
      per KV dtype, PD transfer checks).
    - **G3 only with `long_context` on, G4 only with `stability` on;** one the task did not ask for is
@@ -239,7 +310,11 @@ A round that stopped for time adds `"needs_min": <minutes>`; it has no blocking 
 did not run are `not run`.
 
 A fix (issue, ci) adds `"server_code_changed": true | false`, from its diff (step 2, G2 for a fix):
-`false` only when every file the fix changes is a test, a documentation file or a CI file.
+`false` only when every file the fix changes is a test, a documentation file or a CI file. It adds
+`"text_model": false` when the model answers no text questions, whether G2 compared its outputs or
+had no `output_script` to compare them with, and `"text_model": true` when a model Setup took for
+such a one answers text questions after all. What you say replaces what Setup said, for the later
+rounds and the report; say nothing where you did not look.
 
 A G4 that ran in an earlier round is in `gates` with its commit:
 `"G4": "pass on 1a2b3c4; not run on this commit, 5d6e7f8"`. One whose failure `known_issues` holds as the

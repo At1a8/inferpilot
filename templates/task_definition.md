@@ -17,11 +17,12 @@ of it.
 | `server_script` | the user's script that starts one server for `model_path` (§1.1), or `template`: InferPilot's, after the model's sglang cookbook recipe (§1.2) | required | recommended; required with `stability` on | required with `stability` on | required | — |
 | `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; on it a feature is judged as no slower than the baseline, never on its source's gain (§1.2) | required: G5 measures every feature | required unless `stop_after` ends the run before a fix: G5 measures the fix on it; with `stability` on, required either way | as for an issue | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
+| `output_script` | the user's test that compares the outputs of a model that answers no text questions (a diffusion, speech or embedding model), the fix's against the base's, in gsm8k's place (§1.1) | — | required for such a model unless `stop_after` ends the run before a fix | required for such a model unless `stop_after` ends the run before a fix | — | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
 | `framework` | default `sglang` | | | | | |
 | `platform`, `gpu_ids`, `container` | target and environment; empty `gpu_ids` lets Setup pick free GPUs | | | | | |
-| `apply_prs` | candidate PRs to apply and A/B | | | | optional | |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so the run applies one only when it is named here, whoever wrote it | | | optional | optional | |
 | `sources`, `since` | what to scan, from when | | | | | optional |
 | `stop_after` | stop after this phase | optional | optional | optional | optional | optional |
 | `bisect_fixed` | when the reporter's code fails and main passes, find the commit that fixed it | | optional | | | |
@@ -77,6 +78,20 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   server runs, which is why those tasks name a `model_path`; one that stops before its fix
   (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none
   (`../knowledge/validation_doctrine.md`, *G2 for a fix*).
+- **`output_script`** is the task's own test of the outputs of a model that answers no text
+  questions (a diffusion, speech or embedding model), which gsm8k cannot be put to. It puts its
+  inputs to the server at `PORT`, the same inputs with the same seeds in every run, and writes each
+  output to `OUT_DIR`, a directory InferPilot makes before it starts the script. With `BASE_DIR`
+  set, the directory its run on the baseline wrote to, it compares its outputs with those, says
+  what it compared and by which measure, and exits non-zero when one differs by more than it
+  tolerates. The test is the user's: its inputs, the seeds, the measure and the tolerance are fixed
+  in it. It is G2 for the fix of an issue or a ci task on such a model: InferPilot runs it
+  unchanged, once on the baseline and once on the fix, when the fix changes code the server runs
+  (`../knowledge/validation_doctrine.md`, *G2 for a model that answers no text questions*). It has
+  no template for one, and writes none: Setup says what the model is, and a task that can reach a
+  fix without the script is asked for it then, before anything else runs. One that stops before
+  its fix needs none, and a model that answers text questions is measured on gsm8k, whatever the
+  task names here.
 - **`long_context_script`**, with `long_context` on, runs the task's long-context test against `PORT`
   and writes its results to `OUT_DIR`, a directory InferPilot makes for each run before it starts the
   script: for each request, whether it passed, with its output, and the per-token logprobs when the

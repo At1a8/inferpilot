@@ -79,13 +79,12 @@ return at once with `not_run`, each such GPU with its VRAM%, GPU% and pids, and 
      `server_script`, the one G2 measured the fix on, and the task's `client_script`.
    - Where the base cannot serve the configuration because that is the failure being fixed, never
      launch it: the baseline is the last commit that served it, in a throwaway worktree. That is the
-     commit G2 measured against, which the ledger names. Where G2 measured none, as for a model that
-     answers no text questions, which it does not run on, the commit is still known: take it from the
-     triage record (`triage_path`) as G2 would have, the culprit's parent for a CI fix, the commit or
-     release the report says worked, and write it in the ledger, where the report's *Before pushing*
-     section finds it. Name the commit in `results` and `summary`. Only where the run knows no such
-     commit, measure the fix alone and return `no_baseline` with the reason: `claim_reproduced` is
-     false, its numbers are reported, and nothing is judged on them.
+     commit G2 measured against, which the ledger names. Where G2 measured none, the commit is still
+     known: take it from the triage record (`triage_path`) as G2 would have, the culprit's parent for
+     a CI fix, the commit or release the report says worked, and write it in the ledger, where the
+     report's *Before pushing* section finds it. Name the commit in `results` and `summary`. Only
+     where the run knows no such commit, measure the fix alone and return `no_baseline` with the
+     reason: `claim_reproduced` is false, its numbers are reported, and nothing is judged on them.
    - **A performance problem is measured where it showed:** the benchmark is the reproduction
      (`repro_cmd`) or the failing test (`failing_test_cmd`), on the workload `claim` names, run on the
      fix and on the base, which shows the number that fell. The claim holds when the fix's median

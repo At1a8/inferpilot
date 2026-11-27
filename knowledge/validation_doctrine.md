@@ -14,7 +14,7 @@ Which of these gates a task needs, how its acceptance criteria are written and w
 |---|---|---|
 | G0 feature off | the change is inert when disabled | baseline suites on the feature branch with the switch off |
 | G1 unit / oracle | each new kernel or data structure does what it claims, and a port's own metric agrees with its source's | standalone tests vs a reference implementation, each able to fail: on the parent commit when the change alters behaviour, on a copy of the change broken in one way when it keeps behaviour (`reward_hacks.md` T1); for a port with a value to compare with, the feature's own metric (accept length for speculative decoding) against the source's, on the source's prompts and settings |
-| G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median |
+| G2 accuracy | quality stays within its budget | every set at most 1 point below the baseline, once per arm (`scripts/eval_accuracy.sh`, evalscope): gsm8k (1319) by default; gpqa_diamond (198) and simple_qa (4326, LLM judge) as well when the user's request or goal says the change may lose accuracy; a set that misses its budget is reproduced at most twice and judged on the median; for the fix of a model that answers no text questions, the task's own output comparison in their place (`output_script`) |
 | G3 long context | the feature's own data path is exercised and correct | when the task asks (`long_context`): the task's own long-context test (`long_context_script`), needle-in-a-haystack, single and multi-needle |
 | G4 stability | no crash, hang or out-of-memory under sustained load; throughput and memory hold | when the task asks (`stability`): the task's performance test at high concurrency on long prompts, run back to back for more than 48 hours (`scripts/stability.sh`) |
 | G5 performance | the claimed benefit exists on the task's workload, and a change that claims none is no slower there; the guards the task names hold | see `perf_evaluation.md`; a held-out point, more guards and sweeps only when the task asks (`held_out`, `guards`, `sweep`) |
@@ -60,9 +60,9 @@ Notes per gate:
   meaning to. A fix to tests, documentation or CI files alone changes nothing the server runs and has
   no G2: `not run: no code the server runs changed`. Of any other file nobody judges whether the
   server runs it: that judgement can be wrong, and measuring is the safe side (*What a fix changes
-  decides its gates*). Nor has the fix for a model that answers no text questions (a diffusion,
-  speech or embedding model), which gsm8k cannot be put to: `not run: the model answers no text
-  questions`; what its outputs are worth is the reproduction's or the failing test's to show. The
+  decides its gates*). The fix for a model that answers no text questions (a diffusion, speech or
+  embedding model), which gsm8k cannot be put to, is measured by an output comparison in its place
+  (*G2 for a model that answers no text questions*). The
   reproduction or the failing test runs first, before gsm8k and before any server G2 needs, the one
   exception to *gsm8k first*: a fix that does not fix has no accuracy worth measuring. Where the base
   cannot serve the configuration because that is the failure being fixed (a crash, a server that does
@@ -74,18 +74,50 @@ Notes per gate:
   pull request, and both say that it has no baseline. An issue that reports an accuracy loss is
   judged by its reproduction (`issue_repro`: the reported score comes back); G2 runs all the same, and
   its base arm shows the loss.
+- **G2 for a model that answers no text questions.** gsm8k cannot be put to a diffusion, speech or
+  embedding model, and a fix on its serving path can change its outputs as any other can. Its G2 is
+  an output comparison: the task's own test, its `output_script`, puts the same inputs with the same
+  seeds to the base and to the fix, each once, and compares what comes back, by the measure and
+  within the tolerance the script fixes (the PSNR of two images, the word error rate of a
+  transcript, the cosine of two embeddings). The test is the user's, as G3's is: InferPilot has no
+  template for one, and no role writes one in its place. Setup says what the model is, and a task
+  that can reach a fix on such a model without the script is asked for it then, before anything
+  else runs. The comparison runs on the condition gsm8k runs on for any other fix, by the fix's
+  files and after the reproduction or the failing test, and against the same baseline: the base, or
+  the last commit that served the configuration where the base cannot. Where the failure being
+  fixed is in these very outputs (the base's images are the black ones), the base is no reference
+  either, and that last commit is; where the run knows none, the fix's outputs are kept and
+  reported, not judged. An output that differs by more than the script tolerates is a blocking
+  failure, and so is a run that compared nothing. A round is accepted only on the comparison's
+  result, a pass or outputs kept where there is no baseline: never on a G2 that did not run, with
+  the script named or without. No known issue excuses a difference the comparison reports: where the
+  base differs from itself as much, the script cannot tell the fix from noise, and that is a human's
+  to settle, with the script. Each run of the fix writes to a directory of its own, named for its
+  commit, so that no round's outputs are read as another's. This is the one G2 that compares outputs
+  (*G2 compares scores, not tokens*): InferPilot measures no score set on such a model, the inputs
+  and the seeds are fixed, and what two runs of one commit still differ by is what the script's
+  tolerance is for.
 - **G2 for an accuracy problem in CI.** A CI failure on a score its test measures (a GSM8K threshold,
   an MMMU score), not on an error, is an accuracy problem, as a failure on a speed number is a
   performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the
   claim. Classify records it (`accuracy_claim`: the set, the model and the value, from the last green
   run or from the threshold the test had when it last passed), and G2 measures it where it showed, with
-  the failing test's own measurement, whatever the fix changes. G2 reads the score, not the assertion:
-  a score below the claim is a blocking failure although the test passes, so a threshold moved in a
-  test restores nothing. It is reported under its own name (`accuracy_claim`), apart from gsm8k against
-  the base, which runs by the fix's files as for any fix and cannot stand in for it. No known issue
-  excuses it: the base scores low as well, and that is the failure being fixed. Where the threshold
-  itself was wrong (a baseline no commit ever met), that is a human's to say: the run stops with the
-  scores of the fix, of the base and of the last green run.
+  the failing test's own measurement, whatever the fix changes. That measurement is the base's: the
+  set, the number of questions, the model and the sampling settings as the test has them before the
+  fix, since a fix can change what is measured as easily as the threshold. G2 reads the score, not the
+  assertion: a score below the claim is a blocking failure although the test passes, so a threshold
+  moved in a test restores nothing, nor do fewer questions or another sampling. It is reported under
+  its own name (`accuracy_claim`), apart from gsm8k against the base, which runs by the fix's files as
+  for any fix and cannot stand in for it. No known issue excuses it: the base scores low as well, and
+  that is the failure being fixed. Where the threshold or the measurement itself was wrong (a baseline
+  no commit ever met, a set the test should not have used), that is a human's to say: the run stops
+  with the scores of the fix, of the base and of the last green run, by the base's measurement and by
+  the fix's. Both are measured whenever the fix changes the measurement, whether or not it says that
+  the old one was wrong: a change that meets the claim is still a human's to accept, and is accepted
+  on both scores. A fix with which the test still fails is measured all the same, both ways where it
+  changes the measurement: that failure ends the round, and whoever decides next, the investigator or
+  a human, decides on the scores. The pull request shows the score that fell and the score restored,
+  whatever the fix changes (`pr_playbook.md` §Description).
 - **gsm8k by default; three sets when the user says the change may lose accuracy.** GSM8K alone
   may not show a loss: relaxed speculative verification (FLy) left gsm8k within ±0.4pp at every
   setting while simple_qa lost up to 3pp (`feature_skills/fly-dspark`). Whether a change may lose
@@ -209,8 +241,8 @@ Notes per gate:
   both gates, by one line (*What a fix changes decides its gates*): a fix to tests, documentation or
   CI files alone has no G5 either, `not run: no code the server runs changed`. Where
   the base cannot serve the configuration because that is the failure being fixed, the fix is compared
-  with the last commit that served it: the one G2 measured against, or, where G2 did not run (a model
-  that answers no text questions), the one the triage record names. Only where the run knows no such
+  with the last commit that served it: the one G2 measured against, or, where G2 did not run, the one
+  the triage record names. Only where the run knows no such
   commit are its numbers reported and not judged, and the pull request says that they have no
   baseline. So an issue or a ci task that can reach a fix names its client as it names its model, and
   one that names none is asked for it (`templates/task_definition.md` §1.1); no template is offered
@@ -309,7 +341,10 @@ Before instrumenting any failure, reproduce **the same scheduling pattern on bas
 3. Compare the failure taxonomy over repeated runs. Only a difference beyond the noise is attributable
    to the feature; a failure present on baseline goes to `known_issues.md` and the feature is judged on
    the remainder. G4 keeps its verdict even so: a failure the baseline shares does not block the change,
-   and G4 is still reported as failed (*Notes per gate*).
+   and G4 is still reported as failed (*Notes per gate*). One failure is never the baseline's to keep:
+   the one a fix is there to fix (an issue's reproduction, a CI failure's failing test or the score it
+   must restore). The base shows it by definition, and its showing with the fix as well means that the
+   fix does not fix.
 
 Also run the **original upstream code** (an untouched checkout of the framework) when the branch carries
 other people's commits, so a failure can be pinned to "framework", "dependency PR" or "this change".

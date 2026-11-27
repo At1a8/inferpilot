@@ -263,6 +263,170 @@ class TokenComparisonTest(unittest.TestCase):
         self.assertEqual(found, [], "these ask for outputs equal to another run's; G2 compares scores")
 
 
+class CiExistingFixTest(unittest.TestCase):
+    """A CI failure that an open pull request already fixes is verified, not fixed a second time
+    (knowledge/ci_triage.md §2), as an issue with an open fix PR is: the classification names the pull request,
+    the run applies it without a bisect, the failing test is its gate, and the PR phase drafts a verification
+    comment for it. A pull request runs its author's code on this machine: the run applies one only on the
+    user's word, whoever wrote it, and only one the classification found open, at the commit its branch is at."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_applies_one_pull_request_on_the_users_word_without_a_bisect(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
+        self.assertIn("existing_prs: arr(S({ pr: str, repo: str, author: str, association: str, head: str, state: str }, ['pr'])),", body,
+                      "the classification cannot say who wrote an open fix, which repository and commit it is at, or whether it is still open")
+        for said, why in (
+                # the user's word is what the caller gave: the field or, where it is blank, the answer; not the Intake's reading
+                ("const field = prWords(RAW.apply_prs);\n  const said = field.length ? field : prWords(asObject(RAW.answers).apply_prs);\n"
+                 "  return { said, read: said.length ? [] : prWords(A.apply_prs) };", "what the Intake read into a request passes for the user's word"),
+                ("const isPr = (p) => /^#\\d+$/.test(p);", "a pull request of another repository is applied to this tree"),
+                ("const bare = /^(?:pr\\s*|pull request\\s*)?#?(\\d+)$/i.exec(p);", "an answer that gives the bare number is dropped"),
+                # a word that names its repository keeps it: its number alone names another pull request in the framework's
+                ("return m ? `${m[1]}#${m[2]}` : '';", "a URL is cut down to its number, which names another pull request in the framework's repository"),
+                ("return p.pr === ref.slice(at) && (!repo || p.repo === repo);", "a word for another repository's pull request runs the framework's"),
+                # the word decides when it names a pull request or says none, and one of the two only
+                ("const none = said.some((w) => /^\"?none\"?$/i.test(w));\n  const decided = none ? !byUser.length : byUser.length > 0;",
+                 "an answer that names nothing is taken for none"),
+                ("const usable = here.filter((p) => p.state === 'open' && p.head);", "a closed or a merged pull request, or one at no known commit, is applied"),
+                ("const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;",
+                 "a pull request the user did not name is applied, or several are applied together"),
+                ("if (!decided && candidates.length) {", "the user is not asked, is asked again after deciding, or is not asked again after an "
+                                                         "answer that decides nothing"),
+                ("named_prs: MODE === 'ci' ? [...namedPrs().said, ...namedPrs().read].map((p) => prRef(p)).filter(Boolean) : [],",
+                 "Classify is not told which pull requests the task names, with their repositories, to look them up"),
+                ("out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };", "a field the task left blank wins over the answer, and the run asks again"),
+                ("const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))\n"
+                 "      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "a scan offers a ci task with a pull request to apply, as a field or as an answer a model wrote"),
+                # an issue's existing fix: one pull request, and the roles after it know which
+                ("const prs = listed[0] || '';\n    if (prs) C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several")):
+            self.assertIn(said, src, why)
+        self.assertNotIn("MAINTAINERS", src, "the run still applies a pull request on what a model says of its author")
+        ci = src[src.index("async function runCi() {"):src.index("async function runPerf() {")]
+        for said, why in (
+                ("const fix = existingFix(cl.existing_prs);", "the open fix is applied without the user's word"),
+                ("if (stopHere('Bisect')) {", "a stop named for the phase an existing fix skips does not hold"),
+                ("R.questions = [fix.ask.question];", "the run does not ask before it runs another author's code"),
+                ("const lacking = askForFix('Classify');", "an existing fix is applied without the model and the client its gates need"),
+                ("C.existing_prs = [pr];", "the roles after Classify do not know which pull request is under verification"),
+                ("kind: 'apply_pr', goal: `apply the existing fix ${pr} at ${head} and complete what verification needs`",
+                 "the pull request is not applied as a work package, or not at the commit the classification read"),
+                ("return deliver([wp], gates, ciClaim, perfFailure ? true : 'fix');", "the existing fix is not held to the failing test and the fix's gates")):
+            self.assertIn(said, ci, why)
+        self.assertLess(ci.index("const fix = existingFix(cl.existing_prs);"), ci.index("enter('Bisect');"), "the culprit is searched for although a fix is open")
+        self.assertLess(ci.index("if (handOver) return finish('handed_off', 'Classify');"), ci.index("const fix = existingFix(cl.existing_prs);"),
+                        "a failure that is handed over is fixed all the same")
+        self.assertLess(ci.index("if (fix.ask) {"), ci.index("if (fix.apply) {"), "the question comes after the pull request is applied")
+        # The run ends in a comment for the pull request, and the user is told to post it, not to push a branch.
+        for said in ("...((C.existing_prs || []).length ? { comment_for: C.existing_prs } : {}) };",
+                     "if (verified) user.push(`post the verification comment on ${verified}, once you have re-run what it cites: ${R.pr.pr_body_path}`);"):
+            self.assertIn(said, src)
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**A failure an open pull request already fixes is verified, not fixed again.**"),
+                ("knowledge/ci_triage.md", "a pull request that cites a failure does not always fix it"),
+                ("knowledge/ci_triage.md", "the failing test is its gate, on every lane it failed on, and its accuracy and speed are measured by what it changes"),
+                ("knowledge/ci_triage.md", "It ends in a verification comment for that pull request, drafted for a human to post"),
+                ("knowledge/ci_triage.md", "at which commit of the pull request"),
+                ("knowledge/ci_triage.md", "No second pull request is opened for the same failure"),
+                ("knowledge/ci_triage.md", "A fix that has merged needs none of this: main has it"),
+                # whose code the run executes
+                ("knowledge/ci_triage.md", "Verifying a pull request runs its author's code and tests on this machine, next to the keys the agents hold"),
+                ("knowledge/ci_triage.md", "The run applies one only on the user's word, whoever wrote it: it stops after Classify and asks which one "
+                                           "to verify, or none"),
+                ("knowledge/ci_triage.md", "What the classification says of the author is no proof that the author can put code on main"),
+                ("knowledge/ci_triage.md", "the run has no way of its own to look the permission up"),
+                ("knowledge/ci_triage.md", "What the Intake read into a request in plain words is a reading too, and is asked about: only a field or "
+                                           "an answer the caller gave counts"),
+                ("knowledge/ci_triage.md", "A task a scan offers names no pull request to apply"),
+                ("knowledge/ci_triage.md", "the run applies only a pull request found open, with the commit its branch is at"),
+                ("knowledge/ci_triage.md", "One that is closed, merged or not found is not applied, the triage record says why, and the run goes on "
+                                           "to a fix of its own"),
+                ("knowledge/ci_triage.md", "One pull request is verified in a run: several applied together would show nothing of each"),
+                ("roles/ci_guardian.md", "4. Look for a fix someone has already opened"),
+                ("roles/ci_guardian.md", "Read the diff of each, and run nothing of it"),
+                ("roles/ci_guardian.md", "the fix a tracker names can be wrong"),
+                ("roles/ci_guardian.md", "the author's association with the repository as the API gives it (`author_association`), its head commit "
+                                         "and its `state` (`open`)"),
+                ("roles/ci_guardian.md", "the repository it is in (`repo`: `<owner>/<repo>`, as the API gives it)"),
+                # a name that carries its repository is looked up there, never by its number in the framework's
+                ("roles/ci_guardian.md", "A name that carries its repository (`<owner>/<repo>#<n>`, from a URL the user gave) is looked up in that "
+                                         "repository, never by its number in the framework's"),
+                ("roles/ci_guardian.md", "Return it as `#<n>` only when that repository is the framework's, and always with its `repo`"),
+                ("knowledge/ci_triage.md", "A word that names its repository (a URL, `<owner>/<repo>#<n>`) keeps it"),
+                ("knowledge/ci_triage.md", "never for the framework's pull request of the same number"),
+                ("knowledge/ci_triage.md", "it is taken by the fields of a task definition, and an answer or a request a model wrote next to them "
+                                           "goes no further"),
+                ("knowledge/ci_triage.md", "The word has to decide: it names a pull request, or it says `none`"),
+                ("knowledge/ci_triage.md", "Any other answer, or both at once, is asked about again"),
+                ("roles/ci_guardian.md", "It does so only on the user's word, whoever the author is: the association is for the user to read, and "
+                                         "proves no right to put code on main"),
+                ("roles/ci_guardian.md", "The pull requests in `named_prs` are the ones the task or the request names for verification: look each "
+                                         "of them up"),
+                ("roles/ci_guardian.md", "with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`)"),
+                ("roles/ci_guardian.md", "One that is a pull request of another repository goes under its full name (`<owner>/<repo>#<n>`), never "
+                                         "as this repository's `#<n>`"),
+                ("roles/ci_guardian.md", "The run applies only one returned `open` with its head"),
+                ("roles/ci_guardian.md", "One that has merged is not listed"),
+                ("roles/ci_guardian.md", "One in another repository (a component's) is not listed either"),
+                ("roles/ci_guardian.md", '"existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>", '
+                                         '"association": "<author_association>", "head": "<sha>", "state": "open | closed | merged | not_found"}],'),
+                ("roles/implementer.md", "Write the head you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit"),
+                ("roles/implementer.md", "What you add (a missing test, a fix on top) is commits of your own after the author's"),
+                # a conflict resolved in a cherry-pick is part of that commit: said, not hidden
+                ("roles/implementer.md", "a conflict resolved during a cherry-pick is staged before `git cherry-pick --continue`, and so is part of "
+                                         "that commit"),
+                ("roles/implementer.md", "the verification comment says that this commit is not the author's as pushed"),
+                ("roles/implementer.md", 'write that tip in the ledger as well (`git rev-parse HEAD`, "the PR as applied")'),
+                # a retry that takes the package from the restored ref records this attempt's tip between the author's commits and its own
+                ("roles/implementer.md", "An `apply_pr` package is taken from the ref in two parts"),
+                ("roles/implementer.md", 'first the commits up to that one, the author\'s; then write this attempt\'s tip in the ledger (`git '
+                                         'rev-parse HEAD`, "the PR as applied"); then the commits after it, the run\'s additions'),
+                ("roles/implementer.md", "take nothing from the ref for this package: apply the PR from step 3, which records the tip"),
+                ("roles/test_engineer.md", "the commit the package was made on: the last commit of `verified_work_packages`, or `<base>` for the first package"),
+                # the feature-off comparison takes the same tree before the package as the control does
+                ("roles/test_engineer.md", "The parent is the tree before the package, here as in step 3"),
+                ("roles/test_engineer.md", "where a test an earlier commit of the package broke fails already and would pass for unchanged"),
+                # the PR engineer rewrites nothing of the author's, and exports the run's additions apart
+                ("roles/pr_engineer.md", "A run that verified an existing PR (`existing_prs`) rewrites nothing of it"),
+                ("roles/pr_engineer.md", "Only what the run added after that tip is tidied, in commits of its own that stay after it"),
+                ("roles/pr_engineer.md", "A commit of the PR whose conflict the implementer resolved while applying it (the ledger names each) is "
+                                         "not the author's as pushed"),
+                ("roles/pr_engineer.md", "format-patch <that tip>..inferpilot/<slug> -o RUN_DIR/patches_additions"),
+                ("roles/pr_engineer.md", "a series that carried the PR's own commits would apply them a second time"),
+                ("roles/pr_engineer.md", "that is the whole of what was verified, to replay it, not what the comment offers"),
+                ("knowledge/pr_playbook.md", "It is for one PR: a run verifies one (for an issue the first its triage lists, for a CI failure the one "
+                                             "the user names)"),
+                ("knowledge/pr_playbook.md", "The run's result says to post the comment, and gives no push command"),
+                ("roles/pr_engineer.md", "(an issue triaged `push_existing_pr`, a CI failure classified with `existing_prs`)"),
+                ("roles/pr_engineer.md", "It names the commit of the PR that was verified"),
+                ("roles/pr_engineer.md", "lists apart what the run added on top of it, commit by commit and why"),
+                ("roles/pr_engineer.md", "None for an existing PR's verification (`push_command` empty)"),
+                ("templates/ci_triage.md", "| open fix PRs |"),
+                ("templates/task_definition.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.md", "A CI failure that an open pull request already fixes skips Bisect"),
+                ("README.md", "It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say"),
+                ("README.md", "so the run applies one only when it is named here, whoever wrote it; without it the run asks"),
+                ("README.zh-CN.md", "那个 PR 的代码只有在你点名（`apply_prs`）之后才会在本机运行，任务里没说时运行会先问"),
+                ("README.zh-CN.md", "所以不论作者是谁，只有在这里点名的 PR 才会应用；没给时运行会先问"),
+                ("templates/task_definition.md", "so the run applies one only when it is named here, whoever wrote it"),
+                ("README.md", "`ci`: the open fix PR the run may verify (`#<n>`), or `none`"),
+                ("README.zh-CN.md", "CI failure 已经有人提了修复 PR 且还开着时，跳过 Bisect"),
+                ("README.zh-CN.md", "`ci`：允许运行去验证的那个已有修复 PR（`#<n>`），或 `none`")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        self.assertIn("args.apply_prs (perf: candidate PRs to apply; ci: the open fix PR the run may verify, or none",
+                      (ROOT / "inferpilot.js").read_text(encoding="utf-8").split("\n")[3], "whenToUse does not tell the caller of it")
+        # The steps of the classification are numbered through: the new one did not leave two fourth steps.
+        role = (ROOT / "roles" / "ci_guardian.md").read_text(encoding="utf-8")
+        classify = role[role.index("## PHASE=classify"):role.index("## PHASE=bisect")]
+        self.assertEqual(re.findall(r"^(\d+)\. ", classify, re.M), ["1", "2", "3", "4", "5"])
+
+
 class EnvironmentTest(unittest.TestCase):
     def test_setup_container_and_runner_variables_are_in_both_readmes(self):
         missing = ["%s reads %s; %s does not say what it does" % (path.relative_to(ROOT), name, readme)
@@ -953,6 +1117,161 @@ class FixAccuracyTest(unittest.TestCase):
             self.assertNotIn(stale, row[0], "the profiles still leave a fix's accuracy to the kind of issue")
 
 
+class OutputComparisonTest(unittest.TestCase):
+    """gsm8k cannot be put to a model that answers no text questions (a diffusion, speech or embedding model). The
+    fix of an issue or of a CI failure on one is measured by an output comparison in its place: the task's own
+    test, its `output_script`, on the same inputs and seeds for the base and for the fix
+    (knowledge/validation_doctrine.md, G2 for a model that answers no text questions). InferPilot has no template
+    for one and no role writes one: Setup says what the model is, and a task that can reach a fix without the
+    script is asked for it."""
+
+    FIELD = "output_script"
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_task_names_the_script_and_no_fix_starts_without_it(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the script")
+        self.assertIn("\n  %s: str," % self.FIELD, intake, "the intake cannot return the script")
+        self.assertIn("\n  %s: String(A.%s || '').trim()," % (self.FIELD, self.FIELD), src, "the script does not reach the roles")
+        for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
+            body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
+            self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
+        self.assertIn("if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;", src,
+                      "what Setup says of the model does not reach the roles; left out, the model answers text questions")
+        self.assertIn("function outputsLacking() {\n  if (C.text_model !== false || C.output_script) return null;", src)
+        # Asked after Setup of a task that can reach a fix, at the fix of a run whose stop before it was lifted, and
+        # a round that finds such a model without the script passes nothing.
+        self.assertRegex(src, r"if \(stopHere\('Setup'\)\) return finish\('stopped', 'Setup'\);\n(?:\s*//.*\n)*\s*const stop = liveStopAfter\(\);\n"
+                              r"\s*const lacking = BEFORE_A_FIX\[MODE\] && stop !== 'now' && !BEFORE_A_FIX\[MODE\]\.includes\(stop\) \? outputsLacking\(\) : null;",
+                         "a task that can reach a fix is not asked for the script after Setup")
+        self.assertIn("const outputs = outputsLacking();\n  if (outputs) lacks.push('output_script');", src,
+                      "a run whose stop before the fix was lifted starts its fix without the script")
+        # The verify engineer has the last word on what the model is, either way; a round that does not say changes nothing.
+        self.assertIn("if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;\n"
+                      "    if (C.server_code_changed && outputsLacking()) {", src,
+                      "a round that finds such a model without the script can pass")
+        # With the script, a round is accepted only on the comparison's result: not on a G2 it left out or did not run.
+        self.assertIn("const compared = String((v.gates || {}).G2 || '').trim();\n", src)
+        # "no baseline" is the documented result and nothing looser: the outputs kept and where, never a G2 that did not run or failed
+        self.assertIn("const keptOutputs = /\\bno baseline\\b/i.test(compared) && /\\boutputs\\/fix-/.test(compared) "
+                      "&& !/^(not[ _-]?run|fail|skip)/i.test(compared);\n"
+                      "    const comparisonFailed = failures.some((f) => String(f.gate || '').trim() === 'G2');\n"
+                      "    if (C.server_code_changed && C.text_model === false && (v.all_pass === true || (failures.length && !blocking.length))\n"
+                      "      && (comparisonFailed || !(/^pass\\b/i.test(compared) || keptOutputs))) {", src,
+                      "a round can be accepted for such a model without the result of its output comparison")
+        # a difference the comparison reports is never the baseline's to keep: no known issue, and a human decides
+        self.assertIn("if (C.text_model === false && C.output_script && blocking.some((f) => String(f.gate || '').trim() === 'G2')) {", src,
+                      "a known issue can excuse the output comparison in a later round")
+        self.assertIn("\nFIX_NEEDS.output_script = ", src, "the result does not say what to give")
+        question = re.search(r"\nconst OUTPUTS_ASK = (.*?);\n", src, re.S).group(1)
+        for said in ("PORT", "OUT_DIR", "BASE_DIR", "same inputs with the same seeds", "exits non-zero", "no template for it"):
+            self.assertIn(said, question, "the question does not say what the script does")
+        # A value that names no script would win over the answer and be asked about again: Intake asks first.
+        self.assertIn("if (BEFORE_A_FIX[mode] && outputs && (!outputs.trim() || isTemplate(outputs))) {\n    ask('output_script', OUTPUTS_ASK,", src)
+
+    def test_the_documents_say_how_such_a_fix_is_measured(self):
+        notes = items("knowledge/validation_doctrine.md")
+        note = [i for i in notes if i.startswith("- **G2 for a model that answers no text questions.**")]
+        self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how such a fix is measured")
+        for said in ("Its G2 is an output comparison", "its `output_script`", "the same inputs with the same seeds to the base and to the fix, each once",
+                     "by the measure and within the tolerance the script fixes", "The test is the user's, as G3's is",
+                     "InferPilot has no template for one, and no role writes one in its place", "Setup says what the model is",
+                     "is asked for it then, before anything else runs", "by the fix's files and after the reproduction or the failing test",
+                     "the last commit that served the configuration where the base cannot",
+                     "Where the failure being fixed is in these very outputs", "kept and reported, not judged",
+                     "is a blocking failure, and so is a run that compared nothing", "This is the one G2 that compares outputs",
+                     "A round is accepted only on the comparison's result, a pass or outputs kept where there is no baseline",
+                     "never on a G2 that did not run, with the script named or without",
+                     "No known issue excuses a difference the comparison reports",
+                     "where the base differs from itself as much, the script cannot tell the fix from noise",
+                     "Each run of the fix writes to a directory of its own, named for its commit"):
+            self.assertIn(said, note[0])
+        fix = [i for i in notes if i.startswith("- **G2 for a fix.**")]
+        self.assertIn("is measured by an output comparison in its place (*G2 for a model that answers no text questions*)", fix[0])
+        self.assertNotIn("Nor has the fix for a model that answers no text questions", fix[0], "the doctrine still leaves such a fix unmeasured")
+        for path, said in (("roles/verify_engineer.md", "G2 is an output comparison in its place, by the task's own test, its `output_script`"),
+                           ("roles/verify_engineer.md", "Run it unchanged, once per arm"),
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>"),
+                           # every run of the fix writes to a directory of its own; only the baseline's is reused
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash "
+                                                        "<output_script>"),
+                           ("roles/verify_engineer.md", "in a directory that no earlier execution wrote to, named for the commit it runs: `mkdir "
+                                                        "RUN_DIR/outputs/fix-<commit>`"),
+                           ("roles/verify_engineer.md", "a commit that runs again takes `fix-<commit>-2`"),
+                           ("roles/verify_engineer.md", "A retry or a repaired fix never writes where an earlier execution wrote"),
+                           ("roles/verify_engineer.md", "Only the baseline's directory is reused, for the commit it was measured on"),
+                           ("roles/verify_engineer.md", "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline"),
+                           ("roles/verify_engineer.md", "InferPilot accepts a round for such a model only on one of those two results, a `pass` or "
+                                                        "outputs kept with `no baseline`"),
+                           ("roles/verify_engineer.md", "never report it `not run` where the task names the script"),
+                           ("roles/verify_engineer.md", "The second is that form and nothing looser: it names the outputs that were kept and the "
+                                                        "directory they are in"),
+                           ("roles/verify_engineer.md", "a G2 that begins `not run` or `fail` is neither, whatever it says of a baseline"),
+                           # the known-issue rule of step 4 does not apply to the comparison
+                           ("roles/verify_engineer.md", "Step 4 excuses nothing here: the comparison runs on fixed inputs and seeds"),
+                           ("roles/verify_engineer.md", "no entry of `known_issues` makes an output that differs by more than the script tolerates "
+                                                        "pass, or fail without blocking"),
+                           ("roles/verify_engineer.md", "a comparison listed among the round's failures is not accepted"),
+                           ("roles/verify_engineer.md", "the run stops for a human, and records no known issue"),
+                           ("roles/verify_engineer.md", 'say so in `gates` and with `"text_model": true` in your answer'),
+                           ("roles/verify_engineer.md", '`"text_model": true` when a model Setup took for such a one answers text questions after all'),
+                           ("roles/verify_engineer.md", "What you say replaces what Setup said, for the later rounds and the report"),
+                           ("roles/verify_engineer.md", "Never write such a test yourself, and never change the task's"),
+                           ("roles/verify_engineer.md", "never a pass on its exit status alone"),
+                           ("roles/verify_engineer.md", "Where the failure being fixed is in these outputs"),
+                           ("roles/verify_engineer.md", "where one Setup took for such a model answers text questions all the same"),
+                           ("roles/verify_engineer.md", 'Say `"text_model": false` in your answer'),
+                           ("roles/verify_engineer.md", "not run: the model answers no text questions, and the task names no output_script"),
+                           ("roles/verify_engineer.md", "Never pass G2 for such a fix on the reproduction or the failing test alone"),
+                           ("roles/verify_engineer.md", 'It adds `"text_model": false` when the model answers no text questions'),
+                           ("roles/director.md", "`issue`, `ci`, with a `model_path`: say what the model is"),
+                           ("roles/director.md", '`"text_model": false` for one that answers no text questions'),
+                           ("roles/director.md", "a model that takes images or audio and answers in text included"),
+                           ("roles/director.md", "Judge by the model's files and by the command the report or the job serves it with, not by its name"),
+                           ("roles/director.md", "a run that can reach a fix without one stops after Setup and asks for it"),
+                           ("roles/director.md", "Never write that test in the task's place"),
+                           ("roles/director.md", 'An issue or a ci task with a `model_path` adds `"text_model": true | false`'),
+                           ("roles/director.md", "and `output_script` and `long_context_script`, for which there is no template) run as given"),
+                           ("roles/intake.md", "`output_script` (`task_definition.md` §1.1): the user's own test that compares the outputs"),
+                           ("roles/intake.md", "Ask for it when the request names none, and offer nothing in its place"),
+                           ("roles/intake.md", "Never ask it of a model that answers text questions"),
+                           ("roles/intake.md", "G2 compares its outputs with the task's `output_script`"),
+                           ("roles/perf_engineer.md", "That is the commit G2 measured against, which the ledger names"),
+                           ("knowledge/acceptance.md", "is measured by an output comparison in gsm8k's place: the task's own test, its `output_script`"),
+                           ("knowledge/ci_triage.md", "is measured by the task's own output comparison in gsm8k's place (`output_script`"),
+                           ("knowledge/issue_triage.md", "the task's own output comparison stands in gsm8k's place (`output_script`"),
+                           ("knowledge/pr_playbook.md", "for a model that answers no text questions, what the task's own test compared in their place"),
+                           ("templates/task_definition.md", "**`output_script`** is the task's own test of the outputs of a model that answers no text questions"),
+                           ("templates/task_definition.md", "With `BASE_DIR` set, the directory its run on the baseline wrote to, it compares its outputs with those"),
+                           ("templates/task_definition.md", "exits non-zero when one differs by more than it tolerates"),
+                           ("templates/task_definition.md", "It has no template for one, and writes none")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for path in ("roles/verify_engineer.md", "roles/intake.md", "knowledge/acceptance.md", "knowledge/ci_triage.md"):
+            for stale in ("What its outputs are worth is the reproduction's or the failing test's to show", "G2 says that gsm8k cannot be put to it",
+                          "nor one for a model that answers no text questions"):
+                self.assertNotIn(stale, self.flat(path), "%s still leaves such a fix unmeasured" % path)
+
+    def test_the_task_definition_and_both_readmes_list_the_script(self):
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the script")
+        self.assertEqual(row[0].count("| required for such a model unless `stop_after` ends the run before a fix "), 2,
+                         "an issue and a ci task each name it for a model that answers no text questions")
+        for name, text, said in (("README.md", EN, ("`BASE_DIR`", "`OUT_DIR`", "InferPilot has no template for it", "once on the base and once on the fix")),
+                                 ("README.zh-CN.md", ZH, ("`BASE_DIR`", "`OUT_DIR`", "InferPilot 没有这种脚本的模板", "base 和修复各跑一次"))):
+            row = [line for line in text.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+            self.assertEqual(len(row), 1, "%s has no row for the script" % name)
+            for words in said:
+                self.assertIn(words, row[0], "%s: the output_script row" % name)
+        self.assertRegex(EN, r"the question after Setup\s+for the script that compares outputs \(`output_script`\)", "README.md does not list the question")
+        self.assertIn("Setup 之后会问比较输出的脚本（`output_script`）", ZH, "README.zh-CN.md does not list the question")
+
+
 class FixPerformanceTest(unittest.TestCase):
     """The fix of an issue or of a CI failure is measured for speed as it is for accuracy, and on the same condition
     (knowledge/validation_doctrine.md, G5 for a fix): when it changes code the server runs, it is no slower than the
@@ -1026,8 +1345,8 @@ class FixPerformanceTest(unittest.TestCase):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured for speed")
         for said in ("when it changes anything but tests, documentation and CI files", "no slower than the base beyond the noise band",
-                     "One diff decides both gates", "has no G5 either", "the last commit that served it", "where G2 did not run (a model that answers no text questions), "
-                     "the one the triage record names", "reported and not judged", "names its client as it names its model",
+                     "One diff decides both gates", "has no G5 either", "the last commit that served it", "where G2 did not run, the one the triage record names",
+                     "reported and not judged", "names its client as it names its model",
                      "no template is offered for it", "A performance problem is measured whatever its fix changes",
                      "a CI failure on a number its test measures", "A threshold moved in a test restores nothing",
                      "stops the task at Performance for a human, and nothing is rolled back"):
@@ -1038,8 +1357,7 @@ class FixPerformanceTest(unittest.TestCase):
                            ("roles/perf_engineer.md", "**A fix (issue, ci) has no baseline from Setup:** measure both arms yourself"),
                            ("roles/perf_engineer.md", "the baseline is the last commit that served it, in a throwaway worktree. That "
                                                       "is the commit G2 measured against, which the ledger names"),
-                           ("roles/perf_engineer.md", "Where G2 measured none, as for a model that answers no text questions, which it "
-                                                      "does not run on, the commit is still known: take it from the triage record"),
+                           ("roles/perf_engineer.md", "Where G2 measured none, the commit is still known: take it from the triage record"),
                            ("roles/perf_engineer.md", "Only where the run knows no such commit, measure the fix alone"),
                            ("roles/perf_engineer.md", "return `no_baseline` with the reason"),
                            ("roles/perf_engineer.md", "**A performance problem is measured where it showed:**"),
@@ -1115,6 +1433,12 @@ class CiAccuracyProblemTest(unittest.TestCase):
         self.assertLess(src.index("if (C.accuracy_claim && (v.all_pass === true"), src.index("note('Verify', 'pass',"))
         self.assertLess(src.index("const mine = own(blocking).map((f) => f.gate);"), src.index("if (inv.known_issue) R.known_issues.push(inv.known_issue);"))
 
+    def test_the_bullet_is_a_bullet_of_its_step(self):
+        role = (ROOT / "roles" / "verify_engineer.md").read_text(encoding="utf-8").splitlines()
+        line = [l for l in role if "**An accuracy problem is measured where it showed, whatever the fix changes.**" in l]
+        self.assertEqual(len(line), 1)
+        self.assertTrue(line[0].startswith("   - **An accuracy problem"), "the bullet is not indented as its siblings in step 2: %r" % line[0][:40])
+
     def test_the_documents_say_what_is_measured(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for an accuracy problem in CI.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a CI accuracy problem is judged")
@@ -1123,6 +1447,10 @@ class CiAccuracyProblemTest(unittest.TestCase):
                      "G2 reads the score, not the assertion", "a threshold moved in a test restores nothing",
                      "No known issue excuses it: the base scores low as well",
                      "It is reported under its own name (`accuracy_claim`), apart from gsm8k against the base",
+                     "That measurement is the base's: the set, the number of questions, the model and the sampling settings as the test has "
+                     "them before the fix",
+                     "nor do fewer questions or another sampling",
+                     "The pull request shows the score that fell and the score restored, whatever the fix changes",
                      "cannot stand in for it",
                      "that is a human's to say"):
             self.assertIn(said, note[0])
@@ -1133,13 +1461,51 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 ("roles/ci_guardian.md", '"accuracy": false, "accuracy_claim": "<accuracy failures only>"'),
                 ("roles/verify_engineer.md", "**An accuracy problem is measured where it showed, whatever the fix changes.**"),
                 ("roles/verify_engineer.md", "read the score it measures, not whether its assertion passes"),
-                ("roles/verify_engineer.md", "Report it in `gates` under its own name, apart from G2's gsm8k against the base"),
-                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q)"`'),
-                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above"),
-                ("roles/verify_engineer.md", "Never leave it out, and never report it `not run`: the run accepts no round without its `pass`"),
+                ("roles/verify_engineer.md", "Report the score in `gates` under its own name, apart from G2's gsm8k against the base"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "pass 0.936, the claim is 0.93 (the test\'s GSM8K, 200 q, as at the base)"`'),
+                ("roles/verify_engineer.md", "with `pass` only for a score at the claim or above by that measurement"),
+                ("roles/verify_engineer.md", "Never leave the gate out, and never report it `not run`: the run accepts no round without its `pass`"),
+                # the measurement is the base's: a fix can change what is measured as easily as the threshold
+                ("roles/verify_engineer.md", "The measurement is the base's: the set, the number of questions, the model and the sampling settings as the "
+                                             "test has them at `<base>`"),
+                ("roles/verify_engineer.md", "What is kept from the base is everything that decides the score, wherever it lives"),
+                ("roles/verify_engineer.md", "What is kept from the fix is its framework code and how it launches the server"),
+                ("roles/verify_engineer.md", "run the base's measurement against the fix's server"),
+                ("roles/verify_engineer.md", "nor do fewer questions or another sampling"),
+                ("roles/verify_engineer.md", "A fix that changes the measurement is a human's to accept, whether or not it says that the old "
+                                             "one was wrong"),
+                ("roles/verify_engineer.md", "wherever the fix's measurement differs from the base's (another set, number of questions, model or "
+                                             "sampling), measure both ways and give both scores, in `gates` and in the ledger"),
+                ("knowledge/validation_doctrine.md", "Both are measured whenever the fix changes the measurement, whether or not it says that the old "
+                                                     "one was wrong"),
+                # a failing test that still fails ends the round, and the scores are given all the same: whoever decides next needs them
+                ("roles/verify_engineer.md", "A `failing_test` that still fails with the fix ends the round (step 2) and stays its blocking failure, "
+                                             "and the gates after it stay `not run`; this measurement is not one of them"),
+                ("roles/verify_engineer.md", "before you return, give the score the fix reached, both ways where the fix changes the measurement, in "
+                                             "`gates`, in the ledger and as that failure's `evidence`"),
+                ("roles/verify_engineer.md", '`"accuracy_claim": "fail 0.871 by the base\'s measurement (200 q), 0.902 by the fix\'s (500 q); the claim '
+                                             'is 0.93"`'),
+                ("roles/verify_engineer.md", "Only where there is no score to read (the server does not start with the fix, the test stops before it "
+                                             "measures) say that in its place"),
+                ("knowledge/validation_doctrine.md", "A fix with which the test still fails is measured all the same, both ways where it changes the "
+                                                     "measurement"),
+                # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
+                ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
+                ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
+                                          "cannot"),
+                ("roles/investigator.md", "InferPilot stops the run on `baseline_bug` for such a gate, and records no known issue"),
+                ("knowledge/validation_doctrine.md", "One failure is never the baseline's to keep: the one a fix is there to fix"),
+                # the restored score is shown to whoever merges, also for a fix to the test alone
+                ("knowledge/pr_playbook.md", "shows the score that fell and the score it restores, whatever it changes, a fix to the test alone included"),
+                ("templates/validation_report.md", "| accuracy claim (a CI failure on a score its test measures) |"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
-                ("roles/reviewer.md", "read G2's score against the claim yourself"),
+                ("roles/reviewer.md", "the `accuracy_claim` entry of the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against "
+                                      "the base"),
+                ("roles/reviewer.md", "Check in the diff whether the test still measures what it measured"),
+                ("roles/reviewer.md", "A score below the claim by the base's measurement, or a threshold lowered in the test with no score at the claim, "
+                                      "is hack C1"),
+                ("roles/reviewer.md", "whether the measurement is to change is a human's to say, so the verdict is `blocked` with both scores"),
                 ("roles/reviewer.md", "is hack C1, whatever the base scores and whatever the fix changes"),
                 ("knowledge/ci_triage.md", "An accuracy problem (§2) is measured whatever its fix changes, a fix to the test alone included"),
                 ("knowledge/acceptance.md", "**An accuracy problem in CI** (a test that fails on a score it measures, not on an error)"),
@@ -1280,6 +1646,102 @@ def doc_command(path, start):
     text = re.sub(r"\s+", " ", (ROOT / path).read_text())
     m = re.search(r"`(%s[^`]*)`" % re.escape(start), text)
     return m.group(1) if m else None
+
+
+class CiOnMainTest(unittest.TestCase):
+    """A red CI job says what one image saw of one commit. Before a ci run classifies or fixes anything, main is
+    judged in the environment of the lane that failed (knowledge/ci_triage.md §2): a test that passes there has
+    nothing to fix, one this machine cannot run as that lane does is handed over, and only a failure main shows
+    there is classified."""
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_run_ends_at_classify_when_main_passes_or_the_lane_cannot_be_matched(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[(.*?)\]\);", src, re.S)
+        self.assertIn("on_main: { type: 'string', enum: ['fails', 'passes', 'not_run'] },", body.group(1))
+        self.assertIn("fixed_by: str,", body.group(1))
+        self.assertIn("unchecked: str,", body.group(1))
+        self.assertNotIn("'failure_class'", body.group(2), "a failure main no longer shows has no class to give")
+        self.assertNotIn("'failing_test_cmd'", body.group(2), "nor a command to verify a fix with: the answer would be rejected for lacking it")
+        for said, why in (
+                ("const onMain = String(cl.on_main || 'fails').trim().toLowerCase();", "an answer without on_main is not a failure of main"),
+                ("return finish(fixedBy ? 'fixed_on_main' : 'not_reproduced', 'Classify');", "a test that passes on main still goes on to a fix"),
+                ("if (onMain === 'not_run' && !handOver) {", "a lane this machine cannot be is classified from a run elsewhere"),
+                ("if (onMain === 'passes' && !handOver) {", "a green rerun here ends a failure of the CI's own as nothing to fix"),
+                ("if (unchecked) C.unchecked = R.unchecked = unchecked;", "an exit before the fix loses the part of the task that was not run"),
+                ("const unchecked = String(cl.unchecked || '').trim();", "a task of which a part was not run is called resolved"),
+                ("inputs({ time_limit_min: minutes(timeoutFor('ci_guardian', 'classify')) }), CLASSIFY);",
+                 "the classification is not told its limit, and a large cluster loses its answer to the timeout"),
+                ("if (!cl.failure_class) {", "a failure of main without a class goes on to the bisect")):
+            self.assertIn(said, src, why)
+        order = [src.index(x) for x in ("const onMain = ", "if (!handOver && !failingCmd) {", "const perfFailure = ")]
+        self.assertEqual(order, sorted(order), "main is judged before anything only a fix needs is asked for")
+
+    def test_the_documents_say_how_main_is_judged(self):
+        for path, said in (
+                ("knowledge/ci_triage.md", "**First: does main still fail, on the lane's own image?**"),
+                ("knowledge/ci_triage.md", "that lane's newest image, its GPU model and its node count"),
+                ("knowledge/ci_triage.md", "the run ends with no fix and no reply"),
+                ("knowledge/ci_triage.md", "the lane is supported, so the test or the code has to run on it"),
+                ("knowledge/ci_triage.md", "no conclusion is drawn, in either direction"),
+                ("knowledge/ci_triage.md", "The newest image is established, not assumed"),
+                ("knowledge/ci_triage.md", "for every test of the task on every lane it failed on"),
+                ("knowledge/ci_triage.md", "each test run as the job ran it, in the job's order, three times"),
+                ("knowledge/ci_triage.md", "is `flaky`, not passing"),
+                ("knowledge/ci_triage.md", "sets `stop_after=Classify`: it needs no model and no client"),
+                ("roles/ci_guardian.md", "**Which image is the newest is established, not assumed.**"),
+                ("roles/ci_guardian.md", "one that only matches the failed job's can be as old as it"),
+                ("roles/ci_guardian.md", "**Every test of the task, on every lane it failed on.**"),
+                ("roles/ci_guardian.md", "**A pass that holds.**"),
+                ("roles/ci_guardian.md", "a failure can depend on the test before it"),
+                ("roles/ci_guardian.md", "`unchecked` naming that part"),
+                ("roles/ci_guardian.md", "run them on main: the commit `origin/main` names after a `git fetch origin`"),
+                ("roles/ci_guardian.md", "Where the task worktree's base is that commit, run them there"),
+                ("roles/ci_guardian.md", "A failure found there is run on the task worktree as well: the fix is made on that tree"),
+                ("roles/ci_guardian.md", "The tests fail on main and pass on the task worktree: the failure came in after the task's base"),
+                ("roles/ci_guardian.md", "`failing_test_cmd` runs the task worktree, never `RUN_DIR/main`"),
+                ("roles/ci_guardian.md", "the run fixes what fails, and says that the fix does not answer for the rest"),
+                ("roles/ci_guardian.md", "keep a quarter of the time to it, at most 15 minutes"),
+                ("knowledge/ci_triage.md", "where the rest fails, the run fixes what fails and names what it did not check"),
+                ("roles/director.md", "With `unchecked` (a ci task of which a part is outside what the run answers for"),
+                # a green rerun here does not make a failure of the CI's own go away
+                ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
+                ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),
+                # the lane's own runs of one commit on one image are evidence of an intermittent failure; three passes here are not its end
+                ("roles/ci_guardian.md", "So a test that passes all three times here fails all the same where the lane's own runs of that commit on "
+                                         "that image show it failing in some and passing in others"),
+                ("roles/ci_guardian.md", 'It is `on_main: "fails"` with `failure_class: "flaky"`, and `evidence` names those runs and their rate'),
+                ("knowledge/ci_triage.md", "So is one that passes all three here while the lane's own runs of that commit on that image show it "
+                                           "failing in some and passing in others"),
+                ("knowledge/ci_triage.md", "A failure that was the CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over"),
+                # intermittent is said of one commit, lane and image, not of the tracker's counts
+                ("roles/ci_guardian.md", "intermittent means some runs fail and some pass on one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "The tracker's counts are no such evidence: they span commits and images"),
+                ("knowledge/ci_triage.md", "Intermittent is said of one commit, one lane and one image"),
+                ("roles/ci_guardian.md", "**A cluster of both.**"),
+                # the image is read where the tests run
+                ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
+                # a lane this machine cannot be is outside what the gate shows
+                ("knowledge/ci_triage.md", "A lane this machine cannot be stays `unchecked`: the gate is judged on the lanes that were run"),
+                ("roles/verify_engineer.md", "passes on every lane it failed on that this machine can run"),
+                ("roles/ci_guardian.md", "`scan_ci.py` lists ten tests and three job links of a cluster"),
+                ("roles/ci_guardian.md", "**Within your limit.**"),
+                ("roles/ci_guardian.md", "What you did not reach is `unchecked`, like any part you could not run"),
+                ("knowledge/ci_triage.md", "the commit `origin/main` names now, which the task's worktree is only when the task began there"),
+                ("roles/ci_guardian.md", "leave `failure_class` and `failing_test_cmd` out"),
+                ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
+                ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
+                ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
+                ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
+                ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        for name, text in (("README.md", EN), ("README.zh-CN.md", ZH)):
+            row = [line for line in text.splitlines() if line.startswith("| `ci` |")]
+            self.assertEqual(len(row), 1, name)
+            self.assertRegex(row[0], r"nothing to fix when main passes on the lane's own image|通过时不用修", name)
 
 
 class BranchBundleTest(unittest.TestCase):
@@ -1540,7 +2002,8 @@ class TriageCasesTest(unittest.TestCase):
                 ("const task = p.task || `${issue}: ${p.problem}`;", "a follow-up takes the task as it stands"),
                 ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
                  "a follow-up loses the operator's settings, or the model the report names for it"),
-                ("'gpu_ids'];", "a problem on another configuration is pinned to this run's GPUs"),
+                ("  'gpu_ids', 'output_script'];", "a problem on another configuration is pinned to this run's GPUs, or takes the "
+                                                    "output comparison of this run's model"),
                 ("const pinned = MEASURED_WITH.filter((k) => k !== 'model_path' && A[k]);\n  if (elsewhere) {\n    R.model_mismatch = elsewhere;",
                  "a problem on another model or configuration is reproduced on what the run is set up with, whoever chose it"),
                 # a task without a model is asked for what it pins, not for a model; one that pins nothing, for the GPUs Setup chose

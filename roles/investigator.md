@@ -40,6 +40,13 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      a change in rate, which is the change's. InferPilot then reports G4 as failed with the known issue,
      without blocking the change. A control that ended another way first, or was interrupted, shows
      nothing about this failure: the verdict is `inconclusive`.
+     Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`,
+     `accuracy_claim`. The base fails it by definition, since that is the failure the task is to fix
+     (`validation_doctrine.md`, *Same-pattern baseline control*); failing with the fix as well, the fix
+     is incomplete or wrong. Return `fix_needed` with the repair when you can explain what the fix
+     misses, and `inconclusive` when you cannot, or when what is wrong may be the gate itself (a
+     threshold no commit ever met): that is a human's to say. InferPilot stops the run on
+     `baseline_bug` for such a gate, and records no known issue.
    - `kernel_regression`: the failure goes away with an integrated kernel reverted. Name its hand-offs
      in `kernel_handoffs` and describe the failing case in `counterexample` — gate, shapes, dtype,
      configuration and the command that shows it — so the kernel back end can be given it as a test.

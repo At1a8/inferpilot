@@ -30,6 +30,13 @@ stay on the side ref) and write the package from step 1. Once they apply, a `ker
 speed matters still returns its hand-off (step 3): reuse `RUN_DIR/handoffs/K-<wp>/` when the earlier
 attempt left it and its paths exist, else write it. Then go on from step 4: the test engineer checks
 the commits like any other. Commits no package of this attempt names stay on the side ref.
+An `apply_pr` package is taken from the ref in two parts, since what the run added is exported
+apart from the PR's commits (step 3) and a cherry-pick gives every commit a new name. The earlier
+attempt's ledger names the tip it called "the PR as applied": first the commits up to that one,
+the author's; then write this attempt's tip in the ledger (`git rev-parse HEAD`, "the PR as
+applied"); then the commits after it, the run's additions. Where the earlier ledger names no such
+tip, or the ref does not hold it, take nothing from the ref for this package: apply the PR from
+step 3, which records the tip.
 
 1. If `feedback` is set, start from it: reproduce the failure the test engineer saw before changing code.
 2. Implement only this work package, with the smallest diff that satisfies it:
@@ -52,7 +59,17 @@ the commits like any other. Commits no package of this attempt names stay on the
    - `kernel` packages from the Kernel phase (ids `K-...`): apply the back end's verified patch at the
      plug-in point the package names; do not re-tune it.
    - `apply_pr`: fetch the PR (`git fetch origin pull/<n>/head`), cherry-pick onto the task branch,
-     resolve conflicts following upstream's intent, keep the author's commits intact.
+     resolve conflicts following upstream's intent, keep the author's commits intact. Write the head
+     you fetched in the ledger (`git rev-parse FETCH_HEAD`): results are for the PR at that commit.
+     Where the package names a head and the PR has moved since, say so in `notes`, and go on with what
+     you fetched. What you add (a missing test, a fix on top) is commits of your own after the
+     author's, never folded into theirs. One thing cannot be kept apart: a conflict resolved during
+     a cherry-pick is staged before `git cherry-pick --continue`, and so is part of that commit.
+     Resolve only what git marked, and write each such commit in the ledger and in `notes`, with
+     the files and what you chose: the verification comment says that this commit is not the
+     author's as pushed. Once the last of the PR's commits is on the branch, before anything of
+     your own, write that tip in the ledger as well (`git rev-parse HEAD`, "the PR as applied"):
+     what comes after it is the run's, and the PR phase exports it apart.
    - `test` / `docs`: register tests where CI discovers them; document user-visible switches.
 4. Leave the package ready for the PR, which changes no code: run the repository's formatters and
    linters on the files you changed (sglang: `pre-commit run --files <files>`, `env_hygiene.md`),

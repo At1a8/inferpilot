@@ -1530,6 +1530,171 @@ const scenarios = [
       && /Give the model and the whole workload of InferPilot's client/.test(ciPart.result.next.say),
       `ci: the same, asked together with what else the fix lacks: ${JSON.stringify((ciPart.result.next || {}).ask)} | ${ciPart.result.next.say}`);
   }],
+  ['issue: the fix for a model that answers no text questions is measured by the task\'s own output comparison, which a task that names none is asked for after Setup', async () => {
+    const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
+    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script'])
+      && 'output_script' in ((((r.result.next || {}).rerun_with || {}).answers) || {});
+    const none = await run({ mode: 'issue', task: 'i' }, noText);
+    const q = ((none.result.next || {}).ask || [])[0] || {};
+    check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup' && asked(none)
+      && !none.keys.includes('issue_triager:triage') && none.keys.includes('director:report'),
+      `Setup says the model answers no text questions and the task names no script: the run asks for it before anything else runs, and reports (${
+        none.result.status} at ${none.result.stopped_at}, asks ${JSON.stringify(((none.result.next || {}).ask || []).map((x) => x.field))})`);
+    check(/compares the model's outputs/.test(q.question || '') && /PORT/.test(q.question || '') && /OUT_DIR/.test(q.question || '')
+      && /BASE_DIR/.test(q.question || '') && /InferPilot has no template for it/.test(q.question || '') && !(q.options || []).length,
+      `the question says what the script does, and offers nothing in its place: ${JSON.stringify(q)}`);
+    check(/\/models\/m answers no text questions, so gsm8k cannot be put to it/.test(q.why || '') && /the same inputs and seeds on the base and on the fix/.test(q.why || '')
+      && /with stop_after set to a phase before the fix, no script is needed/.test(q.why || ''), `and why it is asked: ${q.why}`);
+    check(/Give the script that compares the model's outputs, and run the task again/.test(none.result.next.say),
+      `the result says what to give: ${none.result.next.say}`);
+    const given = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, answers: { output_script: ' /s/outputs.sh ' } }, noText);
+    const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
+      `with the answer the run goes to its end, and the verify engineer reads the script and what the model is: ${given.result.status}, ${
+        ve && JSON.stringify([ve.ins.output_script, ve.ins.text_model])}`);
+    check(given.result.task_def.output_script === ' /s/outputs.sh ', `the definition the run records names it: ${JSON.stringify(given.result.task_def.output_script)}`);
+    // A model that answers text questions is measured on gsm8k: nothing is asked, with a script or without.
+    const text = await run({ mode: 'issue', task: 'i' });
+    const tv = text.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(text.result.status === 'ready_for_review' && tv && tv.ins.text_model === true && !tv.ins.output_script,
+      `a Setup that does not say counts the model as one that answers text questions, and nothing is asked: ${text.result.status}, ${tv && tv.ins.text_model}`);
+    const says = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: true }) });
+    check(says.result.status === 'ready_for_review', `nor of a model Setup says answers them: ${says.result.status}`);
+    // A run that stops before its fix needs no script. Where the control file lifts the stop, the run asks before any code changes.
+    const early = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, noText);
+    check(early.result.status === 'stopped' && early.result.stopped_at === 'Diagnose',
+      `a run that stops before its fix is not asked: ${early.result.status} at ${early.result.stopped_at}`);
+    const atSetup = await run({ mode: 'issue', task: 'i', stop_after: 'Setup' }, noText);
+    check(atSetup.result.status === 'stopped' && atSetup.result.stopped_at === 'Setup', `nor one that stops after Setup: ${atSetup.result.status}`);
+    let reproduced = false;
+    const lifted = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      ...noText,
+      'issue_triager:reproduce': () => {
+        reproduced = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'black images 3/3' };
+      },
+    }, { control: () => (reproduced ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Diagnose' && asked(lifted)
+      && !lifted.keys.includes('implementer:implement') && lifted.keys.includes('director:report'),
+      `a stop the control file lifts starts no fix without the script: ${lifted.result.status} at ${lifted.result.stopped_at}`);
+    check(/G2 on the task's own output comparison, since the model answers no text questions/.test(lifted.result.next.say)
+      && /Give the script that compares the model's outputs, and run the task again/.test(lifted.result.next.say),
+      `and says what the fix lacks, and why: ${lifted.result.next.say}`);
+    // Setup took the model for one that answers text questions, and the round finds that it does not: no gsm8k ran, and
+    // there is no script to compare outputs with. The fix has no G2, and the round passes nothing.
+    const found = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, server_code_changed: changed,
+      gates: { issue_repro: 'pass', G2: 'not run: the model answers no text questions, and the task names no output_script' } }) });
+    const late = await run({ mode: 'issue', task: 'i' }, found(true));
+    const why = (late.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+    check(late.result.status === 'blocked' && late.result.stopped_at === 'Verify' && !late.keys.includes('perf_engineer:perf_eval')
+      && !late.keys.some((k) => k.startsWith('pr_engineer')),
+      `a round that finds such a model without the script does not pass, whatever it reports: ${late.result.status} at ${late.result.stopped_at}`);
+    check(/the model answers no text questions, and the task names no output_script/.test(why) && /Name the script \(output_script\), and run the task again/.test(why)
+      && /Name the script \(output_script\)/.test(late.result.next.say), `and the result says what to do: ${why} | ${late.result.next.say}`);
+    // With the script, G2 is the comparison it makes, and the round is accepted only on its result: a pass, or the
+    // outputs kept where the run has no baseline. A G2 the round skipped or left out passes nothing, script or not.
+    const compared = (gates, more = {}) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false,
+      server_code_changed: true, gates: { issue_repro: 'pass', ...gates }, ...more }) });
+    const scripted = { mode: 'issue', task: 'i', output_script: '/s/outputs.sh' };
+    for (const g2 of ["pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)",
+      "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline: the base's are the black images the issue reports"]) {
+      const withScript = await run(scripted, compared({ G2: g2 }));
+      check(withScript.result.status === 'ready_for_review', `with the task's script and its result (${g2.slice(0, 24)}...) the round is accepted: ${
+        withScript.result.status}`);
+    }
+    for (const [said, gates, more] of [
+      ['says it did not run the comparison', { G2: 'not run: the fix changes one line' }, {}],
+      ['leaves G2 out', {}, {}],
+      ['reports a comparison that failed without blocking', { G2: 'fail: 3 of 16 images differ beyond the tolerance (KI-002)' },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-002' }] }],
+      // "no baseline" is the documented result and nothing looser: the outputs that were kept, and where.
+      ['says it did not run for want of a baseline', { G2: 'not run: no baseline available' }, {}],
+      ['reports a failure that mentions no baseline', { G2: 'fail: 3 of 16 images differ from the last good commit; no baseline on the base' },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'no baseline on the base' }] }],
+      ['says there is no baseline without the outputs it kept', { G2: 'no baseline: the base does not start on this configuration' }, {}],
+      ['says it skipped the comparison, with outputs somewhere', { G2: 'skipped, no baseline; an earlier round wrote RUN_DIR/outputs/fix-5d6e7f8' }, {}],
+      ['says it did not run, and names a directory', { G2: 'not run: no baseline; RUN_DIR/outputs/fix-5d6e7f8 holds an earlier round\'s outputs' }, {}],
+      ['says the comparison failed, with no baseline and a directory', { G2: 'fail: no baseline, outputs in RUN_DIR/outputs/fix-5d6e7f8' }, {}],
+      // A comparison among the round's failures is not excused by a known issue, whatever the gate says.
+      ['calls the comparison a pass and lists it among its failures', { G2: "pass: 13 of 16 images match the base's; 3 differ, as KI-002 says" },
+        { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-002' }] }],
+    ]) {
+      const skipped = await run(scripted, compared(gates, more));
+      const said2 = (skipped.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(skipped.result.status === 'blocked' && skipped.result.stopped_at === 'Verify' && !skipped.keys.includes('perf_engineer:perf_eval')
+        && !skipped.keys.some((k) => k.startsWith('pr_engineer')),
+        `with the script, a round that ${said} is not accepted: ${skipped.result.status} at ${skipped.result.stopped_at}`);
+      check(/accepted without the result of its output comparison: G2 is ("|not reported)/.test(said2)
+        && /G2 of such a fix is the task's output_script, run on the base and on the fix/.test(said2), `and the run record says why: ${said2}`);
+    }
+    // A difference the comparison reports is never the baseline's to keep: where the investigator finds the same on
+    // the base, the script cannot tell the fix from noise. No known issue is recorded, which would excuse every
+    // later miss, and the run stops for a human after that one round.
+    const noisy = await run(scripted, { ...compared({ G2: 'fail: 3 of 16 images differ beyond the tolerance' },
+      { all_pass: false, failures: [{ gate: 'G2', blocking: true, evidence: 'PSNR 31 dB on 3 of 16, the script asks 35' }] }),
+    'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-7', title: 'the base differs from itself' },
+      summary: 'two runs of the base differ as much' }) });
+    const noisyWhy = (noisy.result.phases.filter((p) => p.phase === 'Investigate').pop() || {}).summary || '';
+    check(noisy.result.status === 'blocked' && noisy.result.stopped_at === 'Verify' && !(noisy.result.known_issues || []).length
+      && noisy.calls.filter((c) => c.key === 'verify_engineer:verify').length === 1 && !noisy.keys.some((k) => k.startsWith('pr_engineer'))
+      && /no known issue excuses a difference the comparison reports/.test(noisyWhy) && /a human decides/.test(noisyWhy),
+      `a comparison that differs on the base as well stops the run for a human, with no known issue: ${noisy.result.status} at ${
+        noisy.result.stopped_at}, ${JSON.stringify(noisy.result.known_issues)} | ${noisyWhy}`);
+    // gsm8k on a model that answers text questions is judged as before: a failure the baseline shares is a known issue.
+    const shared = await run({ mode: 'issue', task: 'i' }, {
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { ...DEFAULTS['verify_engineer:verify'](), all_pass: false,
+        failures: [{ gate: 'G2', blocking: true, evidence: 'gsm8k 0.84 on both arms' }] } : DEFAULTS['verify_engineer:verify']()),
+      'investigator:investigate': () => ({ verdict: 'baseline_bug', known_issue: { id: 'KI-8', title: 'gsm8k is low on the base too' }, summary: 'on the base too' }) });
+    check(shared.result.status === 'ready_for_review' && (shared.result.known_issues || []).some((k) => k.id === 'KI-8'),
+      `a text model's G2 that the baseline shares is a known issue, as before: ${shared.result.status}`);
+    // The verify engineer has the server, and the last word on what the model is, either way. A model Setup took
+    // for one that answers no text questions and that answers them after all is measured on gsm8k: the later
+    // roles read it so, and the guard for the comparison does not apply. A round that does not say changes nothing.
+    const afterAll = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: true,
+      server_code_changed: true, gates: { issue_repro: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q); the model answers text questions, output_script not run' } }) });
+    const seen = (r, key) => (r.calls.find((c) => c.key === key) || { ins: {} }).ins.text_model;
+    check(afterAll.result.status === 'ready_for_review' && seen(afterAll, 'verify_engineer:verify') === false
+      && seen(afterAll, 'perf_engineer:perf_eval') === true && seen(afterAll, 'reviewer:review') === true,
+      `a model that answers text questions after all is one for the roles after Verify: ${afterAll.result.status}, ${
+        JSON.stringify([seen(afterAll, 'verify_engineer:verify'), seen(afterAll, 'perf_engineer:perf_eval'), seen(afterAll, 'reviewer:review')])}`);
+    const silent = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true,
+      gates: { issue_repro: 'pass', G2: "pass: 16 images match the base's" } }) });
+    check(silent.result.status === 'ready_for_review' && seen(silent, 'perf_engineer:perf_eval') === false && seen(silent, 'reviewer:review') === false,
+      `a round that does not say leaves what Setup said: ${silent.result.status}, ${JSON.stringify([seen(silent, 'perf_engineer:perf_eval'), seen(silent, 'reviewer:review')])}`);
+    const silentSkip = await run(scripted, { ...noText, 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true,
+      gates: { issue_repro: 'pass', G2: 'not run' } }) });
+    check(silentSkip.result.status === 'blocked' && silentSkip.result.stopped_at === 'Verify',
+      `and Setup's word is enough for the guard: a skipped comparison is not accepted (${silentSkip.result.status} at ${silentSkip.result.stopped_at})`);
+    const testsOnly = await run({ mode: 'issue', task: 'i' }, found(false));
+    check(testsOnly.result.status === 'ready_for_review' && !testsOnly.keys.includes('perf_engineer:perf_eval'),
+      `a fix to tests, documentation or CI files alone has no G2, and needs no script: ${testsOnly.result.status}`);
+  }],
+  ['ci: the fix for a model that answers no text questions is asked for its output comparison as an issue\'s is', async () => {
+    const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
+    const none = await run({ mode: 'ci', task: 'c' }, noText);
+    check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup'
+      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !none.keys.includes('ci_guardian:classify'),
+      `asked after Setup, before the failure is classified: ${none.result.status} at ${none.result.stopped_at}`);
+    const given = await run({ mode: 'ci', task: 'c', output_script: '/s/outputs.sh' }, noText);
+    const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
+      `with the script the fix is verified on it: ${given.result.status}, ${ve && ve.ins.output_script}`);
+    for (const stop of ['Classify', 'Bisect']) {
+      const r = await run({ mode: 'ci', task: 'c', stop_after: stop }, noText);
+      check(r.result.status === 'stopped' && r.result.stopped_at === stop, `a run that stops after ${stop} is not asked: ${r.result.status} at ${r.result.stopped_at}`);
+    }
+    let classified = false;
+    const lifted = await run({ mode: 'ci', task: 'c', stop_after: 'Bisect' }, {
+      ...noText,
+      'ci_guardian:classify': () => {
+        classified = true;
+        return { failure_class: 'code_regression', failing_test_cmd: 'pytest test_x.py', window: 'a..b', evidence: 'new regression', triage_path: `${RUN}/ci_triage.md` };
+      },
+    }, { control: () => (classified ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Bisect'
+      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !lifted.keys.includes('implementer:implement'),
+      `a stop the control file lifts starts no fix without it: ${lifted.result.status} at ${lifted.result.stopped_at}`);
+  }],
   ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
     const NO_SLOWER = /^no gain is claimed: no slower than the baseline beyond the noise band, on the run's client$/;
     const verified = (changed) => ({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: changed }) });
@@ -1687,6 +1852,21 @@ const scenarios = [
         && /not a known issue/.test(JSON.stringify(onBase.result.phases)),
         `${gate} failing as on the base is the failure itself: no known issue, no issue drafted for it, and the run stops for a human: ${ended(onBase)}`);
     }
+    // A fix that restores too little gets its repair round: the investigator says what it misses, and only where it
+    // cannot (or calls the failure the baseline's) does the run stop for a human.
+    const repair = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), ...below, failures: [{ gate: 'accuracy_claim', blocking: true, evidence: '0.871 on the fix' }] }
+        : { ...DEFAULTS['verify_engineer:verify'](), gates: restored }),
+      'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'the fix misses the second code path' }) });
+    check(repair.result.status === 'ready_for_review' && repair.keys.filter((k) => k === 'verify_engineer:verify').length === 2
+      && repair.keys.filter((k) => k === 'implementer:implement').length === 2,
+      `an incomplete fix is repaired and measured again: ${ended(repair)}`);
+    const stuck = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
+      ...verified({ ...below, failures: [{ gate: 'accuracy_claim', blocking: true, evidence: '0.871 on the fix' }] }),
+      'investigator:investigate': () => ({ verdict: 'inconclusive', summary: 'the threshold may be one no commit ever met' }) });
+    check(stuck.result.status === 'blocked' && stuck.result.stopped_at === 'Verify' && !(stuck.result.known_issues || []).length,
+      `where the investigator cannot say what the fix misses, the run stops for a human: ${ended(stuck)}`);
     // Any other gate that fails on the base as well is a known issue, as before: G2's gsm8k among them.
     for (const gate of ['G0', 'G2']) {
       const other = await run({ mode: 'ci', task: 'c' }, { ...accuracy,
@@ -2070,6 +2250,16 @@ const scenarios = [
     check(intake.given.reported_on === 'DeepSeek-V4.1, --tp-size 8' && set && set.ins.reported_on === 'DeepSeek-V4.1, --tp-size 8'
       && second.result.task_def.reported_on === 'DeepSeek-V4.1, --tp-size 8',
       `Setup is told which configuration the task's problem is on, and the definition records it: ${set && set.ins.reported_on}`);
+    // The script that compares a model's outputs is one model's too: a diffusion model's says nothing of another
+    // model's. It goes with the rest, from the follow-up on another model and from the rerun after a mismatch.
+    const compares = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', output_script: '/s/outputs.sh' },
+      triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
+    const [farOut, nearOut] = compares.result.next.start;
+    const wrongOut = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', output_script: '/s/outputs.sh' }, mismatch);
+    check(!('output_script' in farOut.args) && nearOut.args.output_script === '/s/outputs.sh'
+      && wrongOut.result.status === 'needs_input' && (wrongOut.result.next.rerun_with || {}).output_script === '',
+      `the output comparison of one model is not taken to a problem on another: ${JSON.stringify([farOut.args.output_script,
+        nearOut.args.output_script, (wrongOut.result.next.rerun_with || {}).output_script])}`);
     // A task that stops before its fix needs no model, and can still pin what does not fit the problem: two GPUs
     // for one at TP8. It stops before Reproduce all the same, and is asked for what it pins, not for a model it
     // has no use for (a reproduction that serves none, a distributed test).
@@ -2243,6 +2433,23 @@ const scenarios = [
     check(im && im.ins.work_package.kind === 'apply_pr' && im.ins.work_package.goal.includes('#40872'), 'apply_pr work package');
     const v = r.calls.find((c) => c.key === 'verify_engineer:verify');
     check(v && v.ins.extra_gates[0].cmd === 'bash repro.sh', `issue_repro gate carries the reproduction: ${JSON.stringify(v && v.ins.extra_gates)}`);
+    // The run ends in a comment for that pull request, as a ci run's does: the PR engineer is told which, and the
+    // result says to post the comment, not to push a branch that has no pull request of its own.
+    const pe = r.calls.find((c) => c.key === 'pr_engineer:pr');
+    const n = r.result.next;
+    check(pe && eqList(pe.ins.existing_prs, ['#40872']) && eqList(r.result.pr.comment_for, ['#40872']),
+      `the PR engineer knows which pull request the comment is for: ${JSON.stringify(pe && pe.ins.existing_prs)}`);
+    check(/^#40872 is verified: the comment for it is drafted at /.test(n.say) && /nothing is to be pushed/.test(n.say)
+      && n.user.some((u) => u.startsWith('post the verification comment on #40872')) && !n.user.some((u) => /git push|^push /.test(u)),
+      `the user is told to post the comment, not to push a branch: ${JSON.stringify(n)}`);
+    // One pull request is verified in a run: several applied together would show nothing of each.
+    const several = await run({ mode: 'issue', task: 'i' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872', ' #40901 '],
+        triage_path: `${RUN}/t.md` }) });
+    const first = several.calls.find((c) => c.key === 'implementer:implement').ins.work_package.goal;
+    check(first.includes('#40872') && !first.includes('#40901') && eqList(several.result.pr.comment_for, ['#40872'])
+      && several.result.phases.some((p) => p.phase === 'Reproduce' && p.summary === '#40872 is verified. Not verified in this run, which takes one: #40901'),
+      `of several the first is verified and the others are named: ${first}`);
   }],
   ['issue: a root cause in an AMD component gets an issue drafted for that repository, and a workaround in the framework only for a P0', async () => {
     const draft = `${RUN}/component_issue.md`;
@@ -2348,6 +2555,224 @@ const scenarios = [
     check(r.result.status === 'handed_off', `status ${r.result.status}`);
     check(!r.keys.includes('ci_guardian:bisect'), 'no bisect for infrastructure');
   }],
+  ['ci: an open pull request that already fixes the failure is verified on the user\'s word, not fixed a second time', async () => {
+    const classified = (out) => ({ 'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), ...out }) });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const mine = { pr: '#50220', repo: 'sgl-project/sglang', author: 'alice', association: 'MEMBER', head: 'abc1234', state: 'open' };
+    const theirs = { pr: '#50231', repo: 'sgl-project/sglang', author: 'mallory', association: 'CONTRIBUTOR', head: 'def5678', state: 'open' };
+    const applied = (r) => (r.calls.find((c) => c.key === 'implementer:implement') || { ins: {} }).ins.work_package || {};
+    const r = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ existing_prs: [mine] }));
+    check(r.result.status === 'ready_for_review' && !r.keys.includes('ci_guardian:bisect'), `no culprit is searched for: ${ended(r)}`);
+    check(eqList(r.phases, ['Setup', 'Classify', 'Implement', 'Verify', 'Performance', 'Review', 'PR', 'Report']), `phases ${r.phases}`);
+    check(applied(r).kind === 'apply_pr' && applied(r).goal.startsWith('apply the existing fix #50220 at abc1234 ')
+      && /failing test passes on every lane/.test(applied(r).test), `the pull request is applied at its head, not a fix planned: ${JSON.stringify(applied(r))}`);
+    const ve = r.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(ve && ve.ins.extra_gates.length === 1 && ve.ins.extra_gates[0].gate === 'failing_test' && ve.ins.extra_gates[0].cmd === 'pytest test_x.py',
+      `the failing test is the gate it must pass: ${JSON.stringify(ve && ve.ins.extra_gates)}`);
+    const pe = r.calls.find((c) => c.key === 'pr_engineer:pr');
+    check(pe && eqList(pe.ins.existing_prs, ['#50220']) && pe.ins.existing_pr.head === 'abc1234',
+      `the PR engineer knows which pull request the comment is for, and at which commit: ${JSON.stringify(pe && pe.ins.existing_pr)}`);
+    check(/^no gain is claimed: no slower than the baseline/.test(r.calls.find((c) => c.key === 'perf_engineer:perf_eval').ins.claim),
+      'its speed is measured as a fix of the run\'s own is: no slower than the base');
+    check(r.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'existing_fix' && p.summary.startsWith('#50220 by alice (member): open')),
+      `the run record names it and its author: ${JSON.stringify(r.result.phases.filter((p) => p.phase === 'Classify'))}`);
+    // The run ends in a comment for that pull request: there is nothing of its own to push.
+    const n = r.result.next;
+    check(eqList(r.result.pr.comment_for, ['#50220']) && /^#50220 is verified: the comment for it is drafted at /.test(n.say)
+      && /nothing is to be pushed/.test(n.say) && n.user.some((u) => u.startsWith('post the verification comment on #50220'))
+      && !n.user.some((u) => /git push|^push /.test(u)), `the user is told to post the comment, not to push a branch: ${JSON.stringify(n)}`);
+
+    // A pull request runs its author's code here, next to the keys the agents hold: the run applies one only on the
+    // user's word, whoever wrote it. What the classification says of the author is a model's report of an
+    // association, which does not show that the author can put code on main.
+    for (const who of [mine, { ...mine, association: 'OWNER' }, { ...theirs, association: 'COLLABORATOR' }, theirs, { ...theirs, association: '' }]) {
+      const asked = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [who] }));
+      const q = (asked.result.next.ask || [])[0] || {};
+      check(asked.result.status === 'needs_input' && asked.result.stopped_at === 'Classify' && !asked.keys.includes('implementer:implement')
+        && !asked.keys.includes('ci_guardian:bisect') && q.field === 'apply_prs' && eqList(q.options, [who.pr, 'none'])
+        && /so the run applies one only on your word/.test(q.question),
+        `a pull request by ${who.association || 'an author of unknown standing'} is not run without the user's word: ${ended(asked)}, ${JSON.stringify(q.options)}`);
+      // The answer takes the place of a field the task left blank, which would otherwise win over it.
+      check(asked.result.next.rerun_with.apply_prs === '' && asked.result.next.rerun_with.answers.apply_prs === null,
+        `the rerun clears the field and waits for the answer: ${JSON.stringify(asked.result.next.rerun_with)}`);
+    }
+    const allowed = await run({ mode: 'ci', task: 'c', apply_prs: ['#50231'] }, classified({ existing_prs: [theirs] }));
+    check(allowed.result.status === 'ready_for_review' && applied(allowed).goal.includes('#50231 at def5678') && !allowed.keys.includes('ci_guardian:bisect'),
+      `named in the task, it is verified: ${ended(allowed)}`);
+    const answered = await run({ mode: 'ci', task: 'c', answers: { apply_prs: '#50231' } }, classified({ existing_prs: [theirs] }));
+    check(answered.result.status === 'ready_for_review' && applied(answered).goal.includes('#50231'), `the answer to the question does the same: ${ended(answered)}`);
+    // The question asks for the number: a bare number, "PR 50231" and the pull request's URL all name it.
+    for (const word of ['50231', ' #50231 ', 'PR 50231', 'pr #50231', 'https://github.com/sgl-project/sglang/pull/50231',
+      'https://github.com/sgl-project/sglang/pull/50231/files', 'https://github.com/SGL-Project/SGLang/pull/50231', 'sgl-project/sglang#50231']) {
+      const bare = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      check(bare.result.status === 'ready_for_review' && applied(bare).goal.includes('#50231 at def5678') && !bare.keys.includes('ci_guardian:bisect'),
+        `the answer ${JSON.stringify(word)} names the pull request: ${ended(bare)}, ${applied(bare).goal}`);
+    }
+    // A field the task set blank does not stand in the answer's way, in this run or in the one after the question.
+    for (const blank of [[], '  ', ['']]) {
+      const empty = await run({ mode: 'ci', task: 'c', apply_prs: blank }, classified({ existing_prs: [theirs] }));
+      check(empty.result.status === 'needs_input' && empty.result.next.rerun_with.apply_prs === '',
+        `a blank apply_prs (${JSON.stringify(blank)}) is no word: the run asks (${ended(empty)})`);
+      const then = await run({ mode: 'ci', task: 'c', apply_prs: blank, ...empty.result.next.rerun_with, answers: { apply_prs: '#50231' } },
+        classified({ existing_prs: [theirs] }));
+      check(then.result.status === 'ready_for_review' && applied(then).goal.includes('#50231'), `and the answer is taken: ${ended(then)}`);
+      const direct = await run({ mode: 'ci', task: 'c', apply_prs: blank, answers: { apply_prs: 'none' } }, classified({ existing_prs: [theirs] }));
+      check(direct.result.status === 'ready_for_review' && direct.keys.includes('ci_guardian:bisect'),
+        `"none" as the answer next to a blank field is taken too: ${ended(direct)}`);
+    }
+    const refused = await run({ mode: 'ci', task: 'c', apply_prs: 'none' }, classified({ existing_prs: [theirs] }));
+    check(refused.result.status === 'ready_for_review' && refused.keys.includes('ci_guardian:bisect') && applied(refused).kind !== 'apply_pr'
+      && !refused.result.pr.comment_for && refused.result.next.user.some((u) => /push/.test(u))
+      && refused.result.phases.some((p) => p.phase === 'Classify' && /#50231 by mallory \(contributor\): open, and not applied/.test(p.summary)),
+      `"none" has the run fix the failure itself, and nothing is asked again: ${ended(refused)}`);
+    // The user's word alone decides which: a pull request the task does not name is not applied, whoever wrote it.
+    const narrowed = await run({ mode: 'ci', task: 'c', apply_prs: ['#50231'] }, classified({ existing_prs: [mine, theirs] }));
+    check(applied(narrowed).goal.includes('#50231') && !applied(narrowed).goal.includes('#50220'), `the task's word decides which: ${applied(narrowed).goal}`);
+
+    // What the Intake read into a request is a model's reading, not the user's word: the run asks, and names it first.
+    const read = { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read',
+      task_def: { ...ins.given, mode: 'ci', task: 'c', apply_prs: ['#50231'] } }) };
+    const inferred = await run({ mode: 'ci', task: 'c', request: 'the red job; someone opened 50231 for it' },
+      { ...read, ...classified({ existing_prs: [mine, theirs] }) });
+    const iq = (inferred.result.next.ask || [])[0] || {};
+    check(inferred.result.status === 'needs_input' && inferred.result.stopped_at === 'Classify' && !inferred.keys.includes('implementer:implement')
+      && eqList(iq.options, ['#50231', '#50220', 'none']) && /The request seems to name #50231: say so here to confirm it\./.test(iq.question),
+      `a pull request the Intake read into the request is asked about, not applied: ${ended(inferred)}, ${JSON.stringify(iq.options)}`);
+    const confirmed = await run({ mode: 'ci', task: 'c', request: 'the red job; someone opened 50231 for it', answers: { apply_prs: '#50231' } },
+      { ...read, ...classified({ existing_prs: [mine, theirs] }) });
+    check(confirmed.result.status === 'ready_for_review' && applied(confirmed).goal.includes('#50231 at def5678'),
+      `confirmed in the answer, it is verified: ${ended(confirmed)}`);
+
+    // What the user names is looked up: Classify is told, and only one it returns open, with the commit its branch
+    // is at, is applied. A closed or a merged one is not reported as an open fix, and no revision is guessed.
+    const told = (x) => (x.calls.find((c) => c.key === 'ci_guardian:classify') || { ins: {} }).ins.named_prs;
+    check(eqList(told(allowed), ['#50231']) && eqList(told(r), ['#50220']) && told(refused) === undefined && eqList(told(inferred), ['#50231'])
+      && eqList(told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'https://github.com/sgl-project/sglang/pull/777' } }, classified({}))),
+        ['sgl-project/sglang#777'])
+      && told(await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'not sure' } }, classified({}))) === undefined,
+      `Classify is given the pull requests the task or the request names: ${JSON.stringify([told(allowed), told(r), told(refused), told(inferred)])}`);
+    const pointed = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] },
+      classified({ existing_prs: [{ pr: '#777', author: 'carol', association: 'NONE', head: '7770001', state: 'open' }] }));
+    check(pointed.result.status === 'ready_for_review' && applied(pointed).goal.startsWith('apply the existing fix #777 at 7770001 ')
+      && !pointed.keys.includes('ci_guardian:bisect'), `a pull request the task names is verified once Classify has looked it up: ${ended(pointed)}`);
+    for (const [found, why] of [
+      [[], '#777: the classification did not find it as a pull request of this repository'],
+      [[{ pr: '#777', author: 'carol', head: '7770001', state: 'closed' }], '#777: it is closed'],
+      [[{ pr: '#777', author: 'carol', head: '7770001', state: 'merged' }], '#777: it is merged'],
+      [[{ pr: '#777', author: 'carol', head: '7770001' }], '#777: it is not said to be open'],
+      [[{ pr: '#777', author: 'carol', state: 'open' }], '#777: the commit its branch is at is not known'],
+      [[{ pr: 'ROCm/aiter#777', author: 'carol', head: '7770001', state: 'open' }], '#777: the classification did not find it as a pull request of this repository'],
+    ]) {
+      const gone = await run({ mode: 'ci', task: 'c', apply_prs: ['#777'] }, classified({ existing_prs: found }));
+      check(gone.result.status === 'ready_for_review' && gone.keys.includes('ci_guardian:bisect') && applied(gone).kind !== 'apply_pr'
+        && !gone.result.pr.comment_for
+        && gone.result.phases.some((p) => p.phase === 'Classify' && p.summary === `named for verification, and not applied: ${why}`),
+        `a named pull request that is not open with a known head (${why}) is not applied, and the run fixes the failure itself: ${ended(gone)}, ${
+          JSON.stringify(gone.result.phases.filter((p) => p.phase === 'Classify').map((p) => p.summary))}`);
+    }
+    // A word that names its repository keeps it. Its number alone names another pull request in the framework's
+    // repository, and a word given for aiter's #777 must not run sglang's #777 next to the keys: Classify is told
+    // the repository, and only a pull request it places there is the one the word names.
+    const unrelated = { pr: '#777', repo: 'sgl-project/sglang', author: 'dave', association: 'NONE', head: '7770002', state: 'open' };
+    for (const word of ['https://github.com/ROCm/aiter/pull/777', 'ROCm/aiter#777', 'https://github.com/ROCm/aiter/pull/777/files']) {
+      const other = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [unrelated] }));
+      check(other.result.status === 'ready_for_review' && other.keys.includes('ci_guardian:bisect') && applied(other).kind !== 'apply_pr'
+        && !other.result.pr.comment_for && eqList(told(other), ['ROCm/aiter#777'])
+        && other.result.phases.some((p) => p.phase === 'Classify'
+          && p.summary === 'named for verification, and not applied: ROCm/aiter#777: the classification did not find it as a pull request of this repository'),
+        `a word for another repository's pull request (${word}) does not run the framework's pull request of that number: ${ended(other)}, ${
+          JSON.stringify(other.result.phases.filter((p) => p.phase === 'Classify').map((p) => p.summary))}`);
+    }
+    // The repository's name is compared without regard to case, as GitHub reads it, whichever side writes it how.
+    const cased = await run({ mode: 'ci', task: 'c', apply_prs: ['https://github.com/sgl-project/sglang/pull/50231'] },
+      classified({ existing_prs: [{ ...theirs, repo: 'SGL-Project/SGLang' }] }));
+    check(cased.result.status === 'ready_for_review' && applied(cased).goal.includes('#50231 at def5678'),
+      `a repository the classification writes in other letters is the same repository: ${ended(cased)}`);
+    // Returned under its full name, as Classify is told to return it, it is one of another repository: not applied either.
+    const elsewhere = await run({ mode: 'ci', task: 'c', apply_prs: ['ROCm/aiter#777'] },
+      classified({ existing_prs: [{ pr: 'ROCm/aiter#777', repo: 'ROCm/aiter', author: 'carol', head: '7770001', state: 'open' }] }));
+    check(elsewhere.result.status === 'ready_for_review' && elsewhere.keys.includes('ci_guardian:bisect') && applied(elsewhere).kind !== 'apply_pr',
+      `nor is the other repository's own pull request applied to this tree: ${ended(elsewhere)}`);
+    // Where the word names a repository and the classification does not say which one a pull request is in, it is not that one.
+    const unplaced = await run({ mode: 'ci', task: 'c', apply_prs: ['https://github.com/sgl-project/sglang/pull/50231'] },
+      classified({ existing_prs: [{ ...theirs, repo: undefined }] }));
+    check(unplaced.result.status === 'ready_for_review' && unplaced.keys.includes('ci_guardian:bisect') && applied(unplaced).kind !== 'apply_pr',
+      `a pull request the classification does not place in the repository the word names is not applied: ${ended(unplaced)}`);
+
+    // An answer decides when it names a pull request or says none. Any other ("not sure", both at once) decides
+    // nothing: taken for "none", it would send the run to a fix of its own without a word. The run asks again.
+    for (const [word, said] of [['not sure', '"not sure"'], [['none', '#50231'], '"none, #50231"'], ['#50231 if it is safe', '"#50231 if it is safe"'],
+      ['no', '"no"']]) {
+      const vague = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      const vq = (vague.result.next.ask || [])[0] || {};
+      check(vague.result.status === 'needs_input' && vague.result.stopped_at === 'Classify' && !vague.keys.includes('ci_guardian:bisect')
+        && !vague.keys.includes('implementer:implement') && vq.field === 'apply_prs' && eqList(vq.options, ['#50231', 'none'])
+        && (vq.question || '').includes(`${said} does not say which: it names no pull request, or one and "none" at once.`)
+        && vague.result.next.rerun_with.answers.apply_prs === null,
+        `an answer that names no pull request and does not say none (${said}) is asked about again: ${ended(vague)}, ${vq.question}`);
+    }
+    for (const word of ['none', 'None', '"none"', ['none']]) {
+      const no = await run({ mode: 'ci', task: 'c', answers: { apply_prs: word } }, classified({ existing_prs: [theirs] }));
+      check(no.result.status === 'ready_for_review' && no.keys.includes('ci_guardian:bisect') && applied(no).kind !== 'apply_pr',
+        `${JSON.stringify(word)} is the word for a fix of the run's own: ${ended(no)}`);
+    }
+    // With no open pull request to choose from, such an answer has nothing to decide: the run fixes the failure.
+    const nothing = await run({ mode: 'ci', task: 'c', answers: { apply_prs: 'not sure' } }, classified({}));
+    check(nothing.result.status === 'ready_for_review' && nothing.keys.includes('ci_guardian:bisect') && !(nothing.result.next.ask || []).length,
+      `where no pull request is open, nothing is asked: ${ended(nothing)}`);
+
+    // Nor is one the classification found itself asked about when it is not open with a head.
+    const stale = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ ...theirs, state: 'closed' }, { ...mine, head: '' }] }));
+    check(stale.result.status === 'ready_for_review' && stale.keys.includes('ci_guardian:bisect') && !(stale.result.next.ask || []).length,
+      `nothing is asked about a pull request that cannot be applied: ${ended(stale)}`);
+
+    // One pull request is verified in a run: several applied together would show nothing of each.
+    const two = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220', '#50231'] }, classified({ existing_prs: [mine, theirs,
+      { pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER', state: 'open', head: '8120001' }] }));
+    check(applied(two).goal.includes('#50220') && !applied(two).goal.includes('#50231') && eqList(two.result.pr.comment_for, ['#50220'])
+      && two.result.phases.some((p) => p.phase === 'Classify' && /Not verified in this run, which takes one: #50231/.test(p.summary))
+      && two.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('ROCm/aiter#812: named as a fix, but not as a pull request of this repository')),
+      `the first is verified, the others are named: ${applied(two).goal}`);
+    const foreign = await run({ mode: 'ci', task: 'c' }, classified({ existing_prs: [{ pr: 'ROCm/aiter#812', author: 'bob', association: 'MEMBER',
+      state: 'open', head: '8120001' }] }));
+    check(foreign.result.status === 'ready_for_review' && foreign.keys.includes('ci_guardian:bisect') && applied(foreign).kind !== 'apply_pr',
+      `one of another repository cannot be applied to this tree: the culprit is found and fixed as before: ${ended(foreign)}`);
+    // None named: as before.
+    for (const none of [{}, { existing_prs: [] }]) {
+      const plain = await run({ mode: 'ci', task: 'c' }, classified(none));
+      check(plain.keys.includes('ci_guardian:bisect') && plain.result.status === 'ready_for_review' && !plain.result.pr.comment_for,
+        `no open fix (${JSON.stringify(none)}): the bisect runs`);
+    }
+    // What is handed over is handed over, whatever fix is named for it.
+    const flaky = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ failure_class: 'flaky', existing_prs: [mine] }));
+    check(flaky.result.status === 'handed_off' && !flaky.keys.includes('implementer:implement'), `a flaky failure is handed over all the same: ${ended(flaky)}`);
+    // A failure on a number: the pull request must restore it.
+    const perf = await run({ mode: 'ci', task: 'c', apply_prs: ['#50220'] }, classified({ existing_prs: [mine], performance: true,
+      perf_claim: 'output throughput back above 1100 tok/s' }));
+    check(perf.result.status === 'ready_for_review' && perf.calls.find((c) => c.key === 'perf_engineer:perf_eval').ins.claim === 'output throughput back above 1100 tok/s',
+      `a performance failure is judged on its number with the existing fix too: ${ended(perf)}`);
+    // An existing fix has no Bisect: a stop named for it holds before the fix is applied or asked about, and no fix starts without a model.
+    for (const word of [['#50220'], undefined]) {
+      const skipped = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect', ...(word ? { apply_prs: word } : {}) },
+        classified({ existing_prs: [mine] }));
+      check(skipped.result.status === 'stopped' && skipped.result.stopped_at === 'Classify' && !skipped.keys.includes('implementer:implement')
+        && !(skipped.result.next.ask || []).length,
+        `stop_after=Bisect holds before the existing fix is ${word ? 'applied' : 'asked about'}: ${ended(skipped)}`);
+    }
+    let classifiedOnce = false;
+    const lifted = await run({ mode: 'ci', task: 'c', model_path: '', stop_after: 'Bisect', apply_prs: ['#50220'] }, {
+      'ci_guardian:classify': () => {
+        classifiedOnce = true;
+        return { ...DEFAULTS['ci_guardian:classify'](), existing_prs: [mine] };
+      },
+    }, { control: () => (classifiedOnce ? { stop_after: '' } : {}) });
+    check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Classify' && !lifted.keys.includes('implementer:implement')
+      && (((lifted.result.next || {}).ask || [])[0] || {}).field === 'model_path',
+      `a stop the control file lifts starts no existing fix without a model: ${ended(lifted)}`);
+    const later = await run({ mode: 'ci', task: 'c', stop_after: 'Verify', apply_prs: ['#50220'] }, classified({ existing_prs: [mine] }));
+    check(later.result.status === 'stopped' && later.result.stopped_at === 'Verify' && later.keys.includes('implementer:implement'),
+      `with a later stop the existing fix is applied and verified: ${ended(later)}`);
+  }],
   ['ci: code regression to a fix PR', async () => {
     const r = await run({ mode: 'ci', task: 'tracker cluster _check ImportError' });
     check(r.result.status === 'ready_for_review', `status ${r.result.status}`);
@@ -2390,6 +2815,102 @@ const scenarios = [
     });
     check(r.result.status === 'blocked' && r.result.stopped_at === 'Classify', `status ${r.result.status}`);
     check(!r.keys.includes('ci_guardian:bisect'), 'no bisect without the failing test');
+  }],
+  ['ci: main is judged first, on the lane\'s own image: a test that passes there has nothing to fix, and a lane this machine cannot be is handed over', async () => {
+    const classified = (out, drop = []) => ({ 'ci_guardian:classify': () => {
+      const a = { ...DEFAULTS['ci_guardian:classify'](), ...out };
+      for (const k of drop) delete a[k];
+      return a;
+    } });
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const stale = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes',
+      evidence: 'the job ran rocm720 of 11-17; the test passes on rocm720 of 11-25' }, ['failure_class']));
+    check(stale.result.status === 'not_reproduced' && stale.result.stopped_at === 'Classify'
+      && !stale.keys.includes('ci_guardian:bisect') && !stale.keys.includes('implementer:implement') && stale.keys.includes('director:report'),
+      `a test that passes on main in the lane's newest image has nothing to fix: ${ended(stale)}`);
+    check(stale.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'passes_on_main' && p.summary.includes('rocm720 of 11-25')),
+      `the run record says which image it passes on: ${JSON.stringify(stale.result.phases.filter((p) => p.phase === 'Classify'))}`);
+    check(!stale.keys.some((k) => k.startsWith('issue_triager:reply')) && !stale.result.reply_draft_path, 'and a ci run writes no reply');
+    const merged = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', fixed_by: '#50220',
+      evidence: 'fails at the job\'s commit, passes on main' }));
+    check(merged.result.status === 'fixed_on_main' && merged.result.fixed_by === '#50220'
+      && merged.result.phases.some((p) => p.phase === 'Classify' && p.summary.startsWith('fixed by #50220: ')),
+      `a fix that merged since is named: ${ended(merged)}, ${merged.result.fixed_by}`);
+    const other = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
+      evidence: 'the lane is MI300X on rocm724; this machine is MI355X on rocm10' }));
+    check(other.result.status === 'handed_off' && other.result.stopped_at === 'Classify' && !other.keys.includes('ci_guardian:bisect')
+      && other.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off' && p.summary.includes(': the lane is MI300X')),
+      `a lane this machine cannot be is handed over, with what it needs: ${ended(other)}`);
+    for (const out of [{ on_main: 'fails' }, {}]) {
+      const fails = await run({ mode: 'ci', task: 'c' }, classified(out));
+      check(fails.result.status === 'ready_for_review' && fails.keys.includes('ci_guardian:bisect'),
+        `a failure main shows there (${JSON.stringify(out)}) is classified and fixed as before: ${ended(fails)}`);
+    }
+    const noClass = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails' }, ['failure_class']));
+    check(noClass.result.status === 'blocked' && noClass.result.stopped_at === 'Classify' && /has no class/.test(JSON.stringify(noClass.result.phases)),
+      `a failure of main without a class stops before the bisect: ${ended(noClass)}`);
+    // What only a fix needs is not asked of a failure that needs none: the answer may leave it out altogether.
+    const bare = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', performance: true }, ['failure_class', 'failing_test_cmd']));
+    check(bare.result.status === 'not_reproduced' && !bare.calls.some((c) => c.key === 'ci_guardian:classify' && c.n > 1),
+      `neither a class, a command to verify a fix with, nor a number to restore, and the answer is taken as it is: ${ended(bare)}`);
+    const away = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run', evidence: 'the lane is rocm724' }, ['failure_class', 'failing_test_cmd']));
+    check(away.result.status === 'handed_off', `nor of a lane this machine cannot be: ${ended(away)}`);
+    // A cluster is several tests on one lane or more: what passed says nothing of what was not run.
+    const part = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'passes', unchecked: 'the two tests on rocm724',
+      evidence: 'all five pass on rocm720 of 11-25' }, ['failure_class']));
+    check(part.result.status === 'handed_off' && part.result.stopped_at === 'Classify' && !part.keys.includes('ci_guardian:bisect')
+      && part.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'handed_off'
+        && p.summary.includes('part of the task was not run: the two tests on rocm724') && p.summary.includes('all five pass')),
+      `a task of which a part was not run is handed over, not called resolved: ${ended(part)}`);
+    // A failure of the CI's own, or an intermittent one, is handed over whatever a rerun of the test shows here.
+    for (const cls of ['infrastructure', 'flaky']) {
+      for (const verdict of ['passes', 'not_run', 'fails']) {
+        const own = await run({ mode: 'ci', task: 'c' }, classified({ on_main: verdict, failure_class: cls, failing_test_cmd: '',
+          evidence: 'the runner lost communication at 02:14' }));
+        check(own.result.status === 'handed_off' && own.result.stopped_at === 'Classify' && !own.keys.includes('ci_guardian:bisect')
+          && own.result.phases.some((p) => p.phase === 'Classify' && p.verdict === cls && p.summary.includes('the runner lost communication')),
+          `${cls} with main "${verdict}" is handed over with its class and evidence, not ended as nothing to fix: ${ended(own)}`);
+      }
+    }
+    // Three passes here do not undo an intermittence the lane itself has shown on that commit and image: Classify
+    // answers "fails" with the class flaky, its command and the lane's runs, and the run hands that over. It is
+    // neither ended as nothing to fix nor bisected and fixed.
+    const lane = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', failure_class: 'flaky',
+      evidence: 'passes 3 of 3 here; the lane ran commit 4f1c2aa on rocm720 of 11-25 five times: 2 failed, 3 passed' }));
+    check(lane.result.status === 'handed_off' && lane.result.stopped_at === 'Classify' && !lane.keys.includes('ci_guardian:bisect')
+      && !lane.keys.includes('implementer:implement')
+      && lane.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'flaky' && p.summary.includes('2 failed, 3 passed')),
+      `a test that passes here and is intermittent in the lane's own runs is handed over as flaky: ${ended(lane)}`);
+    // The part not run is kept whole in the result however the run ends: a note keeps 600 characters of it.
+    const long = `the tests on rocm724: ${'test_x, '.repeat(120)}and more`;
+    for (const out of [{ on_main: 'passes' }, { on_main: 'not_run' }, { on_main: 'fails' }]) {
+      const kept = await run({ mode: 'ci', task: 'c' }, classified({ ...out, unchecked: long }));
+      const report = kept.calls.find((c) => c.key === 'director:report');
+      check(kept.result.unchecked === long && report && report.ins.unchecked === long,
+        `main "${out.on_main}": the part not run reaches the result and the report whole (${kept.result.unchecked.length} characters): ${ended(kept)}`);
+    }
+    // Where part fails and part was not run, what fails is fixed, and the run says what the fix does not answer for.
+    const mixed = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'fails', unchecked: 'the two tests on rocm724' }));
+    check(mixed.result.status === 'ready_for_review' && mixed.keys.includes('ci_guardian:bisect') && mixed.result.unchecked === 'the two tests on rocm724'
+      && mixed.result.phases.some((p) => p.phase === 'Classify' && p.verdict === 'unchecked' && p.summary.includes('the two tests on rocm724')),
+      `a failure of main with a part not run is fixed, and the part is kept in the run record and the result: ${ended(mixed)}`);
+    const report = mixed.calls.find((c) => c.key === 'director:report');
+    check(report && report.ins.unchecked === 'the two tests on rocm724', 'the report is written knowing it');
+    // The failure came in after the task's base: a fix on that base would fix nothing.
+    const later = await run({ mode: 'ci', task: 'c' }, classified({ on_main: 'not_run',
+      evidence: 'fails on main at abc1234, passes on the task worktree at 0ld5ha: start the task on main' }, ['failure_class', 'failing_test_cmd']));
+    check(later.result.status === 'handed_off' && !later.keys.includes('ci_guardian:bisect')
+      && later.result.phases.some((p) => p.phase === 'Classify' && p.summary.includes('passes on the task worktree at 0ld5ha')),
+      `a failure main shows and the task's own tree does not is not fixed on that tree: ${ended(later)}`);
+    // Every test three times can outlast the call: it is told its limit, and what it did not reach is unchecked.
+    const told = stale.calls.find((c) => c.key === 'ci_guardian:classify');
+    check(told.ins.time_limit_min > 0 && !Number.isNaN(Date.parse(told.ins.deadline_utc)),
+      `the classification is told its limit and when it ends: ${told.ins.time_limit_min} min, ${told.ins.deadline_utc}`);
+    // A task that only asks whether main still fails stops at Classify, and needs neither a model nor a client.
+    const ask = await run({ mode: 'ci', task: 'c', model_path: '', client_script: '', stop_after: 'Classify' },
+      classified({ on_main: 'passes', evidence: 'passes on rocm720 of 11-25' }, ['failure_class', 'failing_test_cmd']));
+    check(ask.result.status === 'not_reproduced' && !(ask.result.questions || []).length,
+      `stop_after=Classify gets the verdict without a model or a client: ${ended(ask)}`);
   }],
   ['perf: a hand-off owner outside the list is rejected', async () => {
     const r = await run({ mode: 'perf', task: 'p' }, {
@@ -2539,6 +3060,22 @@ const scenarios = [
     check(before.result.next.say.includes('before this scan') && before.result.next.say.includes(`${RUN}/daily_report.md`)
       && !(before.result.next.user || []).some((u) => u.includes('daily_report.md')),
       `that day's report, shared before this scan, is named as such, and this scan's stays a file: ${before.result.next.say}`);
+    // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
+    // with the task, so that the run started from it asks. A perf task's candidates are the task itself.
+    const offers = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
+      { rank: 1, task: 'rocm720 unit lane red', type: 'ci', priority: 'P0', source: 'ci',
+        task_def: { mode: 'ci', task: 'https://github.com/sgl-project/sglang/actions/runs/1', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#50231'],
+          // what is no field of a task definition: an answer or a request here would stand for the user's word in the run it starts
+          answers: { apply_prs: '#50231' }, request: 'the red lane; verify 50231 for it', approved_by: 'the scan' } },
+      { rank: 2, task: 'A/B two decode PRs', type: 'perf', priority: 'P2', source: 'upstream',
+        task_def: { mode: 'perf', task: 'decode throughput', framework_dir: '/sgl-workspace/sglang', apply_prs: ['#46329'] } }] }) });
+    const [ciOffer, perfOffer] = offers.result.next.start || [];
+    check(ciOffer && ciOffer.args.mode === 'ci' && !('apply_prs' in ciOffer.args) && ciOffer.args.framework_dir === '/sgl-workspace/sglang'
+      && perfOffer && eqList(perfOffer.args.apply_prs, ['#46329']),
+      `a ci task a scan offers names no pull request to apply: ${JSON.stringify(offers.result.next.start)}`);
+    check(eqList(Object.keys(ciOffer.args).sort(), ['framework_dir', 'inferpilot_dir', 'mode', 'task']),
+      `and carries the fields of a task definition and nothing else, no answer and no request, so that the run it starts asks (the ci scenario): ${
+        JSON.stringify(Object.keys(ciOffer.args))}`);
     const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
     check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
       && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,
@@ -2975,6 +3512,35 @@ const scenarios = [
     check(plain.result.status !== 'needs_input',
       `without stability, and stopping before its fix, a task that names the template is asked nothing more: ${plain.result.status}`);
   }],
+  ['arguments: an output_script that names no script is asked about before anything runs, so that the answer can take its place', async () => {
+    const fields = (r) => (r.result.questions || []).map((q) => q.field);
+    for (const mode of ['issue', 'ci']) {
+      for (const value of ['template', '   ']) {
+        const r = await run({ mode, task: 't', output_script: value });
+        const q = (r.result.questions || []).find((x) => x.field === 'output_script') || {};
+        check(asks(r, 'output_script') && eqList(fields(r), ['output_script']) && /names no script/.test(q.why || '')
+          && /InferPilot has no template for it/.test(q.question || ''),
+          `${mode}: ${JSON.stringify(value)} names no script, and InferPilot has no template for one: ${fields(r)} ${JSON.stringify(q.why)}`);
+        // The value the run could not use is cleared for the next run: left there, it would win over the answer.
+        const again = (r.result.next || {}).rerun_with || {};
+        check(again.output_script === '' && 'output_script' in (again.answers || {}), `${mode}: and it is cleared for the next run: ${JSON.stringify(again)}`);
+        const answered = await run({ mode, task: 't', output_script: value, ...again, answers: { output_script: '/s/outputs.sh' } });
+        const ve = answered.calls.find((c) => c.key === 'verify_engineer:verify');
+        check(answered.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh',
+          `${mode}: with the answer the run starts on the script the user named: ${answered.result.status}, ${ve && ve.ins.output_script}`);
+        // A model that answers text questions needs none: the question left unanswered, the run starts.
+        const left = await run({ mode, task: 't', output_script: value, ...again });
+        check(left.result.status === 'ready_for_review', `${mode}: left unanswered, the run starts without one: ${left.result.status}`);
+      }
+      const named = await run({ mode, task: 't', output_script: '/s/outputs.sh' });
+      check(named.result.status === 'ready_for_review', `${mode}: a task that names its script is asked nothing: ${named.result.status}`);
+    }
+    // A feature or a perf task measures gsm8k from its baseline on, and reads no such script: nothing is asked of it.
+    const feature = await run({ mode: 'feature', task: 't', output_script: 'template' });
+    check(feature.result.status !== 'needs_input', `a feature task is not asked about it: ${feature.result.status}`);
+    const noText = await run({ mode: 'feature', task: 't' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
+    check(noText.result.status === 'ready_for_review', `nor does what Setup says of the model stop a feature: ${noText.result.status}`);
+  }],
   ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);
     for (const mode of ['feature', 'issue', 'ci', 'perf']) {
@@ -3172,7 +3738,12 @@ const scenarios = [
       if (r.status === 'queued') {
         check((n.start || []).length > 0 && n.start.every((s) => s.args.mode && s.args.inferpilot_dir === INFERPILOT), `${where}: starts ${JSON.stringify(n.start)}`);
       }
-      if (r.status === 'ready_for_review') check((n.user || []).some((u) => /\bpush\b/.test(u)), `${where}: the push is the user's: ${JSON.stringify(n.user)}`);
+      // A run that verified someone else's pull request has a comment to post, and nothing of its own to push.
+      if (r.status === 'ready_for_review' && r.pr && r.pr.comment_for) {
+        check((n.user || []).some((u) => /^post the verification comment on /.test(u)), `${where}: the comment is the user's to post: ${JSON.stringify(n.user)}`);
+      } else if (r.status === 'ready_for_review') {
+        check((n.user || []).some((u) => /\bpush\b/.test(u)), `${where}: the push is the user's: ${JSON.stringify(n.user)}`);
+      }
     }
     if (!ONLY) {
       for (const s of ['needs_input', 'rejected', 'awaiting_design_review', 'stopped', 'busy', 'blocked', 'queued', 'ready_for_review',

@@ -123,8 +123,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    task without a `model_path` stops before any fix: prepare only what its reproduction needs, and
    render nothing.
    - **InferPilot's templates** (`task_definition.md` §1.2). The scripts the task brings
-     (`server_script`, `client_script`, `accuracy_script`, and `long_context_script`, for which there is
-     no template) run as given. From `templates/harness/` into `RUN_DIR/scripts/`, render only the
+     (`server_script`, `client_script`, `accuracy_script`, and `output_script` and
+     `long_context_script`, for which there is no template) run as given. From
+     `templates/harness/` into `RUN_DIR/scripts/`, render only the
      server or the client the user answered `template` for, and `accuracy.sh` unless the task brings an
      `accuracy_script`: `python3 <inferpilot_dir>/scripts/harness.py
      render --out RUN_DIR/scripts --scripts <those> --set MODEL_PATH=<model_path> --set TP=<the number of
@@ -226,6 +227,18 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      `RUN_DIR/run.json` as the fixed benchmark, as for a feature, and return the client the run uses
      (the rendered one when the task names `template`): every measurement of the fix runs it
      unchanged.
+   - `issue`, `ci`, with a `model_path`: say what the model is. `"text_model": false` for one that
+     answers no text questions, which gsm8k cannot be put to: a diffusion pipeline (a
+     `model_index.json` at its root), a speech model (it transcribes or synthesizes audio), an
+     embedding model (served with `--is-embedding`), or any other the server has no chat
+     completions for. `true` for one that answers them, a model that takes images or audio and
+     answers in text included. Judge by the model's files and by the command the report or the job
+     serves it with, not by its name, and say in `notes` what you judged by. G2 for the fix of such
+     a model is the task's own output comparison, its `output_script` (`validation_doctrine.md`,
+     *G2 for a model that answers no text questions*): a run that can reach a fix without one
+     stops after Setup and asks for it. Never write that test in the task's place, and never
+     leave the field out for such a model: without it the run takes the model for one that
+     answers text questions, and finds out at Verify, after the fix is written.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 
@@ -238,6 +251,8 @@ Return:
  "server_script": "/abs/RUN_DIR/scripts/server.sh", "client_script": "/abs/RUN_DIR/scripts/perf.sh",
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
+
+An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4).
 
 ## PHASE=spec (feature)
 
@@ -402,6 +417,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
   every time.
+- With `unchecked` (a ci task of which a part is outside what the run answers for: tests or lanes it
+  could not run on this machine, tests that fail only now and then next to ones that fail every
+  time), name that part and say that the fix does not answer for it: it is handed over, to be run
+  where it can be.
 - List `spinoffs` with the known issues: for each, the upstream issue that tracks it or the issue draft
   a human is to file, and the definition that starts InferPilot on it; then the unconfirmed leads, each
   with what would confirm it. A spinoff with `withdrawn_draft` was written as a draft and not counted:
