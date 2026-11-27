@@ -2190,6 +2190,14 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
                 ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
                 ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
+                # a fix is named on proof, as for an issue: a change that only looks like the fix is a candidate
+                ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit only where you showed that it is the fix: the test "
+                                         "fails on the change's parent and passes on the change, on the lane's image"),
+                ("roles/ci_guardian.md", "That the job's commit failed and main passes says that something between the two fixed it, not "
+                                         "which change did"),
+                ("roles/ci_guardian.md", "A change that only looks like the fix is named in `evidence` as a candidate, and `fixed_by` stays "
+                                         "empty"),
+                ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: fails on its parent, passes on it>"'),
                 ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
                 ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)

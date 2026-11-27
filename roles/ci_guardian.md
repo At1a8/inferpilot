@@ -57,7 +57,12 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
 Then:
 
 - All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older than
-  the lane's newest, or a fix has merged since (then `fixed_by` names that pull request or commit).
+  the lane's newest, or a fix has merged since. `fixed_by` names that pull request or commit only
+  where you showed that it is the fix: the test fails on the change's parent and passes on the
+  change, on the lane's image, each run as the job ran it. That the job's commit failed and main
+  passes says that something between the two fixed it, not which change did. A change that only
+  looks like the fix is named in `evidence` as a candidate, and `fixed_by` stays empty: the run
+  then ends as not reproduced on main, which is all it showed, and names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is
@@ -135,7 +140,7 @@ Return:
 
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
- "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
+ "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit you showed to be the fix: fails on its parent, passes on it>",
  "unchecked": "<the tests or lanes of the task that were not run here, or that fail only now and then>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>",
