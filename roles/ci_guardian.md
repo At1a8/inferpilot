@@ -32,6 +32,17 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
   one that passes says nothing of the others. `scan_ci.py` lists ten tests and three job links of a
   cluster (`n_tests` says how many it has): take the rest from the tracker's own state and from the
   jobs, and name in `unchecked` whatever part of the task you could not establish.
+- **What the lane's setup installs is part of its environment.** A lane does not run its image as
+  it is. Its setup step can replace a package the image ships: sglang's
+  `<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's
+  is not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where
+  the job overrides the pin. The same image can then pass in the job and fail here, or the other
+  way round. Read in the job's log what its setup installed or rebuilt, and hold it against what
+  the image you run in has (`pip show amd-aiter` gives the version and the commit it was built
+  from). Where they differ, put the lane's version into effect for these runs as an arm's
+  environment is made (`verify_engineer.md`, PHASE=verify step 1: in a directory of the run's own,
+  first on `PYTHONPATH`, never in place), and name both versions in `evidence`. Where you cannot,
+  the tests did not run in the lane's environment: the answer is `on_main: "not_run"`.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one

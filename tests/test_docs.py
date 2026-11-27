@@ -2177,6 +2177,16 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "The tracker's counts are no such evidence: they span commits and images"),
                 ("knowledge/ci_triage.md", "Intermittent is said of one commit, one lane and one image"),
                 ("roles/ci_guardian.md", "**A cluster of both.**"),
+                # what the lane's setup installs over its image is part of the lane's environment
+                ("roles/ci_guardian.md", "**What the lane's setup installs is part of its environment.**"),
+                ("roles/ci_guardian.md", "`<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's is "
+                                         "not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where the "
+                                         "job overrides the pin"),
+                ("roles/ci_guardian.md", "Read in the job's log what its setup installed or rebuilt, and hold it against what the image you run "
+                                         "in has"),
+                ("roles/ci_guardian.md", "put the lane's version into effect for these runs as an arm's environment is made"),
+                ("roles/ci_guardian.md", 'Where you cannot, the tests did not run in the lane\'s environment: the answer is `on_main: "not_run"`'),
+                ("knowledge/ci_triage.md", "The lane's environment is also what its setup step installs over the image"),
                 # the image is read where the tests run
                 ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
                 # a lane this machine cannot be is outside what the gate shows
