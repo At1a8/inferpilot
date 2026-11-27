@@ -64,7 +64,9 @@ tracker's counts span commits and images, and prove nothing of the kind. A failu
 CI's own (a runner, an image pull, a disk) is `infrastructure` and is handed over, whatever the
 tests do here. The lane's environment is also what its setup step installs over the image (AITER
 rebuilt at the commit the tested tree pins): a run on the image as it ships, where the lane
-replaced a package, is a run in another environment.
+replaced a package, is a run in another environment. So are two of the lane's own jobs on one
+commit whose setups differ: what differs between them is two environments, not an intermittent
+failure.
 
 - All of it passes: there is nothing to fix in the framework, and the run ends with no fix and no
   reply. The job ran an image older than the lane's newest, or a fix has merged since. Most of two

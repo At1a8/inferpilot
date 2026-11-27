@@ -37,16 +37,27 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
   `<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's
   is not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where
   the job overrides the pin. The same image can then pass in the job and fail here, or the other
-  way round. Read in the job's log what its setup installed or rebuilt, and hold it against what
-  the image you run in has (`pip show amd-aiter` gives the version and the commit it was built
-  from). Where they differ, put the lane's version into effect for these runs as an arm's
-  environment is made (`verify_engineer.md`, PHASE=verify step 1: in a directory of the run's own,
-  first on `PYTHONPATH`, never in place), and name both versions in `evidence`. Where you cannot,
-  the tests did not run in the lane's environment: the answer is `on_main: "not_run"`.
+  way round. What the setup puts in effect is decided by the tree it tests. So resolve it for each
+  tree you run, main and the task worktree: that tree's pin for the lane's stage, with the flags
+  and the overrides the lane's workflow gives the job. The failed job's log shows how the setup
+  went and which overrides it had. It tested another tree: what it installed is evidence, and
+  not what to install for these. Hold what you resolved against what the image you run in has.
+  `pip show amd-aiter` gives the version, and the commit it was built from only where the version
+  carries one (`0.1.26.dev144+g285579b62`). Equal versions without a commit do not show the same
+  build: read where the package came from, or build it as the setup does. Where the two differ,
+  put the lane's into effect for these runs as an arm's environment is made
+  (`verify_engineer.md`, PHASE=verify step 1: in a directory of the run's own, first on
+  `PYTHONPATH`, never in place), and name both versions in `evidence`. Where you cannot, or
+  cannot tell, those tests did not run in the lane's environment. That lane is then one this
+  machine could not be (below): named in `unchecked` where another part of the task was judged,
+  and `on_main: "not_run"` only where no part of it was.
 - **A pass that holds.** Run each as the job ran it (its file or its partition, in the job's order:
   a failure can depend on the test before it), three times. A test that fails some of those runs
   fails, and its class is `flaky` (step 2): intermittent means some runs fail and some pass on one
-  commit, one lane and one image, in your repeats or in the lane's runs of that commit. So a test
+  commit, one lane and one image, in your repeats or in the lane's runs of that commit. The
+  lane's runs count there only where their setup put the same packages in effect: two jobs of
+  one commit whose overrides differ ran two environments, and a failure in one of them is that
+  environment's, and no intermittence. So a test
   that passes all three times here fails all the same where the lane's own runs of that commit on
   that image show it failing in some and passing in others: three passes do not undo an
   intermittence the lane has shown. It is `on_main: "fails"` with `failure_class: "flaky"`, and

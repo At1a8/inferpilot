@@ -2182,11 +2182,22 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "`<framework_dir>/scripts/ci/amd/amd_ci_install_dependency.sh` rebuilds AITER where the image's is "
                                          "not the commit that `<framework_dir>/docker/rocm.Dockerfile` pins in the tested tree, or where the "
                                          "job overrides the pin"),
-                ("roles/ci_guardian.md", "Read in the job's log what its setup installed or rebuilt, and hold it against what the image you run "
-                                         "in has"),
-                ("roles/ci_guardian.md", "put the lane's version into effect for these runs as an arm's environment is made"),
-                ("roles/ci_guardian.md", 'Where you cannot, the tests did not run in the lane\'s environment: the answer is `on_main: "not_run"`'),
+                # what the setup installs is decided by the tree it tests: resolved for main and for the task worktree, not read off the job
+                ("roles/ci_guardian.md", "What the setup puts in effect is decided by the tree it tests. So resolve it for each tree you run, "
+                                         "main and the task worktree"),
+                ("roles/ci_guardian.md", "It tested another tree: what it installed is evidence, and not what to install for these"),
+                # a version without a commit does not show the same build
+                ("roles/ci_guardian.md", "`pip show amd-aiter` gives the version, and the commit it was built from only where the version "
+                                         "carries one"),
+                ("roles/ci_guardian.md", "Equal versions without a commit do not show the same build"),
+                ("roles/ci_guardian.md", "put the lane's into effect for these runs as an arm's environment is made"),
+                # a lane whose setup cannot be made here is one this machine could not be: the rest of the task is still judged
+                ("roles/ci_guardian.md", "That lane is then one this machine could not be (below): named in `unchecked` where another part of "
+                                         'the task was judged, and `on_main: "not_run"` only where no part of it was'),
+                # two jobs of one commit whose setups differ ran two environments: no evidence of an intermittent failure
+                ("roles/ci_guardian.md", "The lane's runs count there only where their setup put the same packages in effect"),
                 ("knowledge/ci_triage.md", "The lane's environment is also what its setup step installs over the image"),
+                ("knowledge/ci_triage.md", "So are two of the lane's own jobs on one commit whose setups differ"),
                 # the image is read where the tests run
                 ("roles/ci_guardian.md", "The image the tests run in must be that image, read where they run"),
                 # a lane this machine cannot be is outside what the gate shows
