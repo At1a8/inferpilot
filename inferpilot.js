@@ -1054,7 +1054,13 @@ const COLLECT = S({ lock: { type: 'string', enum: ['acquired', 'busy', 'skipped'
 // dispatch.md §6: a task of this many GPU hours or more is long, to start apart from the queue. The estimate
 // decides it even where the dispatcher's own mark disagrees with its numbers.
 const LONG_GPU_H = 6;
-const isLong = (t) => t.long === true || Number((t.effort || {}).gpu_h) >= LONG_GPU_H;
+// null: no estimate, so how long the task takes is unknown, which is not short
+const gpuHours = (t) => {
+  const g = (t.effort || {}).gpu_h;
+  const v = g == null || g === '' ? NaN : Number(g);
+  return Number.isFinite(v) ? v : null;
+};
+const isLong = (t) => t.long === true || (gpuHours(t) !== null && gpuHours(t) >= LONG_GPU_H);
 const DISPATCH = S({
   queue_path: str,
   top: arr(S({ rank: num, task: str, type: str, level: str, priority: str, source: str,
@@ -1183,7 +1189,8 @@ async function finish(status, at) {
     // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
       inputs({ status, stopped_at: at || '', phases: R.phases, handoffs: R.handoffs, attention: R.attention,
-        spinoffs: R.spinoffs, ...(MODE === 'scan' ? { share_daily_report: status === 'queued' } : {}) }),
+        spinoffs: R.spinoffs,
+        ...(MODE === 'scan' ? { share_daily_report: status === 'queued', long_corrected: R.long_corrected || [] } : {}) }),
       MODE === 'scan' ? SCAN_REPORT : REPORT);
     if (rep) {
       R.report_path = rep.report_path;
@@ -1282,16 +1289,23 @@ function nextSteps(status, at) {
       : R.daily_report_action === 'exists'
         ? ` That day's daily report was shared before this scan: ${R.daily_report_url}; this scan's stays at ${C.run_dir}/daily_report.md.`
         : ` The daily report is shared: ${R.daily_report_url}.`;
-    const long = R.queue.filter((t) => t.long === true).length;
+    const long = R.queue.filter((t) => t.long === true);
+    const unknown = R.queue.filter((t) => t.long !== true && gpuHours(t) === null);
+    const named = (ts) => ts.map((t) => (t.rank != null ? `#${t.rank}` : t.task)).join(', ');
     out.say = `${R.queue.length} ${R.queue.length === 1 ? 'task is' : 'tasks are'} ranked in ${C.queue_path}; each starts as a run of its own.`
-      + `${long ? ` ${long} of them ${long === 1 ? 'is' : 'are'} long (${LONG_GPU_H} GPU hours or more): start each apart from the queue, on a machine and with time of its own.` : ''}${shared}${report}`;
+      + (long.length ? ` ${long.length} of them ${long.length === 1 ? 'is' : 'are'} long (${LONG_GPU_H} GPU hours or more: `
+        + `${named(long)}): start each apart from the queue, on a machine and with time of its own.` : '')
+      + (unknown.length ? ` ${named(unknown)} ${unknown.length === 1 ? 'has' : 'have'} no effort estimate: how long `
+        + `${unknown.length === 1 ? 'it takes' : 'they take'} is unknown.` : '')
+      + `${shared}${report}`;
     // A scan names what it found, not what the user allows: the pull request a ci run may apply is not offered
     // with the task, so that the run started from it asks. The task definition a model wrote is taken by its
     // fields and no further: an answer or a request it put next to them would stand for the user's word.
     const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))
       .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));
     out.start = R.queue.filter((t) => t.task_def && t.task_def.mode).slice(0, 5)
-      .map((t) => ({ rank: t.rank, task: t.task, ...(t.effort ? { effort: t.effort } : {}), long: t.long === true,
+      .map((t) => ({ rank: t.rank, task: t.task, ...(t.effort ? { effort: t.effort } : {}),
+        long: t.long === true ? true : gpuHours(t) === null ? null : false,
         args: { inferpilot_dir: INFERPILOT, ...offered(t.task_def) } }));
   } else if (status === 'awaiting_design_review' || (status === 'stopped' && at === 'Design' && MODE === 'feature')) {
     out.say = `The design waits for you: ${C.design_path || `${C.run_dir}/design.md`}. To go on with it, run again from `
@@ -3149,7 +3163,10 @@ async function runScan() {
     return finish('blocked', 'Dispatch');
   }
   C.queue_path = dp.queue_path;
-  R.queue = (dp.top || []).slice(0, 20).map((t) => (isLong(t) ? { ...t, long: true } : t));
+  const top = (dp.top || []).slice(0, 20);
+  // The dispatcher's files keep its own mark: the report corrects them before the daily report is shared.
+  R.long_corrected = top.filter((t) => t.long !== true && isLong(t)).map((t) => ({ rank: t.rank, task: t.task, gpu_h: gpuHours(t) }));
+  R.queue = top.map((t) => (isLong(t) ? { ...t, long: true } : t));
   note('Dispatch', 'pass', `${(dp.top || []).length} ranked; ${dp.matrix_changes || 0} matrix change(s)`);
   return finish('queued', 'Dispatch');
 }

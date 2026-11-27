@@ -21,8 +21,8 @@ Input: `candidates_path`.
    when the log or its history shows it (a code regression names the first failing run's commit
    range), else "unclassified", and blocks every AMD PR while it is a code regression.
 3. Rank with `dispatch.md` §6; within a rank, prefer what a named customer workload or a roadmap item
-   needs, then the smaller effort. Mark a task of 6 GPU hours or more `long` (GPU hours as §6 defines
-   them: the wall hours the task holds its GPUs).
+   needs, then the smaller effort, then the larger gain. Mark a task of 6 GPU hours or more `long`
+   (GPU hours as §6 defines them: the wall hours the task holds its GPUs).
 4. Ecosystem matrix: record every `feature × model × platform` cell whose state the evidence changes
    (`composability.md` §3).
 5. Write `RUN_DIR/task_queue.md` (`templates/task_queue.md`) and `RUN_DIR/queue.json`; for each of the

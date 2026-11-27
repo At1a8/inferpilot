@@ -136,6 +136,10 @@ class ScanTemplatesTest(unittest.TestCase):
         rank = (ROOT / "knowledge" / "dispatch.md").read_text(encoding="utf-8").split("## 6. Ranking", 1)[1]
         self.assertIn("then the smaller", rank)
         self.assertIn("not hours times GPUs", re.sub(r"\s+", " ", rank))
+        # one order within a rank: gain breaks ties after effort, no rank orders by gain on its own
+        ranks, within = re.sub(r"\s+", " ", rank).split("Within a rank", 1)
+        self.assertNotIn("by measured or estimated gain", ranks)
+        self.assertIn("then the larger measured or estimated gain", within)
         found = {}
         for name, path in (("dispatch.md", "knowledge/dispatch.md"), ("dispatcher.md", "roles/dispatcher.md"),
                            ("task_queue.md", "templates/task_queue.md")):

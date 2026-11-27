@@ -345,12 +345,16 @@ feature's own metric with no value to compare it with is reported, and is not a 
 ## PHASE=report (every mode, every outcome)
 
 Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a scan
-`share_daily_report`, and every artifact path produced so far.
+`share_daily_report` and `long_corrected`, and every artifact path produced so far.
 
 - `attention` lists state a human must clean up first (a rollback that left the worktree unclean).
   When it is not empty, open the report with it: what is left, where, and the command that cleans it.
 - `scan`: when `RUN_DIR/skills.json` lists framework skills that are missing or not indexed, add them
   to the report as index maintenance for the curator.
+- `scan` with `long_corrected` not empty: the dispatcher left these tasks unmarked although their GPU
+  hours make them `long` (`knowledge/dispatch.md` §6), and InferPilot offers them as long. Before
+  anything is shared, mark each one long in `RUN_DIR/task_queue.md`, `RUN_DIR/queue.json` and
+  `RUN_DIR/daily_report.md`, so the files say what the tasks to start say.
 - `scan` with `share_daily_report` true (its Dispatch passed): share the daily report as an issue in
   InferPilot's repository (the origin of the InferPilot checkout):
   `python3 <inferpilot_dir>/scripts/share_daily_report.py RUN_DIR/daily_report.md`. It checks the report
