@@ -1711,16 +1711,26 @@ async function verifyLoop(extraGates) {
     }
     // The user's word made the model one that answers text questions where Setup took it for one that answers
     // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. A round is accepted
-    // there only with the G2 that bears the word out: gsm8k was put to the model, and the round gives its result,
-    // a pass or a fail against the baseline, or the fix's score where it has none (verify_engineer.md). Not on a
-    // G2 the round left out or did not run: the fix would have neither gsm8k nor a comparison behind it.
-    const scored = /^(pass|fail)\b/i.test(compared)
-      || (/\bno baseline\b/i.test(compared) && /\d/.test(compared) && !/^(not[ _-]?run|skip)/i.test(compared));
+    // there only with the G2 that bears the word out: gsm8k was put to the model, and the round gives its scores
+    // (verify_engineer.md). The fix's and the baseline's for a comparison ("pass 0.893 vs 0.895 (1319 q)"), or the
+    // fix's alone where it has no baseline ("0.893 (1319 q), no baseline: ..."). A word without a score is no
+    // result: not a bare "pass", not "no baseline: gsm8k could not start". And a comparison that failed is the
+    // round's failure to list: it counts only where the round lists it as one that does not block, a known issue
+    // of the baseline. Listed as blocking, the round is not accepted in the first place; not listed at all, the
+    // round contradicts itself. Not on a G2 the round left out or did not run either: the fix would have neither
+    // gsm8k nor a comparison behind it.
+    const SCORE = String.raw`(?:\d*\.\d+|\d+(?:\.\d+)?\s*%)`;
+    const versus = new RegExp(`^(pass|fail)\\b[^;]*?${SCORE}\\s+vs\\.?\\s+${SCORE}`, 'i').exec(compared);
+    const alone = !/^(pass|fail|not[ _-]?run|skip)/i.test(compared) && new RegExp(`${SCORE}[^;]*\\bno baseline\\b`, 'i').test(compared);
+    const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);
+    const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));
     if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))
       && !scored) {
       const why = 'the task says that the model answers text questions (text_model) where Setup took it for one that answers none, and the '
-        + `round was accepted without gsm8k's result on it: G2 is ${compared ? `"${compared}"` : 'not reported'}. The word stands only with `
-        + 'that result; where the model answers none after all, name its output comparison (output_script)';
+        + `round was accepted without gsm8k's result on it: G2 is ${compared ? `"${compared}"` : 'not reported'}`
+        + `${versus ? ', a comparison that failed and that the round does not list among its failures' : ''}. The word stands only with `
+        + "gsm8k's scores, the fix's and the baseline's, or the fix's alone where it has no baseline; where the model answers none after all, "
+        + 'name its output comparison (output_script)';
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
     }

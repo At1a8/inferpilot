@@ -1308,9 +1308,15 @@ class ModelWordTest(unittest.TestCase):
                  "an Intake that takes the model for the wrong kind stops the run before Setup hears the user's word"),
                 # on the word alone no comparison was asked for: the round is accepted only with gsm8k's result
                 ("  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;", "the run does not know that the word stands against Setup's"),
-                ("    const scored = /^(pass|fail)\\b/i.test(compared)\n"
-                 "      || (/\\bno baseline\\b/i.test(compared) && /\\d/.test(compared) && !/^(not[ _-]?run|skip)/i.test(compared));",
-                 "a G2 that did not run counts as gsm8k's result"),
+                # a result has its scores, and a comparison that failed is the round's failure to list
+                ("    const SCORE = String.raw`(?:\\d*\\.\\d+|\\d+(?:\\.\\d+)?\\s*%)`;", "a digit in a word counts as a score"),
+                ("    const versus = new RegExp(`^(pass|fail)\\\\b[^;]*?${SCORE}\\\\s+vs\\\\.?\\\\s+${SCORE}`, 'i').exec(compared);",
+                 "a verdict without both scores counts as gsm8k's result"),
+                ("    const alone = !/^(pass|fail|not[ _-]?run|skip)/i.test(compared) && new RegExp(`${SCORE}[^;]*\\\\bno baseline\\\\b`, 'i').test(compared);",
+                 "a G2 that did not run counts as the fix's score without a baseline"),
+                ("    const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);\n"
+                 "    const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));",
+                 "a comparison that failed is accepted where the round lists no failure for it"),
                 ("    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))\n"
                  "      && !scored) {", "a fix is accepted on the user's word with neither gsm8k nor a comparison behind it"),
                 ("R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];", "the question for the script does not offer the correction"),
@@ -1337,8 +1343,10 @@ class ModelWordTest(unittest.TestCase):
                 ("roles/intake.md", "InferPilot reads it only where the caller gave it, and takes none from the definition you return"),
                 ("roles/intake.md", "With `text_model: true` in `given` or `answers`, ask for no `output_script`, whatever you make of the "
                                     "model's files"),
-                ("roles/verify_engineer.md", "InferPilot accepts a round there only with gsm8k's result in `gates`, a `pass` or a `fail` with "
-                                             "both scores, or the fix's score with `no baseline`"),
+                ("roles/verify_engineer.md", "InferPilot accepts a round there only with gsm8k's scores in `gates`. A `pass` with both, the fix's "
+                                             "and the baseline's (`pass 0.893 vs 0.895 (1319 q)`), or the fix's score with `no baseline`"),
+                ("roles/verify_engineer.md", "A `fail` with both scores counts only where `failures` lists G2 as one that does not block"),
+                ("roles/verify_engineer.md", "A verdict without its scores is no result"),
                 ("roles/verify_engineer.md", "Never leave G2 out or report it `not run` for a fix that changes code the server runs"),
                 ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
                                                  "only with gsm8k's result on the model"),
