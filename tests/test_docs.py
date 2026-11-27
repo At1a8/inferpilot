@@ -1985,6 +1985,12 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "its `model` where the report gives it another model, launch configuration or workload than "
                                                       "this run's"),
                            ("roles/issue_triager.md", "A difference in the workload alone counts"),
+                           # the marker is whole: the follow-up has none of this run's settings to read "the same" against
+                           ("roles/issue_triager.md", "Say the marker whole, as the report puts it, and never by reference to this run: the model, "
+                                                      "the launch flags and the workload (`DeepSeek-V4.1, --tp-size 8, 32k input`)"),
+                           ("roles/issue_triager.md", "The follow-up starts without this run's model and settings, which may have come from the "
+                                                      "caller and not from the report, and has nothing to read \"the same\" against"),
+                           ("roles/issue_triager.md", "So it is with `model_mismatch`"),
                            ("knowledge/issue_triage.md", "A problem the report puts on another one, were it another workload alone (32k input where "
                                                          "the run measures 8k), is offered as a follow-up"),
                            # Setup works before Triage: the run after a mismatch, and a follow-up, tell it the configuration

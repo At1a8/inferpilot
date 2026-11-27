@@ -60,8 +60,12 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    the others as `other_problems`, each with its `problem` in a few words, its `priority`, the `task`
    that starts a run on it (the issue and the problem's name), and its `model` where the report gives
    it another model, launch configuration or workload than this run's. A difference in the workload
-   alone counts (the same model and flags at 32k input, where this run measures 8k): the run's
-   client and workload would measure another problem. The run's result offers them, and one with
+   alone counts (32k input where this run measures 8k): the run's client and workload would measure
+   another problem. Say the marker whole, as the report puts it, and never by reference to this
+   run: the model, the launch flags and the workload (`DeepSeek-V4.1, --tp-size 8, 32k input`), not
+   "the same model at 32k". The follow-up starts without this run's model and settings, which may
+   have come from the caller and not from the report, and has nothing to read "the same" against.
+   So it is with `model_mismatch`. The run's result offers them, and one with
    a `model` asks for its own model, scripts and GPUs instead of taking this run's. The reply covers
    every problem. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code
    change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the
@@ -80,7 +84,7 @@ Return:
  "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
  "duplicate_of": "<with duplicate: #n, the original>",
  "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>",
-                     "model": "<its model, when not this run's>"}],
+                     "model": "<its model, launch flags and workload, whole, when not this run's>"}],
  "model_mismatch": "<the model and configuration of the problem task names, when not the task's>",
  "triage_path": "/abs/RUN_DIR/issue_triage.md", "reply_draft_path": "/abs/RUN_DIR/reply_draft.md"}
 ```

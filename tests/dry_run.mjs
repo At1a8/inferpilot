@@ -2299,10 +2299,11 @@ const scenarios = [
     // A difference in the workload alone puts a problem on another configuration too: the follow-up takes none of
     // this run's workload and client, which would measure another problem.
     const longer = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}' },
-      triaged([{ problem: 'TTFT doubles at 32k input', model: 'the same model and flags, at 32k input' }]));
+      triaged([{ problem: 'TTFT doubles at 32k input', model: 'DeepSeek-V4.1, --tp-size 8, 32k input' }]));
     const at32k = (longer.result.next.start || [])[0];
     check(at32k && ['workload', 'client_script', 'model_path'].every((k) => !(k in at32k.args))
-      && at32k.args.reported_on === 'the same model and flags, at 32k input',
+      && at32k.args.reported_on === 'DeepSeek-V4.1, --tp-size 8, 32k input'
+      && at32k.args.request.includes('The report puts this problem on DeepSeek-V4.1, --tp-size 8, 32k input:'),
       `a problem on another workload alone takes none of this run's workload and client: ${JSON.stringify(at32k && at32k.args)}`);
     // With the answer the run is set up for the problem, and reproduces it.
     const fitted = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
