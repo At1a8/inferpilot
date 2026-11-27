@@ -2152,6 +2152,10 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "The variant is the ROCm and the GPU of the tag together (`rocm720-mi35x`, `rocm724-mi30x`)"),
                 ("roles/ci_guardian.md", "the newest tag of the ROCm alone can be the other family's, which this lane never ran"),
                 ("roles/ci_guardian.md", "It is the newest tag of the lane's variant and release in the registry"),
+                # the image of the lane's latest run is a floor only where that run had the same base
+                ("roles/ci_guardian.md", "where the lane's latest run on main had the same base, no older than the one that run pulled, which its "
+                                         "log names. A lane whose base has changed since can take an image dated before that one"),
+                ("knowledge/ci_triage.md", "and no older than the one the lane's latest run on main pulled where that run had the same base"),
                 ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names the newest of a variant "
                                          "for a lane that runs the daily sglang image, by the date and whatever the release"),
                 # the lane takes the newest date of one base tag (the release too): the newest of the variant can be another release's
@@ -2169,8 +2173,17 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "Where that base has no image of those days (a release cut since the last build, or a base last built "
                                          "before them), an older image of the base is not the lane's: the lane's is what its start script falls "
                                          "back to"),
-                ("roles/ci_guardian.md", "sglang's falls back to a build of the variant's newest date among those days, whatever the release: "
-                                         "`--variant <rocm>-<gpu> --days 7` names that date"),
+                ("roles/ci_guardian.md", "sglang's falls back first to a build of the variant's newest date among those days, whatever the "
+                                         "release: `--variant <rocm>-<gpu> --days 7` names that date"),
+                # several releases on that date: the lane takes the first its own query lists now, not what an earlier run's log shows
+                ("roles/ci_guardian.md", "Where more than one release was built on it, the lane takes the one its start script's query lists "
+                                         "first: ask the registry as the script does, now, and do not go by the lane's log, which shows an "
+                                         "earlier answer"),
+                # the script's last branches: a runner's cached image, a fixed tag
+                ("roles/ci_guardian.md", "Where those days have no build of the variant either, the script goes on, to an image its runner has "
+                                         "cached and, for some variants, to a fixed tag: follow it to the branch that applies"),
+                ("roles/ci_guardian.md", "An image that only a runner's cache holds cannot be seen from here, and the lane's image is not "
+                                         "established then"),
                 ("roles/ci_guardian.md", "Where you cannot establish a lane's image, its base included, that lane was not run (below)"),
                 ("knowledge/ci_triage.md", "and of the lane's base tag (its release too, `v0.5.23-rocm720-mi35x`: the lane takes the newest date of "
                                            "that one base among the days it looks back, and falls back to another release only where the base "

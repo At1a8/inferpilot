@@ -226,6 +226,13 @@ class LatestImageTest(unittest.TestCase):
         self.assertEqual(run("--base", "v0.5.23-rocm10-mi35x", "--days", "8"), (0, "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261103", ""))
         self.assertEqual(run("--variant", "rocm10-mi35x", "--days", "7"), (0, "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261104", ""))
         self.assertEqual(asked[-1], ("rocm10-mi35x", "2026-11-03"), "and the pages are read back to the day before the first of them")
+        # A tag dated after today is one a lane does not look for: it probes today and the days before.
+        tags.append({"name": "v0.5.23-rocm10-mi35x-20261111", "last_updated": "2026-11-10T20:00:00Z"})
+        self.assertEqual(run("--base", "v0.5.23-rocm10-mi35x"), (0, "rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261111", ""))
+        code, out, err = run("--base", "v0.5.23-rocm10-mi35x", "--days", "7")
+        self.assertEqual((code, out), (1, ""), "tomorrow's tag is no answer within the days a lane looks back")
+        self.assertEqual(run("--variant", "rocm10-mi35x", "--days", "7"), (0, "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261104", ""))
+        tags.pop()
         code, out, err = run("--variant", "rocm10-mi35x", "--days", "6")
         self.assertEqual((code, out), (1, ""))
         self.assertIn("no daily rocm/sgl-dev tag for rocm10-mi35x dated in the last 6 days", err)
@@ -243,9 +250,14 @@ class LatestImageTest(unittest.TestCase):
         self.assertEqual(latest_image.pick_base(tags, "v0.5.23-rocm10-mi35x", "20261104"), "", "its last build is older")
         self.assertEqual(latest_image.pick(tags, "rocm10-mi35x", "20261104"), "v0.5.22-rocm10-mi35x-20261104")
         self.assertEqual(latest_image.pick(tags, "rocm10-mi35x", "20261105"), "")
+        # the newest date that counts is today's: a later one is not looked for
+        self.assertEqual(latest_image.pick(tags, "rocm10-mi35x", "20261101", "20261103"), "v0.5.23-rocm10-mi35x-20261103")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.22-rocm10-mi35x", "20261101", "20261103"), "")
+        self.assertEqual(latest_image.pick_base(tags, "v0.5.22-rocm10-mi35x", "20261101", "20261104"), "v0.5.22-rocm10-mi35x-20261104")
         with mock.patch.object(latest_image, "today", lambda: latest_image.dt.date(2026, 11, 10)):
-            self.assertEqual(latest_image.window(7), ("20261104", "2026-11-03"), "today and the six days before; pushes from the day before")
-            self.assertEqual(latest_image.window(1), ("20261110", "2026-11-09"))
+            self.assertEqual(latest_image.window(7), ("20261104", "20261110", "2026-11-03"),
+                             "today and the six days before; pushes from the day before")
+            self.assertEqual(latest_image.window(1), ("20261110", "20261110", "2026-11-09"))
 
     def test_every_page_that_holds_a_push_of_those_days_is_read(self):
         # Docker Hub lists tags by push time. Without --days two pages are read; with it, every page down to the

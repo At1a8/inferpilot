@@ -17,8 +17,8 @@ whatever the release: an older release built on a later day wins it, and a relea
 built on one day are told apart by their push time alone. A CI lane takes the newest date of one
 exact base tag instead, and --base answers for that: the tags <base>-<YYYYMMDD> and no other. A
 lane also looks back only so many days before it falls back to another release: --days N counts
-the tags dated today or in the N-1 days before (UTC), for a base or for a variant, and an older
-image is then no answer.
+the tags dated today or in the N-1 days before (UTC), for a base or for a variant. An older image
+is then no answer, and neither is one dated after today, which a lane does not look for.
 
 Docker Hub lists tags by push time. Without --days the two newest pages are read (200 tags), which
 hold the newest build unless that many older tags were pushed again after it. With --days, every
@@ -50,12 +50,14 @@ def today() -> dt.date:
     return dt.datetime.now(dt.timezone.utc).date()
 
 
-def window(days: int) -> tuple[str, str]:
-    """For the last `days` days, today included: the oldest tag date that counts (YYYYMMDD), and the day
-    before it as a push date (YYYY-MM-DD). A tag is not pushed before its date, so no tag of those days was
-    pushed earlier than that day: the pages older than it hold none."""
-    first = today() - dt.timedelta(days=days - 1)
-    return first.strftime("%Y%m%d"), (first - dt.timedelta(days=1)).isoformat()
+def window(days: int) -> tuple[str, str, str]:
+    """For the last `days` days, today included: the oldest and the newest tag date that count (YYYYMMDD),
+    from one reading of the clock, and the day before the oldest as a push date (YYYY-MM-DD). A tag is not
+    pushed before its date, so no tag of those days was pushed earlier than that day: the pages older than it
+    hold none."""
+    last = today()
+    first = last - dt.timedelta(days=days - 1)
+    return first.strftime("%Y%m%d"), last.strftime("%Y%m%d"), (first - dt.timedelta(days=1)).isoformat()
 
 
 def daily_key(name: str, variant: str):
@@ -66,13 +68,13 @@ def daily_key(name: str, variant: str):
     return m.group(2), tuple(int(x) for x in m.group(1).split("."))
 
 
-def pick(results: list, variant: str, first: str = "") -> str:
+def pick(results: list, variant: str, first: str = "", last: str = "") -> str:
     """The newest daily tag among Docker Hub tag records ({"name", "last_updated"}), '' if none. With
-    `first` (YYYYMMDD), only tags dated that day or later count."""
+    `first` and `last` (YYYYMMDD), only tags dated from the one to the other count."""
     best, best_key = "", None
     for t in results:
         key = daily_key(t.get("name", ""), variant)
-        if key is None or key[0] < first:
+        if key is None or key[0] < first or (last and key[0] > last):
             continue
         key = key + (t.get("last_updated") or "",)
         if best_key is None or key > best_key:
@@ -86,13 +88,13 @@ def base_date(name: str, base: str):
     return m.group(1) if m else None
 
 
-def pick_base(results: list, base: str, first: str = "") -> str:
+def pick_base(results: list, base: str, first: str = "", last: str = "") -> str:
     """The newest date among the tags of one exact base (release, ROCm and GPU), '' if none. With `first`
-    (YYYYMMDD), only tags dated that day or later count."""
+    and `last` (YYYYMMDD), only tags dated from the one to the other count."""
     best, best_date = "", ""
     for t in results:
         date = base_date(t.get("name", ""), base)
-        if date and date >= first and date > best_date:
+        if date and date >= first and not (last and date > last) and date > best_date:
             best, best_date = t["name"], date
     return best
 
@@ -164,10 +166,10 @@ def main(argv=None) -> int:
         print(compare(a.compare, results))
         return 0
     base = (a.base or "").strip()
-    first, since = window(a.days) if a.days else ("", "")
+    first, last, since = window(a.days) if a.days else ("", "", "")
     try:
         results = fetch(a.repo, base or a.variant, a.timeout, since=since)
-        tag = pick_base(results, base, first) if base else pick(results, a.variant, first)
+        tag = pick_base(results, base, first, last) if base else pick(results, a.variant, first, last)
     except (OSError, ValueError) as e:
         print("latest_image: cannot read the %s tags on Docker Hub (%s)" % (a.repo, e), file=sys.stderr)
         return 1
