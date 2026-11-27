@@ -74,6 +74,10 @@ Layer table — per forward pass and layer type:
 <!-- Selected opportunities in order, each as a work package with its test; kernel-level items as
      hand-offs (op_spec + reference); dropped items with the reason. -->
 
+| Item | Value |
+|---|---|
+| claim | `<perf_claim, word for word: the conservative combined expectation the result is judged on>` |
+
 ## Result
 
 | Opportunity | Correctness gates | A/B (equal budget) | Held-out point | Kept / dropped | Artifact |

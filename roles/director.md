@@ -40,7 +40,62 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
 1. **Run directory.** If `resume_run_dir` is set, reuse it: check that it exists, that its branch
    exists in `framework_dir` (restored from its bundle when it does not, step 2) and is checked out
    there (check it out when the checkout is clean), and
-   re-run one baseline smoke to confirm the environment still matches the ledger.
+   re-run one baseline smoke to confirm the environment still matches the ledger. An `issue` or a `ci`
+   run whose Setup measured no baseline (step 4; the ledger's baseline section says so) runs no smoke on
+   a resume either, and returns `baseline_status: "skip"` again: its base may be the server that does
+   not start, the failure being fixed. With `resume_from:
+   verify`, first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6): the
+   branch head is the commit the run's last Verify round ran on, the checkout is clean, the task you are
+   given measures what the one `run.json` recorded did, which still has its `task`, and the run
+   directory still records the verified
+   work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
+   (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
+   was to judge (a `feature`'s with the spec's yes or no on whether it is a cost the user stated), and
+   `known_issues.json`, `handoffs.json` and `run_state.json`, every hand-off whole (step 6 there), and
+   in `run_state.json` what a `ci` run always has there: the score a failure its triage record gives
+   as an accuracy problem must restore, and with the pull request it verified that pull request and
+   the commit it was verified at (steps 4 and 6 there).
+   Check that every script
+   the task names by its path (`server_script`, `client_script`, `accuracy_script`,
+   `output_script`, `long_context_script`), one that lies in the run directory too (Spec's fallback
+   client, where the user took it), is still, byte for
+   byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
+   however the file at it was edited since, and an edited script would measure otherwise than the run
+   did. A script with no copy there fails the check as well: nothing shows what the run ran. Some of
+   what the run measured with lies outside its directory, and changes under the same name: the
+   model's files, the GPUs it was pinned to, and `scripts/eval_accuracy.sh`, which InferPilot's
+   accuracy script runs from this checkout. `python3 <inferpilot_dir>/scripts/run_fingerprint.py check
+   --run-dir RUN_DIR --gpus <the GPU set this run pins> --model <model_path> --accuracy-script <the
+   run's accuracy script>` (`--model` when the task names a `model_path`, `--accuracy-script` when the
+   run has an accuracy script; run it where the servers run) holds them against
+   `RUN_DIR/fingerprint.json`, which the run's Setup wrote (step 3). Only exit 0 passes: what
+   differs, a run directory without that record and what the script cannot tell (exit 2) fail the
+   check, with what it printed. Pin for it the GPU set the task gives or, when it gives none, as many
+   GPUs as that record lists (`gpus`), not as many as you would choose now: the launch script the run
+   has was written for that many, and is not written again. Another set of the same GPUs is the
+   same; fewer, more or GPUs of another kind are a run of their own. Check too
+   that the call whose Verify had no result is over: one that timed out is
+   not cancelled, and its agent may still be running and start more servers, which idle GPUs do not
+   show.
+   `for f in $(grep -l -s -z '^INFERPILOT_RUN_TAG=' /proc/[0-9]*/environ); do t=$(tr '\0' '\n' < "$f"
+   2>/dev/null | grep -m 1 '^INFERPILOT_RUN_TAG=') || continue; [ "$t" =
+   "INFERPILOT_RUN_TAG=$INFERPILOT_RUN_TAG" ] || echo "${f%/environ} $t"; done`
+   lists the processes a runner other than this run's started, each with its tag (run it in the
+   `container` too, when that is set, through `docker exec -e INFERPILOT_RUN_TAG`: without this run's
+   tag there, its own processes are listed as another's): one that is the earlier run's agent, or a
+   server or suite of its, has not ended. Stop nothing: it may be writing the run's results. When any of these fails, run no
+   smoke, so that nothing is measured, and return the run directory with `baseline_status: "fail"` and
+   what differs, or what still runs, in `baseline`. A run resumed from Verify changes nothing in
+   `RUN_DIR/run.json`, at this step or at a later one, and reads its `task` and its `goal` there: the
+   file holds what the run it resumes was given, which PHASE=resume restores and holds this run's
+   inputs against, and inputs written there would be compared with themselves. Return the two as
+   `run_task` and `run_goal`, as the file has them (an empty `run_goal` where it has none), also when
+   a check above fails: the run is about its run from here on, and the report of a resume that stops
+   at Setup, which is written into this run directory, names that task and not the one this run was
+   given. Nor does it render or
+   write again a script the run has (step 3): it goes on with those in `RUN_DIR/scripts/` as they are,
+   the ones the run measured with, and a `harness` file, a cookbook page or a template changed since is
+   not read for them.
    Otherwise create `RUN_DIR=<exp_root>/<mode>_<slug>_<time>`: `<slug>` a short lowercase name of the
    task, its issue, PR or CI job number and two or three words (`41299-glm-dcp`) or the feature
    (`hisparse-v2`); `<time>` from `date -u +%Y%m%d-%H%M%SZ`, UTC whatever the container's clock says.
@@ -102,15 +157,21 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    many as the task needs; step 0 found them all idle. With `reported_on` (the model and launch
    configuration the report puts the task's problem on; the result of an earlier run gives it, where
    that run was set up for another one), the task needs what that configuration needs: a problem at
-   TP8 takes eight GPUs, whatever the run before this one chose. `gpu_status.py` lists them by HIP
+   TP8 takes eight GPUs, whatever the run before this one chose. A run resumed from Verify that is
+   given no set takes as many as the run it resumes was pinned to (`RUN_DIR/fingerprint.json`,
+   step 1). `gpu_status.py` lists them by HIP
    number, the
    order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server is started from the
-   run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts
-   to `RUN_DIR/scripts/task/` for the record), or InferPilot's template when the user answered
+   run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts,
+   its `output_script` and its `long_context_script` among them, and one that lies in the run
+   directory like any other (Spec's fallback client, where the user took it), to
+   `RUN_DIR/scripts/task/` for the
+   record, which a run resumed from Verify holds them against, step 1), or InferPilot's template when
+   the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
    `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
@@ -177,6 +238,18 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      authors once one is set. Never set it yourself.
    - An image too old for the worktree (sgl-kernel or aiter rejected at import or startup) fails the
      baseline; `baseline` names the newer image to start a container from.
+   - Write down what the run measures with that lies outside its directory, once the GPU set is
+     pinned and the run's scripts are there: `python3 <inferpilot_dir>/scripts/run_fingerprint.py
+     record --run-dir RUN_DIR --gpus <gpu_ids> --model <model_path> --accuracy-script <the run's
+     accuracy script>` (`--model` when the task names a `model_path`, `--accuracy-script` when the
+     run has an accuracy script; run it where the servers run) writes `RUN_DIR/fingerprint.json`:
+     the model's files, each GPU of the set by its device id, its architecture and its memory, and
+     the contents of `scripts/eval_accuracy.sh` when the accuracy script runs it. A run resumed
+     from Verify is held against it (step 1). A resume writes none: the run keeps the record it was
+     set up with, and the script replaces no record that says otherwise. A retry, which measures
+     everything again, adds `--replace`. What the script cannot tell or write (exit 2) goes in
+     `notes` with its `error`, and the run goes on: nothing but a resume from Verify reads the
+     record, and a run without one is not resumed from there.
 4. **Baseline.**
    - First, one discarded warm-up per GPU set: a launch and a short run of the client, so the first
      launch in a fresh container, which compiles kernels and is slower, is not measured.
@@ -262,7 +335,139 @@ Return:
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
-An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4).
+An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4). A run resumed
+from Verify adds `"run_task"` and `"run_goal"`, the task and the goal of the run it resumes (step 1).
+
+## PHASE=resume (resume_from=verify, right after Setup)
+
+Inputs: `resume_run_dir`, the run directory Setup reused, and `task_def`, the task definition this run
+was given. The run's Verify ended without a result: its verify engineer returned nothing, or timed out.
+A call that returned took its servers with it; one that timed out was not cancelled, which is why Setup
+looked for what it left before its smoke (step 1 there). Only Verify and what comes after it run again,
+on the commit the run's last Verify round ran on. Change nothing.
+
+1. From `RUN_DIR/experiment_ledger.md` and `run_report.md` (or `validation_report.md`): the work packages
+   Implement verified, each with its commit and evidence, and the commit the run's last Verify round ran
+   on (each round's first row in the ledger's Run log; without one, the last commit Implement
+   verified). `verified_work_packages` is `[]` only when the report says none was left (a plan of
+   kernel hand-offs whose integration was reverted), and `null` when the run directory does not record
+   them, which stops the resume. A package whose name or commit it does not record is returned with
+   that field empty, never left out: Verify and Review are given all the run verified or nothing, and
+   an incomplete entry stops the resume too. `head_ok` is true only when the task branch's head in the worktree is
+   that commit, the worktree is clean, and every verified package's commit is in its history: that head
+   may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
+   that moved after the round started (a commit, an edit, a reset) is not what the run verified.
+   `fingerprint_ok` is true only when `scripts/run_fingerprint.py check`, run again as Setup ran it
+   before its smoke (step 1 there), with the GPU set Setup pinned (`gpu_ids`), exits 0: the model's
+   files, the GPUs and InferPilot's accuracy harness are as `RUN_DIR/fingerprint.json` has them.
+   Otherwise `false`, with what it printed in `fingerprint`, and the resume stops: what the run
+   measured before would be held against a measurement on another model, on other GPUs or by
+   another harness.
+2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
+   word for word from the *reproduction command* row of `issue_triage.md`); `ci`, the failing test
+   (`failing_test_cmd`, word for word from the *failing test command* row of `ci_triage.md`). Leave it
+   empty when the record has no such row, or the row holds no command, which stops the resume: a
+   command put together from the rest of the record is not the one Verify was given.
+3. `task_definition`: the task definition `RUN_DIR/run.json` recorded, as it is there (`null` when there
+   is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
+   workload, the scripts, `output_script` among them, `harness`, `apply_prs`, `held_out`, `guards`,
+   `sweep`, `tune`, and the gates
+   the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
+   that would measure otherwise is a run of its own. A `reported_on` that is not the one `run.json`
+   has (another configuration, one where the run had none, none where it had one) stops the resume in
+   the same way: Setup takes the GPUs that configuration needs where the task gives none, and the
+   launch script written for the run's, which a resume does not write again, would start on the GPUs
+   of another. So does a `text_model` that is not the one `run.json` has (`issue`, `ci`: the user's
+   word on what the model is; the opposite word, one where the run had none, none where it had one):
+   on that word the run asked for no output comparison, and Verify is held to gsm8k by it, so a
+   resume that brings another would judge the fix by another G2 than the run's. Give it as the file
+   has it, and leave it out where the file has none: what Setup or a Verify round found of the
+   model is not that word, and is in `run_state` (step 6). A path, like any other string, is compared as
+   written, since the run uses it as given: a space at its end is part of a file's name; what the file
+   at it holds, Setup held against the run's copy before its smoke (step 1 there). What a
+   `workload` holds is compared as it is there, a number also where it is written as its digits:
+   `"false"` is no empty value in it, and a list of one is not its item. `harness` is
+   compared as its lines render (a flag
+   `false` is `0`, not an unset line; a line set to nothing is not an unset one either: an empty
+   `REASONING_EFFORT` sends none, an unset one its default). The `task` and the `goal` stay the ones
+   `run.json` has, whatever this run was given, and a run that had no goal has none now: the goal names
+   data sets and guard workloads the run's Verify and Performance ran, and the task the issue or PR its
+   triage and reply are about. A `run.json` without its `task` lost it, as every run has one: return
+   the definition as it is there, never with the task you were given in its place, and the resume
+   stops.
+4. `perf_required`: whether the run's Performance phase was to judge a claim the run stated (an `issue`
+   that `issue_triage.md` classifies `performance`, a `ci` failure that `ci_triage.md` gives as a
+   performance problem, a `feature` whose spec or design states one, a `perf` plan's gain);
+   `perf_claim`: that claim (for a performance problem, the number the fix must restore), word for
+   word from the row its phase wrote it in: the *performance claim* row of `issue_triage.md`,
+   `ci_triage.md` or `feature_spec.md`, the *claim* row of the Plan in `perf_analysis.md`. A row that
+   says `none` is no claim: empty for it, and empty where the record has no such row, never the claim
+   as the rest of the record words it (a run that was to judge one then stops). `perf_cost`
+   (`feature`): `true` when that claim is a cost the
+   user stated, which stays the claim on InferPilot's client, and `false` when it is not, as the row
+   under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or
+   `no`). `null` when the spec has no such row, or the row says neither: never `false` for it, since a
+   cost taken for a gain is judged on InferPilot's client as no slowdown at all, a stricter claim than
+   the run had (the resume of a feature with a claim then stops). `false`
+   in the other modes (always say which: a claim not said to be a cost is a gain, which
+   is never claimed on InferPilot's client). A `feature` that states no claim, and a fix of a problem
+   that is not one of performance, are judged all the same, as no slower than the baseline
+   (`validation_doctrine.md`, *G5 for a feature*, *G5 for a fix*; such a fix when it changes code the
+   server runs, which this run's Verify says again): InferPilot gives that claim, and there is none to
+   restore. `accuracy_required` (`ci`): `true` when `ci_triage.md` gives the failure as an accuracy
+   problem (its *accuracy problem* row says `yes`), `false` when it does not, and in the other modes
+   (always say which). The score the fix of such a failure must restore is in `run_state` (step 6):
+   a `run_state.json` that no longer has it stops the resume, since a round would be accepted on the
+   failing test alone, whatever became of the score.
+5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
+   the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
+   on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
+   `analysis_path` (`perf`: `perf_analysis.md`, whose plan names the gates Verify runs and whose path
+   check Performance holds both arms to). A resume without its triage record, a `feature` without its
+   spec or its design, or a `perf` run without its analysis, stops. The reply draft the run wrote stays
+   in the run directory for the triager;
+   it is not this run's to post until Reply rewrites it.
+6. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
+   `RUN_DIR/handoffs.json`: `[]` for a file that holds an empty list, `null` for one that is missing or
+   does not parse, which stops the resume. Verify judges a failure the baseline shares by the first, and
+   an integrated kernel is reverted to its `commit` by the second. Give every entry as the file has it,
+   never leaving one out and never completing one: a hand-off without its `id`, or an integrated one
+   without the package and the commit that integrated it (`integrated_wp`, `commit`), stops the
+   resume, since without that commit a kernel that fails Verify would not be reverted. `run_state`, as
+   the report wrote it
+   to `RUN_DIR/run_state.json`, in the same way: the object the file holds, as it is there (`{}` for an
+   empty one), and `null` for a file that is missing or does not parse. It is what the run had
+   established before Verify and the phases after it go by: the pull request it verified in place of
+   a fix of its own (`existing_prs`, `existing_pr`), for which the PR phase writes a comment; an
+   `issue`'s pull request that did not pass (`existing_pr_result`), after which the fix on the
+   branch is the run's own, the PR phase prepares it as any fix's, and the reply, the report and the
+   result name the comment drafted for the one that did not pass; the
+   score an accuracy problem in CI must restore (`accuracy_claim`), without which no round is
+   accepted; the AMD component its root cause is in (`component_issue`); the part of a ci task it
+   does not answer for (`unchecked`); whether the model of an `issue` or a `ci` task answers text
+   questions (`text_model`), as the run's Setup said or a Verify round found since, which goes before
+   what this run's Setup says of it, and before the user's word, which a Verify round of the run had
+   the last word on as well. Take none of it from another record, and add nothing to it: a
+   key the file does not have is left out, never given as `null`. A `ci` run's file that names the
+   pull request it verified (`existing_prs`) without that pull request as Classify returned it, with
+   the commit it was verified at (`existing_pr`), lost it, and the resume stops: the comment for the
+   pull request names that commit. An `issue` run's file names its pull requests alone.
+7. `design_auto_approved` (`feature`): `true` when the run's Design went on to Implement without a
+   human's approval (its report says so, its Design phase `auto_approved`); `false` otherwise and in
+   the other modes.
+8. Append to the ledger that the run was resumed from Verify, on which commit, and why its Verify had
+   no result (the report and ledger say).
+
+Return:
+
+```json
+{"head_ok": true, "head": "<sha>", "fingerprint_ok": true,
+ "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
+ "known_issues": [], "handoffs": [], "run_state": {"text_model": true}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
+ "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
+ "perf_cost": false, "accuracy_required": false, "design_auto_approved": false,
+ "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
+```
 
 ## PHASE=spec (feature)
 
@@ -320,7 +525,10 @@ An issue or a ci task with a `model_path` adds `"text_model": true | false` (ste
    nothing more by default: with `guards` on, add guard workloads of your own (`perf_evaluation.md`
    §2); with `sweep` on, points beyond the workload's own (more concurrencies or lengths,
    `acceptance.md` §1); with `held_out` on, the claim also names its held-out operating point
-   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's.
+   (`perf_evaluation.md` §3), fixed here with the workload. For a port, the claim is step 1's. Write
+   `perf_claim` word for word in the spec's *performance claim* row (`none` when the feature claims
+   none), and in the row under it whether it is a cost the user stated: Design copies them from there,
+   and so does a run resumed from Verify.
 5. Accuracy: the sets Setup measured, from `goal` (`acceptance.md` §1.1: gsm8k 1319, and gpqa_diamond
    and simple_qa when `goal` says the change may lose accuracy), each once per arm, at most 1 point below
    the baseline, with no token-level comparison (`validation_doctrine.md`, G2). Performance: one
@@ -352,7 +560,7 @@ feature's own metric with no value to compare it with is reported, and is not a 
 
 ## PHASE=report (every mode, every outcome)
 
-Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a scan
+Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `run_state`, `attention`, for a scan
 `share_daily_report`, and every artifact path produced so far.
 
 - `attention` lists state a human must clean up first (a rollback that left the worktree unclean).
@@ -421,14 +629,21 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
   at PR, the run had verified a fix of its own before main moved: say that its branch was not
-  proposed, and where it is.
+  proposed, and where it is. A run that reused a run directory (`resume_run_dir`) and stopped at
+  Setup measured nothing: it writes `RUN_DIR/run_report_<n>.md` instead, the first `<n>` from 2 not
+  taken, so that `run_report.md` stays the report of the run it resumed, which a later resume reads.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
   the branch, unverified. An empty `commit` is one not reported, not one not made: the implementer's call
   timed out, and may have committed or still be running, so say that the branch is to be inspected once
-  that call has stopped. A `not_integrated` hand-off's back end found a gain that the run, stopped by
-  the control file, never integrated: give its speedup.
+  that call has stopped. Write `handoffs`, `known_issues` and `run_state` as given to
+  `RUN_DIR/handoffs.json`, `RUN_DIR/known_issues.json` and `RUN_DIR/run_state.json`, which a run
+  resumed from Verify restores: each whole and unchanged, and one you were not given as empty (`[]`
+  for the two lists, `{}` for `run_state`). A run that stopped at Setup
+  writes none of them: it has none of its own, and a resumed one would empty those it was to restore. A
+  `not_integrated` hand-off's back end found a gain that the run, stopped by the control file, never
+  integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later
   (`kernel_backend=geak` with `kernel_backend_dir`, or `kernel_backend=command` with
   `kernel_backend_command`; `knowledge/kernel_backends.md`). List reply drafts. State the timezone of
@@ -448,9 +663,14 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   what became of the run's own fix as the status has it: only `ready_for_review` has a pull request
   to link from that comment, and the comment itself promises none. With `branch_findings`, give
   what the leak scan found on that pull request's own branch: the comment is clean, and whoever
-  posts it should know what the branch it is about holds.
+  posts it should know what the branch it is about holds. A run resumed from Verify
+  (`resume_from: verify`) in which that pull request did not pass ends once it is off the task
+  branch: it has no Diagnose, where a fix of the run's own starts. Say that no such fix was
+  started, and that the task is run again from its start, without `resume_from`, for one.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
-  RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code.
+  RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code. A run that reused
+  a run directory (`resume_run_dir`) and stopped at Setup leaves it where it is: it measured nothing on
+  it, and a call of the run it resumes that has not ended (Setup, step 1) may be measuring on it still.
 - Add one row to `<exp_root>/index.md`, every run's line in one place (create it with this header when
   it is missing): `| start (UTC) | mode | task | status | container | run directory |`, with the run
   directory's name and the task in a few words.

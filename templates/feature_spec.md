@@ -52,6 +52,11 @@
 | G4 stability (only with `stability` on; else `not run: not asked`) | the run's `client_script` at <its highest concurrency, on long prompts>, run back to back for more than 48 hours (`scripts/stability.sh`) | no crash, hang, out-of-memory or failed request; hour by hour, the last 6 hours' throughput no lower and memory no higher than the range of the first 6 hours' values allows |
 | G5 performance (every feature) | the run's `client_script` on <the source's scenarios, or the task's own workload> | a claimed gain: e.g. >= +X% output tok/s at equal HBM; no claimed gain, or InferPilot's client: no slower than the baseline beyond the noise band; a cost the user stated in `goal`: no more than it, on either client |
 
+| Item | Value |
+|---|---|
+| performance claim | `<perf_claim, word for word: the gain G5 judges, or the cost the user stated; none when the feature claims none>` |
+| the claim is a cost the user stated | yes / no |
+
 ## Non-goals and unsupported combinations
 
 <!-- Each unsupported combination gets a startup rejection with a clear message. -->

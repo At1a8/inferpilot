@@ -1091,6 +1091,20 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("once in a run", EN)
         self.assertIn("一次运行里只跑一次", ZH)
 
+    def test_each_g4_attempt_has_a_directory_of_its_own(self):
+        """stability.sh adds to the files it finds and counts its passes from 1: a G4 started again in the
+        directory of one that a call without a result left unfinished would be judged with it, across two
+        servers."""
+        verify = self.flat("roles/verify_engineer.md")
+        self.assertIn("Each attempt has a directory of its own", verify)
+        self.assertIn("leave it as it is and give this one `RUN_DIR/logs/g4_<arm>_<n>`, the first `<n>` from 2 not taken", verify)
+        self.assertIn("A G4 with no result in the ledger has not run: one that a call without a result left unfinished "
+                      "(a run resumed from Verify) starts again from its first pass, on a server of its own", verify)
+        self.assertIn("it starts in no directory an attempt wrote to (exit 2)", verify)
+        self.assertIn("and the directory its passes are in", verify)
+        script = (ROOT / "scripts" / "stability.sh").read_text(encoding="utf-8")
+        self.assertIn("this run needs a directory of its own", script, "the script adds to an earlier run's passes")
+
     def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
         doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)
@@ -2193,11 +2207,17 @@ class FeaturePerformanceTest(unittest.TestCase):
         self.assertIn("const ours = fallback || isTemplate(A.client_script);\n"
                       "  const claimOf = (c, cost) => (ours && cost !== true ? '' : String(c || '').trim()) || NO_SLOWER;",
                       src, "a feature without a claimed gain, or on InferPilot's client, is measured and nothing is judged")
-        self.assertEqual(src.count("claimOf("), 2, "the first run and the resumed one read the claim the same way")
-        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)"):
+        self.assertEqual(src.count("claimOf("), 3, "the first run and the resumed ones read the claim the same way")
+        for call in ("claimOf(spec.perf_claim, spec.perf_cost)", "claimOf(approved.perf_claim, approved.perf_cost)",
+                     "claimOf(restored, rs.perf_cost)"):
             self.assertIn(call, src, "a cost the user stated is lost on the way to Performance")
         self.assertEqual(src.count("perf_cost: bool,"), 2,
                          "the spec and the approved design both say whether the claim is a cost the user stated")
+        self.assertIn("  perf_cost: { type: ['boolean', 'null'] }, // feature: the claim is a cost the user stated, as its spec says; null: it does not say\n",
+                      src, "a run resumed from Verify says whether the claim is a cost, or that its spec does not say")
+        self.assertIn("`perf_cost` (`feature`): `true` when that claim is a cost the user stated",
+                      " ".join((ROOT / "roles" / "director.md").read_text(encoding="utf-8").split()),
+                      "a run resumed from Verify is not told to restore whether its claim is a cost")
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G5 for a feature.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say that every feature is measured")
         for said in ("Every feature is measured against the baseline, whether it claims a gain or not",
@@ -2270,6 +2290,36 @@ def doc_command(path, start):
     text = re.sub(r"\s+", " ", (ROOT / path).read_text())
     m = re.search(r"`(%s[^`]*)`" % re.escape(start), text)
     return m.group(1) if m else None
+
+
+class EarlierRunStillRunningTest(unittest.TestCase):
+    """A run resumed from Verify looks, before its smoke, for what a call that timed out left running: the
+    documented command names the processes another runner started, each with its tag, and none of this
+    run's."""
+
+    def test_the_documented_command_lists_another_runs_processes_and_none_of_this_runs(self):
+        cmd = doc_command("roles/director.md", "for f in $(grep -l -s -z '^INFERPILOT_RUN_TAG='")
+        self.assertIsNotNone(cmd, "director.md gives no command that finds what an earlier run left running")
+        mine, theirs = "resumed-%d" % os.getpid(), "earlier-%d" % os.getpid()
+        procs = [subprocess.Popen(["sleep", "30"], env=dict(os.environ, INFERPILOT_RUN_TAG=tag)) for tag in (mine, theirs)]
+        try:
+            for proc in procs:
+                for _ in range(200):
+                    if Path("/proc/%d/cmdline" % proc.pid).read_bytes().startswith(b"sleep"):
+                        break
+                    time.sleep(0.05)
+            out = subprocess.run(["bash", "-c", cmd], env=dict(os.environ, INFERPILOT_RUN_TAG=mine), capture_output=True,
+                                 text=True, timeout=60)
+            lines = out.stdout.splitlines()
+            self.assertIn("/proc/%d INFERPILOT_RUN_TAG=%s" % (procs[1].pid, theirs), lines, out.stderr)
+            self.assertEqual([line for line in lines if line.endswith("=" + mine)], [], "a process of this run is listed")
+        finally:
+            for proc in procs:
+                proc.kill()
+                proc.wait()
+        doc = re.sub(r"\s+", " ", (ROOT / "roles/director.md").read_text())
+        self.assertIn("lists the processes a runner other than this run's started, each with its tag", doc)
+        self.assertIn("Stop nothing: it may be writing the run's results", doc)
 
 
 class CiOnMainTest(unittest.TestCase):

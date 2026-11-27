@@ -12,6 +12,15 @@ export const DEFAULTS = {
   'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
     base_commit: 'base0f1e2d3c',
     server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
+  'director:resume': (ins) => ({ head_ok: true, head: 'c_WP2', fingerprint_ok: true, verified_work_packages: [{ wp: 'WP1', commit: 'c_WP1', evidence: 'ok' }, { wp: 'WP2', commit: 'c_WP2', evidence: 'ok' }],
+    known_issues: [], handoffs: [], run_state: ['issue', 'ci'].includes(ins.mode) ? { text_model: true } : {}, task_definition: ins.task_def || {},
+    design_auto_approved: false,
+    repro_cmd: ins.mode === 'issue' ? 'bash repro.sh' : '', failing_test_cmd: ins.mode === 'ci' ? 'pytest test_x.py' : '',
+    perf_required: ['feature', 'perf'].includes(ins.mode), perf_claim: ['feature', 'perf'].includes(ins.mode) ? '+20% output tok/s at equal HBM' : '',
+    perf_cost: false, accuracy_required: false,
+    ...(ins.mode === 'issue' ? { triage_path: `${RUN}/issue_triage.md` } : ins.mode === 'ci' ? { triage_path: `${RUN}/ci_triage.md` }
+      : ins.mode === 'feature' ? { spec_path: `${RUN}/feature_spec.md`, design_path: `${RUN}/design.md` }
+        : ins.mode === 'perf' ? { analysis_path: `${RUN}/perf_analysis.md` } : {}) }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': (ins) => ({ report_path: `${RUN}/run_report.md`, summary: 'done',
     ...('share_daily_report' in ins ? { daily_report_url: '', daily_report_action: '' } : {}) }),

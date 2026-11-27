@@ -128,8 +128,11 @@ Then:
    repository is the framework's, and always with its `repo`: the run takes a word that names a
    repository for a pull request you place there, and for no other. The run applies only one returned
    `open` with its head: it does not take your word for a closed one, and guesses no revision.
-5. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`); for `infrastructure` and `flaky`, write the
-   handover note there (who, what evidence).
+5. Fill `RUN_DIR/ci_triage.md` (`templates/ci_triage.md`), with `failing_test_cmd` word for word in its
+   *failing test command* row and, for a performance problem, `perf_claim` word for word in its
+   *performance claim* row (`none` for any other failure): a run resumed from Verify takes the gate and
+   the claim from there. For `infrastructure` and `flaky`, write the handover note there (who, what
+   evidence).
 
 Return:
 

@@ -19,9 +19,13 @@
 # goes to OUT_DIR/stability.log. OUT_DIR is touched after every pass: the machine's lock takes a run
 # directory with nothing new for hours as a dead run's.
 #
+# OUT_DIR is one run's: the lines are added to the files that are there and the passes counted from 1, so
+# a second run in it would be read with the first, as one run against two servers. One that holds a
+# run's stability.jsonl or stability.log is refused, and nothing in it is changed.
+#
 # The first pass whose client does not exit 0 ends the run: a request failed or the server is gone, and
 # G4 has failed there. Exit status: 0 after HOURS of passes that all exited 0, 1 when one did not, 2 on a
-# usage error.
+# usage error or an OUT_DIR an earlier run wrote to.
 set -u
 usage() {
   echo "usage: PORT=<port> OUT_DIR=<dir> [HOURS=48] [CONCURRENCY=<n>] stability.sh <client script>" >&2
@@ -41,6 +45,12 @@ EOF
   echo "stability.sh: HOURS=$HOURS is not a number of hours" >&2
   exit 2
 fi
+for f in stability.jsonl stability.log; do
+  if [ -e "$OUT_DIR/$f" ]; then
+    echo "stability.sh: $OUT_DIR holds an earlier run's $f: this run needs a directory of its own" >&2
+    exit 2
+  fi
+done
 mkdir -p "$OUT_DIR" || exit 2
 pass=0
 while :; do
