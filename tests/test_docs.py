@@ -2162,17 +2162,34 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "keep a quarter of the time to it, at most 15 minutes"),
                 ("knowledge/ci_triage.md", "where the rest fails, the run fixes what fails and names what it did not check"),
                 ("roles/director.md", "With `unchecked` (a ci task of which a part is outside what the run answers for"),
-                # on the newest image of its variant, a package main rejects is not Setup's to block a fix task on
+                # on the newest image of its variant, a package main rejects does not stop a ci task at Setup
                 ("roles/director.md", "That is said of an image that is not the newest of its variant"),
-                ("roles/director.md", "For an issue or a ci task that may be the failure the task is about, or one the CI lane's own setup "
-                                      "step repairs before its tests run: report `baseline_status: \"skip\"`, with what was rejected and by "
-                                      "which import in `notes`"),
-                ("roles/director.md", "A ci task blocked here would never reach the classification that names a dependency's failure"),
-                ("roles/director.md", "A feature or a perf task has no baseline to measure then: it fails, and `baseline` says that the "
-                                      "newest image does not run the worktree"),
+                # the newest is the very image the script prints: current by the date is not enough, and a named image counts too
+                ("roles/director.md", "The newest is the image `python3 <inferpilot_dir>/scripts/latest_image.py --variant <the image's variant>` "
+                                      "prints, and this container's has to be that very image, whether the task named it or left it to you"),
+                ("roles/director.md", "`current` from `--compare` is not enough, since it goes by the date, and an older version built the same "
+                                      "day passes it"),
+                ("roles/director.md", "Where the script cannot say (Docker Hub is not readable, or the image is no daily one), the image is not "
+                                      "shown to be the newest: the baseline fails"),
+                ("roles/director.md", "Report `baseline_status: \"skip\"` there, and what was rejected and by which import in "
+                                      "`import_rejected`: the run goes on to Classify, which is given it"),
+                ("roles/director.md", "a ci task blocked here would never reach the classification that names a dependency's failure"),
+                # any other task still stops: nothing of it would run in that image, and a server that does not start reads as a fix
+                ("roles/director.md", "Any other task fails the baseline, and `baseline` says that the newest image does not run the worktree"),
+                ("roles/director.md", "a server that does not start for this reason would read as a problem that is gone"),
+                ("roles/director.md", "The run holds to that: with `import_rejected`, only a ci task goes on"),
+                ("roles/director.md", "A ci task on the newest image of its variant adds `\"import_rejected\"` where the worktree rejects a "
+                                      "package of that image (step 3)"),
                 ("knowledge/env_hygiene.md", "On the newest image of its variant it is neither: the worktree and its newest image disagree"),
-                ("roles/ci_guardian.md", "A package of the lane's newest image that main rejects at import is yours to classify like any "
-                                         "other failure of main"),
+                ("knowledge/env_hygiene.md", "A ci task goes on to Classify, which makes the lane's own environment before it judges main; any "
+                                             "other task stops at Setup and says so"),
+                # the guardian makes the lane's environment before it judges: a raw-image rejection is not yet a failure of main
+                ("roles/ci_guardian.md", "That is not yet a failure of main: the lane's setup step may replace that package before its tests run"),
+                ("roles/ci_guardian.md", "`failing_test_cmd` makes that environment for the tree it runs, as the lane's setup does, so that the "
+                                         "fix is verified in the lane's environment and not in the image's"),
+                ("roles/ci_guardian.md", 'Where you cannot make it, this machine could not be that lane (above): `on_main: "not_run"`, with the '
+                                         "step that is missing in `evidence`"),
+                ("roles/ci_guardian.md", "No fix is planned for an import failure the lane does not have"),
                 # a green rerun here does not make a failure of the CI's own go away
                 ("roles/ci_guardian.md", "**A failure that is the CI's own is handed over, whatever the test does here.**"),
                 ("roles/ci_guardian.md", "unless the failure was the CI's own: then `failure_class` is `infrastructure`, and the run hands it over"),

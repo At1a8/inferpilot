@@ -1520,6 +1520,29 @@ const scenarios = [
     check(feature.result.status === 'blocked' && feature.result.stopped_at === 'Setup', `feature with skip: ${feature.result.status}`);
     const issue = await run({ mode: 'issue', task: 'i' }, skip);
     check(issue.result.status === 'ready_for_review', `issue with skip: ${issue.result.status}`);
+    // A ci task on the newest image of its lane whose worktree rejects a package of that image is not stopped at
+    // Setup: the baseline is skipped, and the guardian is given what was rejected, to make the lane's own
+    // environment before it judges main. No other task goes on from such a Setup, whatever baseline it
+    // reports: an issue's reproduction would not run in that image, and would read as a problem that is gone.
+    const rejected = 'aiter 0.1.7 (the image\'s): ImportError: cannot import name fused_moe_v2, from python/sglang/srt/layers/moe.py';
+    const rejecting = { 'director:setup': () => ({ ...skip['director:setup'](), import_rejected: rejected }) };
+    const ciGoes = await run({ mode: 'ci', task: 'c' }, rejecting);
+    const classify = ciGoes.calls.find((c) => c.key === 'ci_guardian:classify');
+    const setupNote = ciGoes.result.phases.find((p) => p.phase === 'Setup' && p.verdict === 'pass');
+    check(classify && classify.ins.import_rejected === rejected && setupNote && setupNote.summary.includes(rejected),
+      `a ci task goes on to Classify with what its worktree rejects of the image, and the record has it: ${
+        JSON.stringify([classify && classify.ins.import_rejected, setupNote && setupNote.summary])}`);
+    const plain = (await run({ mode: 'ci', task: 'c' }, skip)).calls.find((c) => c.key === 'ci_guardian:classify');
+    check(plain && !('import_rejected' in plain.ins), 'a Setup that names no rejected package gives Classify none');
+    const afterSetup = ['issue_triager:triage', 'analyst:recon', 'director:spec', 'architect:perf_plan'];
+    for (const mode of ['issue', 'feature', 'perf']) {
+      const stops = await run({ mode, task: 't' }, { 'director:setup': () => ({ ...rejecting['director:setup'](),
+        baseline_status: mode === 'issue' ? 'skip' : 'pass' }) });
+      check(stops.result.status === 'blocked' && stops.result.stopped_at === 'Setup' && !stops.keys.some((k) => afterSetup.includes(k))
+        && JSON.stringify(stops.result.phases).includes(`the newest image does not run the worktree: ${rejected}`),
+        `${mode}: no other task goes on from a Setup whose worktree rejects a package of the newest image: ${
+          stops.result.status} at ${stops.result.stopped_at}, calls ${stops.keys.join(' ')}`);
+    }
     const prose = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ run_dir: RUN, baseline: 'PASS - 3/3' }) });
     check(prose.result.status === 'blocked' && prose.result.stopped_at === 'Setup', 'a baseline in prose without baseline_status is rejected');
   }],
