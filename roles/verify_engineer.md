@@ -198,12 +198,16 @@ clock can start before your session does.
        that the later rounds and the report read the model as what it is. The user can say the same
        before any server is up (the task's `text_model: true`, against Setup's word), and the run
        then asks for no script. You are told so with `text_model_unconfirmed`: nobody who launched
-       the model has said yet which it is. Find out on the server before anything else (does it
-       have chat completions, and answer one), and say `text_model` in your answer as the server
-       showed it, `true` or `false`. InferPilot accepts no round there until one has said it, and
-       none whose G2 is left out or `not run` for a fix that changes code the server runs. Once
-       you have said `true`, the fix is one for a text model like any other, and G2 is gsm8k's
-       result as you report it for any fix.
+       the model has said yet which it is. That changes nothing in the order of the round: the
+       fix's own gate runs first, and nothing is launched for G2 before it has passed and the diff
+       has shown that G2 runs (above). Where G2 runs, find out on the first server you launch for
+       it, before gsm8k is put to it (does it have chat completions, and answer one), and say
+       `text_model` in your answer as the server showed it, `true` or `false`. A fix that changes
+       no code the server runs has no G2 and launches nothing for this: leave the field out there.
+       Where G2 runs, InferPilot accepts no round until one has said `text_model`, and G2 has to
+       be reported: not left out, not `not run`, not `skipped`. Once you have said `true`, the fix
+       is one for a text model like any other, and G2 is gsm8k's result as you report it for any
+       fix.
      - With no `output_script` there is nothing to compare the outputs of such a model with, and
        gsm8k cannot run: the round measured no G2. Say `"text_model": false` in your answer and
        `"G2": "not run: the model answers no text questions, and the task names no output_script"`

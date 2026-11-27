@@ -1809,8 +1809,14 @@ class ModelWordTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "You are told so with `text_model_unconfirmed`: nobody who launched the model has said yet which "
                                              "it is"),
                 ("roles/verify_engineer.md", "say `text_model` in your answer as the server showed it, `true` or `false`"),
-                ("roles/verify_engineer.md", "InferPilot accepts no round there until one has said it, and none whose G2 is left out or `not "
-                                             "run` for a fix that changes code the server runs"),
+                # the confirmation follows the round's order: the fix's own gate first, and no launch for a fix that has no G2
+                ("roles/verify_engineer.md", "That changes nothing in the order of the round: the fix's own gate runs first, and nothing is "
+                                             "launched for G2 before it has passed and the diff has shown that G2 runs"),
+                ("roles/verify_engineer.md", "Where G2 runs, find out on the first server you launch for it, before gsm8k is put to it"),
+                ("roles/verify_engineer.md", "A fix that changes no code the server runs has no G2 and launches nothing for this: leave the "
+                                             "field out there"),
+                ("roles/verify_engineer.md", "Where G2 runs, InferPilot accepts no round until one has said `text_model`, and G2 has to be "
+                                             "reported: not left out, not `not run`, not `skipped`"),
                 ("roles/verify_engineer.md", "Once you have said `true`, the fix is one for a text model like any other"),
                 ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
                                                  "only once the verify engineer has said the same of the model on its server, and with gsm8k's "
@@ -2507,8 +2513,116 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
                            ("roles/issue_triager.md", "Return the others as `other_problems`"),
                            ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
+                           ("knowledge/issue_triage.md", "and with the operator's settings this run was given"),
+                           ("knowledge/issue_triage.md", "A run that has a model takes a problem on that model and configuration"),
+                           ("knowledge/issue_triage.md", "where the task itself names such a problem, the run stops before Reproduce and asks for them"),
+                           ("knowledge/issue_triage.md", "A task without a model, one that stops before its fix, takes the most urgent problem of all"),
+                           ("roles/issue_triager.md", "Where the task has a `model_path`, \"the most urgent\" is said of the problems on that model and "
+                                                      "configuration"),
+                           ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
+                           ("roles/issue_triager.md", "A task without a model (one that stops before its fix) takes the most urgent of all"),
+                           ("roles/issue_triager.md", "`task` itself names a problem on another model or configuration than the task's"),
+                           # a task that names the issue alone has a problem to take even where none is on its model
+                           ("roles/issue_triager.md", "Or `task` names the issue alone and none of its problems is on the task's: take the most "
+                                                      "urgent of all then"),
+                           ("roles/issue_triager.md", "one without a model that pins two GPUs does not fit a problem at TP8 either"),
+                           ("roles/issue_triager.md", "Where the task pins none of them, it is what Setup chose for the run before the problem was "
+                                                      "known, the `gpu_ids` you are given"),
+                           ("roles/issue_triager.md", "for the problem's model where the task has one, otherwise for each input it pins, and where "
+                                                      "it pins none for the GPUs, never for a model the task has no use for"),
+                           ("knowledge/issue_triage.md", "It is then asked for those inputs, each of them, and not for a model"),
+                           ("knowledge/issue_triage.md", "A task that names no model and pins nothing was set up by Setup alone, before the run knew "
+                                                         "which problem it takes"),
+                           ("knowledge/issue_triage.md", "the run stops as well and asks for the GPUs, since Reproduce uses the ones the run is set up "
+                                                         "with and no others"),
+                           ("knowledge/issue_triage.md", "So it does where the task names the issue alone and no problem of the report is on the "
+                                                         "run's model and configuration"),
+                           ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
+                           ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
+                           # the rule is for the problem taken, whether or not another would fit
+                           ("roles/issue_triager.md", "Whichever problem you take, hold it against what the task is set up with, and return "
+                                                      "`model_mismatch` (its model and configuration) whenever it is not on that"),
+                           ("roles/issue_triager.md", "Or the task has no model, and the most urgent of all is not on what it pins although a less "
+                                                      "urgent one is"),
+                           ("roles/issue_triager.md", "the P0 is still the one you take, with `model_mismatch`, and the P1 is one of the others, "
+                                                      "offered on this run's GPUs"),
+                           ("knowledge/issue_triage.md", "or the run stops before Reproduce in the same way, whether or not a less urgent problem "
+                                                         "would fit: that one is offered as a follow-up"),
+                           # a difference in the workload alone is another configuration
+                           ("roles/issue_triager.md", "its `model` where the report gives it another model, launch configuration or workload than "
+                                                      "this run's"),
+                           ("roles/issue_triager.md", "A difference in the workload alone counts"),
+                           # the marker is whole: the follow-up has none of this run's settings to read "the same" against
+                           ("roles/issue_triager.md", "Say the marker whole, as the report puts it, and never by reference to this run: the model, "
+                                                      "the launch flags and the workload (`DeepSeek-V4.1, --tp-size 8, 32k input`)"),
+                           ("roles/issue_triager.md", "The follow-up starts without this run's model and settings, which may have come from the "
+                                                      "caller and not from the report, and has nothing to read \"the same\" against"),
+                           ("roles/issue_triager.md", "So it is with `model_mismatch`"),
+                           ("knowledge/issue_triage.md", "A problem the report puts on another one, were it another workload alone (32k input where "
+                                                         "the run measures 8k), is offered as a follow-up"),
+                           # Setup works before Triage: the run after a mismatch, and a follow-up, tell it the configuration
+                           ("roles/issue_triager.md", "The run after it is given your `model_mismatch` as `reported_on`, as a run on one of the "
+                                                      "others is given its `model`"),
+                           ("roles/issue_triager.md", "So say it as the report does, the launch flags with the model"),
+                           ("roles/director.md", "With `reported_on` (the model and launch configuration the report puts the task's problem on; "
+                                                 "the result of an earlier run gives it, where that run was set up for another one), the task "
+                                                 "needs what that configuration needs"),
+                           ("roles/director.md", "a problem at TP8 takes eight GPUs, whatever the run before this one chose"),
+                           ("roles/director.md", "Where the report gives several commands, it is the one for the problem `task` names, and with "
+                                                 "`reported_on` the one for that configuration"),
+                           ("roles/intake.md", "`reported_on` (issue): the model and launch configuration the report puts the task's problem on"),
+                           ("roles/intake.md", "never fill it yourself"),
+                           ("knowledge/issue_triage.md", "is told which one the problem is on (`reported_on`): Setup works before Triage, and one "
+                                                         "left to choose again takes the GPUs that configuration needs, not the same ones"),
+                           ("templates/task_definition.md", "| `reported_on` | the model and launch configuration the report puts the task's "
+                                                            "problem on"),
+                           ("README.md", "| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on"),
+                           ("README.zh-CN.md", "| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置"),
+                           ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
+                           ("README.md", "a scan's top tasks, the other problems of an issue's report"),
+                           ("README.zh-CN.md", "scan 排在前面的任务，issue 报告里的其他问题"),
                            ("templates/issue_triage.md", "| problems in the report |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const issue = issueOf(def.task);", "a follow-up of a follow-up names two problems"),
+                ("const task = p.task || `${issue}: ${p.problem}`;", "a follow-up takes the task as it stands"),
+                ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
+                 "a follow-up loses the operator's settings, or the model the report names for it"),
+                ("  'gpu_ids', 'output_script', 'text_model'];", "a problem on another configuration is pinned to this run's GPUs, or takes "
+                                                                  "the output comparison of this run's model or the user's word on it"),
+                ("const pinned = MEASURED_WITH.filter((k) => !['model_path', 'text_model'].includes(k) && A[k]); // a word pins nothing\n"
+                 "  if (elsewhere) {\n    R.model_mismatch = elsewhere;",
+                 "a problem on another model or configuration is reproduced on what the run is set up with, whoever chose it"),
+                # a task without a model is asked for what it pins, not for a model; one that pins nothing, for the GPUs Setup chose
+                (": pinned.length ? pinned.map((k) => ({ field: k, question: `The task's ${k} (${given(k)}) is another `",
+                 "a task without a model is asked for a model"),
+                (": [{ field: 'gpu_ids', question: `Which GPUs should the run use for ${elsewhere} (HIP numbers)? Setup chose ${C.gpu_ids} `",
+                 "a run Setup alone set up for another configuration reproduces on GPUs that do not fit"),
+                # an input given as an object is shown as it was given
+                ("const given = (k) => JSON.stringify((typeof A[k] === 'string' ? A[k] : JSON.stringify(A[k])).slice(0, 120));",
+                 "a workload or a harness given as an object is shown as [object Object]"),
+                ("  } else if (status === 'needs_input' && R.model_mismatch) {\n", "the result of a mismatch on what a task pins (its GPUs alone) "
+                                                                                 "does not say what to give, or how to run again"),
+                ("if (R.model_mismatch) afterMismatch(out, at, last, report);", "the rerun after a mismatch brings the old configuration back"),
+                # the rerun clears what the task measured with as a field and as an earlier answer, and names the problem's configuration
+                ("Object.fromEntries(MEASURED_WITH.filter((k) => A[k] != null && A[k] !== '').map((k) => [k, ''])),",
+                 "the rerun keeps the task's own model, scripts or GPUs, or a word on the model that is false"),
+                ("out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), "
+                 "...out.rerun_with.answers };", "an earlier answer brings the old configuration back into the rerun"),
+                ("{ request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: ", "the rerun keeps the request of the old configuration"),
+                # the configuration is a field of its own too, which Setup is given: it works before Triage
+                ("\"this task are that configuration's, not those of the run that stopped.\", reported_on: R.model_mismatch });",
+                 "a Setup left to choose again is not told the configuration, and takes the same GPUs"),
+                ("'of this task are that configuration\\'s, not those of the run that offered it.', reported_on: p.model } : {};",
+                 "the Setup of a follow-up on another configuration is not told which"),
+                ("  reported_on: String(A.reported_on || '').trim(),\n", "the roles are not given the configuration the task names"),
+                ("'bisect_fixed', 'confirm_leads', 'reported_on'];", "the configuration is not part of the definition a rerun carries"),
+                ("pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),",
+                 "the rerun loses the rest of the task, or makes an inferred apply_prs the caller's"),
+                ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",
+                 "a problem on another model is measured with this run's model and scripts")):
+            self.assertIn(said, src, why)
         self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
                          "another problem may have a fix already: the reply gives its known state")
 

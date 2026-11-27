@@ -598,6 +598,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`: `true` bisects between the reporter's commit and main, with the reproduction as the test, when the first fails and the second passes, and names the commit that fixed it |
+| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on (`DeepSeek-V4.1, --tp-size 8`). A run that finds its problem on another configuration than the one it was set up for stops before Reproduce, and its result gives this to the run after it (`next.rerun_with`; `next.start` for the report's other problems): with no `gpu_ids` given, Setup takes as many GPUs as that configuration needs, and writes the launch for it |
 | `confirm_leads` | default `false`: leads, the problems roles met that are not the task's, are listed in the report with how to reproduce them, and Spinoff runs nothing on the GPUs; `true` checks each on the base commit before the report and drafts an issue for those that show there |
 | `stop_after` | stop after the named phase of the mode (e.g. `Design`, `Reproduce`); a phase the mode does not run comes back as a question |
 | `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md` |
@@ -630,8 +631,8 @@ status; one that ends at the Intake (questions, a rejection) or before Setup cre
 Every result ends with `next`, what comes after the run, the same for Claude Code, a Cursor agent and the
 runner's log: `say`, a sentence for you; `ask`, questions only you answer; `rerun_with`, the arguments to
 set before running it again with the rest unchanged (answers merge with those already given); `start`, new
-runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
-post, a daily report the director could not share.
+runs it offers, with their arguments: a scan's top tasks, the other problems of an issue's report;
+`user`, what only you do: the push, a reply to post, a daily report the director could not share.
 
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and
