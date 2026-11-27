@@ -1763,6 +1763,21 @@ const scenarios = [
     const saidOn = await run({ mode: 'issue', task: 'sglang#41299', text_model: true, stop_after: 'Reproduce' }, withOthers(another));
     check(saidOn.result.task_def.text_model === true && ((saidOn.result.next.start || [])[0] || { args: {} }).args.text_model === true,
       `the caller's own word is kept, for the run and for a follow-up on the same model: ${JSON.stringify(saidOn.result.next.start)}`);
+    // Not a word this run's Verify disproved: whoever launched the model said the opposite, and the follow-up on
+    // the same model starts without the word, for Setup to say what the model is. The run's record keeps the
+    // word as it was given. Either way round.
+    const comparedOk = "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)";
+    for (const [word, setupSays, verifySays, g2] of [[true, false, false, comparedOk], [false, true, true, 'pass 0.893 vs 0.895 (1319 q)']]) {
+      const refuted = await run({ mode: 'issue', task: 'sglang#41299', text_model: word, output_script: '/s/outputs.sh' }, {
+        ...withOthers(another), 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: setupSays }),
+        'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: verifySays, server_code_changed: true,
+          gates: { issue_repro: 'pass', G2: g2 } }) });
+      const next1 = ((refuted.result.next.start || [])[0] || { args: { text_model: 'no follow-up' } }).args;
+      check(refuted.result.status === 'ready_for_review' && refuted.result.task_def.text_model === word && !('text_model' in next1)
+        && next1.output_script === '/s/outputs.sh',
+        `a word (${word}) that Verify disproved is not handed to a follow-up, and stays in the run's record: ${refuted.result.status}, ${
+          JSON.stringify([refuted.result.task_def.text_model, next1.text_model])}`);
+    }
     // An Intake that takes the model for one that answers no text questions, as Setup did, asks for its output
     // comparison. Against the caller's word that it answers them, the question is not put: the run reaches Setup.
     const intakeAsks = { 'intake:define': (ins) => ({ status: 'needs_input', summary: 'a diffusion model, by its files',

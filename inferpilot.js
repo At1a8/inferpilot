@@ -1359,7 +1359,12 @@ function nextSteps(status, at) {
   // it is the same work on the same issue. A problem the report puts on another model takes none of what this
   // run measured with: its model, its scripts and its workload are asked for, as of any new task.
   if ((R.other_problems || []).length && !out.start) {
-    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)));
+    // The user's word on the model goes with a follow-up on the same model, unless this run's Verify, which
+    // launched the model, said the opposite: a word that was disproved is not handed on. The record of this
+    // run keeps it as it was given.
+    const disproved = MODEL_WORD !== null && typeof C.text_model === 'boolean' && C.text_model !== MODEL_WORD;
+    const def = pick(R.task_def, TASK_KEYS.filter((k) => !['stop_after', 'resume_from', 'run_dir'].includes(k)
+      && !(disproved && k === 'text_model')));
     const issue = issueOf(def.task);
     out.start = R.other_problems.map((p, i) => {
       const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;

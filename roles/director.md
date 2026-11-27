@@ -77,7 +77,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
      update-ref -d refs/inferpilot/restored/<slug>`), so an earlier retry's commits are not taken again;
      `RUN_DIR/failed/branch.bundle` alone means every commit was rolled back, and still holds them: say
-     so.
+     so. A branch of that name can also be left by a run of the task on another definition, which
+     step 1 does not match: the run that asked a question this one answers (a model, a script,
+     `text_model`). It is an earlier attempt's all the same: refresh its bundle and rename it in the
+     same way, so that `checkout -b` never meets it and nothing of it is lost.
    - A resume skips the phases before it, so its branch is the one it stopped with. When it is not in
      `framework_dir` (a preempted node, a job past its time limit, a replaced container), restore it
      from the bundle after the fetch: `git -C <framework_dir> fetch RUN_DIR/branch.bundle

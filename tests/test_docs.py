@@ -1774,6 +1774,10 @@ class ModelWordTest(unittest.TestCase):
                  "      && (C.text_model_unconfirmed || !ranG2)) {\n      await refused();",
                  "a fix is accepted on the user's word alone, with neither gsm8k nor a comparison behind it, or the round refused for it is "
                  "not asked what it left running"),
+                # a word this run's Verify disproved is not handed to a follow-up on the same model
+                ("    const disproved = MODEL_WORD !== null && typeof C.text_model === 'boolean' && C.text_model !== MODEL_WORD;",
+                 "a follow-up carries a word on the model that Verify disproved"),
+                ("      && !(disproved && k === 'text_model')));", "a follow-up carries a word on the model that Verify disproved"),
                 # Setup is given the caller's word with the task, for its record of the run's inputs
                 ("  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null) C.text_model = MODEL_WORD;\n  const s = await call('director', 'setup',",
                  "Setup does not get the caller's word, and its record of the task's inputs lacks it"),
@@ -1821,6 +1825,10 @@ class ModelWordTest(unittest.TestCase):
                 ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
                                                  "only once the verify engineer has said the same of the model on its server, and with gsm8k's "
                                                  "result"),
+                ("roles/director.md", "A branch of that name can also be left by a run of the task on another definition, which step 1 does "
+                                      "not match: the run that asked a question this one answers (a model, a script, `text_model`)"),
+                ("roles/director.md", "refresh its bundle and rename it in the same way, so that `checkout -b` never meets it and nothing of it "
+                                      "is lost"),
                 ("roles/director.md", "It is among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the rest, so "
                                       "that a retry of the task is matched on it too, and judge the model as if it were not there"),
                 ("templates/task_definition.md", "The word is `true` or `false`, as a boolean or as that word; anything else is asked about"),
