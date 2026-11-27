@@ -403,6 +403,10 @@ async function intakeStage(raw) {
   const request = String(raw.request || '').trim();
   const given = pick(raw, TASK_KEYS);
   const answers = pick(asObject(raw.answers), TASK_KEYS);
+  // A stop the caller set to nothing is the caller's word too: the result of a run whose stop was lifted hands
+  // that on (next.rerun_with), and the stop the request's words name, which the Intake reads again, does not
+  // come back over it. An answer does: an empty field is also how a value the run asked about makes room for one.
+  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';
   if (!request && missingFields({ ...answers, ...given }).length === 0) return { args: { ...raw, ...answers, ...given } };
   enter('Intake');
   const res = await call('intake', 'define', { request, given, answers, inferpilot_dir: INFERPILOT }, INTAKE, 'intake');
@@ -429,7 +433,8 @@ async function intakeStage(raw) {
       questions,
       // null until the user answers: a run that still has it asks again rather than taking a placeholder
       next: { say: 'InferPilot needs these answers before it starts; nothing ran.', ask: questions,
-        rerun_with: { ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) } },
+        rerun_with: intakeStopHandedOn({ ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) },
+          merged.stop_after, raw.answers, questions) },
     });
   }
   return {
@@ -1544,7 +1549,56 @@ function nextSteps(status, at) {
   }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;
+  if (out.rerun_with) stopHandedOn(out.rerun_with);
   return out;
+}
+
+// The control file can move the stop while a run goes on, and that is the operator's last word on where the
+// task stops. The rerun a result offers goes by it, where the result names no stop of its own: a run started
+// with stop_after=Diagnose, whose stop was lifted and which then asked for what its fix needs, is not run
+// again only to stop after Diagnose once more. "now" is no place to stop a run that starts over. The file is
+// read once more here: a run that ends inside a phase (Spec asks for another client, Setup for the image)
+// passed no boundary since the operator last wrote to it. Every result that offers a rerun goes through this,
+// the two that are written where they arise as well (askImage, a scan that finds a recent report).
+function stopHandedOn(rerun) {
+  const stopNow = liveStopAfter();
+  // A stop the rerun carries from the task's own definition (the rerun after a model mismatch copies the
+  // definition) is the task's, and no stop of the result's: the control file's last word goes over it as well.
+  const tasks = !('stop_after' in rerun) || (!!STOP_AFTER && String(rerun.stop_after || '').trim().toLowerCase() === STOP_AFTER);
+  if (tasks && stopNow !== STOP_AFTER && stopNow !== 'now') {
+    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';
+  }
+  return withoutAnsweredStop(rerun, RAW.answers);
+}
+
+// A rerun without a stop means it. A stop an earlier answer named would come back with the answers, which the
+// runner merges: it is cleared there too. The request's words are overruled by the empty field itself, which the
+// next run takes for the caller's word (intakeStage). The runner merges this patch over the answers as the caller
+// gave them, and can only spread an object: answers given as a JSON string are carried in the patch whole, so
+// that the others (a model, a script, a workload) are not lost with the stop.
+function withoutAnsweredStop(rerun, answers) {
+  if (rerun.stop_after !== '' || asObject(answers).stop_after == null) return rerun;
+  rerun.answers = { ...(typeof answers === 'string' ? asObject(answers) : {}), ...(rerun.answers || {}), stop_after: null };
+  return rerun;
+}
+
+// The same for a run the Intake stops with questions, before anything of it exists: where the control file moved
+// the stop while the Intake worked, the rerun goes by it. The mode may not be known yet, so the stop goes as the
+// operator wrote it, and the next run asks about one that names no phase of its mode. Not where the Intake's
+// question is about the stop itself: the answer decides there. `stop` is the one in effect, whether the caller
+// gave it as a field, an earlier answer did, or the Intake read it in the request: cleared by the operator, a
+// stop that came from an answer or from the request is as obsolete as one given as a field.
+function intakeStopHandedOn(rerun, stop, answers, questions) {
+  let c = null;
+  try {
+    c = typeof control === 'function' ? control() : null;
+  } catch { /* an unreadable file changes nothing */ }
+  const moved = c && typeof c.stop_after === 'string' ? c.stop_after.trim() : null;
+  const asked = 'stop_after' in rerun || questions.some((q) => q.field === 'stop_after');
+  if (moved === null || asked || moved.toLowerCase() === 'now'
+    || moved.toLowerCase() === String(stop || '').trim().toLowerCase()) return rerun;
+  rerun.stop_after = moved;
+  return withoutAnsweredStop(rerun, answers);
 }
 
 // A rollback that did not leave the worktree clean is recorded for a human; returns the note suffix.
@@ -1595,7 +1649,7 @@ function askImage(img) {
     options: [true, false] }];
   Object.assign(R, { status: 'needs_input', stopped_at: 'Setup', image: img, questions,
     next: { say: `${why}. To run here anyway, answer image_ok; to run on ${want}, start a container from it (README step 2) and run there.`,
-      ask: questions, rerun_with: { answers: { image_ok: true } } } });
+      ask: questions, rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });
   log(`[inferpilot] mode=${MODE} status=needs_input: ${why}`);
   return R;
 }
@@ -3371,7 +3425,7 @@ async function runScan() {
       why: 'one report a day is enough: another scan repeats the same API calls and agent work', options: [true, false] }];
     Object.assign(R, { status: 'needs_input', stopped_at: 'Collect', recent: r, questions,
       next: { say: `A daily report from ${when} exists (${where}); scan again only if a fresh one is needed.`,
-        ask: questions, rerun_with: { answers: { rescan: true } } } });
+        ask: questions, rerun_with: stopHandedOn({ answers: { rescan: true } }) } });
     log(`[inferpilot] mode=scan status=needs_input: a scan from ${when} exists (${where})`);
     return R;
   }

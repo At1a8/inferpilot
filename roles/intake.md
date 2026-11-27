@@ -11,7 +11,9 @@ Read: `templates/task_definition.md` (the fields and what each mode needs), `kno
 ## PHASE=define
 
 Inputs: `request` (the user's words; empty when only fields were given), `given` (fields the caller set;
-they win over anything you infer), `answers` (the user's replies to earlier questions).
+they win over anything you infer), `answers` (the user's replies to earlier questions). An empty
+`stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops
+nowhere, whatever the request says of a stop.
 
 1. **Mode.** Decide it from the request with the signals of `task_definition.md` §2. Ask when two
    modes fit (e.g. "DeepSeek decode is slow on MI355X" is a perf task, unless it refers to an issue
