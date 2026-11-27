@@ -2568,6 +2568,18 @@ const scenarios = [
     check(order.result.status === 'ready_for_review' && rollbacks.length === 1 && rollbacks[0].ins.work_package.id === 'ALL'
       && order.keys.indexOf('pr_engineer:comment') < order.keys.indexOf('implementer:rollback'),
       `the pull request is still on the branch when its comment is drafted: ${ended(order)}, rollbacks ${rollbacks.map((c) => c.ins.work_package.id)}`);
+    // A test of the pull request that cannot fail is no failure of the fix. The implementer hears of it in the next
+    // round, still told to leave the author's commits as they are, and adds a test of its own that can fail: the
+    // pull request goes on to Verify, and no comment says that it failed.
+    const vacuous = await run({ mode: 'issue', task: 'i' }, { ...existing, 'test_engineer:unit': (ins, n) => (n === 1
+      ? { ...DEFAULTS['test_engineer:unit'](ins, n), fails_without_change: 'no', failure_summary: 'test_dcp_tp8 passes on the parent commit too' }
+      : DEFAULTS['test_engineer:unit'](ins, n)) });
+    const again = vacuous.calls.filter((c) => c.key === 'implementer:implement')[1];
+    check(vacuous.result.status === 'ready_for_review' && !comment(vacuous) && !vacuous.keys.includes('implementer:rollback')
+      && again && again.ins.verify_only === true && again.ins.round === 1 && /the unit test cannot fail/.test(again.ins.feedback)
+      && eqList(packages(vacuous), ['WP1:apply_pr', 'WP1:apply_pr']),
+      `a test of the pull request that cannot fail is answered with a test of the run's own, not with a comment: ${ended(vacuous)}, ${
+        again && again.ins.feedback}`);
     const racing = await run({ mode: 'issue', task: 'i', agent_timeout_ms: 100 }, { ...existing, 'test_engineer:unit': redUnit,
       'pr_engineer:comment': async () => {
         await new Promise((resolve) => setTimeout(resolve, 400));
