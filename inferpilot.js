@@ -1084,24 +1084,33 @@ const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_scr
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
 // What a run establishes before Verify that the phases after it go by, and that no phase's record holds as the
 // run had it: the pull request it verifies in place of a fix of its own (the PR phase writes a comment for it,
-// and no pull request), the score an accuracy problem in CI must restore (no round is accepted without it), the
+// and no pull request), an issue's pull request that did not pass, after which the fix on the branch is the
+// run's own (the PR phase prepares it as any fix's, whatever the triage record says of a pull request, and the
+// reply, the report and the result name the comment drafted for the one that failed), the score an accuracy
+// problem in CI must restore (no round is accepted without it), the
 // AMD component its root cause is in (the reply, the report and the result name the draft), the part of a ci
 // task it does not answer for, and whether the model of an issue or a ci task answers text questions, as Setup
 // said or as a Verify round found since (G2 of a fix for one that does not is the task's output comparison).
 // The report writes it down as given (run_state.json), and a run resumed from Verify goes on with it. STATE
 // says what each of them holds: one in another form is one the file lost, and so is a pull request without
-// the commit the run verified it at, or one that existing_prs does not name.
+// the commit the run verified it at, or one that existing_prs does not name, and a pull request that did not
+// pass next to one still under verification: the run has the one or the other (existingFailed).
 const filled = (v) => typeof v === 'string' && !!v.trim();
 const STATE = {
   existing_prs: (v) => Array.isArray(v) && v.length > 0 && v.every(filled),
   existing_pr: (v, all) => !!v && typeof v === 'object' && !Array.isArray(v) && filled(v.pr) && filled(v.head)
     && Array.isArray(all.existing_prs) && all.existing_prs.includes(v.pr),
+  existing_pr_result: (v, all) => !!v && typeof v === 'object' && !Array.isArray(v) && filled(v.prs) && filled(v.failed_at)
+    && typeof v.comment_path === 'string' && !('existing_prs' in all),
   accuracy_claim: filled,
   component_issue: (v) => !!v && typeof v === 'object' && !Array.isArray(v) && COMPONENTS.includes(v.component) && filled(v.draft_path),
   unchecked: filled,
   text_model: (v) => typeof v === 'boolean',
 };
-const runState = () => pick(C, Object.keys(STATE));
+// A list the run emptied is left out, as anything it has none of is: an issue's pull request that did not pass
+// is no longer one the run verifies (existingFailed), and the file of such a run names none.
+const runState = () => Object.fromEntries(Object.entries(pick(C, Object.keys(STATE)))
+  .filter(([, v]) => !(Array.isArray(v) && v.length === 0)));
 // One form for a setting however it was written down. JSON, given as an object or in a string, is compared as
 // JSON with its keys in order, which keeps the boundaries of every value: a comma or a colon in a path is not a
 // second setting. Its values stay what they are, a number also where it is written as its digits: what "false"
@@ -1373,6 +1382,13 @@ function nextSteps(status, at) {
     const stop = liveStopAfter();
     const ahead = STOP_PHASES[MODE].slice(STOP_PHASES[MODE].indexOf('Verify')).find((p) => p.toLowerCase() === stop);
     out.rerun_with = { resume_from: 'verify', run_dir: C.run_dir, stop_after: ahead || '' };
+  } else if (status === 'blocked' && noFixOfItsOwn) {
+    // Run again as it was, the task would be resumed on a branch that is back at its base: the run that fixes
+    // the failure starts over, as a run of the task that names no run to resume.
+    out.say = `${R.existing_pr_result.prs} did not pass verification at ${R.existing_pr_result.failed_at}, and is off the task branch. `
+      + 'A run resumed from Verify makes no fix of its own, which starts at Diagnose. To have the failure fixed, run the task '
+      + `again without resume_from: it starts over.${report}`;
+    out.rerun_with = { resume_from: '', run_dir: '' };
   } else if (status === 'busy') {
     out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
       + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
@@ -2456,13 +2472,17 @@ async function kernelStage() {
 // may still be at work on the branch, something the run started is not known to have stopped, the branch is
 // not back at the task's base, or the run was asked to stop after this phase.
 const EXISTING_FAILED = { existing_failed: true };
+// A run resumed from Verify whose pull request did not pass has no Diagnose to go on to (resumeVerify): it ends
+// with the comment drafted and the branch at the base, and the result says how the task gets its fix.
+let noFixOfItsOwn = false;
 // Two names of one commit, a short one and a long one: at least the four characters git itself asks of a name.
 const sameCommit = (a, b) => {
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.length >= 4 && long.toLowerCase().startsWith(short.toLowerCase());
 };
 async function existingFailed(prs, at, why) {
-  note(at, 'existing_fix_failed', `${prs} did not pass verification: ${why}. A comment is drafted for it, and the run fixes the failure itself`);
+  note(at, 'existing_fix_failed', `${prs} did not pass verification: ${why}. A comment is drafted for it, and ${
+    RESUME === 'verify' ? 'the run, resumed from Verify, ends once it is off the task branch' : 'the run fixes the failure itself'}`);
   C.existing_pr_result = R.existing_pr_result = { prs, failed_at: at, why: String(why || '').slice(0, 1200), comment_path: '' };
   // What is on the branch from here on is the run's own: the PR phase writes no verification comment for it.
   C.existing_prs = [];
@@ -2675,14 +2695,16 @@ async function resumeVerify(claimOf) {
   // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
   // What the run had established goes on as it was: the roles after Verify read it in their inputs, the PR
-  // phase writes the comment for a pull request the run verified, a round is accepted only with the score an
-  // accuracy problem must restore, and the result names what a human files or runs elsewhere. What the run knew
+  // phase writes the comment for a pull request the run verified, and a pull request of the run's own after one
+  // that did not pass, a round is accepted only with the score an
+  // accuracy problem must restore, and the result names what a human files, posts or runs elsewhere. What the run knew
   // of the model replaces what this run's Setup said of it, as a Verify round's word replaced Setup's in that
   // run: a fix for a model found to answer no text questions is still judged on its output comparison.
   const setupSaid = C.text_model;
   Object.assign(C, pick(state, Object.keys(STATE)));
-  for (const k of ['component_issue', 'unchecked']) if (C[k]) R[k] = C[k];
+  for (const k of ['component_issue', 'unchecked', 'existing_pr_result']) if (C[k]) R[k] = C[k];
   const had = [C.existing_prs && `${C.existing_prs.join(', ')}, the pull request it verified in place of a fix of its own`,
+    C.existing_pr_result && `${C.existing_pr_result.prs}, the pull request it verified first, which did not pass: the fix is its own`,
     C.accuracy_claim && 'the score its fix must restore', C.component_issue && `its root cause in ${C.component_issue.component}`,
     C.unchecked && 'the part of the task it does not answer for',
     BEFORE_A_FIX[MODE] && C.text_model !== setupSaid && `a model that ${C.text_model ? 'answers' : 'answers no'} text questions, as the run `
@@ -2710,9 +2732,21 @@ async function resumeVerify(claimOf) {
   const claim = claimOf(restored, rs.perf_cost);
   const when = BEFORE_A_FIX[MODE] && !restored ? 'fix' : true;
   logRoute(routeOf());
-  if (MODE === 'issue') return fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, when);
   if (MODE === 'ci') return fromVerify([{ gate: 'failing_test', cmd, expect: 'pass on every lane it failed on' }], claim, when);
-  return fromVerify([], claim, true);
+  if (MODE !== 'issue') return fromVerify([], claim, true);
+  // The pull request an issue run verifies in place of a fix of its own is verified as it is, here as in the run
+  // this one resumes (runIssue): nothing is repaired on top of it, and where it does not pass, its comment is
+  // drafted and it is taken off the task branch (existingFailed). The fix of the run's own that follows there
+  // starts at Diagnose, with the priority Triage gave the problem, and a run resumed from Verify has neither:
+  // it ends here, and the task is run again from its start for that fix.
+  const theirs = (C.existing_prs || [])[0];
+  const out = await fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, when, theirs);
+  if (out !== EXISTING_FAILED) return out;
+  const at = R.existing_pr_result.failed_at;
+  noFixOfItsOwn = true;
+  note(at, 'fail', `${theirs} is off the task branch, which is back at the task's base. A run resumed from Verify starts no fix of `
+    + 'its own: that begins at Diagnose, in a run of the task from its start');
+  return finish('blocked', at);
 }
 
 // ---------------------------------------------------------------------------

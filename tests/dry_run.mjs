@@ -1326,6 +1326,72 @@ const scenarios = [
       && eqList((existing.result.pr || {}).comment_for, ['#40872'])
       && (existing.result.next.user || []).some((u) => u.startsWith('post the verification comment on #40872')),
       `an issue's too: ${ended(existing)}, ${JSON.stringify(existing.result.next.user)}`);
+    // An issue's pull request is verified as it is, in the resumed run as in the run it resumes: nothing is repaired
+    // on top of it. Where it does not pass, its comment is drafted and it is taken off the task branch, as in any
+    // run. The fix of the run's own starts at Diagnose, which a resumed run does not have: it ends, and the result
+    // says how the task gets that fix.
+    const failing = { ...DEFAULTS['verify_engineer:verify'](), all_pass: false, left_running: '',
+      failures: [{ gate: 'issue_repro', blocking: true, evidence: 'fails 3 of 3 with the PR applied' }] };
+    const failed = await resumedWith('issue', { existing_prs: ['#40872'] }, { 'verify_engineer:verify': () => failing });
+    const drafted = failed.calls.find((c) => c.key === 'pr_engineer:comment');
+    const fn = failed.result.next || {};
+    check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Verify' && !!drafted && drafted.ins.failed_at === 'Verify'
+      && failed.calls.some((c) => c.key === 'implementer:rollback' && c.ins.work_package.id === 'ALL' && c.ins.base_commit === 'base0f1e2d3c'),
+      `a pull request that does not pass in the resumed run gets its comment and is taken off the task branch, back to the task's base: ${
+        ended(failed)}, ${failed.keys}`);
+    check(given(failed, 'investigator:investigate').verify_only === true && !failed.keys.includes('implementer:implement')
+      && !failed.keys.includes('investigator:diagnose') && !failed.keys.includes('pr_engineer:pr'),
+      `nothing is repaired on top of it (the investigator's FIX1 is not implemented), and no fix of the run's own is started: ${failed.keys}`);
+    check(eqList(fn.rerun_with, { resume_from: '', run_dir: '' })
+      && /^#40872 did not pass verification at Verify, and is off the task branch\. .* run the task again without resume_from: it starts over\./.test(fn.say)
+      && (fn.user || []).some((u) => u.startsWith('post the comment on #40872')) && !(fn.user || []).some((u) => /git push|^push /.test(u)),
+      `the result says that the task is run again from its start for a fix, and gives the comment to post: ${JSON.stringify(fn)}`);
+    check(failed.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'existing_fix_failed'
+      && p.summary.endsWith('the run, resumed from Verify, ends once it is off the task branch'))
+      && !JSON.stringify(failed.result.phases).includes('the run fixes the failure itself'),
+      'and the run record promises no fix of the run\'s own');
+    const after = given(failed, 'director:report').run_state;
+    check(eqList(Object.keys(after), ['existing_pr_result', 'text_model']) && after.existing_pr_result.prs === '#40872'
+      && eqList(failed.result.existing_pr_result, after.existing_pr_result) && !(failed.result.done || []).length,
+      `its report is given that pull request as one that did not pass, and none as still under verification: ${JSON.stringify(after)}`);
+    // A ci run's pull request is not held to that, as in a run of the task: what it lacks is repaired on top of it.
+    const mended = await resumedWith('ci', { existing_prs: ['#50220'], existing_pr: theirs }, {
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { ...failing, failures: [{ ...failing.failures[0], gate: 'failing_test' }] }
+        : DEFAULTS['verify_engineer:verify']()) });
+    check(mended.result.status === 'ready_for_review' && !mended.keys.includes('pr_engineer:comment')
+      && !given(mended, 'investigator:investigate').verify_only && mended.keys.includes('implementer:implement')
+      && eqList((mended.result.pr || {}).comment_for, ['#50220']), `a ci run's goes on as before: ${ended(mended)}`);
+    // In a run of the task, the pull request that did not pass is followed by a fix of the run's own. Where the
+    // Verify of that fix has no result, the report is given the pull request as one that did not pass, and none
+    // as still under verification: the run that goes on verifies the run's own fix, and prepares its pull request.
+    const triaged = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+      triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const ownFix = await run({ mode: 'issue', task: 'i' }, { ...triaged, 'verify_engineer:verify': (ins, n) => (n === 1 ? failing : null) });
+    const fell = given(ownFix, 'director:report').run_state;
+    check(ownFix.result.stopped_at === 'Verify' && (ownFix.result.next.rerun_with || {}).resume_from === 'verify'
+      && ownFix.keys.indexOf('investigator:diagnose') > ownFix.keys.indexOf('pr_engineer:comment')
+      && eqList(Object.keys(fell), ['existing_pr_result', 'text_model']) && fell.existing_pr_result.prs === '#40872'
+      && fell.existing_pr_result.failed_at === 'Verify' && fell.existing_pr_result.comment_path === `${RUN}/pr_comment.md`,
+      `the report of a run whose own fix followed a pull request that did not pass is given that, and no pull request under verification: ${
+        ended(ownFix)}, ${JSON.stringify(fell)}`);
+    const goesOn = await run({ mode: 'issue', task: 'i', ...ownFix.result.next.rerun_with }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: fell }) });
+    const ownPr = given(goesOn, 'pr_engineer:pr');
+    const gn = goesOn.result.next || {};
+    check(goesOn.result.status === 'ready_for_review' && (ownPr.existing_pr_result || {}).prs === '#40872' && !ownPr.existing_prs
+      && !(goesOn.result.pr || {}).comment_for && !goesOn.keys.includes('pr_engineer:comment'),
+      `the run that goes on prepares the pull request of the run's own fix, not a comment for the one that did not pass: ${ended(goesOn)}, ${
+        JSON.stringify([ownPr.existing_pr_result, ownPr.existing_prs, (goesOn.result.pr || {}).comment_for])}`);
+    check((gn.user || []).some((u) => u.startsWith('post the comment on #40872')
+      && u.endsWith("once the run's own pull request is open, add its link to that comment")) && (gn.user || []).some((u) => /push/.test(u))
+      && eqList(goesOn.result.existing_pr_result, fell.existing_pr_result),
+      `its result still gives the comment to post on that pull request, with the push of its own: ${JSON.stringify(gn.user)}`);
+    for (const key of ['issue_triager:reply', 'director:report']) {
+      check((given(goesOn, key).existing_pr_result || {}).prs === '#40872', `${key} still knows that #40872 was verified first and did not pass`);
+    }
+    check(goesOn.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
+      && p.summary.includes('#40872, the pull request it verified first, which did not pass: the fix is its own'))
+      && eqList(given(goesOn, 'director:report').run_state, fell), 'the run record says so, and its report is given the same to write down again');
     const draft = `${RUN}/component_issue.md`;
     const cause = { component: 'aiter', draft_path: draft, summary: 'aiter 0.1.11 works meanwhile' };
     const inAiter = await resumedWith('issue', { component_issue: cause });
@@ -1345,6 +1411,10 @@ const scenarios = [
       // A pull request the list does not name, or without the commit the run verified it at, is not the one the run verified.
       ['existing_pr', { existing_pr: theirs }], ['existing_pr', { existing_prs: ['#50221'], existing_pr: theirs }],
       ['existing_pr', { existing_prs: ['#50220'], existing_pr: { ...theirs, head: '' } }],
+      // A pull request that did not pass has its name and the phase it failed in, and is no longer one the run verifies.
+      ['existing_pr_result', { existing_pr_result: '#40872' }], ['existing_pr_result', { existing_pr_result: { prs: '#40872', comment_path: '' } }],
+      ['existing_pr_result', { existing_pr_result: { prs: '#40872', failed_at: 'Verify' } }],
+      ['existing_pr_result', { existing_prs: ['#40872'], existing_pr_result: fell.existing_pr_result }],
       ['accuracy_claim', { accuracy_claim: ' ' }], ['component_issue', { component_issue: { component: 'cuda', draft_path: draft } }],
       ['component_issue', { component_issue: { component: 'aiter' } }], ['unchecked', { unchecked: ['test_a'] }],
       // Only a key the file does not have says that the run had none of it: one that is null is held to its form like any other.
@@ -1418,6 +1488,13 @@ const scenarios = [
       && said('resume').includes('whether the model of an `issue` or a `ci` task answers text questions (`text_model`), as the run\'s Setup said or a Verify '
         + 'round found since, which goes before what this run\'s Setup says of it')
       && said('resume').includes('the scripts, `output_script` among them'), 'and the resume gives it back as the file holds it');
+    check(said('resume').includes('an `issue`\'s pull request that did not pass (`existing_pr_result`), after which the fix on the branch is the run\'s own, '
+      + 'the PR phase prepares it as any fix\'s')
+      && said('report').includes('A run resumed from Verify (`resume_from: verify`) in which that pull request did not pass ends once it is off the task branch')
+      && said('report').includes('Say that no such fix was started, and that the task is run again from its start, without `resume_from`, for one.')
+      && read('README.md').includes('or the one an issue run verified first and that did not pass')
+      && read('README.zh-CN.md').includes('或 issue 任务先验证而没有通过的那个 PR'),
+      'the director and both READMEs name the pull request that did not pass among what the run established, and the report says how a resumed run ends on one');
     check(said('resume').includes('as the row under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or `no`)')
       && said('resume').includes('`null` when the spec has no such row, or the row says neither: never `false` for it'),
       'whether a claim is a cost is the spec\'s own yes or no, and no answer where the spec gives none');
@@ -5043,6 +5120,10 @@ const scenarios = [
         && r.phases.some((p) => p.phase === 'Verify' && p.summary === 'the verify engineer returned nothing')) {
         check(again && again.resume_from === 'verify' && again.run_dir === r.run_dir && ['', 'Verify', 'Performance', 'Review'].includes(again.stop_after),
           `${where}: a Verify without a result runs again from Verify, with no stop that is behind it: ${JSON.stringify(again)}`);
+      } else if (r.status === 'blocked'
+        && r.phases.some((p) => p.verdict === 'fail' && p.summary.includes('A run resumed from Verify starts no fix of its own'))) {
+        check(eqList(again, { resume_from: '', run_dir: '' }),
+          `${where}: a pull request that did not pass in a resumed run leaves the fix to a run of the task from its start: ${JSON.stringify(again)}`);
       } else if (r.status === 'stopped') {
         check(again && again.stop_after === '', `${where}: runs again with ${JSON.stringify(again)}`);
       } else if (r.status === 'busy') {

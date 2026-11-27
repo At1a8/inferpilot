@@ -371,7 +371,10 @@ on the commit the run's last Verify round ran on. Change nothing.
    to `RUN_DIR/run_state.json`, in the same way: the object the file holds, as it is there (`{}` for an
    empty one), and `null` for a file that is missing or does not parse. It is what the run had
    established before Verify and the phases after it go by: the pull request it verified in place of
-   a fix of its own (`existing_prs`, `existing_pr`), for which the PR phase writes a comment; the
+   a fix of its own (`existing_prs`, `existing_pr`), for which the PR phase writes a comment; an
+   `issue`'s pull request that did not pass (`existing_pr_result`), after which the fix on the
+   branch is the run's own, the PR phase prepares it as any fix's, and the reply, the report and the
+   result name the comment drafted for the one that did not pass; the
    score an accuracy problem in CI must restore (`accuracy_claim`), without which no round is
    accepted; the AMD component its root cause is in (`component_issue`); the part of a ci task it
    does not answer for (`unchecked`); whether the model of an `issue` or a `ci` task answers text
@@ -586,7 +589,10 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `run_state`, `atten
   what became of the run's own fix as the status has it: only `ready_for_review` has a pull request
   to link from that comment, and the comment itself promises none. With `branch_findings`, give
   what the leak scan found on that pull request's own branch: the comment is clean, and whoever
-  posts it should know what the branch it is about holds.
+  posts it should know what the branch it is about holds. A run resumed from Verify
+  (`resume_from: verify`) in which that pull request did not pass ends once it is off the task
+  branch: it has no Diagnose, where a fix of the run's own starts. Say that no such fix was
+  started, and that the task is run again from its start, without `resume_from`, for one.
 - Remove the baseline worktree if there is one (`git -C <framework_dir> worktree remove --force
   RUN_DIR/base`): the run directory keeps what the run found, not a copy of the code. A run that reused
   a run directory (`resume_run_dir`) and stopped at Setup leaves it where it is: it measured nothing on
