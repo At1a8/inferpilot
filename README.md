@@ -646,7 +646,7 @@ names the holder. Every mode but scan also needs the machine's GPUs free of othe
 (`scripts/gpu_status.py --check all`): another job on any of them ends the run at Setup as `busy` too,
 and makes a later performance measurement not run. A lock whose run finished, whose runner (`runtime/run.mjs`, seen from the same
 container) is gone, or which wrote nothing in its run directory for twice its longest agent call, one given
-the most time it can get (24 h by default, 14 days with `stability` on), is taken over by the next run. A run in another container is
+the most time it can get (24 h by default, 14 days with `stability` on; with `agent_timeout_ms` given, twice that timeout), is taken over by the next run. A run in another container is
 never taken over for silence, since its run directory is not visible from here; once that run is
 gone, the second command frees the machine, as it frees one a run that died left behind:
 
