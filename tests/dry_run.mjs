@@ -419,6 +419,40 @@ const scenarios = [
     check(big.keys.filter((k) => k === 'verify_engineer:verify').length === 1 && big.result.phases.some((p) => p.phase === 'Verify'
       && /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)), 'a round gets at most twice its limit');
   }],
+  ['feature: with stability on, a Verify round with G4 gets the limit it asks for, with no timeout from the user, and the lock\'s idle window follows', async () => {
+    // G4 is one test of more than 48 hours, and a round's estimate counts it twice, the run and the control a
+    // failure would need: about 6 days, which no multiple of a 6-hour limit reaches. The task asked for G4, so
+    // the round gets the limit it asks for, up to 7 days: nobody is asked for agent_timeout_ms to make it work.
+    const G4 = { mode: 'feature', task: 't', stability: true, client_script: '/s/client.sh' };
+    const asks = (min) => ({
+      'verify_engineer:verify': (ins, n) => (n === 1 ? { all_pass: false, failures: [], needs_min: min } : { all_pass: true, failures: [] }) });
+    const limitsOf = (r) => r.calls.filter((c) => c.key === 'verify_engineer:verify').map((c) => c.ins.time_limit_min);
+    const idleOf = (r) => String(r.calls.find((c) => c.key === 'director:setup').ins.lock_idle_hours);
+    const refused = (r, why) => limitsOf(r).length === 1 && r.result.status === 'blocked' && r.result.stopped_at === 'Verify'
+      && r.result.phases.some((p) => p.phase === 'Verify' && p.summary.includes(why));
+    const six = await run(G4, asks(9210));
+    check(eqList(limitsOf(six), [360, 9210]) && six.result.status === 'ready_for_review',
+      `the default limit, then the six days and more the round asked for: ${limitsOf(six)}, ${six.result.status}`);
+    check(six.result.phases.some((p) => p.phase === 'Verify' && p.verdict === 'more_time'
+      && p.summary === 'the round needs 9210 min and had 360: run again with a 9210-min limit'), 'the record says what it was given');
+    const week = await run(G4, asks(10080));
+    check(eqList(limitsOf(week), [360, 10080]), `seven days are the most a round with G4 can have: ${limitsOf(week)}`);
+    const more = await run(G4, asks(10081));
+    check(refused(more, 'needs 10081 min; its limit is 360 min (more than the 10080 min a round with G4 can have)'),
+      `more than that is not given: ${limitsOf(more)}, ${more.result.status}`);
+    // The machine's lock is taken over from a run that wrote nothing for twice its longest call: with G4 that
+    // call is the round, so the window is two weeks, and a day for a task without it.
+    check(idleOf(six) === '336' && idleOf(await run({ mode: 'feature', task: 't' })) === '24',
+      `the lock's idle window covers a round with G4: ${idleOf(six)} h`);
+    // Without stability the same request is refused as before: a round gets at most twice its limit.
+    const plain = await run({ mode: 'feature', task: 't' }, asks(9210));
+    check(refused(plain, 'needs 9210 min; its limit is 360 min (more than 2 times its limit)'),
+      `a task that did not ask for G4 gets no such limit: ${limitsOf(plain)}, ${plain.result.status}`);
+    // A timeout the user gave stays the limit, with stability too: G4 then has to fit in it, and the lock follows it.
+    const given = await run({ ...G4, agent_timeout_ms: 7200000 }, asks(9210));
+    check(refused(given, 'needs 9210 min; its limit is 120 min (agent_timeout_ms)') && idleOf(given) === '4',
+      `a timeout the user gave stays the limit: ${limitsOf(given)}, ${given.result.status}, idle ${idleOf(given)} h`);
+  }],
   ['feature: a gate\'s answer InferPilot cannot use goes to a new attempt, a unit gate\'s to the call that finishes it, with a limit of its own, told what the first left', async () => {
     // The first answer of each, 300 ms late, is one InferPilot cannot use.
     const once = (key) => async (ins, n) => {
@@ -2518,6 +2552,13 @@ const scenarios = [
     check(big.keys.filter((k) => k === 'issue_triager:reproduce').length === 1 && big.result.status === 'blocked'
       && big.result.phases.some((p) => /needs 800 min; its limit is 360 min \(more than 2 times its limit\)/.test(p.summary)),
     'more time is at most twice the limit');
+    // With stability on, a Verify round gets the days G4 needs. The reproduction is no G4: it still gets at most
+    // twice its limit.
+    const g4 = await run({ mode: 'issue', task: 't', stability: true, server_script: '/s/server.sh', client_script: '/s/client.sh' },
+      { 'issue_triager:reproduce': () => ({ ...left, needs_min: 9210 }) });
+    check(g4.keys.filter((k) => k === 'issue_triager:reproduce').length === 1 && g4.result.status === 'blocked'
+      && g4.result.phases.some((p) => p.summary.includes('needs 9210 min; its limit is 360 min (more than 2 times its limit)')),
+      `with stability on a reproduction still gets at most twice its limit: ${g4.result.status} at ${g4.result.stopped_at}`);
     const given = await run({ mode: 'issue', task: 't', agent_timeout_ms: 7200000 }, { 'issue_triager:reproduce': () => left });
     const rep = given.calls.filter((c) => c.key === 'issue_triager:reproduce');
     check(rep.length === 1 && rep[0].ins.time_limit_min === 120 && given.result.status === 'blocked' && given.result.phases.some((p) =>
