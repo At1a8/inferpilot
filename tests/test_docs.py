@@ -1866,6 +1866,32 @@ class CiAccuracyProblemTest(unittest.TestCase):
     def flat(path):
         return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
+    def test_the_reports_row_for_the_claim_holds_a_base_score_that_counts(self):
+        # The row itself, cell by cell: a sentence elsewhere in the template would not make the column right. The
+        # same-pattern column holds the base's score as this run's verify engineer measured it, never "the score
+        # that fell", which reads as the failed job's: another commit's, on another machine.
+        rows = [line for line in (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
+                if line.startswith("| accuracy claim (a CI failure on a score its test measures) |")]
+        self.assertEqual(len(rows), 1, "one row for the accuracy claim")
+        cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
+        self.assertEqual(len(cells), 6, "Gate | Suite | Baseline (same pattern) | Feature | Verdict | Artifact")
+        header = [line for line in (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
+                  if line.startswith("| Gate | Suite | Baseline (same pattern) |")]
+        self.assertEqual(len(header), 1, "the row sits in the table whose third column is the same-pattern baseline")
+        suite, baseline, feature = cells[1], cells[2], cells[3]
+        self.assertIn("the failing test's own measurement, as the test stood at the base", suite)
+        for said in ("the score on the base by that measurement, as the verify engineer measured it in this run on this machine "
+                     "(the commit, each run's score), or `not measured`",
+                     # the column holds a number that counts: Classify's runs are the reproduction, named apart
+                     "only the test, the verify and the performance engineer produce numbers that count (`guardrails.md` §3)",
+                     "Classify's runs reproduce the failure and are named apart as that, each with its commit: the task worktree is at "
+                     "the base, and main only where the task began on that commit",
+                     "Never the failed job's own score, which is another commit's on another machine: that one is named apart too, with "
+                     "its commit and its lane"):
+            self.assertIn(said, baseline, "the same-pattern cell does not say it")
+        self.assertNotIn("the score that fell", baseline)
+        self.assertEqual(feature, "the score restored, and the claim")
+
     def test_the_run_takes_the_score_from_classify_and_accepts_no_round_without_g2(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
@@ -1953,16 +1979,6 @@ class CiAccuracyProblemTest(unittest.TestCase):
                 # the restored score is shown to whoever merges, also for a fix to the test alone
                 ("knowledge/pr_playbook.md", "shows the score that fell and the score it restores, whatever it changes, a fix to the test alone included"),
                 ("templates/validation_report.md", "| accuracy claim (a CI failure on a score its test measures) |"),
-                # the same-pattern column holds what this run measured, not the failed job's score from another commit and lane
-                ("templates/validation_report.md", "the score on the base by that measurement, as the verify engineer measured it in this run "
-                                                   "on this machine (the commit, each run's score), or `not measured`"),
-                # the column holds a number that counts: Classify's runs are the reproduction, named apart
-                ("templates/validation_report.md", "only the test, the verify and the performance engineer produce numbers that count "
-                                                   "(`guardrails.md` §3)"),
-                ("templates/validation_report.md", "Classify's runs reproduce the failure and are named apart as that, each with its commit: the "
-                                                   "task worktree is at the base, and main only where the task began on that commit"),
-                ("templates/validation_report.md", "Never the failed job's own score, which is another commit's on another machine: that one is "
-                                                   "named apart too, with its commit and its lane"),
                 ("roles/verify_engineer.md", "Step 4 excuses nothing here"),
                 ("roles/verify_engineer.md", "no entry of `known_issues` makes a score below the claim pass, or fail without blocking"),
                 ("roles/reviewer.md", "the `accuracy_claim` entry of the last Verify round in `RUN_DIR/experiment_ledger.md`, not G2's gsm8k against "
