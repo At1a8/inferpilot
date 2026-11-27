@@ -45,8 +45,10 @@ kernel back end tuned and InferPilot integrated: `handoff`, `wp`, `commit`).
      (`validation_doctrine.md`, *Same-pattern baseline control*); failing with the fix as well, the fix
      is incomplete or wrong. Return `fix_needed` with the repair when you can explain what the fix
      misses, and `inconclusive` when you cannot, or when what is wrong may be the gate itself (a
-     threshold no commit ever met): that is a human's to say. InferPilot stops the run on
-     `baseline_bug` for such a gate, and records no known issue.
+     threshold no commit ever met): that is a human's to say. `kernel_regression` (below) stays
+     the verdict for such a gate too, where it passes again with an integrated kernel reverted:
+     that kernel goes back to its back end, and you plan no repair in its place. InferPilot stops
+     the run on `baseline_bug` for such a gate, and records no known issue.
    - `kernel_regression`: the failure goes away with an integrated kernel reverted. Name its hand-offs
      in `kernel_handoffs` and describe the failing case in `counterexample` — gate, shapes, dtype,
      configuration and the command that shows it — so the kernel back end can be given it as a test.
