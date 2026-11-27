@@ -1449,6 +1449,25 @@ const scenarios = [
     check(midPhase.result.status === 'needs_input' && midPhase.result.stopped_at === 'Spec' && midPhase.result.next.rerun_with.stop_after === '',
       `a stop cleared while the last phase ran goes with the rerun: ${midPhase.result.status} at ${midPhase.result.stopped_at}, ${
         JSON.stringify(midPhase.result.next.rerun_with)}`);
+    // So does the result that is written where it arises: Setup asks whether to run on an image that is not the
+    // newest, after the stop was cleared while it ran.
+    let atSetup = false;
+    const imageAsked = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      'director:setup': () => {
+        atSetup = true;
+        return { lock: 'skipped', run_dir: '', baseline_status: 'skip', gpu_ids: '',
+          image: { current: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261105', wanted: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261109', verdict: 'older' } };
+      },
+    }, { control: () => (atSetup ? { stop_after: '' } : {}) });
+    const imageRerun = imageAsked.result.next.rerun_with || { answers: {} };
+    check(imageAsked.result.status === 'needs_input' && imageAsked.result.stopped_at === 'Setup' && imageRerun.answers.image_ok === true
+      && imageRerun.stop_after === '',
+      `the image question hands the stop on too: ${imageAsked.result.status} at ${imageAsked.result.stopped_at}, ${JSON.stringify(imageRerun)}`);
+    const imagePlain = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      'director:setup': () => ({ lock: 'skipped', run_dir: '', baseline_status: 'skip', gpu_ids: '',
+        image: { current: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261105', wanted: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261109', verdict: 'older' } }) });
+    check(imagePlain.result.status === 'needs_input' && !('stop_after' in imagePlain.result.next.rerun_with),
+      `and names no stop where none moved: ${JSON.stringify(imagePlain.result.next.rerun_with)}`);
     // A rerun without a stop means it, wherever the stop came from. One an earlier answer named is cleared in the
     // answers the runner merges, and one the request's words name is not read back by the Intake over the empty field.
     let seen = false;
@@ -3008,6 +3027,17 @@ const scenarios = [
       `asks before scanning again: ${asked.result.status}, calls ${asked.keys}`);
     check(asked.result.questions[0].field === 'rescan' && asked.result.questions[0].question.includes('issues/3'),
       'the question names the recent report');
+    // The stop the control file last set goes with that rerun, as with any other: cleared while Collect ran, it is
+    // not the one the scan started with.
+    let collecting = false;
+    const cleared = await run({ mode: 'scan', stop_after: 'Collect' }, { 'scout:collect': (ins) => {
+      collecting = true;
+      return recent(ins);
+    } }, { control: () => (collecting ? { stop_after: '' } : {}) });
+    check(cleared.result.status === 'needs_input' && cleared.result.next.rerun_with.answers.rescan === true
+      && cleared.result.next.rerun_with.stop_after === '' && !('stop_after' in asked.result.next.rerun_with),
+      `a stop cleared while Collect ran goes with the rescan: ${JSON.stringify(cleared.result.next.rerun_with)}, and none where none moved: ${
+        JSON.stringify(asked.result.next.rerun_with)}`);
     const again = await run({ mode: 'scan', answers: { rescan: true } }, { 'scout:collect': recent });
     check(again.result.status === 'queued' && again.calls.find((c) => c.key === 'scout:collect').ins.rescan === true,
       `answers={"rescan": true} scans again: ${again.result.status}`);

@@ -1289,23 +1289,27 @@ function nextSteps(status, at) {
   }
   for (const a of R.attention) user.push(`clean up before anything else runs there: ${a.issue}${a.worktree ? ` (${a.worktree})` : ''}`);
   if (user.length) out.user = user;
-  // The control file can move the stop while a run goes on, and that is the operator's last word on where the
-  // task stops. The rerun a result offers goes by it, where the result names no stop of its own: a run started
-  // with stop_after=Diagnose, whose stop was lifted and which then asked for what its fix needs, is not run
-  // again only to stop after Diagnose once more. "now" is no place to stop a run that starts over. The file is
-  // read once more here: a run that ends inside a phase (Spec asks for another client) passed no boundary since
-  // the operator last wrote to it.
+  if (out.rerun_with) stopHandedOn(out.rerun_with);
+  return out;
+}
+
+// The control file can move the stop while a run goes on, and that is the operator's last word on where the
+// task stops. The rerun a result offers goes by it, where the result names no stop of its own: a run started
+// with stop_after=Diagnose, whose stop was lifted and which then asked for what its fix needs, is not run
+// again only to stop after Diagnose once more. "now" is no place to stop a run that starts over. The file is
+// read once more here: a run that ends inside a phase (Spec asks for another client, Setup for the image)
+// passed no boundary since the operator last wrote to it. Every result that offers a rerun goes through this,
+// the two that are written where they arise as well (askImage, a scan that finds a recent report).
+function stopHandedOn(rerun) {
   const stopNow = liveStopAfter();
-  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopNow !== STOP_AFTER && stopNow !== 'now') {
-    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';
+  if (!('stop_after' in rerun) && stopNow !== STOP_AFTER && stopNow !== 'now') {
+    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';
   }
   // A rerun without a stop means it. A stop an earlier answer named would come back with the answers, which the
   // runner merges: it is cleared there too. The request's words are overruled by the empty field itself, which
   // the next run takes for the caller's word (intakeStage).
-  if (out.rerun_with && out.rerun_with.stop_after === '' && asObject(RAW.answers).stop_after != null) {
-    out.rerun_with.answers = { ...(out.rerun_with.answers || {}), stop_after: null };
-  }
-  return out;
+  if (rerun.stop_after === '' && asObject(RAW.answers).stop_after != null) rerun.answers = { ...(rerun.answers || {}), stop_after: null };
+  return rerun;
 }
 
 // A rollback that did not leave the worktree clean is recorded for a human; returns the note suffix.
@@ -1354,7 +1358,7 @@ function askImage(img) {
     options: [true, false] }];
   Object.assign(R, { status: 'needs_input', stopped_at: 'Setup', image: img, questions,
     next: { say: `${why}. To run here anyway, answer image_ok; to run on ${want}, start a container from it (README step 2) and run there.`,
-      ask: questions, rerun_with: { answers: { image_ok: true } } } });
+      ask: questions, rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });
   log(`[inferpilot] mode=${MODE} status=needs_input: ${why}`);
   return R;
 }
@@ -2551,7 +2555,7 @@ async function runScan() {
       why: 'one report a day is enough: another scan repeats the same API calls and agent work', options: [true, false] }];
     Object.assign(R, { status: 'needs_input', stopped_at: 'Collect', recent: r, questions,
       next: { say: `A daily report from ${when} exists (${where}); scan again only if a fresh one is needed.`,
-        ask: questions, rerun_with: { answers: { rescan: true } } } });
+        ask: questions, rerun_with: stopHandedOn({ answers: { rescan: true } }) } });
     log(`[inferpilot] mode=scan status=needs_input: a scan from ${when} exists (${where})`);
     return R;
   }

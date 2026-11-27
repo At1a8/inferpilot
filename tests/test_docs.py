@@ -1085,13 +1085,17 @@ class FixAccuracyTest(unittest.TestCase):
         before the fix again. The result hands on the stop as the control file last set it."""
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         self.assertIn("  const stopNow = liveStopAfter();\n"
-                      "  if (out.rerun_with && !('stop_after' in out.rerun_with) && stopNow !== STOP_AFTER && stopNow !== 'now') {\n"
-                      "    out.rerun_with.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
+                      "  if (!('stop_after' in rerun) && stopNow !== STOP_AFTER && stopNow !== 'now') {\n"
+                      "    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
                       "a rerun after the control file moved the stop stops where the task first said, or the file is not read when the run ends")
         # a rerun without a stop means it: not brought back by an earlier answer, nor by the request's words
-        self.assertIn("  if (out.rerun_with && out.rerun_with.stop_after === '' && asObject(RAW.answers).stop_after != null) {\n"
-                      "    out.rerun_with.answers = { ...(out.rerun_with.answers || {}), stop_after: null };", src,
-                      "a stop an earlier answer named comes back in the rerun")
+        self.assertIn("  if (rerun.stop_after === '' && asObject(RAW.answers).stop_after != null) rerun.answers = "
+                      "{ ...(rerun.answers || {}), stop_after: null };", src, "a stop an earlier answer named comes back in the rerun")
+        # every result that offers a rerun goes through it: the two written where they arise as well
+        for said, why in (("  if (out.rerun_with) stopHandedOn(out.rerun_with);", "a result of nextSteps does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });", "the image question does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { rescan: true } }) } });", "a scan's question does not hand the stop on")):
+            self.assertIn(said, src, why)
         self.assertIn("  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';", src,
                       "a stop the request's words name comes back over one the caller cleared, or the cleared field beats an answer")
         self.assertIn("An empty `stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops nowhere, "
