@@ -176,14 +176,16 @@ clock can start before your session does.
        that would overwrite the evidence of its round, and an output the script did not write again
        would be compared as this round's. Only the baseline's directory is reused, and only the one
        of the commit this round's baseline is, whose run the ledger records as finished, in the
-       environment this round has: the same image, the same GPUs, the same launch script and
-       settings. Write those in the ledger with the baseline's command, so that a later round can
-       tell. A retry of the task can find the run directory with the outputs of another base (main
-       has moved), of a run that was cut short, or of another container or other GPUs, where a
-       retry reuses the run directory: none of these is this round's baseline, and a difference the
-       environment made would read as the fix's. Leave such a directory as it is, the evidence of
-       its own round, and measure the baseline again next to it (`base-<base commit>-2` where the
-       name is taken).
+       environment this round has and by the test this round runs: the same image, the same GPUs,
+       the same launch script and settings, and the same `output_script` by its content
+       (`sha256sum`), not by its path. Write those in the ledger with the baseline's command, so
+       that a later round can tell. A retry of the task can find the run directory with the outputs
+       of another base (main has moved), of a run that was cut short, of another container or other
+       GPUs, where a retry reuses the run directory, or of a script whose inputs or seeds were
+       changed in place since: none of these is this round's baseline, and a difference the
+       environment or the test made would read as the fix's. A record that lacks one of them shows
+       nothing either. Leave such a directory as it is, the evidence of its own round, and measure
+       the baseline again next to it (`base-<base commit>-2` where the name is taken).
        Never write such a test yourself, and never change the task's: its inputs, the seeds, the
        measure and the tolerance are the user's. `gates` says what it compared, of which commit,
        where and with what: `"G2": "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match
