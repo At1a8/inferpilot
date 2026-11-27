@@ -82,21 +82,27 @@ Notes per gate:
   transcript, the cosine of two embeddings). The test is the user's, as G3's is: InferPilot has no
   template for one, and no role writes one in its place. Setup says what the model is, and a task
   that can reach a fix on such a model without the script is asked for it then, before anything
-  else runs. The comparison runs on the condition gsm8k runs on for any other fix, by the fix's
-  files and after the reproduction or the failing test, and against the same baseline: the base, or
-  the last commit that served the configuration where the base cannot. Where the failure being
-  fixed is in these very outputs (the base's images are the black ones), the base is no reference
-  either, and that last commit is; where the run knows none, the fix's outputs are kept and
-  reported, not judged. An output that differs by more than the script tolerates is a blocking
-  failure, and so is a run that compared nothing. A round is accepted only on the comparison's
-  result, a pass or outputs kept where there is no baseline: never on a G2 that did not run, with
-  the script named or without. No known issue excuses a difference the comparison reports: where the
-  base differs from itself as much, the script cannot tell the fix from noise, and that is a human's
-  to settle, with the script. Each run of the fix writes to a directory of its own, named for its
-  commit, so that no round's outputs are read as another's. This is the one G2 that compares outputs
-  (*G2 compares scores, not tokens*): InferPilot measures no score set on such a model, the inputs
-  and the seeds are fixed, and what two runs of one commit still differ by is what the script's
-  tolerance is for.
+  else runs. Setup judges by the model's files and the command that serves it, and can be wrong:
+  the question comes with a second one, whether the model answers text questions after all, and
+  the user's word (`text_model`) stands in Setup's place, either way. The verify engineer, who
+  launches the model, has the last word, and has to say it: a round on the user's word that the
+  model answers text questions is accepted only once a round has said the same of the server, and
+  with gsm8k's result on it. Left out, the fix would have neither gsm8k nor a comparison behind
+  it. The comparison runs on the condition gsm8k runs on for any
+  other fix, by the fix's files and after the reproduction or the failing test, and against the same
+  baseline: the base, or the last commit that served the configuration where the base cannot. Where
+  the failure being fixed is in these very outputs (the base's images are the black ones), the base
+  is no reference either, and that last commit is; where the run knows none, the fix's outputs are
+  kept and reported, not judged. An output that differs by more than the script tolerates is a
+  blocking failure, and so is a run that compared nothing. A round is accepted only on the
+  comparison's result, a pass or outputs kept where there is no baseline: never on a G2 that did not
+  run, with the script named or without. No known issue excuses a difference the comparison reports:
+  where the base differs from itself as much, the script cannot tell the fix from noise, and that is
+  a human's to settle, with the script. Each run of the fix writes to a directory of its own, named
+  for its commit, so that no round's outputs are read as another's. This is the one G2 that compares
+  outputs (*G2 compares scores, not tokens*): InferPilot measures no score set on such a model, the
+  inputs and the seeds are fixed, and what two runs of one commit still differ by is what the
+  script's tolerance is for.
 - **G2 for an accuracy problem in CI.** A CI failure on a score its test measures (a GSM8K threshold,
   an MMMU score), not on an error, is an accuracy problem, as a failure on a speed number is a
   performance problem (*G5 for a fix*). It is fixed when the score comes back, so the score is the

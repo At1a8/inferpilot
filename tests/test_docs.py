@@ -300,7 +300,7 @@ class CiExistingFixTest(unittest.TestCase):
                  "Classify is not told which pull requests the task names, with their repositories, to look them up"),
                 ("out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };", "a field the task left blank wins over the answer, and the run asks again"),
                 ("const offered = (def) => Object.fromEntries(Object.entries(pick(def, TASK_KEYS))\n"
-                 "      .filter(([k]) => !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "      .filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
                  "a scan offers a ci task with a pull request to apply, as a field or as an answer a model wrote"),
                 # an issue's existing fix: one pull request, and the roles after it know which
                 ("const prs = listed[0] || '';\n    if (prs) C.existing_prs = [prs];", "an issue's verification ends in a push command, or applies several")):
@@ -952,8 +952,11 @@ class RecheckOnMainTest(unittest.TestCase):
                            ("knowledge/pr_playbook.md", "A verified fix is dropped only on proof"),
                            ("knowledge/pr_playbook.md", "A check that decides less than that prepares the PR"),
                            ("roles/director.md", "or the check on the latest main before the pull request"),
+                           # the report names the fix whichever phase named it
+                           ("roles/director.md", "and name the fix (`fixed_by`), whichever phase named it: Classify for a CI job whose tests pass "
+                                                 "on main, Bisect for an issue, or the check on the latest main before the pull request"),
                            # bisect_fixed is an issue's: a ci task is given the range, and no run that does not exist
-                           ("roles/director.md", "Where neither names it, say that the change that fixed it is not named, and give the range it "
+                           ("roles/director.md", "Where none names it, say that the change that fixed it is not named, and give the range it "
                                                  "lies in"),
                            ("roles/director.md", "For an issue, give the `bisect_fixed` run that would name it; a ci task has no such run, so offer "
                                                  "none"),
@@ -1516,6 +1519,48 @@ class FixAccuracyTest(unittest.TestCase):
             for said in ("`issue`", "`ci`", "`stop_after`", "gsm8k"):
                 self.assertIn(said, row[0], "%s: the model_path row" % name)
 
+    def test_the_rerun_after_a_moved_stop_stops_where_the_control_file_last_said(self):
+        """The control file can lift a stop before the fix, and the run then asks for what the fix lacks. The task is
+        run again with the answers and the same arguments: with the stop it started with among them, it would stop
+        before the fix again. The result hands on the stop as the control file last set it."""
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        self.assertIn("  const stopNow = liveStopAfter();\n", src)
+        self.assertIn("  if (tasks && stopNow !== STOP_AFTER && stopNow !== 'now') {\n"
+                      "    rerun.stop_after = (STOP_PHASES[MODE] || []).find((p) => p.toLowerCase() === stopNow) || '';", src,
+                      "a rerun after the control file moved the stop stops where the task first said, or the file is not read when the run ends")
+        # a rerun without a stop means it: not brought back by an earlier answer, nor by the request's words
+        self.assertIn("  if (rerun.stop_after !== '' || asObject(answers).stop_after == null) return rerun;\n"
+                      "  rerun.answers = { ...(typeof answers === 'string' ? asObject(answers) : {}), ...(rerun.answers || {}), stop_after: null };",
+                      src, "a stop an earlier answer named comes back in the rerun, or answers given as a string are lost with it")
+        self.assertIn("  return withoutAnsweredStop(rerun, RAW.answers);", src)
+        # the Intake's questions come before the run exists: their rerun hands the stop on as well
+        self.assertIn("rerun_with: intakeStopHandedOn({ ...rejected, answers: Object.fromEntries(questions.map((q) => [q.field, null])) },\n"
+                      "          merged.stop_after, raw.answers, questions) },", src,
+                      "the rerun of the Intake's questions keeps the stop the task started with, or one an answer or the request gave")
+        self.assertIn("    || moved.toLowerCase() === String(stop || '').trim().toLowerCase()) return rerun;", src,
+                      "a stop that came from an answer or from the request counts as not moved when the operator clears it")
+        # the stop a rerun carries from the task's definition (after a model mismatch) is the task's own: the control file goes over it
+        self.assertIn("  const tasks = !('stop_after' in rerun) || (!!STOP_AFTER && String(rerun.stop_after || '').trim().toLowerCase() === "
+                      "STOP_AFTER);\n  if (tasks && stopNow !== STOP_AFTER && stopNow !== 'now') {", src,
+                      "the rerun after a model mismatch keeps the stop the task started with")
+        self.assertIn("  const asked = 'stop_after' in rerun || questions.some((q) => q.field === 'stop_after');", src,
+                      "a question about the stop itself is overruled by the control file")
+        # every result that offers a rerun goes through it: the two written where they arise as well
+        for said, why in (("  if (out.rerun_with) stopHandedOn(out.rerun_with);", "a result of nextSteps does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { image_ok: true } }) } });", "the image question does not hand the stop on"),
+                          ("rerun_with: stopHandedOn({ answers: { rescan: true } }) } });", "a scan's question does not hand the stop on")):
+            self.assertIn(said, src, why)
+        self.assertIn("  if (typeof raw.stop_after === 'string' && !raw.stop_after.trim() && !('stop_after' in answers)) given.stop_after = '';", src,
+                      "a stop the request's words name comes back over one the caller cleared, or the cleared field beats an answer")
+        self.assertIn("An empty `stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops nowhere, "
+                      "whatever the request says of a stop", " ".join((ROOT / "roles" / "intake.md").read_text(encoding="utf-8").split()))
+        flat = lambda path: " ".join((ROOT / path).read_text(encoding="utf-8").split())
+        for path, said in (("README.md", "the arguments for running it again (`next.rerun_with`) carry `stop_after` as the file last set it"),
+                           ("README.zh-CN.md", "再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值"),
+                           ("templates/task_definition.md", "The run that follows the answers keeps the stop where the file put it "
+                                                            "(`next.rerun_with` carries it)")):
+            self.assertIn(said, flat(path), "%s does not say it" % path)
+
     def test_a_fix_is_measured_when_it_changes_code_the_server_runs_and_says_what_it_is_compared_with(self):
         note = [i for i in items("knowledge/validation_doctrine.md") if i.startswith("- **G2 for a fix.**")]
         self.assertEqual(len(note), 1, "knowledge/validation_doctrine.md does not say how a fix is measured")
@@ -1587,7 +1632,7 @@ class OutputComparisonTest(unittest.TestCase):
         for schema, who in (("SETUP", "Setup"), ("VERIFY", "the verify engineer")):
             body = re.search(r"\nconst %s = S\(\{(.*?)\n\}, \[" % schema, src, re.S).group(1)
             self.assertIn("text_model: bool,", body, "%s cannot say that the model answers no text questions" % who)
-        self.assertIn("if (BEFORE_A_FIX[MODE]) C.text_model = s.text_model !== false;", src,
+        self.assertIn("const setupSays = s.text_model !== false;\n  if (BEFORE_A_FIX[MODE]) C.text_model = MODEL_WORD === null ? setupSays : MODEL_WORD;", src,
                       "what Setup says of the model does not reach the roles; left out, the model answers text questions")
         self.assertIn("function outputsLacking() {\n  if (C.text_model !== false || C.output_script) return null;", src)
         # Asked after Setup of a task that can reach a fix, at the fix of a run whose stop before it was lifted, and
@@ -1725,6 +1770,126 @@ class OutputComparisonTest(unittest.TestCase):
                 self.assertIn(words, row[0], "%s: the output_script row" % name)
         self.assertRegex(EN, r"the question after Setup\s+for the script that compares outputs \(`output_script`\)", "README.md does not list the question")
         self.assertIn("Setup 之后会问比较输出的脚本（`output_script`）", ZH, "README.zh-CN.md does not list the question")
+
+
+class ModelWordTest(unittest.TestCase):
+    """Setup says what the model of a fix is, by its files and the command that serves it, and can take a model that
+    answers text questions for one that does not: the run would then ask for an output comparison the model needs
+    none of. The user's word (the task's `text_model`) stands in Setup's place, either way, and the question for
+    the script offers it; the verify engineer, who launches the model, has the last word."""
+
+    FIELD = "text_model"
+
+    @staticmethod
+    def flat(path):
+        return " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    def test_the_users_word_stands_in_setups_place(self):
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        keys = re.search(r"const TASK_KEYS = \[(.*?)\];", src, re.S).group(1)
+        self.assertIn("'%s'" % self.FIELD, keys, "inferpilot.js does not take the user's word on the model")
+        for said, why in (
+                # only what the caller gave counts, as a field or as an answer: not what the Intake read into a request
+                ("const MODEL_WORD = callersModelWord(RAW);", "the word is read from somewhere else than the caller's arguments"),
+                ("const callersModelWord = (raw) => (modelWord(raw.text_model) === null ? modelWord(asObject(raw.answers).text_model)\n"
+                 "  : modelWord(raw.text_model));", "the word is read from somewhere else than the caller's field or answer"),
+                # a word is a boolean or a string: a list or an object that reads "true" as a string is not one
+                ("  const said = typeof v === 'boolean' || typeof v === 'string' ? String(v).trim().toLowerCase() : '';\n"
+                 "  return said === 'true' ? true : said === 'false' ? false : null;",
+                 "a value that is neither true nor false, or no word at all, is read as one of them"),
+                ("if (BEFORE_A_FIX[mode] && a.text_model != null && a.text_model !== '' && modelWord(a.text_model) === null) {",
+                 "a value that is neither is not asked about, and Setup's word stands without a word of it"),
+                # only the caller gives the word: not the Intake's definition, not a task a scan offers
+                ("pick(res.task_def, TASK_KEYS.filter((k) => k !== 'text_model'))", "the Intake's reading of the model goes into the run's record"),
+                (".filter(([k]) => k !== 'text_model' && !(k === 'apply_prs' && String(def.mode).trim().toLowerCase() === 'ci')));",
+                 "a scan says what a model is in the user's place"),
+                # nor does the Intake ask against it
+                ("    .filter((q) => !(callersModelWord(raw) === true && q && q.field === 'output_script'));",
+                 "an Intake that takes the model for the wrong kind stops the run before Setup hears the user's word"),
+                # on the word alone no comparison was asked for: the round is accepted only with gsm8k's result
+                ("  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;", "the run does not know that the word stands against Setup's"),
+                # whoever launches the model says which it is: the verify engineer is told while the word is unconfirmed
+                ("  if (wordAgainstSetup) C.text_model_unconfirmed = true;", "the verify engineer is not told that the user's word stands "
+                                                                              "against Setup's"),
+                ("    if (typeof v.text_model === 'boolean') delete C.text_model_unconfirmed;", "the verify engineer's word on the model settles "
+                                                                                                 "nothing"),
+                # a round is accepted only once one has said it, and with a G2 that ran; no scores are read out of prose
+                ("    const ranG2 = !!compared && !/^(not[ _-]?run|skip)/i.test(compared);", "a G2 that did not run counts as gsm8k's result"),
+                ("    if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))\n"
+                 "      && (C.text_model_unconfirmed || !ranG2)) {\n      await refused();",
+                 "a fix is accepted on the user's word alone, with neither gsm8k nor a comparison behind it, or the round refused for it is "
+                 "not asked what it left running"),
+                # a word this run's Verify disproved is not handed to a follow-up on the same model
+                ("    const disproved = MODEL_WORD !== null && typeof C.text_model === 'boolean' && C.text_model !== MODEL_WORD;",
+                 "a follow-up carries a word on the model that Verify disproved"),
+                ("      && !(disproved && k === 'text_model')));", "a follow-up carries a word on the model that Verify disproved"),
+                # Setup is given the caller's word with the task, for its record of the run's inputs
+                ("  if (BEFORE_A_FIX[MODE] && MODEL_WORD !== null) C.text_model = MODEL_WORD;\n  const s = await call('director', 'setup',",
+                 "Setup does not get the caller's word, and its record of the task's inputs lacks it"),
+                ("R.questions = MODEL_WORD === null ? [lacking, MODEL_ASK()] : [lacking];", "the question for the script does not offer the correction"),
+                ("if (outputs && MODEL_WORD === null) R.questions.push(MODEL_ASK());",
+                 "a run whose stop before the fix was lifted is not offered the correction"),
+                ("if (MODEL_WORD === null) FIX_NEEDS.output_script += ', or say that the model answers text questions after all (text_model)';",
+                 "the result does not say that there is another answer"),
+                # the verify engineer still has the last word
+                ("if (BEFORE_A_FIX[MODE] && typeof v.text_model === 'boolean') C.text_model = v.text_model;", "the user's word outlasts the server's")):
+            self.assertIn(said, src, why)
+        intake = re.search(r"const TASK_DEF = S\(\{(.*?)\n\}\);", src, re.S).group(1)
+        self.assertNotIn("text_model", intake, "the Intake can return a word that is the user's to give")
+        # the tool description names the field, next to the script it can stand in for
+        use = re.search(r"\n  whenToUse: '(.*)',\n", src).group(1)
+        self.assertIn("args.text_model (issue, ci: true or false, the user\\'s word on whether the model answers text questions, where Setup "
+                      "took it for the wrong kind; with true G2 runs gsm8k on it and no output_script is asked for)", use,
+                      "inferpilot.js's whenToUse does not tell the caller of the word")
+
+    def test_the_documents_say_it(self):
+        for path, said in (
+                ("templates/task_definition.md", "**`text_model`** is your word on what the model is"),
+                ("templates/task_definition.md", "the question for the script comes with a second one, and `text_model: true` answers it"),
+                ("templates/task_definition.md", "Your word stands in Setup's place until a server is up: the verify engineer, who launches the "
+                                                 "model, has the last word either way"),
+                ("knowledge/validation_doctrine.md", "Setup judges by the model's files and the command that serves it, and can be wrong"),
+                ("knowledge/validation_doctrine.md", "the user's word (`text_model`) stands in Setup's place, either way"),
+                ("roles/intake.md", "`text_model` is the user's word on what the model is"),
+                ("roles/intake.md", "Never set it yourself, from the request's wording or the model's name"),
+                ("roles/intake.md", "InferPilot reads it only where the caller gave it, and takes none from the definition you return"),
+                ("roles/intake.md", "With `text_model: true` in `given` or `answers`, ask for no `output_script`, whatever you make of the "
+                                    "model's files"),
+                ("roles/verify_engineer.md", "You are told so with `text_model_unconfirmed`: nobody who launched the model has said yet which "
+                                             "it is"),
+                ("roles/verify_engineer.md", "say `text_model` in your answer as the server showed it, `true` or `false`"),
+                # the confirmation follows the round's order: the fix's own gate first, and no launch for a fix that has no G2
+                ("roles/verify_engineer.md", "That changes nothing in the order of the round: the fix's own gate runs first, and nothing is "
+                                             "launched for G2 before it has passed and the diff has shown that G2 runs"),
+                ("roles/verify_engineer.md", "Where G2 runs, find out on the first server you launch for it, before gsm8k is put to it"),
+                ("roles/verify_engineer.md", "A fix that changes no code the server runs has no G2 and launches nothing for this: leave the "
+                                             "field out there"),
+                ("roles/verify_engineer.md", "Where G2 runs, InferPilot accepts no round until one has said `text_model`, and G2 has to be "
+                                             "reported: not left out, not `not run`, not `skipped`"),
+                ("roles/verify_engineer.md", "Once you have said `true`, the fix is one for a text model like any other"),
+                ("templates/task_definition.md", "Nor does a fix pass on your word alone: where it stands against Setup's, a round is accepted "
+                                                 "only once the verify engineer has said the same of the model on its server, and with gsm8k's "
+                                                 "result"),
+                ("roles/director.md", "A branch of that name can also be left by a run of the task on another definition, which step 1 does "
+                                      "not match: the run that asked a question this one answers (a model, a script, `text_model`)"),
+                ("roles/director.md", "refresh its bundle and rename it in the same way, so that `checkout -b` never meets it and nothing of it "
+                                      "is lost"),
+                ("roles/director.md", "It is among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the rest, so "
+                                      "that a retry of the task is matched on it too, and judge the model as if it were not there"),
+                ("templates/task_definition.md", "The word is `true` or `false`, as a boolean or as that word; anything else is asked about"),
+                ("templates/task_definition.md", "what the Intake reads into a request, or a scan writes for a task it offers, is not taken for it"),
+                ("knowledge/validation_doctrine.md", "a round on the user's word that the model answers text questions is accepted only once "
+                                                     "a round has said the same of the server, and with gsm8k's result on it"),
+                ("roles/director.md", "Say what you find also where the task gives `text_model`"),
+                ("README.md", "`issue` and `ci`: your word on what the model is, where Setup's is wrong"),
+                ("README.zh-CN.md", "Setup 把模型判断错了时，由你来说它是哪一类")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        fields = (ROOT / "templates" / "task_definition.md").read_text(encoding="utf-8")
+        row = [line for line in fields.splitlines() if line.startswith("| `%s` |" % self.FIELD)]
+        self.assertEqual(len(row), 1, "templates/task_definition.md has no row for the user's word on the model")
+        for readme in ("README.md", "README.zh-CN.md"):
+            text = (ROOT / readme).read_text(encoding="utf-8")
+            self.assertEqual(len([line for line in text.splitlines() if line.startswith("| `%s` |" % self.FIELD)]), 1, "%s has no row for it" % readme)
 
 
 class FixPerformanceTest(unittest.TestCase):
@@ -1946,6 +2111,10 @@ class CiAccuracyProblemTest(unittest.TestCase):
                                                      "measurement"),
                 # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
                 ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
+                # the gate of the fix's own that an integrated kernel breaks is still that kernel's
+                ("roles/investigator.md", "`kernel_regression` (below) stays the verdict for such a gate too, where it passes again with an "
+                                          "integrated kernel reverted"),
+                ("roles/investigator.md", "that kernel goes back to its back end, and you plan no repair in its place"),
                 ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
                                           "cannot"),
                 ("roles/investigator.md", "InferPilot stops the run on `baseline_bug` for such a gate, and records no known issue"),
@@ -2455,8 +2624,116 @@ class TriageCasesTest(unittest.TestCase):
                            ("roles/issue_triager.md", "a fix PR for another problem of the report is listed in the triage record only"),
                            ("roles/issue_triager.md", "Return the others as `other_problems`"),
                            ("knowledge/issue_triage.md", "the run's result offers those runs (`next.start`)"),
+                           ("knowledge/issue_triage.md", "and with the operator's settings this run was given"),
+                           ("knowledge/issue_triage.md", "A run that has a model takes a problem on that model and configuration"),
+                           ("knowledge/issue_triage.md", "where the task itself names such a problem, the run stops before Reproduce and asks for them"),
+                           ("knowledge/issue_triage.md", "A task without a model, one that stops before its fix, takes the most urgent problem of all"),
+                           ("roles/issue_triager.md", "Where the task has a `model_path`, \"the most urgent\" is said of the problems on that model and "
+                                                      "configuration"),
+                           ("roles/issue_triager.md", "a problem the report puts on another model is one of the others, however urgent"),
+                           ("roles/issue_triager.md", "A task without a model (one that stops before its fix) takes the most urgent of all"),
+                           ("roles/issue_triager.md", "`task` itself names a problem on another model or configuration than the task's"),
+                           # a task that names the issue alone has a problem to take even where none is on its model
+                           ("roles/issue_triager.md", "Or `task` names the issue alone and none of its problems is on the task's: take the most "
+                                                      "urgent of all then"),
+                           ("roles/issue_triager.md", "one without a model that pins two GPUs does not fit a problem at TP8 either"),
+                           ("roles/issue_triager.md", "Where the task pins none of them, it is what Setup chose for the run before the problem was "
+                                                      "known, the `gpu_ids` you are given"),
+                           ("roles/issue_triager.md", "for the problem's model where the task has one, otherwise for each input it pins, and where "
+                                                      "it pins none for the GPUs, never for a model the task has no use for"),
+                           ("knowledge/issue_triage.md", "It is then asked for those inputs, each of them, and not for a model"),
+                           ("knowledge/issue_triage.md", "A task that names no model and pins nothing was set up by Setup alone, before the run knew "
+                                                         "which problem it takes"),
+                           ("knowledge/issue_triage.md", "the run stops as well and asks for the GPUs, since Reproduce uses the ones the run is set up "
+                                                         "with and no others"),
+                           ("knowledge/issue_triage.md", "So it does where the task names the issue alone and no problem of the report is on the "
+                                                         "run's model and configuration"),
+                           ("knowledge/issue_triage.md", "what it pins all the same (its GPUs, its scripts) has to fit that problem"),
+                           ("roles/issue_triager.md", "one with a `model` asks for its own model, scripts and GPUs instead of taking this run's"),
+                           # the rule is for the problem taken, whether or not another would fit
+                           ("roles/issue_triager.md", "Whichever problem you take, hold it against what the task is set up with, and return "
+                                                      "`model_mismatch` (its model and configuration) whenever it is not on that"),
+                           ("roles/issue_triager.md", "Or the task has no model, and the most urgent of all is not on what it pins although a less "
+                                                      "urgent one is"),
+                           ("roles/issue_triager.md", "the P0 is still the one you take, with `model_mismatch`, and the P1 is one of the others, "
+                                                      "offered on this run's GPUs"),
+                           ("knowledge/issue_triage.md", "or the run stops before Reproduce in the same way, whether or not a less urgent problem "
+                                                         "would fit: that one is offered as a follow-up"),
+                           # a difference in the workload alone is another configuration
+                           ("roles/issue_triager.md", "its `model` where the report gives it another model, launch configuration or workload than "
+                                                      "this run's"),
+                           ("roles/issue_triager.md", "A difference in the workload alone counts"),
+                           # the marker is whole: the follow-up has none of this run's settings to read "the same" against
+                           ("roles/issue_triager.md", "Say the marker whole, as the report puts it, and never by reference to this run: the model, "
+                                                      "the launch flags and the workload (`DeepSeek-V4.1, --tp-size 8, 32k input`)"),
+                           ("roles/issue_triager.md", "The follow-up starts without this run's model and settings, which may have come from the "
+                                                      "caller and not from the report, and has nothing to read \"the same\" against"),
+                           ("roles/issue_triager.md", "So it is with `model_mismatch`"),
+                           ("knowledge/issue_triage.md", "A problem the report puts on another one, were it another workload alone (32k input where "
+                                                         "the run measures 8k), is offered as a follow-up"),
+                           # Setup works before Triage: the run after a mismatch, and a follow-up, tell it the configuration
+                           ("roles/issue_triager.md", "The run after it is given your `model_mismatch` as `reported_on`, as a run on one of the "
+                                                      "others is given its `model`"),
+                           ("roles/issue_triager.md", "So say it as the report does, the launch flags with the model"),
+                           ("roles/director.md", "With `reported_on` (the model and launch configuration the report puts the task's problem on; "
+                                                 "the result of an earlier run gives it, where that run was set up for another one), the task "
+                                                 "needs what that configuration needs"),
+                           ("roles/director.md", "a problem at TP8 takes eight GPUs, whatever the run before this one chose"),
+                           ("roles/director.md", "Where the report gives several commands, it is the one for the problem `task` names, and with "
+                                                 "`reported_on` the one for that configuration"),
+                           ("roles/intake.md", "`reported_on` (issue): the model and launch configuration the report puts the task's problem on"),
+                           ("roles/intake.md", "never fill it yourself"),
+                           ("knowledge/issue_triage.md", "is told which one the problem is on (`reported_on`): Setup works before Triage, and one "
+                                                         "left to choose again takes the GPUs that configuration needs, not the same ones"),
+                           ("templates/task_definition.md", "| `reported_on` | the model and launch configuration the report puts the task's "
+                                                            "problem on"),
+                           ("README.md", "| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on"),
+                           ("README.zh-CN.md", "| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置"),
+                           ("AGENTS.md", "(a scan's top tasks, the other problems of an issue's report)"),
+                           ("README.md", "a scan's top tasks, the other problems of an issue's report"),
+                           ("README.zh-CN.md", "scan 排在前面的任务，issue 报告里的其他问题"),
                            ("templates/issue_triage.md", "| problems in the report |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for said, why in (
+                ("const issue = issueOf(def.task);", "a follow-up of a follow-up names two problems"),
+                ("const task = p.task || `${issue}: ${p.problem}`;", "a follow-up takes the task as it stands"),
+                ("args: { inferpilot_dir: INFERPILOT, ...pick(RAW, OPERATOR_KEYS), ...own, mode: 'issue', task, ...words } };",
+                 "a follow-up loses the operator's settings, or the model the report names for it"),
+                ("  'gpu_ids', 'output_script', 'text_model'];", "a problem on another configuration is pinned to this run's GPUs, or takes "
+                                                                  "the output comparison of this run's model or the user's word on it"),
+                ("const pinned = MEASURED_WITH.filter((k) => !['model_path', 'text_model'].includes(k) && A[k]); // a word pins nothing\n"
+                 "  if (elsewhere) {\n    R.model_mismatch = elsewhere;",
+                 "a problem on another model or configuration is reproduced on what the run is set up with, whoever chose it"),
+                # a task without a model is asked for what it pins, not for a model; one that pins nothing, for the GPUs Setup chose
+                (": pinned.length ? pinned.map((k) => ({ field: k, question: `The task's ${k} (${given(k)}) is another `",
+                 "a task without a model is asked for a model"),
+                (": [{ field: 'gpu_ids', question: `Which GPUs should the run use for ${elsewhere} (HIP numbers)? Setup chose ${C.gpu_ids} `",
+                 "a run Setup alone set up for another configuration reproduces on GPUs that do not fit"),
+                # an input given as an object is shown as it was given
+                ("const given = (k) => JSON.stringify((typeof A[k] === 'string' ? A[k] : JSON.stringify(A[k])).slice(0, 120));",
+                 "a workload or a harness given as an object is shown as [object Object]"),
+                ("  } else if (status === 'needs_input' && R.model_mismatch) {\n", "the result of a mismatch on what a task pins (its GPUs alone) "
+                                                                                 "does not say what to give, or how to run again"),
+                ("if (R.model_mismatch) afterMismatch(out, at, last, report);", "the rerun after a mismatch brings the old configuration back"),
+                # the rerun clears what the task measured with as a field and as an earlier answer, and names the problem's configuration
+                ("Object.fromEntries(MEASURED_WITH.filter((k) => A[k] != null && A[k] !== '').map((k) => [k, ''])),",
+                 "the rerun keeps the task's own model, scripts or GPUs, or a word on the model that is false"),
+                ("out.rerun_with.answers = { ...Object.fromEntries(MEASURED_WITH.filter((k) => k in earlier).map((k) => [k, null])), "
+                 "...out.rerun_with.answers };", "an earlier answer brings the old configuration back into the rerun"),
+                ("{ request: `${R.task_def.task}. The report puts this problem on ${R.model_mismatch}: ", "the rerun keeps the request of the old configuration"),
+                # the configuration is a field of its own too, which Setup is given: it works before Triage
+                ("\"this task are that configuration's, not those of the run that stopped.\", reported_on: R.model_mismatch });",
+                 "a Setup left to choose again is not told the configuration, and takes the same GPUs"),
+                ("'of this task are that configuration\\'s, not those of the run that offered it.', reported_on: p.model } : {};",
+                 "the Setup of a follow-up on another configuration is not told which"),
+                ("  reported_on: String(A.reported_on || '').trim(),\n", "the roles are not given the configuration the task names"),
+                ("'bisect_fixed', 'confirm_leads', 'reported_on'];", "the configuration is not part of the definition a rerun carries"),
+                ("pick(R.task_def, TASK_KEYS.filter((k) => !MEASURED_WITH.includes(k) && k !== 'apply_prs')),",
+                 "the rerun loses the rest of the task, or makes an inferred apply_prs the caller's"),
+                ("const own = p.model ? Object.fromEntries(Object.entries(def).filter(([k]) => !MEASURED_WITH.includes(k))) : def;",
+                 "a problem on another model is measured with this run's model and scripts")):
+            self.assertIn(said, src, why)
         self.assertNotIn("says for each of the others that it is not yet worked on", self.flat("knowledge/issue_triage.md"),
                          "another problem may have a fix already: the reply gives its known state")
 

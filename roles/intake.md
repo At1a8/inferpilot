@@ -11,7 +11,9 @@ Read: `templates/task_definition.md` (the fields and what each mode needs), `kno
 ## PHASE=define
 
 Inputs: `request` (the user's words; empty when only fields were given), `given` (fields the caller set;
-they win over anything you infer), `answers` (the user's replies to earlier questions).
+they win over anything you infer), `answers` (the user's replies to earlier questions). An empty
+`stop_after` in `given` is set as well: the stop of an earlier run was lifted, and the run stops
+nowhere, whatever the request says of a stop.
 
 1. **Mode.** Decide it from the request with the signals of `task_definition.md` §2. Ask when two
    modes fit (e.g. "DeepSeek decode is slow on MI355X" is a perf task, unless it refers to an issue
@@ -30,6 +32,10 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      G2 compares its outputs with the task's `output_script` (below), since gsm8k cannot be put to it.
    - `gpu_ids`: GPUs that exist, by HIP number (`scripts/gpu_status.py`); leave it empty to let Setup
      pick free ones.
+   - `reported_on` (issue): the model and launch configuration the report puts the task's problem on.
+     The result of an earlier run gives it, and it goes on to Setup as given, which picks as many
+     GPUs as that configuration needs: never fill it yourself. With it in `given`, the `model_path`
+     and the scripts you fill are that configuration's.
    - an issue or PR: fetch its title and state (`scripts/scan_issues.py --issue <n>` for issues).
    - `workload` and any target number: only what the request states or the user answers; never invent
      numbers.
@@ -58,6 +64,13 @@ they win over anything you infer), `answers` (the user's replies to earlier ques
      InferPilot has no template for one, and never write it for the user. Where you cannot tell what
      the model is, leave the field out: Setup says, and the run asks then. Never ask it of a model
      that answers text questions, which G2 measures on gsm8k.
+   - `text_model` is the user's word on what the model is, given as a field or as an answer where
+     Setup took the model for the wrong kind (`task_definition.md` §1.1). Never set it yourself,
+     from the request's wording or the model's name: InferPilot reads it only where the caller
+     gave it, and takes none from the definition you return. A value that is neither `true` nor
+     `false` is asked about. With `text_model: true` in `given` or `answers`, ask for no
+     `output_script`, whatever you make of the model's files: the user has said that it answers
+     text questions, and InferPilot does not put that question against the word.
    - `harness`: the template parameters the request sets, by their names (`scripts/harness.py show`):
      a context length, thinking off. Only what the request states; the feature's source and the
      templates fill the rest at Setup. The accuracy sets come from `goal`, never from here.

@@ -236,7 +236,7 @@ tail -f exp/scan.log    # Ctrl-C 只是退出查看，运行会继续
 
 **查看运行状态。** runner 存活期间每 30 秒重写一次 `exp/scan.status.json`（状态、阶段、正在进行的 agent 调用及各自的最后一行和它出现的时间 `last_at`）；`updated` 超过两分钟没更新，说明 runner 已经不在了。`exp/scan.agents/` 保存每次 agent 调用的 prompt、完整的输出流和 stderr（`--agent-log-dir` 可以换个位置），`--show-text` 会把 agent 写的文字也打进日志。
 
-**改变运行的停止点。** runner 在每个阶段边界读取 `exp/scan.control.json`（参数文件名换成 `.control.json`；`--control-file` 可以指定别的文件）：`{"stop_after": "<phase>"}` 在该模式的这个阶段之后停（这个 scan 是 `Collect`，feature 任务可以是 `Verify`），`{"stop_after": "now"}` 在当前阶段结束后停，`{"stop_after": ""}` 跑到结束。停止点变化时日志里会写一行；运行已经过了那个阶段、或者文件里不是 JSON 对象时，日志也会说明；运行开始时就已经存在的文件，要等它被改过之后才生效。只有 runner 会读控制文件，两个 backend 都一样；在 Claude Code 里直接跑（由它的 Workflow tool 执行）时没有控制文件，停止点就是启动时的 `stop_after`。
+**改变运行的停止点。** runner 在每个阶段边界读取 `exp/scan.control.json`（参数文件名换成 `.control.json`；`--control-file` 可以指定别的文件）：`{"stop_after": "<phase>"}` 在该模式的这个阶段之后停（这个 scan 是 `Collect`，feature 任务可以是 `Verify`），`{"stop_after": "now"}` 在当前阶段结束后停，`{"stop_after": ""}` 跑到结束。停止点变化时日志里会写一行；运行已经过了那个阶段、或者文件里不是 JSON 对象时，日志也会说明；运行开始时就已经存在的文件，要等它被改过之后才生效。停止点被改过之后，运行如果以提问结束，会把它带给下一次运行：再跑一次用的参数（`next.rerun_with`）里的 `stop_after` 就是控制文件最后设的值，任务不会重跑一遍又停在最初说的地方。只有 runner 会读控制文件，两个 backend 都一样；在 Claude Code 里直接跑（由它的 Workflow tool 执行）时没有控制文件，停止点就是启动时的 `stop_after`。
 
 **停止一个运行。** `kill <runner 的 pid>`（SIGTERM；日志第一行给出这个 pid），或者对前台启动的 runner 按 Ctrl-C，会停掉它的所有 agent 以及它们启动的一切，包括用 `setsid` 或 `nohup` 启动的 server（它们都继承了标明这个 runner 的 `INFERPILOT_RUN_TAG`），释放机器锁，并在 `--result-file` 里写下 `"status": "interrupted"`。以其他方式死掉的运行（`kill -9`、被 OOM killer 杀掉）会留下它的进程：下一个运行会把它们列出来（任务容器里的也包括在内），`--kill-orphans` 会先停掉它们。容器重启会带走其中的进程，但会留下机器锁，而新容器判断不了锁的 runner 是否还在：用 `python3 scripts/run_lock.py release --force` 释放它。
 
@@ -329,6 +329,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `client_script` | 你自己的压测脚本，对 `PORT` 上的 server 跑负载，日志写到 `OUT_DIR`；它就是基准，原样运行；`feature` 和 `perf` 必填：每个 feature 都要和 baseline 比性能（G5），声称了收益就验证这个收益，没有声称就验证没有变慢；`issue` 和 `ci` 也必填，除非 `stop_after` 让运行在修复之前停下：修复改了 server 会运行的代码时，要用它对照 base 测性能，不能变慢（G5）。没有的话，feature 和 perf 任务可以回答 `template`：用 InferPilot 的 `templates/harness/perf.sh`（sglang 的 serving 压测）跑 `workload`，选它的任务要给出完整的 `workload`；feature 用它只判定有没有比 baseline 慢，不验证源 PR 的收益 |
 | `accuracy_script` | 你自己的精度评测脚本，对 `API_URL` 上的 server 测精度，结果写到 `RESULT_ROOT` 下，每一组都原样运行；可选，不给时用 InferPilot 的 `templates/harness/accuracy.sh`（`scripts/eval_accuracy.sh`） |
 | `output_script` | `issue` 和 `ci`，用于不回答文本问题的模型（diffusion、语音、embedding 模型），这类模型跑不了 gsm8k：你自己的输出测试脚本，修复改了 server 会运行的代码时，由它代替 gsm8k 作为 G2。脚本用同样的输入和 seed 请求 `PORT` 上的 server，把每个输出写到 `OUT_DIR`；设置了 `BASE_DIR`（它在 base 上那次运行的输出目录）时，把自己的输出和那里的输出比较，差异超过脚本自己的容差就以非零状态退出。脚本原样运行，base 和修复各跑一次。InferPilot 没有这种脚本的模板：模型是哪一类由 Setup 判断，能走到修复却没有给脚本的任务会在这时被问到（[`templates/task_definition.md`](templates/task_definition.md) §1.1） |
+| `text_model` | `issue` 和 `ci`：Setup 把模型判断错了时，由你来说它是哪一类。`true`：它回答文本问题，G2 跑 gsm8k，不再要 `output_script`。`false`：它不回答文本问题，G2 用输出对比。没给时由 Setup 判断。无论哪种，最后以启动模型的 verify engineer 看到的为准 |
 | `harness` | InferPilot 模板的参数取值，例如 `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}`（`python3 scripts/harness.py show` 列出全部参数）：每个参数先取任务给的值，没有则取 feature 源头测试里用的值（PARD-2 是 vLLM 的 `--max-model-len 4096`），server 的参数再取模型的 sglang cookbook 配方，最后才用模板默认值（[`templates/task_definition.md`](templates/task_definition.md) §1.2） |
 | `container` | 只在 InferPilot 运行在宿主机上时使用：框架所在的容器，通过 `docker exec` 访问 |
 | `exp_root` | 运行目录放在哪里（默认 `<inferpilot_dir>/exp`，git 会忽略它）。放在宿主机挂载目录里时，运行目录比容器活得久，换一个新容器重试时能从 `RUN_DIR/branch.bundle` 取回任务的提交，不用再写一遍：容器可能中途消失时（会被抢占的节点、作业到了时间上限）就这样用 |
@@ -341,6 +342,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`、`image_ok` | 任务必须运行的镜像（默认是容器对应 ROCm 和 GPU 下最新的每日镜像；不是的话 Setup 会停下来问）；为 `true` 时仍在容器现有的镜像上运行 |
 | `rescan`、`upstream_repos` | `scan`：为 `true` 时，即使已有 24 小时内的日报也重新扫描；要跟进的其他上游仓库，写成 `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`：为 `true` 时，若报告者的 commit 失败而 main 通过，就以复现脚本为测试在两者之间做 bisect，找出修复它的提交 |
+| `reported_on` | `issue`：报告里这个问题所在的模型和启动配置（如 `DeepSeek-V4.1, --tp-size 8`）。一次运行如果发现它要处理的问题不在自己准备好的配置上，会在 Reproduce 之前停下，并在结果里把这个字段交给下一次运行（`next.rerun_with`；报告里其他问题用 `next.start`）：没有给 `gpu_ids` 时，Setup 按这个配置需要的数量选 GPU，并按它写启动脚本 |
 | `confirm_leads` | 默认 `false`：线索（角色遇到的、不属于本任务的问题）在报告里列出，附上复现方法，Spinoff 不占用 GPU；为 `true` 时，在报告前把每条线索放到 base 提交上确认，能复现的起草 issue |
 | `stop_after` | 在该模式的指定阶段之后停下（例如 `Design`、`Reproduce`）；填了该模式没有的阶段，会作为问题返回 |
 | `resume_from`、`run_dir` | `feature`：人审阅通过 `design.md` 后，用 `implement` 继续一个停在 Design 的运行 |
@@ -357,7 +359,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 
 人工检查点：Intake 的提问（`needs_input`），以及移植任务的 client 跑不了源 PR 的场景时 Spec 的提问；issue 或 ci 的运行走到修复却还没有模型或 client 时，会先问要用哪个，用的是 InferPilot 的 client 而 `workload` 只给了一部分时也会先问；这类运行的模型不回答文本问题时，Setup 之后会问比较输出的脚本（`output_script`）；任何 `stop_after`；`auto_approve_design` 设为 `false` 时，L3 任务和 architect 标记的设计会停在 Design（`awaiting_design_review`；默认直接继续，报告会写明设计没有经过人审）；被 reviewer 标为 `blocked` 的审阅会在 PR 之前停下；PR engineer 只返回确切的 `git push` 而不执行；issue 回复是运行目录里的草稿。只要建好了运行目录，无论结局如何，运行都会以一份报告结束；停在 Intake（提问或拒绝），或在 Setup 建目录之前就结束的运行（`busy`），只返回运行结果。
 
-每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行，比如 scan 排在前面的任务及其参数；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
+每个结果最后都有 `next`，说明运行结束后接下来做什么，对 Claude Code、Cursor 的 agent 和 runner 的日志都一样：`say` 是写给你的一句话；`ask` 是只有你能回答的问题；`rerun_with` 是再跑一次之前要设置的参数，其余参数不变（answers 会和已有的回答合并）；`start` 是它建议发起的新运行及其参数：scan 排在前面的任务，issue 报告里的其他问题；`user` 是只有你能做的事：推送、发出回复、分享 director 没能分享的日报。
 
 **一台机器一个任务。** 运行在创建任何东西之前先占住这台机器：锁放在 `/dev/shm`，所有用 `--ipc=host` 启动的容器都和宿主机共用它，其他机器看不到；运行在写完报告后释放。另一个任务占着机器时，新的运行会立即以 `busy` 结束，并说明是谁占着。除 scan 外，每种模式还要求机器上的 GPU 都没有被别的任务占用（`scripts/gpu_status.py --check all`）：Setup 时发现有别的任务占着卡，运行同样以 `busy` 结束；之后的性能测量前发现，这次测量就报告为没跑成。如果持有锁的运行已经结束，或者它的 runner（`runtime/run.mjs`，从同一个容器里看）已经不在，或者在两倍于最长 agent 调用（按它能拿到的最长加时算）的时间里（默认 24 小时）没往运行目录写过任何东西，下一个运行会直接接管。另一个容器里的运行不会因为没动静而被接管，因为这里看不到它的运行目录；确认那次运行已经不在之后，用第二条命令释放机器，和释放意外中断的运行留下的锁一样：
 

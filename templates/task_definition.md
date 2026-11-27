@@ -18,6 +18,7 @@ of it.
 | `client_script` | the user's script that runs the fixed workload against that server (§1.1), or `template`: InferPilot's, on the workload; on it a feature is judged as no slower than the baseline, never on its source's gain (§1.2) | required: G5 measures every feature | required unless `stop_after` ends the run before a fix: G5 measures the fix on it; with `stability` on, required either way | as for an issue | required | — |
 | `accuracy_script` | the user's script that measures accuracy against that server (§1.1); without one, InferPilot's (§1.2) | optional | optional | — | optional | — |
 | `output_script` | the user's test that compares the outputs of a model that answers no text questions (a diffusion, speech or embedding model), the fix's against the base's, in gsm8k's place (§1.1) | — | required for such a model unless `stop_after` ends the run before a fix | required for such a model unless `stop_after` ends the run before a fix | — | — |
+| `text_model` | your word on what the model is, where Setup's is wrong: `true` for one that answers text questions (G2 runs gsm8k), `false` for one that answers none (G2 is the output comparison). Left out, Setup says (§1.1) | — | optional | optional | — | — |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192}` (§1.2) | optional | optional | — | optional | — |
 | `goal` | what done means, measurable when the mode measures | recommended | — | — | recommended | — |
 | `framework` | default `sglang` | | | | | |
@@ -26,6 +27,7 @@ of it.
 | `sources`, `since` | what to scan, from when | | | | | optional |
 | `stop_after` | stop after this phase | optional | optional | optional | optional | optional |
 | `bisect_fixed` | when the reporter's code fails and main passes, find the commit that fixed it | | optional | | | |
+| `reported_on` | the model and launch configuration the report puts the task's problem on (`DeepSeek-V4.1, --tp-size 8`). The result of a run that was set up for another one gives it to the run after it (`next.rerun_with`, `next.start`): with no `gpu_ids` given, Setup takes as many GPUs as that configuration needs, and writes the launch for it | | optional | | | |
 | `confirm_leads` | default `false`: leads are listed with how to reproduce them; `true`: each is checked on the base commit, and those that show there are drafted as issues | optional | optional | optional | optional | |
 | `resume_from`, `run_dir` | `implement`: continue after a human approved the design | optional | | | | |
 | `auto_approve_design` | default `true`: a design the architect flags goes on to Implement and the report says so; `false`: it waits for a human review | optional | | | | |
@@ -64,7 +66,8 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   stops before its fix (`stop_after` at Triage, Reproduce, Diagnose, Classify or Bisect) needs none.
   Where the control file lifts that stop, the run asks before any code changes for what the fix
   lacks: the model, the client, and of a task that names InferPilot's client all the same, what its
-  `workload` leaves out.
+  `workload` leaves out. The run that follows the answers keeps the stop where the file put it
+  (`next.rerun_with` carries it): it is not run again only to stop before the fix once more.
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,
@@ -91,6 +94,19 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   fix without the script is asked for it then, before anything else runs. One that stops before
   its fix needs none, and a model that answers text questions is measured on gsm8k, whatever the
   task names here.
+- **`text_model`** is your word on what the model is. Setup judges by the model's files and the
+  command that serves it, and can take a model that answers text questions for one that does not:
+  the run would then ask for a script the model needs none of, each time it is run. So the
+  question for the script comes with a second one, and `text_model: true` answers it: the run
+  puts gsm8k to the model and asks for no script. `false` says the opposite of a model Setup took
+  for one that answers text questions. Your word stands in Setup's place until a server is up: the
+  verify engineer, who launches the model, has the last word either way, and a fix on a model
+  that answers no text questions still passes nothing without its comparison. Nor does a fix pass
+  on your word alone: where it stands against Setup's, a round is accepted only once the verify
+  engineer has said the same of the model on its server, and with gsm8k's result, which a round
+  that left G2 out does not give. The word is `true` or `false`, as a boolean or as that word;
+  anything else is asked about. Only you give it: what the Intake reads into a request, or a scan
+  writes for a task it offers, is not taken for it.
 - **`long_context_script`**, with `long_context` on, runs the task's long-context test against `PORT`
   and writes its results to `OUT_DIR`, a directory InferPilot makes for each run before it starts the
   script: for each request, whether it passed, with its output, and the per-token logprobs when the

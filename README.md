@@ -421,8 +421,11 @@ the log.
 stops after that phase of the mode (`Collect` for this scan, `Verify` for a feature task),
 `{"stop_after": "now"}` after the phase now running, `{"stop_after": ""}` runs to the end. The log says
 when the stop moved, and when the run is already past that phase or the file holds no JSON object; a
-file already there when the run starts counts only once it changes. Only the runner reads a control
-file, on either backend; a run in Claude Code's Workflow tool keeps the `stop_after` it started with.
+file already there when the run starts counts only once it changes. A run that ends with questions
+after its stop moved hands the stop on: the arguments for running it again (`next.rerun_with`) carry
+`stop_after` as the file last set it, so the task is not run again only to stop where it first said.
+Only the runner reads a control file, on either backend; a run in Claude Code's Workflow tool keeps
+the `stop_after` it started with.
 
 **Stopping a run.** `kill <runner pid>` (SIGTERM; the log's first line gives the pid), or Ctrl-C on a
 runner started in the foreground, stops its agents and everything they started, servers started with
@@ -585,6 +588,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `client_script` | your script that runs the workload against `PORT` and writes its logs to `OUT_DIR`: the benchmark, run unchanged; required for `feature` and `perf`: every feature is measured against the baseline (G5), the gain it claims or, where it claims none, that it is no slower; for `issue` and `ci` too, unless `stop_after` ends the run before a fix: a fix that changes code the server runs is measured on it against the base, and is no slower (G5). Without one, a feature or a perf task may answer `template`: InferPilot's `templates/harness/perf.sh` (sglang's serving benchmark) on the `workload`, which a task that takes it gives in full; on it a feature is judged only as no slower than the baseline, never on its source's gain |
 | `accuracy_script` | your script that measures accuracy against `API_URL` and writes its results under `RESULT_ROOT`, run unchanged for every arm; optional: without one, InferPilot's `templates/harness/accuracy.sh` (`scripts/eval_accuracy.sh`) |
 | `output_script` | `issue` and `ci`, for a model that answers no text questions (a diffusion, speech or embedding model), which gsm8k cannot be put to: your test of its outputs, which stands in for gsm8k as G2 when a fix changes code the server runs. It puts the same inputs with the same seeds to the server at `PORT` and writes each output to `OUT_DIR`; with `BASE_DIR` set (its run on the base), it compares its outputs with those and exits non-zero when they differ by more than it tolerates. Run unchanged, once on the base and once on the fix. InferPilot has no template for it: Setup says what the model is, and a task that can reach a fix without one is asked for it then ([`templates/task_definition.md`](templates/task_definition.md) §1.1) |
+| `text_model` | `issue` and `ci`: your word on what the model is, where Setup's is wrong. `true`: it answers text questions, so G2 runs gsm8k and no `output_script` is asked for. `false`: it answers none, so G2 is the output comparison. Left out, Setup says. Either way the verify engineer, who launches the model, has the last word |
 | `harness` | values for InferPilot's templates, e.g. `{"CONTEXT_LENGTH": 8192, "ENABLE_THINKING": 0}` (`python3 scripts/harness.py show` lists them): each parameter takes the task's value, else the one the tests of the feature's source use (vLLM's `--max-model-len 4096` for PARD-2), else for the server the model's sglang cookbook recipe, else the template's default ([`templates/task_definition.md`](templates/task_definition.md) §1.2) |
 | `container` | only when InferPilot runs on the host: the framework's container, reached with `docker exec` |
 | `exp_root` | where run directories go (default `<inferpilot_dir>/exp`, which git ignores). On a host mount they outlive the container, and a retry in a new container takes the task's commits from `RUN_DIR/branch.bundle` instead of writing them again: use one where the container can go away mid-run (a preemptible node, a job's time limit) |
@@ -597,6 +601,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
 | `bisect_fixed` | `issue`: `true` bisects between the reporter's commit and main, with the reproduction as the test, when the first fails and the second passes, and names the commit that fixed it |
+| `reported_on` | `issue`: the model and launch configuration the report puts the task's problem on (`DeepSeek-V4.1, --tp-size 8`). A run that finds its problem on another configuration than the one it was set up for stops before Reproduce, and its result gives this to the run after it (`next.rerun_with`; `next.start` for the report's other problems): with no `gpu_ids` given, Setup takes as many GPUs as that configuration needs, and writes the launch for it |
 | `confirm_leads` | default `false`: leads, the problems roles met that are not the task's, are listed in the report with how to reproduce them, and Spinoff runs nothing on the GPUs; `true` checks each on the base commit before the report and drafts an issue for those that show there |
 | `stop_after` | stop after the named phase of the mode (e.g. `Design`, `Reproduce`); a phase the mode does not run comes back as a question |
 | `resume_from`, `run_dir` | `feature`: `implement` continues a run that stopped at Design once a human approved `design.md` |
@@ -629,8 +634,8 @@ status; one that ends at the Intake (questions, a rejection) or before Setup cre
 Every result ends with `next`, what comes after the run, the same for Claude Code, a Cursor agent and the
 runner's log: `say`, a sentence for you; `ask`, questions only you answer; `rerun_with`, the arguments to
 set before running it again with the rest unchanged (answers merge with those already given); `start`, new
-runs it offers, a scan's top tasks with their arguments; `user`, what only you do: the push, a reply to
-post, a daily report the director could not share.
+runs it offers, with their arguments: a scan's top tasks, the other problems of an issue's report;
+`user`, what only you do: the push, a reply to post, a daily report the director could not share.
 
 **One task per machine.** A run takes the machine before it creates anything — a lock in `/dev/shm`,
 which every container started with `--ipc=host` shares with the host and no other machine sees — and

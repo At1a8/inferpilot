@@ -1582,6 +1582,181 @@ const scenarios = [
     }, { control: () => (classified ? { stop_after: '' } : {}) });
     check(ci.result.status === 'needs_input' && ci.result.stopped_at === 'Bisect' && asked(ci) && !ci.keys.includes('implementer:implement'),
       `ci: the same, after Bisect: ${ci.result.status} at ${ci.result.stopped_at}`);
+    // The control file's last word on the stop goes with the rerun the result offers. Started with a stop before
+    // the fix, and asked for the model once that stop was lifted, the task is not run again only to stop there.
+    check(issue.result.next.rerun_with.stop_after === '' && ci.result.next.rerun_with.stop_after === '',
+      `the rerun carries the stop as the control file left it: ${JSON.stringify([issue.result.next.rerun_with, ci.result.next.rerun_with])}`);
+    // The runner's merge (runtime/run.mjs): the arguments, rerun_with over them, the answers merged, and the user's answer.
+    const first = { mode: 'issue', task: 'i', model_path: '', stop_after: 'Diagnose' };
+    const again = (r) => ({ ...first, ...r.result.next.rerun_with, answers: { ...r.result.next.rerun_with.answers, model_path: '/models/m' } });
+    const goesOn = await run(again(issue));
+    check(goesOn.result.status === 'ready_for_review' && goesOn.keys.includes('implementer:implement'),
+      `with the answer the task goes on to its fix, as the operator last asked: ${goesOn.result.status} at ${goesOn.result.stopped_at}`);
+    // Moved to a later phase, the stop is that phase's for the rerun too, by the phase's own name.
+    let shown = false;
+    const later = await run(first, {
+      'issue_triager:reproduce': () => {
+        shown = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (shown ? { stop_after: ' verify ' } : {}) });
+    check(later.result.status === 'needs_input' && asked(later) && later.result.next.rerun_with.stop_after === 'Verify',
+      `a stop the control file moved to Verify goes with the rerun: ${JSON.stringify(later.result.next.rerun_with)}`);
+    const stopsLater = await run(again(later));
+    check(stopsLater.result.status === 'stopped' && stopsLater.result.stopped_at === 'Verify',
+      `and the rerun stops there: ${stopsLater.result.status} at ${stopsLater.result.stopped_at}`);
+    // A stop nobody moved is the task's own, and stays in its arguments: the result names none.
+    for (const control of [undefined, { control: () => ({ stop_after: 'Verify' }) }, { control: () => ({}) }]) {
+      const unmoved = await run({ mode: 'feature', task: 't', stop_after: 'Verify' }, {
+        'director:spec': () => ({ ...DEFAULTS['director:spec'](), workload_gap: 'the source measures agentic sessions', fallback_client: 'template' }),
+      }, control);
+      check(unmoved.result.status === 'needs_input' && unmoved.result.stopped_at === 'Spec' && !('stop_after' in unmoved.result.next.rerun_with),
+        `a result after a stop that did not move names none (${control ? JSON.stringify(control.control()) : 'no control file'}): ${
+          unmoved.result.status} at ${unmoved.result.stopped_at}, ${JSON.stringify(unmoved.result.next.rerun_with)}`);
+    }
+    // The file is read once more when the run ends: one that ends inside a phase passed no boundary since the
+    // operator last wrote to it. Spec asks for another client after the stop was cleared while it ran.
+    let atSpec = false;
+    const midPhase = await run({ mode: 'feature', task: 't', stop_after: 'Verify' }, {
+      'director:spec': () => {
+        atSpec = true;
+        return { ...DEFAULTS['director:spec'](), workload_gap: 'the source measures agentic sessions', fallback_client: 'template' };
+      },
+    }, { control: () => (atSpec ? { stop_after: '' } : {}) });
+    check(midPhase.result.status === 'needs_input' && midPhase.result.stopped_at === 'Spec' && midPhase.result.next.rerun_with.stop_after === '',
+      `a stop cleared while the last phase ran goes with the rerun: ${midPhase.result.status} at ${midPhase.result.stopped_at}, ${
+        JSON.stringify(midPhase.result.next.rerun_with)}`);
+    // So does the result that is written where it arises: Setup asks whether to run on an image that is not the
+    // newest, after the stop was cleared while it ran.
+    let atSetup = false;
+    const imageAsked = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      'director:setup': () => {
+        atSetup = true;
+        return { lock: 'skipped', run_dir: '', baseline_status: 'skip', gpu_ids: '',
+          image: { current: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261105', wanted: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261109', verdict: 'older' } };
+      },
+    }, { control: () => (atSetup ? { stop_after: '' } : {}) });
+    const imageRerun = imageAsked.result.next.rerun_with || { answers: {} };
+    check(imageAsked.result.status === 'needs_input' && imageAsked.result.stopped_at === 'Setup' && imageRerun.answers.image_ok === true
+      && imageRerun.stop_after === '',
+      `the image question hands the stop on too: ${imageAsked.result.status} at ${imageAsked.result.stopped_at}, ${JSON.stringify(imageRerun)}`);
+    const imagePlain = await run({ mode: 'issue', task: 'i', stop_after: 'Diagnose' }, {
+      'director:setup': () => ({ lock: 'skipped', run_dir: '', baseline_status: 'skip', gpu_ids: '',
+        image: { current: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261105', wanted: 'rocm/sgl-dev:v0.5.23-rocm10-mi35x-20261109', verdict: 'older' } }) });
+    check(imagePlain.result.status === 'needs_input' && !('stop_after' in imagePlain.result.next.rerun_with),
+      `and names no stop where none moved: ${JSON.stringify(imagePlain.result.next.rerun_with)}`);
+    // A rerun without a stop means it, wherever the stop came from. One an earlier answer named is cleared in the
+    // answers the runner merges, and one the request's words name is not read back by the Intake over the empty field.
+    let seen = false;
+    const answeredStop = { mode: 'issue', task: 'i', model_path: '', answers: { stop_after: 'Diagnose' } };
+    const fromAnswer = await run(answeredStop, {
+      'issue_triager:reproduce': () => {
+        seen = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (seen ? { stop_after: '' } : {}) });
+    const handed = fromAnswer.result.next.rerun_with || { answers: {} };
+    check(fromAnswer.result.status === 'needs_input' && asked(fromAnswer) && handed.stop_after === '' && handed.answers.stop_after === null,
+      `a lifted stop that an answer had named is cleared in the answers too: ${JSON.stringify(handed)}`);
+    const afterAnswer = await run({ ...answeredStop, ...handed, answers: { ...answeredStop.answers, ...handed.answers, model_path: '/models/m' } });
+    check(afterAnswer.result.status === 'ready_for_review', `and the rerun goes on to its fix: ${afterAnswer.result.status} at ${afterAnswer.result.stopped_at}`);
+    const reads = { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, stop_after: 'Diagnose' } }) };
+    const worded = { mode: 'issue', task: 'i', request: 'the issue, and stop after the diagnosis' };
+    const stopsAsRead = await run(worded, reads);
+    const overruled = await run({ ...worded, stop_after: '' }, reads);
+    const intakeIns = (overruled.calls.find((c) => c.key === 'intake:define') || { ins: { given: {} } }).ins;
+    check(stopsAsRead.result.status === 'stopped' && stopsAsRead.result.stopped_at === 'Diagnose'
+      && overruled.result.status === 'ready_for_review' && intakeIns.given.stop_after === '',
+      `a stop the request's words name does not come back over a stop the caller cleared: ${stopsAsRead.result.status} at ${
+        stopsAsRead.result.stopped_at}, then ${overruled.result.status} at ${overruled.result.stopped_at}, the Intake given ${
+        JSON.stringify(intakeIns.given.stop_after)}`);
+    // Answers given as a JSON string are carried in that patch whole. The runner merges it over the answers as the
+    // caller gave them, and can only spread an object: the model answered before would be lost with the stop.
+    let shown2 = false;
+    const stringly = { mode: 'issue', task: 'i', model_path: '', client_script: '',
+      answers: JSON.stringify({ stop_after: 'Diagnose', model_path: '/models/m' }) };
+    const fromString = await run(stringly, {
+      'issue_triager:reproduce': () => {
+        shown2 = true;
+        return { reproduced: true, repro_cmd: 'bash repro.sh', evidence: 'segfault 3/3' };
+      },
+    }, { control: () => (shown2 ? { stop_after: '' } : {}) });
+    const patch = (fromString.result.next.rerun_with || {}).answers || {};
+    check(fromString.result.status === 'needs_input' && patch.stop_after === null && patch.model_path === '/models/m' && patch.client_script === null,
+      `answers given as a string are carried in the patch that clears the stop: ${JSON.stringify(fromString.result.next.rerun_with)}`);
+    // The runner's merge, as runtime/run.mjs does it: the string is spread, and the patch goes over it.
+    const merged2 = { ...stringly, ...fromString.result.next.rerun_with, answers: { ...stringly.answers, ...patch, client_script: '/s/client.sh' } };
+    const afterString = await run(merged2);
+    check(afterString.result.status === 'ready_for_review' && afterString.result.task_def.model_path === '/models/m',
+      `and the rerun still has the model answered before: ${afterString.result.status} at ${afterString.result.stopped_at}, ${
+        afterString.result.task_def.model_path}`);
+    // The Intake's own questions come before anything of the run exists, and their rerun hands the stop on too:
+    // moved while the Intake worked, it is not the one the task started with. Not where the Intake asks about the
+    // stop itself, and not where nothing moved.
+    let defining = false;
+    const intakeAsks = (field) => ({ 'intake:define': (ins) => {
+      defining = true;
+      return { status: 'needs_input', summary: 'one thing is missing', task_def: { ...ins.given },
+        questions: [{ field, question: `What is ${field}?`, why: 'the task does not say' }] };
+    } });
+    const early = { mode: 'issue', task: 'i', request: 'the issue', stop_after: 'Diagnose' };
+    const atIntake = await run(early, intakeAsks('goal'), { control: () => (defining ? { stop_after: '' } : {}) });
+    check(atIntake.result.status === 'needs_input' && atIntake.result.stopped_at === 'Intake' && atIntake.result.next.rerun_with.stop_after === ''
+      && atIntake.result.next.rerun_with.answers.goal === null,
+      `a stop cleared while the Intake worked goes with the rerun of its questions: ${JSON.stringify(atIntake.result.next.rerun_with)}`);
+    defining = false;
+    const movedAtIntake = await run(early, intakeAsks('goal'), { control: () => (defining ? { stop_after: 'Verify' } : {}) });
+    const sameAtIntake = await run(early, intakeAsks('goal'), { control: () => ({ stop_after: 'diagnose' }) });
+    const plainAtIntake = await run(early, intakeAsks('goal'));
+    check(movedAtIntake.result.next.rerun_with.stop_after === 'Verify' && !('stop_after' in sameAtIntake.result.next.rerun_with)
+      && !('stop_after' in plainAtIntake.result.next.rerun_with),
+      `moved to another phase it is that phase, and where nothing moved the rerun names none: ${JSON.stringify([
+        movedAtIntake.result.next.rerun_with, sameAtIntake.result.next.rerun_with, plainAtIntake.result.next.rerun_with])}`);
+    // The stop in effect is the one that counts, wherever it came from: one an earlier answer named, or one the
+    // Intake read in the request, is as obsolete once the operator has cleared it as one given as a field.
+    defining = false;
+    const answeredEarly = { mode: 'issue', task: 'i', request: 'the issue', answers: { stop_after: 'Diagnose' } };
+    const clearedAnswer = await run(answeredEarly, intakeAsks('goal'), { control: () => (defining ? { stop_after: '' } : {}) });
+    defining = false;
+    const readsStop = { 'intake:define': (ins) => {
+      defining = true;
+      return { status: 'needs_input', summary: 'one thing is missing', task_def: { ...ins.given, stop_after: 'Diagnose' },
+        questions: [{ field: 'goal', question: 'What is goal?', why: 'the task does not say' }] };
+    } };
+    const clearedWords = await run({ mode: 'issue', task: 'i', request: 'the issue, and stop after the diagnosis' }, readsStop,
+      { control: () => (defining ? { stop_after: '' } : {}) });
+    const unclearedWords = await run({ mode: 'issue', task: 'i', request: 'the issue, and stop after the diagnosis' }, readsStop);
+    check(clearedAnswer.result.next.rerun_with.stop_after === '' && clearedAnswer.result.next.rerun_with.answers.stop_after === null
+      && clearedWords.result.next.rerun_with.stop_after === '' && !('stop_after' in unclearedWords.result.next.rerun_with),
+      `a stop that an answer or the request's words gave, cleared while the Intake worked, is cleared in the rerun: ${JSON.stringify([
+        clearedAnswer.result.next.rerun_with, clearedWords.result.next.rerun_with, unclearedWords.result.next.rerun_with])}`);
+    defining = false;
+    const aboutStop = await run(early, intakeAsks('stop_after'), { control: () => (defining ? { stop_after: 'Verify' } : {}) });
+    check(aboutStop.result.status === 'needs_input' && aboutStop.result.next.rerun_with.stop_after === ''
+      && aboutStop.result.next.rerun_with.answers.stop_after === null,
+      `a question about the stop itself is left to its answer: ${JSON.stringify(aboutStop.result.next.rerun_with)}`);
+    // The rerun after a model mismatch carries the task's definition, its stop with it. That is the task's own
+    // stop and no stop of the result's: the control file's last word goes over it, as it goes over the arguments.
+    const elsewhere = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce',
+      model_mismatch: 'DeepSeek-V4.1, --tp-size 8', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const misTask = { mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', stop_after: 'Reproduce' };
+    const misKept = await run(misTask, elsewhere);
+    const misLifted = await run(misTask, elsewhere, { control: () => ({ stop_after: '' }) });
+    const misMoved = await run(misTask, elsewhere, { control: () => ({ stop_after: 'Verify' }) });
+    check(misKept.result.status === 'needs_input' && misKept.result.stopped_at === 'Triage' && misKept.result.next.rerun_with.stop_after === 'Reproduce'
+      && misLifted.result.next.rerun_with.stop_after === '' && misMoved.result.next.rerun_with.stop_after === 'Verify',
+      `the rerun after a mismatch stops where the control file last said, and where the task said when it said nothing: ${JSON.stringify([
+        misKept.result.next.rerun_with.stop_after, misLifted.result.next.rerun_with.stop_after, misMoved.result.next.rerun_with.stop_after])}`);
+    // An answer still wins over the empty field: that is how a stop the run asked about makes room for one.
+    const answeredAgain = await run({ ...worded, stop_after: '', answers: { stop_after: 'Reproduce' } }, reads);
+    check(answeredAgain.result.status === 'stopped' && answeredAgain.result.stopped_at === 'Reproduce',
+      `an answer for the stop wins over the cleared field: ${answeredAgain.result.status} at ${answeredAgain.result.stopped_at}`);
+    // A result that names a stop of its own keeps it. A run the control file stopped says to run again without
+    // a stop: the stop it moved to is where the run ended, and is not handed to the rerun to end there again.
+    const halted = await run({ mode: 'issue', task: 'i' }, undefined, { control: () => ({ stop_after: 'Reproduce' }) });
+    check(halted.result.status === 'stopped' && halted.result.stopped_at === 'Reproduce' && halted.result.next.rerun_with.stop_after === '',
+      `a run the control file stopped offers a rerun without that stop: ${halted.result.status} at ${halted.result.stopped_at}, ${
+        JSON.stringify(halted.result.next.rerun_with)}`);
   }],
   ['arguments: an issue or a ci task that can reach a fix names the client G5 measures it on; one that stops before the fix needs none', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);
@@ -1709,8 +1884,9 @@ const scenarios = [
   }],
   ['issue: the fix for a model that answers no text questions is measured by the task\'s own output comparison, which a task that names none is asked for after Setup', async () => {
     const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
-    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script'])
-      && 'output_script' in ((((r.result.next || {}).rerun_with || {}).answers) || {});
+    // The script is asked for, and with it whether Setup took the model for the wrong kind: either answer goes on.
+    const asked = (r) => eqList(((r.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model'])
+      && eqList(Object.keys((((r.result.next || {}).rerun_with || {}).answers) || {}), ['output_script', 'text_model']);
     const none = await run({ mode: 'issue', task: 'i' }, noText);
     const q = ((none.result.next || {}).ask || [])[0] || {};
     check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup' && asked(none)
@@ -1722,8 +1898,183 @@ const scenarios = [
       `the question says what the script does, and offers nothing in its place: ${JSON.stringify(q)}`);
     check(/\/models\/m answers no text questions, so gsm8k cannot be put to it/.test(q.why || '') && /the same inputs and seeds on the base and on the fix/.test(q.why || '')
       && /with stop_after set to a phase before the fix, no script is needed/.test(q.why || ''), `and why it is asked: ${q.why}`);
-    check(/Give the script that compares the model's outputs, and run the task again/.test(none.result.next.say),
-      `the result says what to give: ${none.result.next.say}`);
+    check(/Give the script that compares the model's outputs, or say that the model answers text questions after all \(text_model\), and run the task again/
+      .test(none.result.next.say), `the result says what to give: ${none.result.next.say}`);
+    // Setup judges by the model's files and the command that serves it, and can be wrong: only the user can say so
+    // before a server is launched. The second question offers that word, and the word stands in Setup's place.
+    const q2 = ((none.result.next || {}).ask || [])[1] || {};
+    check(q2.field === 'text_model' && /^Or does the model answer text questions after all\? Say true, and no script is needed/.test(q2.question)
+      && /Setup took \/models\/m for one that answers no text questions/.test(q2.why) && /the verify engineer, who launches the model, has the last word/.test(q2.why)
+      && eqList(q2.options, ['true']), `the user is offered the word that corrects Setup: ${JSON.stringify(q2)}`);
+    // A round on the user's word against Setup's says what the server showed and gives gsm8k's result (below): these
+    // runs' rounds do.
+    const gsm8kRan = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: true,
+      gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' } }) };
+    for (const [how, word] of [['an answer', { answers: { text_model: 'true' } }], ['an answer given as a boolean', { answers: { text_model: true } }],
+      ['a field of the task', { text_model: true }], ['a field given as a word', { text_model: ' True ' }]]) {
+      const corrected = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, ...word }, { ...noText, ...gsm8kRan });
+      const cv = corrected.calls.find((c) => c.key === 'verify_engineer:verify');
+      check(corrected.result.status === 'ready_for_review' && cv && cv.ins.text_model === true && !cv.ins.output_script
+        && corrected.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'text_model'
+          && /the task says that the model answers text questions \(text_model\), and Setup took it for one that answers none/.test(p.summary)),
+        `said as ${how}, the user's word stands in Setup's place, and gsm8k is put to the model: ${corrected.result.status}, ${cv && cv.ins.text_model}`);
+    }
+    // Only what the caller gave is the user's word: what the Intake read into a request is its reading, and corrects nothing.
+    const readIn = await run({ mode: 'issue', task: 'i', request: 'the issue; it is a chat model, I think' }, { ...noText,
+      'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, text_model: true } }) });
+    check(readIn.result.status === 'needs_input' && readIn.result.stopped_at === 'Setup' && asked(readIn),
+      `a word the Intake read into the request does not stand in Setup's place: ${readIn.result.status} at ${readIn.result.stopped_at}`);
+    // Nor does it go into the run's record: from there a follow-up or a rerun would carry it as the caller's own.
+    const another = [{ problem: 'the server hangs on shutdown', priority: 'P2' }];
+    const withOthers = (list) => ({ 'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce',
+      reason: 'the crash, the more urgent of two', other_problems: list, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const readOn = await run({ mode: 'issue', task: 'sglang#41299', request: 'the issue; it is a chat model, I think', stop_after: 'Reproduce' }, {
+      ...withOthers(another),
+      'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as read', task_def: { ...ins.given, text_model: true } }) });
+    const followed = (readOn.result.next.start || [])[0];
+    check(!('text_model' in readOn.result.task_def) && followed && !('text_model' in followed.args),
+      `the Intake's reading of the model is in no record and no follow-up: ${JSON.stringify([readOn.result.task_def.text_model,
+        followed && followed.args.text_model])}`);
+    const saidOn = await run({ mode: 'issue', task: 'sglang#41299', text_model: true, stop_after: 'Reproduce' }, withOthers(another));
+    check(saidOn.result.task_def.text_model === true && ((saidOn.result.next.start || [])[0] || { args: {} }).args.text_model === true,
+      `the caller's own word is kept, for the run and for a follow-up on the same model: ${JSON.stringify(saidOn.result.next.start)}`);
+    // Not a word this run's Verify disproved: whoever launched the model said the opposite, and the follow-up on
+    // the same model starts without the word, for Setup to say what the model is. The run's record keeps the
+    // word as it was given. Either way round.
+    const comparedOk = "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)";
+    for (const [word, setupSays, verifySays, g2] of [[true, false, false, comparedOk], [false, true, true, 'pass 0.893 vs 0.895 (1319 q)']]) {
+      const refuted = await run({ mode: 'issue', task: 'sglang#41299', text_model: word, output_script: '/s/outputs.sh' }, {
+        ...withOthers(another), 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: setupSays }),
+        'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: verifySays, server_code_changed: true,
+          gates: { issue_repro: 'pass', G2: g2 } }) });
+      const next1 = ((refuted.result.next.start || [])[0] || { args: { text_model: 'no follow-up' } }).args;
+      check(refuted.result.status === 'ready_for_review' && refuted.result.task_def.text_model === word && !('text_model' in next1)
+        && next1.output_script === '/s/outputs.sh',
+        `a word (${word}) that Verify disproved is not handed to a follow-up, and stays in the run's record: ${refuted.result.status}, ${
+          JSON.stringify([refuted.result.task_def.text_model, next1.text_model])}`);
+    }
+    // An Intake that takes the model for one that answers no text questions, as Setup did, asks for its output
+    // comparison. Against the caller's word that it answers them, the question is not put: the run reaches Setup.
+    const intakeAsks = { 'intake:define': (ins) => ({ status: 'needs_input', summary: 'a diffusion model, by its files',
+      task_def: { ...ins.given, ...ins.answers },
+      questions: [{ field: 'output_script', question: 'Which script compares the outputs?', why: 'the model answers no text questions' }] }) };
+    const heard = await run({ mode: 'issue', task: 'i', request: 'the issue', answers: { text_model: true } }, { ...noText, ...intakeAsks, ...gsm8kRan });
+    check(heard.result.status === 'ready_for_review' && heard.keys.includes('director:setup'),
+      `an Intake that asks for the script against the caller's word does not stop the run: ${heard.result.status} at ${heard.result.stopped_at}`);
+    const unheard = await run({ mode: 'issue', task: 'i', request: 'the issue' }, { ...noText, ...intakeAsks });
+    check(unheard.result.status === 'needs_input' && unheard.result.stopped_at === 'Intake'
+      && eqList((unheard.result.next.ask || []).map((x) => x.field), ['output_script']) && !unheard.keys.includes('director:setup'),
+      `without that word the Intake's question is put: ${unheard.result.status} at ${unheard.result.stopped_at}`);
+    const saidNone = await run({ mode: 'issue', task: 'i', request: 'the issue', answers: { text_model: false } }, { ...noText, ...intakeAsks });
+    check(saidNone.result.status === 'needs_input' && saidNone.result.stopped_at === 'Intake',
+      `and with the word that the model answers none: ${saidNone.result.status} at ${saidNone.result.stopped_at}`);
+    // The verify engineer launches the model, and has the last word: where the user was wrong, the round passes nothing.
+    const wrongWord = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false, server_code_changed: true,
+        gates: { issue_repro: 'pass', G2: 'not run: the model answers no text questions, and the task names no output_script' } }) });
+    check(wrongWord.result.status === 'blocked' && wrongWord.result.stopped_at === 'Verify'
+      && /Name the script \(output_script\)/.test(wrongWord.result.next.say),
+      `a word the server contradicts does not get the fix past Verify: ${wrongWord.result.status} at ${wrongWord.result.stopped_at}`);
+    // On the user's word alone the run asked for no output comparison. Whoever launches the model says which it
+    // is: the verify engineer is told that the word is not confirmed, and a round is accepted only once one has
+    // said text_model, as the server showed it, and with a G2 that ran. Left out, the fix would have neither
+    // gsm8k nor a comparison behind it.
+    const onWord = (answer) => run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, ...answer }) });
+    const scores = { issue_repro: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' };
+    for (const [said, answer, why] of [
+      ['gives gsm8k\'s scores and does not say what the model is', { gates: scores }, /accepted without saying which the server showed \(text_model\): G2 is "pass 0\.893/],
+      ['says what the model is and leaves G2 out', { text_model: true, gates: { issue_repro: 'pass' } }, /accepted without gsm8k's result on it: G2 is not reported/],
+      ['says what the model is and that G2 did not run', { text_model: true, gates: { issue_repro: 'pass', G2: 'not run: the fix changes one line' } },
+        /accepted without gsm8k's result on it: G2 is "not run/],
+      ['says what the model is and that it skipped G2', { text_model: true, gates: { issue_repro: 'pass', G2: 'skipped: 1319 questions would take too long' } },
+        /accepted without gsm8k's result on it: G2 is "skipped/]]) {
+      const unsaid = await onWord(answer);
+      const whyNot = (unsaid.result.phases.filter((p) => p.phase === 'Verify').pop() || {}).summary || '';
+      check(unsaid.result.status === 'blocked' && unsaid.result.stopped_at === 'Verify' && !unsaid.keys.includes('perf_engineer:perf_eval')
+        && /the task says that the model answers text questions \(text_model\) where Setup took it for one that answers none/.test(whyNot)
+        && why.test(whyNot),
+        `on the user's word against Setup's, a round that ${said} is not accepted: ${unsaid.result.status} at ${unsaid.result.stopped_at}, ${whyNot}`);
+    }
+    // Such a round is refused like any other pass the run does not accept: one that does not say what it left
+    // running is asked first, and no lead is confirmed on GPUs it may still hold.
+    const wordLead = { title: 'tokenizer test fails on main', observed: '3/3 KeyError', reproduce: 'pytest test_tokenizer.py' };
+    const refusedOnWord = await run({ mode: 'issue', task: 'i', text_model: true, confirm_leads: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass' } }),
+      'verify_engineer:gpus': (ins) => (String(ins.round).startsWith('after') ? null : { in_use: '' }),
+      'implementer:implement': (ins) => ({ ...DEFAULTS['implementer:implement'](ins), leads: [wordLead] }) });
+    const spWord = refusedOnWord.calls.find((c) => c.key === 'issue_triager:spinoff');
+    check(refusedOnWord.result.status === 'blocked' && refusedOnWord.result.stopped_at === 'Verify'
+      && refusedOnWord.calls.filter((c) => c.key === 'verify_engineer:gpus' && c.ins.round === 'after 0').length === 1
+      && spWord && spWord.ins.confirm_leads === false
+      && (spWord.ins.confirm_skipped || []).some((x) => /Verify round 0 did not say whether what it started has stopped/.test(x)),
+      `a round refused on the user's word is asked what it left running before a lead is confirmed: ${refusedOnWord.result.status} at ${
+        refusedOnWord.result.stopped_at}, ${JSON.stringify(spWord && [spWord.ins.confirm_leads, spWord.ins.confirm_skipped])}`);
+    // Once the verify engineer has said the same of the model, the fix is one for a text model like any other: the
+    // run reads no scores out of G2's words, so a score of exactly 0 or 1, per cent, or a miss the baseline shares
+    // is judged as for any fix.
+    const known = { all_pass: false, failures: [{ gate: 'G2', blocking: false, summary: 'known issue KI-3' }] };
+    for (const [said, g2, more] of [['a pass against the baseline', 'pass 0.893 vs 0.895 (1319 q)', {}],
+      ['the score where the fix has no baseline', '0.893 (1319 q), no baseline: the base does not start on this configuration', {}],
+      ['whole-number scores', 'pass 1 vs 1 (1319 q)', {}], ['a score of 0 without a baseline', '0 (1319 q), no baseline: the base does not start', {}],
+      ['scores in per cent', 'pass 89.3% vs 89.5% (1319 q)', {}],
+      ['a miss the baseline shares, listed as one that does not block', 'fail 0.851 vs 0.853 (1319 q), KI-3', known]]) {
+      const confirmed = await onWord({ text_model: true, gates: { issue_repro: 'pass', G2: g2 }, ...more });
+      check(confirmed.result.status === 'ready_for_review', `said by the verify engineer too, with ${said} the round is judged as any other: ${
+        confirmed.result.status} at ${confirmed.result.stopped_at}`);
+    }
+    // The verify engineer is told that the word is not confirmed, until a round has said what the server showed:
+    // said in a round that failed, it holds for the rounds after it.
+    const twoRounds = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': (ins, n) => (n === 1
+        ? { ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, text_model: true, all_pass: false, gates: { issue_repro: 'fail' },
+          failures: [{ gate: 'issue_repro', blocking: true, evidence: 'fails 3 of 3' }] }
+        : { ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: scores }) });
+    const told = twoRounds.calls.filter((c) => c.key === 'verify_engineer:verify').map((c) => c.ins.text_model_unconfirmed === true);
+    check(twoRounds.result.status === 'ready_for_review' && eqList(told, [true, false]),
+      `the verify engineer is told while the word is unconfirmed, and no longer once a round has said it: ${twoRounds.result.status}, ${told}`);
+    // Setup is given the caller's word with the task, for its record of the run's inputs, and still says what it finds.
+    const setupOf = (r) => (r.calls.find((c) => c.key === 'director:setup') || { ins: {} }).ins;
+    const worded2 = await onWord({ text_model: true, gates: scores });
+    const unworded = await run({ mode: 'issue', task: 'i' });
+    check(setupOf(worded2).text_model === true && !('text_model' in setupOf(unworded)) && !('text_model_unconfirmed' in setupOf(worded2)),
+      `Setup is given the caller's word, and none where the caller gave none: ${JSON.stringify([setupOf(worded2).text_model, setupOf(unworded).text_model])}`);
+    // A fix that changes no code the server runs has no G2 to give, whoever said what the model is.
+    const noCode = await run({ mode: 'issue', task: 'i', text_model: true }, { ...noText,
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: false,
+        gates: { issue_repro: 'pass', G2: 'not run: no code the server runs changed' } }) });
+    check(noCode.result.status === 'ready_for_review', `a fix to tests alone is asked for no gsm8k on that word: ${noCode.result.status}`);
+    // The rule is for the word that stands against Setup's: where the two agree, a round is judged as before.
+    const agreed = await run({ mode: 'issue', task: 'i', text_model: true }, {
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), server_code_changed: true, gates: { issue_repro: 'pass' } }) });
+    const agreedVerify = (agreed.calls.find((c) => c.key === 'verify_engineer:verify') || { ins: {} }).ins;
+    check(agreed.result.status === 'ready_for_review' && !('text_model_unconfirmed' in agreedVerify),
+      `a word Setup agrees with changes nothing: ${agreed.result.status}`);
+    // The word goes both ways: a model Setup took for one that answers text questions, and the user says answers none.
+    const saysNone = await run({ mode: 'issue', task: 'i', text_model: false });
+    check(saysNone.result.status === 'needs_input' && saysNone.result.stopped_at === 'Setup'
+      && eqList((saysNone.result.next.ask || []).map((x) => x.field), ['output_script'])
+      && /Give the script that compares the model's outputs, and run the task again/.test(saysNone.result.next.say),
+      `the user's word that the model answers none asks for the script, and for nothing the user has already said: ${
+        saysNone.result.status}, ${JSON.stringify((saysNone.result.next.ask || []).map((x) => x.field))}`);
+    const saysNoneWith = await run({ mode: 'issue', task: 'i', text_model: 'false', output_script: '/s/outputs.sh' });
+    const sv = saysNoneWith.calls.find((c) => c.key === 'verify_engineer:verify');
+    check(sv && sv.ins.text_model === false && sv.ins.output_script === '/s/outputs.sh',
+      `and with the script the verify engineer is told what the user said: ${sv && JSON.stringify([sv.ins.text_model, sv.ins.output_script])}`);
+    // A value that is neither is asked about at Intake: read as nothing, it would leave Setup's word standing.
+    for (const odd of ['yes', 1, 'text']) {
+      const unclear = await run({ mode: 'issue', task: 'i', text_model: odd }, noText);
+      check(asks(unclear, 'text_model'), `text_model ${JSON.stringify(odd)} is asked about before anything is set up: ${unclear.result.status} at ${
+        unclear.result.stopped_at}`);
+    }
+    // A word is a boolean or a string. A list or an object that reads "true" once it is made a string is not what
+    // the user said, and one that cannot be made a string at all stops nothing but the question: each is asked about.
+    for (const [how, args] of [['a list as the field', { text_model: [true] }], ['a list as the answer', { answers: { text_model: ['true'] } }],
+      ['an object as the field', { text_model: { toString: 'true' } }], ['an object as the answer', { answers: { text_model: { value: true } } }]]) {
+      const shaped = await run({ mode: 'issue', task: 'i', ...args }, noText);
+      check(asks(shaped, 'text_model') && !shaped.keys.includes('director:setup'),
+        `text_model given as ${how} is asked about, and stands for no word: ${shaped.result.status} at ${shaped.result.stopped_at}`);
+    }
     const given = await run({ mode: 'issue', task: 'i', ...none.result.next.rerun_with, answers: { output_script: ' /s/outputs.sh ' } }, noText);
     const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
     check(given.result.status === 'ready_for_review' && ve && ve.ins.output_script === '/s/outputs.sh' && ve.ins.text_model === false,
@@ -1755,7 +2106,8 @@ const scenarios = [
       && !lifted.keys.includes('implementer:implement') && lifted.keys.includes('director:report'),
       `a stop the control file lifts starts no fix without the script: ${lifted.result.status} at ${lifted.result.stopped_at}`);
     check(/G2 on the task's own output comparison, since the model answers no text questions/.test(lifted.result.next.say)
-      && /Give the script that compares the model's outputs, and run the task again/.test(lifted.result.next.say),
+      && /Give the script that compares the model's outputs, or say that the model answers text questions after all \(text_model\), and run the task again/
+        .test(lifted.result.next.say),
       `and says what the fix lacks, and why: ${lifted.result.next.say}`);
     // Setup took the model for one that answers text questions, and the round finds that it does not: no gsm8k ran, and
     // there is no script to compare outputs with. The fix has no G2, and the round passes nothing.
@@ -1850,7 +2202,7 @@ const scenarios = [
     const noText = { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) };
     const none = await run({ mode: 'ci', task: 'c' }, noText);
     check(none.result.status === 'needs_input' && none.result.stopped_at === 'Setup'
-      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !none.keys.includes('ci_guardian:classify'),
+      && eqList(((none.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model']) && !none.keys.includes('ci_guardian:classify'),
       `asked after Setup, before the failure is classified: ${none.result.status} at ${none.result.stopped_at}`);
     const given = await run({ mode: 'ci', task: 'c', output_script: '/s/outputs.sh' }, noText);
     const ve = given.calls.find((c) => c.key === 'verify_engineer:verify');
@@ -1869,7 +2221,7 @@ const scenarios = [
       },
     }, { control: () => (classified ? { stop_after: '' } : {}) });
     check(lifted.result.status === 'needs_input' && lifted.result.stopped_at === 'Bisect'
-      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script']) && !lifted.keys.includes('implementer:implement'),
+      && eqList(((lifted.result.next || {}).ask || []).map((q) => q.field), ['output_script', 'text_model']) && !lifted.keys.includes('implementer:implement'),
       `a stop the control file lifts starts no fix without it: ${lifted.result.status} at ${lifted.result.stopped_at}`);
   }],
   ['issue: a fix that changes code the server runs is measured for speed, and one to tests, documentation or CI files alone is not', async () => {
@@ -2337,10 +2689,9 @@ const scenarios = [
   ['issue: the other problems of a report with several are offered as runs of their own', async () => {
     const others = [{ problem: 'GSM8K loses 4 points with the same flags', priority: 'P1', task: 'sgl-project/sglang#41299: the accuracy loss' },
       { problem: 'the server hangs on shutdown', priority: 'P2' }];
-    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, {
-      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash, the most urgent of three',
-        other_problems: others, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }),
-    });
+    const triaged = (list) => ({ 'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce',
+      reason: 'the crash, the most urgent of three', other_problems: list, triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const r = await run({ mode: 'issue', task: 'sgl-project/sglang#41299', model_path: '/models/m', stop_after: 'Reproduce' }, triaged(others));
     const start = r.result.next.start || [];
     check(start.length === 2 && start[0].task === others[0].problem && start[0].args.task === 'sgl-project/sglang#41299: the accuracy loss',
       `each other problem is offered with its task: ${JSON.stringify(start)}`);
@@ -2352,6 +2703,215 @@ const scenarios = [
     check(r.result.other_problems.length === 2, 'the result lists them');
     const one = await run({ mode: 'issue', task: 'i' });
     check(!one.result.next.start && !one.result.other_problems, 'a report with one problem offers no run');
+    // A follow-up of a follow-up names one problem, not two: the task is cut back to its issue, however it names it.
+    for (const [task, issue] of [['sgl-project/sglang#41299: the accuracy loss', 'sgl-project/sglang#41299'], ['#41299: the crash', '#41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299: the crash at 32k', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299/: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299?notification_referrer_id=1: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299#issuecomment-2771: the crash', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['https://github.com/sgl-project/sglang/issues/41299#issuecomment-2771', 'https://github.com/sgl-project/sglang/issues/41299'],
+      ['sglang#41299: the crash', 'sglang#41299'], ['sglang#41299', 'sglang#41299'],
+      ['the crash a customer reported', 'the crash a customer reported']]) {
+      const again = await run({ mode: 'issue', task, stop_after: 'Reproduce' }, triaged([{ problem: 'the server hangs on shutdown' }]));
+      check(again.result.next.start[0].args.task === `${issue}: the server hangs on shutdown`,
+        `a task already scoped to a problem ("${task}") offers the next one on the issue alone: ${again.result.next.start[0].args.task}`);
+    }
+    // The follow-up is the same work on the same issue: it keeps the operator's settings this run was given.
+    const kept = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', exp_root: '/data/exp', max_fix_rounds: 0, review_model: 'big',
+      agent_timeout_ms: 7200000 }, triaged(others));
+    const args = kept.result.next.start[0].args;
+    check(args.exp_root === '/data/exp' && args.max_fix_rounds === 0 && args.review_model === 'big' && args.agent_timeout_ms === 7200000,
+      `the operator's settings go with the follow-up: ${JSON.stringify(args)}`);
+    check(!('max_work_packages' in r.result.next.start[0].args) && !('exp_root' in r.result.next.start[0].args), 'and none is made up where none was given');
+    // A problem on another model takes nothing of what this run measured with: its own is asked for, as of any new task.
+    const elsewhere = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}', gpu_ids: '0,1' },
+      triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
+    const [far, near] = elsewhere.result.next.start;
+    check(far.model === 'DeepSeek-V4.1, --tp-size 8' && ['model_path', 'client_script', 'server_script', 'workload', 'gpu_ids'].every((k) => !(k in far.args))
+      && far.args.framework_dir && far.args.mode === 'issue', `a problem on another model brings its own model, scripts and GPUs: ${JSON.stringify(far)}`);
+    // Only the arguments start a run: what the report says of the problem's model goes with them, for the Intake.
+    check(far.args.request.startsWith(`${far.args.task}. The report puts this problem on DeepSeek-V4.1, --tp-size 8:`) && !('request' in near.args),
+      `the offered run carries the model the report names, in the words the Intake reads: ${far.args.request}`);
+    // And as a field of its own, which Setup is given: it works before Triage, and reads nothing else of the report.
+    check(far.args.reported_on === 'DeepSeek-V4.1, --tp-size 8' && !('reported_on' in near.args),
+      `the offered run names the configuration for Setup too: ${far.args.reported_on}, ${near.args.reported_on}`);
+    check(near.args.model_path === '/models/m' && near.args.client_script === '/s/client.sh' && near.args.gpu_ids === '0,1' && !('model' in near),
+      `one on this run's model keeps them: ${JSON.stringify(near.args)}`);
+    // The task itself names a problem on another model than its own: nothing is reproduced or measured on the wrong one.
+    const wrong = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', workload: '{"isl":8192,"osl":1024,"conc":64}', gpu_ids: '0,1' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1, --tp-size 8',
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const again = wrong.result.next.rerun_with || {};
+    check(wrong.result.status === 'needs_input' && wrong.result.stopped_at === 'Triage' && !wrong.keys.includes('issue_triager:reproduce')
+      && (wrong.result.next.ask || [])[0].field === 'model_path' && /DeepSeek-V4\.1, --tp-size 8/.test(wrong.result.next.ask[0].question),
+      `a task that names a problem on another model stops before Reproduce and asks for it: ${wrong.result.status} at ${wrong.result.stopped_at}`);
+    check(again.model_path === '' && again.client_script === '' && again.workload === '' && again.gpu_ids === '' && 'model_path' in again.answers,
+      `the task's own model, scripts and GPUs are cleared for the answer to take their place: ${JSON.stringify(again)}`);
+    // The rest of the validated task goes with the rerun, and the words the Intake reads are the problem's
+    // configuration, in place of the request that set the task up for another one.
+    check(again.mode === 'issue' && again.task === 'sglang#41299: the TP8 accuracy loss' && again.framework_dir === '/tmp/sglang'
+      && again.request.startsWith('sglang#41299: the TP8 accuracy loss. The report puts this problem on DeepSeek-V4.1, --tp-size 8:'),
+      `the rerun keeps the rest of the task and names the problem's configuration for the Intake: ${JSON.stringify(again)}`);
+    check(again.reported_on === 'DeepSeek-V4.1, --tp-size 8', `and for Setup, as a field of its own: ${again.reported_on}`);
+    // What an earlier run was answered is cleared as well: the runner merges the answers, and they would come back.
+    const mismatch = { 'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce',
+      model_mismatch: 'DeepSeek-V4.1, --tp-size 8', triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const answered = { mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', request: 'the TP8 accuracy loss of sglang#41299, on two GPUs',
+      model_path: '', client_script: '', answers: { model_path: '/models/m', client_script: '/s/client_tp2.sh',
+        workload: '{"isl":8192,"osl":1024,"conc":64}', gpu_ids: '0,1', goal: 'find the loss' } };
+    const stale = await run(answered, { ...mismatch, 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'as asked',
+      task_def: { ...ins.given, apply_prs: ['#50000'] } }) });
+    const next = stale.result.next.rerun_with || { answers: {} };
+    check(eqList(stale.result.task_def.apply_prs, ['#50000']) && !('apply_prs' in next),
+      `a pull request the Intake read into the old request is not made the caller's word by the rerun: ${JSON.stringify(next.apply_prs)}`);
+    check(stale.result.status === 'needs_input' && stale.result.stopped_at === 'Triage'
+      && ['model_path', 'client_script', 'workload', 'gpu_ids'].every((k) => next.answers[k] === null) && !('goal' in next.answers)
+      && !('server_script' in next.answers) && next.goal === 'find the loss' && !/two GPUs/.test(next.request),
+      `an earlier answer for what the task measured with is cleared too, and no other: ${JSON.stringify(next)}`);
+    // The runner's merge (runtime/run.mjs): the arguments, rerun_with over them, the answers merged, and the user's answer.
+    const merged = { ...answered, ...next, answers: { ...answered.answers, ...next.answers, model_path: '/models/deepseek' } };
+    const second = await run(merged, { 'intake:define': (ins) => ({ status: 'ready', questions: [], summary: 'the TP8 configuration',
+      task_def: { ...ins.given, client_script: '/s/client_tp8.sh', gpu_ids: '0,1,2,3,4,5,6,7' } }) });
+    const intake = (second.calls.find((c) => c.key === 'intake:define') || { ins: { given: {}, answers: {} } }).ins;
+    const set = second.calls.find((c) => c.key === 'director:setup');
+    check(eqList(Object.keys(intake.answers).sort(), ['goal', 'model_path'])
+      && ['model_path', 'client_script', 'workload', 'gpu_ids'].every((k) => !(k in intake.given))
+      && /DeepSeek-V4\.1, --tp-size 8/.test(intake.request) && !/two GPUs/.test(intake.request),
+      `the run after it gives the Intake the problem's configuration and none of the old one: ${JSON.stringify(intake)}`);
+    check(set && set.ins.model_path === '/models/deepseek' && set.ins.client_script === '/s/client_tp8.sh' && set.ins.gpu_ids === '0,1,2,3,4,5,6,7'
+      && !set.ins.workload, `and is set up on the answer and on what the Intake derives for it: ${set && JSON.stringify([set.ins.model_path,
+        set.ins.client_script, set.ins.gpu_ids, set.ins.workload])}`);
+    check(intake.given.reported_on === 'DeepSeek-V4.1, --tp-size 8' && set && set.ins.reported_on === 'DeepSeek-V4.1, --tp-size 8'
+      && second.result.task_def.reported_on === 'DeepSeek-V4.1, --tp-size 8',
+      `Setup is told which configuration the task's problem is on, and the definition records it: ${set && set.ins.reported_on}`);
+    // The script that compares a model's outputs is one model's too: a diffusion model's says nothing of another
+    // model's. It goes with the rest, from the follow-up on another model and from the rerun after a mismatch.
+    const compares = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', output_script: '/s/outputs.sh' },
+      triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
+    const [farOut, nearOut] = compares.result.next.start;
+    const wrongOut = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', output_script: '/s/outputs.sh' }, mismatch);
+    check(!('output_script' in farOut.args) && nearOut.args.output_script === '/s/outputs.sh'
+      && wrongOut.result.status === 'needs_input' && (wrongOut.result.next.rerun_with || {}).output_script === '',
+      `the output comparison of one model is not taken to a problem on another: ${JSON.stringify([farOut.args.output_script,
+        nearOut.args.output_script, (wrongOut.result.next.rerun_with || {}).output_script])}`);
+    // So is the user's word on what the model is (text_model): said of one model, true or false, it is not taken
+    // to a problem on another. And it is no input a task without a model pins: such a task is not asked about it.
+    const wordy = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', text_model: false, output_script: '/s/outputs.sh' },
+      triaged([{ problem: 'DeepSeek-V4.1 loses accuracy at TP8', model: 'DeepSeek-V4.1, --tp-size 8' }, others[1]]));
+    const [farWord, nearWord] = wordy.result.next.start;
+    const wrongWords = [];
+    for (const word of [false, true]) {
+      const moved = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', text_model: word, output_script: '/s/outputs.sh' }, mismatch);
+      wrongWords.push(moved.result.status === 'needs_input' && (moved.result.next.rerun_with || {}).text_model === '');
+    }
+    const wordOnly = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', text_model: true,
+      stop_after: 'Reproduce' }, mismatch);
+    check(!('text_model' in farWord.args) && nearWord.args.text_model === false && eqList(wrongWords, [true, true])
+      && eqList((wordOnly.result.next.ask || []).map((q) => q.field), ['gpu_ids']),
+      `the user's word on one model is not taken to a problem on another, and a task without a model is not asked about it: ${
+        JSON.stringify([farWord.args.text_model, nearWord.args.text_model, wrongWords, (wordOnly.result.next.ask || []).map((q) => q.field)])}`);
+    // A task that stops before its fix needs no model, and can still pin what does not fit the problem: two GPUs
+    // for one at TP8. It stops before Reproduce all the same, and is asked for what it pins, not for a model it
+    // has no use for (a reproduction that serves none, a distributed test).
+    const pinned = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
+      stop_after: 'Reproduce' }, mismatch);
+    const pinnedAgain = pinned.result.next.rerun_with || {};
+    const pinnedAsk = pinned.result.next.ask || [];
+    check(pinned.result.status === 'needs_input' && pinned.result.stopped_at === 'Triage' && !pinned.keys.includes('issue_triager:reproduce')
+      && eqList(pinnedAsk.map((q) => q.field), ['gpu_ids']),
+      `a run that stops at Reproduce without a model stops for the mismatch too, and is asked for what it pins: ${pinned.result.status} at ${
+        pinned.result.stopped_at}, asks ${JSON.stringify(pinnedAsk.map((q) => q.field))}`);
+    check(/the task is set up for another configuration \(its gpu_ids\): reproduced on that, the problem would not show/.test(pinnedAsk[0].why)
+      && /^The task's gpu_ids \("0,1"\) is another configuration's\. What should it be for DeepSeek-V4\.1, --tp-size 8\?/.test(pinnedAsk[0].question)
+      && /Give what that configuration needs in place of the task's gpu_ids, and run the task again/.test(pinned.result.next.say)
+      && pinnedAgain.gpu_ids === '' && pinnedAgain.answers.gpu_ids === null && pinnedAgain.stop_after === 'Reproduce'
+      && !('model_path' in pinnedAgain) && !('model_path' in pinnedAgain.answers),
+      `it says what does not fit, and the rerun clears it and stops where the task said: ${pinnedAsk[0].question} | ${pinned.result.next.say} | ${
+        JSON.stringify(pinnedAgain)}`);
+    const both = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '/s/client_tp2.sh',
+      gpu_ids: '0,1', stop_after: 'Reproduce' }, mismatch);
+    check(eqList((both.result.next.ask || []).map((q) => q.field), ['client_script', 'gpu_ids'])
+      && /in place of the task's client_script, gpu_ids/.test(both.result.next.say),
+      `each input it pins is asked about: ${JSON.stringify((both.result.next.ask || []).map((q) => q.field))}`);
+    // The rule is for the problem the run takes, whether or not another problem of the report would fit. A task
+    // without a model that pins two GPUs takes the P0 at TP8, and stops for it; the P1 at TP2 is one of the others,
+    // offered on this run's GPUs.
+    const mixed = await run({ mode: 'issue', task: 'sglang#41299', model_path: '', client_script: '', gpu_ids: '0,1', stop_after: 'Reproduce' }, {
+      'issue_triager:triage': () => ({ priority: 'P0', category: 'crash', action: 'reproduce', reason: 'the crash at TP8, the more urgent of two',
+        model_mismatch: 'DeepSeek-V4.1, --tp-size 8', other_problems: [{ problem: 'GSM8K loses 4 points at TP2', priority: 'P1' }],
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    const fits = (mixed.result.next.start || [])[0];
+    check(mixed.result.status === 'needs_input' && mixed.result.stopped_at === 'Triage' && !mixed.keys.includes('issue_triager:reproduce')
+      && eqList((mixed.result.next.ask || []).map((q) => q.field), ['gpu_ids']) && mixed.result.next.rerun_with.reported_on === 'DeepSeek-V4.1, --tp-size 8'
+      && fits && fits.args.task === 'sglang#41299: GSM8K loses 4 points at TP2' && fits.args.gpu_ids === '0,1' && !('reported_on' in fits.args),
+      `the problem taken is held against what the task pins although another would fit, and that other is offered on this run's GPUs: ${
+        mixed.result.status} at ${mixed.result.stopped_at}, ${JSON.stringify(fits && fits.args)}`);
+    // A difference in the workload alone puts a problem on another configuration too: the follow-up takes none of
+    // this run's workload and client, which would measure another problem.
+    const longer = await run({ mode: 'issue', task: 'i', stop_after: 'Reproduce', workload: '{"isl":8192,"osl":1024,"conc":64}' },
+      triaged([{ problem: 'TTFT doubles at 32k input', model: 'DeepSeek-V4.1, --tp-size 8, 32k input' }]));
+    const at32k = (longer.result.next.start || [])[0];
+    check(at32k && ['workload', 'client_script', 'model_path'].every((k) => !(k in at32k.args))
+      && at32k.args.reported_on === 'DeepSeek-V4.1, --tp-size 8, 32k input'
+      && at32k.args.request.includes('The report puts this problem on DeepSeek-V4.1, --tp-size 8, 32k input:'),
+      `a problem on another workload alone takes none of this run's workload and client: ${JSON.stringify(at32k && at32k.args)}`);
+    // With the answer the run is set up for the problem, and reproduces it.
+    const fitted = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', gpu_ids: '0,1',
+      ...pinnedAgain, answers: { ...pinnedAgain.answers, gpu_ids: '0,1,2,3,4,5,6,7' } });
+    const fittedSetup = fitted.calls.find((c) => c.key === 'director:setup');
+    check(fitted.result.status === 'stopped' && fitted.result.stopped_at === 'Reproduce' && fitted.keys.includes('issue_triager:reproduce')
+      && fittedSetup && fittedSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `with the answer the run takes the GPUs the problem needs and reproduces it: ${fitted.result.status} at ${fitted.result.stopped_at}, ${
+        fittedSetup && fittedSetup.ins.gpu_ids}`);
+    // A task that names no model and pins nothing was set up by Setup alone, before the run knew which problem it
+    // takes. The GPUs Setup chose are the run's all the same, and Reproduce may use no others: the run stops
+    // there too, and asks for them, saying whose choice they were.
+    const free = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce' }, mismatch);
+    const freeAsk = free.result.next.ask || [];
+    check(free.result.status === 'needs_input' && free.result.stopped_at === 'Triage' && !free.keys.includes('issue_triager:reproduce')
+      && eqList(freeAsk.map((q) => q.field), ['gpu_ids'])
+      && /^Which GPUs should the run use for DeepSeek-V4\.1, --tp-size 8 \(HIP numbers\)\? Setup chose 0,1 before the run knew which problem it takes\./.test(freeAsk[0].question)
+      && /Setup set the run up before it was known \(GPUs 0,1\)/.test(freeAsk[0].why)
+      && /Give what that configuration needs in place of the task's gpu_ids/.test(free.result.next.say),
+      `a task that pins nothing is not reproduced on the GPUs Setup chose for another configuration: ${free.result.status} at ${
+        free.result.stopped_at}, ${freeAsk[0] && freeAsk[0].question}`);
+    const refit = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce',
+      ...free.result.next.rerun_with, answers: { ...free.result.next.rerun_with.answers, gpu_ids: '0,1,2,3,4,5,6,7' } });
+    const refitSetup = refit.calls.find((c) => c.key === 'director:setup');
+    check(refit.result.status === 'stopped' && refit.result.stopped_at === 'Reproduce' && refitSetup && refitSetup.ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `with the answer the next run is set up on the GPUs the problem needs: ${refit.result.status} at ${refit.result.stopped_at}`);
+    // Left out, Setup chooses again, and this time it is told what for: the first run's Setup had no way to
+    // know the configuration, and one that is told no more would take the same two GPUs again.
+    const chooses = { 'director:setup': (ins) => ({ ...DEFAULTS['director:setup'](ins),
+      gpu_ids: /--tp-size 8/.test(ins.reported_on || '') ? '0,1,2,3,4,5,6,7' : '0,1' }),
+    'issue_triager:triage': (ins) => ({ priority: 'P1', category: 'wrong result', action: 'reproduce',
+      ...(ins.gpu_ids === '0,1' ? { model_mismatch: 'DeepSeek-V4.1, --tp-size 8' } : {}), triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) };
+    const unpinned = { mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce' };
+    const firstRun = await run(unpinned, chooses);
+    const leftOut = await run({ ...unpinned, ...firstRun.result.next.rerun_with }, chooses);
+    const leftSetup = leftOut.calls.find((c) => c.key === 'director:setup');
+    const firstSetup = firstRun.calls.find((c) => c.key === 'director:setup');
+    check(firstRun.result.status === 'needs_input' && !firstSetup.ins.reported_on && firstRun.result.next.rerun_with.answers.gpu_ids === null
+      && leftOut.result.status === 'stopped' && leftOut.result.stopped_at === 'Reproduce' && leftOut.keys.includes('issue_triager:reproduce')
+      && leftSetup && leftSetup.ins.reported_on === 'DeepSeek-V4.1, --tp-size 8' && !leftSetup.ins.gpu_ids
+      && (leftOut.calls.find((c) => c.key === 'issue_triager:reproduce') || { ins: {} }).ins.gpu_ids === '0,1,2,3,4,5,6,7',
+      `a rerun that leaves the GPUs to Setup tells it the configuration, and is not set up on the same two again: ${leftOut.result.status} at ${
+        leftOut.result.stopped_at}, Setup given ${leftSetup && JSON.stringify([leftSetup.ins.reported_on, leftSetup.ins.gpu_ids])}`);
+    // An input the task gave as an object is shown as it was given, not as "[object Object]".
+    const shaped = await run({ mode: 'issue', task: 'sglang#41299: the TP8 accuracy loss', model_path: '', client_script: '', stop_after: 'Reproduce',
+      workload: { isl: 8192, osl: 1024, conc: 64 }, harness: { rounds: 3 } }, mismatch);
+    const shapedAsk = shaped.result.next.ask || [];
+    check(eqList(shapedAsk.map((q) => q.field), ['workload', 'harness'])
+      && shapedAsk[0].question.startsWith('The task\'s workload ("{\\"isl\\":8192,\\"osl\\":1024,\\"conc\\":64}") is another configuration\'s.')
+      && shapedAsk[1].question.startsWith('The task\'s harness ("{\\"rounds\\":3}") is another configuration\'s.')
+      && shapedAsk.every((q) => !/\[object Object\]/.test(q.question)),
+      `an input given as an object is shown as it was given: ${JSON.stringify(shapedAsk.map((q) => q.question))}`);
+    // A run that stops at Triage has triaged, which is all it was asked: a mismatch stops nothing there.
+    const bare = await run({ mode: 'issue', task: 'i', model_path: '', client_script: '', stop_after: 'Triage' }, {
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'wrong result', action: 'reproduce', model_mismatch: 'DeepSeek-V4.1',
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    check(bare.result.status === 'stopped' && bare.result.stopped_at === 'Triage', `a triage without a model ends as it would: ${bare.result.status}`);
   }],
   ['issue: needs_info ends at triage with a reply draft', async () => {
     const r = await run({ mode: 'issue', task: 'i' }, {
@@ -3718,6 +4278,13 @@ const scenarios = [
     check(eqList(Object.keys(ciOffer.args).sort(), ['framework_dir', 'inferpilot_dir', 'mode', 'task']),
       `and carries the fields of a task definition and nothing else, no answer and no request, so that the run it starts asks (the ci scenario): ${
         JSON.stringify(Object.keys(ciOffer.args))}`);
+    // Nor does a scan say what a model is in the user's place (text_model): the run it starts hears Setup, and the user.
+    const worded = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => ({ queue_path: `${RUN}/task_queue.md`, matrix_changes: 0, top: [
+      { rank: 1, task: 'a diffusion model returns black images', type: 'issue', priority: 'P1', source: 'issues',
+        task_def: { mode: 'issue', task: 'sgl-project/sglang#41300', framework_dir: '/sgl-workspace/sglang', model_path: '/models/sd', text_model: true } }] }) });
+    const wordOffer = (worded.result.next.start || [])[0];
+    check(wordOffer && wordOffer.args.model_path === '/models/sd' && !('text_model' in wordOffer.args),
+      `an issue task a scan offers says nothing of what its model is: ${JSON.stringify(wordOffer && wordOffer.args)}`);
     const failed = await run({ mode: 'scan', framework_dir: '' }, { 'dispatcher:dispatch': () => null });
     check(failed.result.status === 'blocked' && failed.result.stopped_at === 'Dispatch'
       && failed.calls.find((c) => c.key === 'director:report').ins.share_daily_report === false,
@@ -3741,6 +4308,17 @@ const scenarios = [
       `asks before scanning again: ${asked.result.status}, calls ${asked.keys}`);
     check(asked.result.questions[0].field === 'rescan' && asked.result.questions[0].question.includes('issues/3'),
       'the question names the recent report');
+    // The stop the control file last set goes with that rerun, as with any other: cleared while Collect ran, it is
+    // not the one the scan started with.
+    let collecting = false;
+    const cleared = await run({ mode: 'scan', stop_after: 'Collect' }, { 'scout:collect': (ins) => {
+      collecting = true;
+      return recent(ins);
+    } }, { control: () => (collecting ? { stop_after: '' } : {}) });
+    check(cleared.result.status === 'needs_input' && cleared.result.next.rerun_with.answers.rescan === true
+      && cleared.result.next.rerun_with.stop_after === '' && !('stop_after' in asked.result.next.rerun_with),
+      `a stop cleared while Collect ran goes with the rescan: ${JSON.stringify(cleared.result.next.rerun_with)}, and none where none moved: ${
+        JSON.stringify(asked.result.next.rerun_with)}`);
     const again = await run({ mode: 'scan', answers: { rescan: true } }, { 'scout:collect': recent });
     check(again.result.status === 'queued' && again.calls.find((c) => c.key === 'scout:collect').ins.rescan === true,
       `answers={"rescan": true} scans again: ${again.result.status}`);
@@ -4182,6 +4760,9 @@ const scenarios = [
     check(feature.result.status !== 'needs_input', `a feature task is not asked about it: ${feature.result.status}`);
     const noText = await run({ mode: 'feature', task: 't' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
     check(noText.result.status === 'ready_for_review', `nor does what Setup says of the model stop a feature: ${noText.result.status}`);
+    // Nor is it asked what its model is: the user's word on that (text_model) is for a fix, whatever value it has.
+    const word = await run({ mode: 'feature', task: 't', text_model: 'yes' });
+    check(word.result.status === 'ready_for_review', `a feature task is not asked what its model is: ${word.result.status}`);
   }],
   ['arguments: with long_context on the task names the test G3 runs, and nothing stands in for it', async () => {
     const fields = (r) => (r.result.questions || []).map((q) => q.field);

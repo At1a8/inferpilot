@@ -77,7 +77,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      and list them in `notes`. Without a bundle, delete that ref if it is there (`git -C <framework_dir>
      update-ref -d refs/inferpilot/restored/<slug>`), so an earlier retry's commits are not taken again;
      `RUN_DIR/failed/branch.bundle` alone means every commit was rolled back, and still holds them: say
-     so.
+     so. A branch of that name can also be left by a run of the task on another definition, which
+     step 1 does not match: the run that asked a question this one answers (a model, a script,
+     `text_model`). It is an earlier attempt's all the same: refresh its bundle and rename it in the
+     same way, so that `checkout -b` never meets it and nothing of it is lost.
    - A resume skips the phases before it, so its branch is the one it stopped with. When it is not in
      `framework_dir` (a preempted node, a job past its time limit, a replaced container), restore it
      from the bundle after the fetch: `git -C <framework_dir> fetch RUN_DIR/branch.bundle
@@ -96,7 +99,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      checkout). Never switch the branch while a server imports from the checkout.
 3. **Environment.** Pin the framework commit, container image, ROCm and PyTorch versions and the GPU set,
    and return it as `gpu_ids`: the given one, or, when none was given, the first GPUs by HIP number, as
-   many as the task needs; step 0 found them all idle. `gpu_status.py` lists them by HIP number, the
+   many as the task needs; step 0 found them all idle. With `reported_on` (the model and launch
+   configuration the report puts the task's problem on; the result of an earlier run gives it, where
+   that run was set up for another one), the task needs what that configuration needs: a problem at
+   TP8 takes eight GPUs, whatever the run before this one chose. `gpu_status.py` lists them by HIP
+   number, the
    order of their KFD nodes: rocm-smi's Device numbers can differ (`env_hygiene.md`). Every later role uses
    exactly these, through `HIP_VISIBLE_DEVICES`. Servers, tests and benchmarks run where InferPilot runs,
    normally inside the container. When `container` is set (InferPilot on the host), run them with
@@ -110,7 +117,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    *Servers*); poll the health endpoint; read the effective
    `server_args=` line. A task without a `server_script` (issue, ci) gets one launch script written by
    you, with the same variables, from the reporter's or the job's own command as given: never with a
-   template's or the cookbook's flags. A report or a job that starts no server at all (a unit test, an
+   template's or the cookbook's flags. Where the report gives several commands, it is the one for the
+   problem `task` names, and with `reported_on` the one for that configuration. A report or a job
+   that starts no server at all (a unit test, an
    import that fails) leaves nothing to write it from: when the task has a `model_path`, render
    InferPilot's server template for it (below), the one template a run takes without the user's
    answer, and say so in `notes` for the report. Return the one or the other as `server_script`: G2
@@ -233,7 +242,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      *G2 for a model that answers no text questions*): a run that can reach a fix without one
      stops after Setup and asks for it. Never write that test in the task's place, and never
      leave the field out for such a model: without it the run takes the model for one that
-     answers text questions, and finds out at Verify, after the fix is written.
+     answers text questions, and finds out at Verify, after the fix is written. Say what you
+     find also where the task gives `text_model`: that is the user's word, which stands in
+     yours until Verify launches the model, and the run record says where the two differ. It is
+     among your inputs then, like any field of the task: record it in `RUN_DIR/run.json` with the
+     rest, so that a retry of the task is matched on it too, and judge the model as if it were
+     not there.
 5. **Artifact:** the environment and baseline sections of `RUN_DIR/experiment_ledger.md`
    (`templates/experiment_ledger.md`).
 
@@ -400,8 +414,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   done, the evidence, where and why the run stopped, and the exact next step for a human (what to
   review, approve, post or hand over); stopped at PR, each of `leak_scan_findings` (where it is and what it
   shows) and of `pr_work_packages` (what the branch still lacks). For `fixed_on_main`, say on which code
-  it fails and on which it passes, name the fix (`fixed_by`) when Bisect found one, or the check on the
-  latest main before the pull request. Where neither names it, say that the change that fixed it is
+  it fails and on which it passes, and name the fix (`fixed_by`), whichever phase named it: Classify
+  for a CI job whose tests pass on main, Bisect for an issue, or the check on the latest main before
+  the pull request. Where none names it, say that the change that fixed it is
   not named, and give the range it lies in: from the commit the run began on to the main the check
   ran on (`recheck.main`), or from the reporter's commit to main. For an issue, give the
   `bisect_fixed` run that would name it; a ci task has no such run, so offer none. Stopped
