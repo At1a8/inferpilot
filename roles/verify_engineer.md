@@ -159,16 +159,33 @@ clock can start before your session does.
        for a model that answers no text questions*): the same inputs with the same seeds on both
        arms, and the fix's outputs compared with the baseline's. Run it unchanged, once per arm, each
        against a server launched with the run's launch script on the same GPUs, each in a directory
-       of its own that you make first. The baseline arm first: `mkdir -p RUN_DIR/outputs/base`, then
-       `PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>`. Then the fix, with the
-       baseline's outputs, in a directory that no earlier execution wrote to, named for the commit it
-       runs: `mkdir RUN_DIR/outputs/fix-<commit>` (which must not find it there: a commit that runs
-       again takes `fix-<commit>-2`, and so on), then `PORT=<port>
-       OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash <output_script>`,
-       which compares, and exits non-zero when an output differs by more than the script tolerates. A
-       retry or a repaired fix never writes where an earlier execution wrote: that would overwrite
-       the evidence of its round, and an output the script did not write again would be compared as
-       this round's. Only the baseline's directory is reused, for the commit it was measured on.
+       of its own that you make first, named for the commit it runs. Make their parent once, `mkdir
+       -p RUN_DIR/outputs`, and each arm's directory with a plain `mkdir`, which fails where the
+       name is taken and so writes over nothing. The baseline arm first: `mkdir
+       RUN_DIR/outputs/base-<base commit>`, then `PORT=<port> OUT_DIR=RUN_DIR/outputs/base-<base
+       commit> bash <output_script>`. `<base commit>` is the commit the baseline arm runs, the base
+       or the last commit that served the configuration: not the fix's. Then the fix, with the
+       baseline's outputs, in a directory that no earlier execution wrote to: `mkdir
+       RUN_DIR/outputs/fix-<commit>` (which must not find it there: a commit that runs again takes
+       `fix-<commit>-2`, and so on), then `PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit>
+       BASE_DIR=<the baseline's directory> bash <output_script>`, which compares, and exits
+       non-zero when an output differs by more than the script tolerates. `BASE_DIR` is the
+       baseline directory this round uses, by its exact name: the one whose run finished, with its
+       suffix where the baseline was measured again (`base-<base commit>-2`). A retry or a repaired
+       fix never writes where an earlier execution wrote:
+       that would overwrite the evidence of its round, and an output the script did not write again
+       would be compared as this round's. Only the baseline's directory is reused, and only the one
+       of the commit this round's baseline is, whose run the ledger records as finished, in the
+       environment this round has and by the test this round runs: the same image, the same GPUs,
+       the same launch script and settings, and the same `output_script` by its content
+       (`sha256sum`), not by its path. Write those in the ledger with the baseline's command, so
+       that a later round can tell. A retry of the task can find the run directory with the outputs
+       of another base (main has moved), of a run that was cut short, of another container or other
+       GPUs, where a retry reuses the run directory, or of a script whose inputs or seeds were
+       changed in place since: none of these is this round's baseline, and a difference the
+       environment or the test made would read as the fix's. A record that lacks one of them shows
+       nothing either. Leave such a directory as it is, the evidence of its own round, and measure
+       the baseline again next to it (`base-<base commit>-2` where the name is taken).
        Never write such a test yourself, and never change the task's: its inputs, the seeds, the
        measure and the tolerance are the user's. `gates` says what it compared, of which commit,
        where and with what: `"G2": "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match

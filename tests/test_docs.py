@@ -1687,15 +1687,37 @@ class OutputComparisonTest(unittest.TestCase):
         self.assertNotIn("Nor has the fix for a model that answers no text questions", fix[0], "the doctrine still leaves such a fix unmeasured")
         for path, said in (("roles/verify_engineer.md", "G2 is an output comparison in its place, by the task's own test, its `output_script`"),
                            ("roles/verify_engineer.md", "Run it unchanged, once per arm"),
-                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/base bash <output_script>"),
+                           # each arm writes to a directory named for the commit it runs, the baseline's too
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/base-<base commit> bash <output_script>"),
+                           ("roles/verify_engineer.md", "`<base commit>` is the commit the baseline arm runs, the base or the last commit that "
+                                                        "served the configuration: not the fix's"),
+                           # the parent exists before either arm, and each arm's own directory is made with a mkdir that writes over nothing
+                           ("roles/verify_engineer.md", "Make their parent once, `mkdir -p RUN_DIR/outputs`, and each arm's directory with a plain "
+                                                        "`mkdir`, which fails where the name is taken and so writes over nothing"),
                            # every run of the fix writes to a directory of its own; only the baseline's is reused
-                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=RUN_DIR/outputs/base bash "
+                           ("roles/verify_engineer.md", "PORT=<port> OUT_DIR=RUN_DIR/outputs/fix-<commit> BASE_DIR=<the baseline's directory> bash "
                                                         "<output_script>"),
-                           ("roles/verify_engineer.md", "in a directory that no earlier execution wrote to, named for the commit it runs: `mkdir "
-                                                        "RUN_DIR/outputs/fix-<commit>`"),
+                           # BASE_DIR is the baseline's own directory, by its exact name
+                           ("roles/verify_engineer.md", "`BASE_DIR` is the baseline directory this round uses, by its exact name: the one whose "
+                                                        "run finished, with its suffix where the baseline was measured again"),
+                           ("roles/verify_engineer.md", "in a directory that no earlier execution wrote to: `mkdir RUN_DIR/outputs/fix-<commit>`"),
                            ("roles/verify_engineer.md", "a commit that runs again takes `fix-<commit>-2`"),
                            ("roles/verify_engineer.md", "A retry or a repaired fix never writes where an earlier execution wrote"),
-                           ("roles/verify_engineer.md", "Only the baseline's directory is reused, for the commit it was measured on"),
+                           ("roles/verify_engineer.md", "Only the baseline's directory is reused, and only the one of the commit this round's "
+                                                        "baseline is, whose run the ledger records as finished, in the environment this round "
+                                                        "has and by the test this round runs: the same image, the same GPUs, the same launch "
+                                                        "script and settings, and the same `output_script` by its content (`sha256sum`), not "
+                                                        "by its path"),
+                           # the environment is recorded with the baseline's command: a retry can reuse the run directory elsewhere
+                           ("roles/verify_engineer.md", "Write those in the ledger with the baseline's command, so that a later round can tell"),
+                           # a retry of the task can find the outputs of another base, of a run that was cut short, or of another environment
+                           ("roles/verify_engineer.md", "A retry of the task can find the run directory with the outputs of another base (main has "
+                                                        "moved), of a run that was cut short, of another container or other GPUs, where a "
+                                                        "retry reuses the run directory, or of a script whose inputs or seeds were changed in "
+                                                        "place since: none of these is this round's baseline, and a difference the environment "
+                                                        "or the test made would read as the fix's"),
+                           ("roles/verify_engineer.md", "A record that lacks one of them shows nothing either"),
+                           ("roles/verify_engineer.md", "measure the baseline again next to it (`base-<base commit>-2` where the name is taken)"),
                            ("roles/verify_engineer.md", "16 images of 5d6e7f8 written to RUN_DIR/outputs/fix-5d6e7f8, no baseline"),
                            ("roles/verify_engineer.md", "InferPilot accepts a round for such a model only on one of those two results, a `pass` or "
                                                         "outputs kept with `no baseline`"),
