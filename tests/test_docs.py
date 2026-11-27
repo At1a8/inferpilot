@@ -2151,7 +2151,13 @@ class CiOnMainTest(unittest.TestCase):
                 # the variant is the ROCm and the GPU together: the newest tag of the ROCm alone can be the other GPU family's
                 ("roles/ci_guardian.md", "The variant is the ROCm and the GPU of the tag together (`rocm720-mi35x`, `rocm724-mi30x`)"),
                 ("roles/ci_guardian.md", "the newest tag of the ROCm alone can be the other family's, which this lane never ran"),
-                ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names it"),
+                ("roles/ci_guardian.md", "`python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names it for a lane that "
+                                         "runs the daily sglang image"),
+                # a lane on another family of images (MILES) has a newest tag of its own, which that script skips
+                ("roles/ci_guardian.md", "the MILES nightly runs `miles-<rocm>-<gpu>-<date>`, which that script skips, and resolves it in its "
+                                         "workflow"),
+                ("roles/ci_guardian.md", "Take such a lane's image from its workflow and its latest run on main, never the sglang image of the "
+                                         "same ROCm and GPU"),
                 ("knowledge/ci_triage.md", "the newest tag of the lane's variant in the registry (its ROCm and its GPU together, "
                                            "`rocm720-mi35x`: the other GPU family has a build of its own)"),
                 ("roles/ci_guardian.md", "one that only matches the failed job's can be as old as it"),
