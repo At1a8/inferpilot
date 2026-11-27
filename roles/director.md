@@ -429,7 +429,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   as a candidate for the fix is named as one, and as not confirmed. The phases keep only the
   start of Classify's evidence, where it may be missing. A fix the record holds as confirmed is
   named too where the run handed the task over with a part not run: the result has no `fixed_by`
-  then. Name it as the fix of the tests and lanes that were run, and of nothing else.
+  then. Name a confirmed fix, from the record or from `fixed_by`, as the fix of the tests and
+  lanes it was confirmed on, and of nothing else: a cluster can have been fixed by several
+  changes, each for some of its tests.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on

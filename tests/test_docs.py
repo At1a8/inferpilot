@@ -2392,6 +2392,14 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "Where its diff does not show that, apply the change to the job's commit and run the test there, or leave "
                                          "it a candidate"),
                 ("roles/ci_guardian.md", "The first two show that a fix lies between the job's commit and main, not which change it is"),
+                # a cluster can have been fixed by several changes: a fix is named for the tests and lanes it was shown on
+                ("roles/ci_guardian.md", "The four are shown test by test and lane by lane, each against the commit of its own failing job"),
+                ("roles/ci_guardian.md", "a fix confirmed on one test of one lane is not thereby the fix of the rest"),
+                ("roles/ci_guardian.md", "`fixed_by` names a change only for what it was shown on: where that is not every test and lane you ran, "
+                                         "it says which (`#50231: test_a on rocm720; #50240: test_b`), and the triage record keeps each confirmed "
+                                         "fix with its tests and lanes"),
+                ("roles/director.md", "Name a confirmed fix, from the record or from `fixed_by`, as the fix of the tests and lanes it was "
+                                      "confirmed on, and of nothing else"),
                 # the check on the latest main before the pull request names a fix on the same proof, for a ci task and an issue alike
                 ("roles/verify_engineer.md", "`fixed_by` names the pull request or the commit that fixed it only where you showed that it did, "
                                              "within this check's time"),
@@ -2427,12 +2435,11 @@ class CiOnMainTest(unittest.TestCase):
                 # a confirmed fix of the part that was run is not lost where the rest of the task is handed over
                 ("roles/director.md", "A fix the record holds as confirmed is named too where the run handed the task over with a part not run: "
                                       "the result has no `fixed_by` then"),
-                ("roles/director.md", "Name it as the fix of the tests and lanes that were run, and of nothing else"),
-                ("templates/ci_triage.md", "the fix that merged where the runs confirmed it: the job's commit and the change's parent fail on "
-                                           "this image, the change passes; a change that only looks like the fix as a candidate, marked not "
-                                           "confirmed"),
+                ("templates/ci_triage.md", "the fix that merged where the runs confirmed it, with the tests and lanes it was confirmed on: the "
+                                           "job's commit and the change's parent fail on this image, the change passes; a change that only looks "
+                                           "like the fix as a candidate, marked not confirmed"),
                 ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: the job\'s commit and its parent fail '
-                                         'here, it passes>"'),
+                                         'here, it passes; with its tests and lanes where it is not the fix of all that ran>"'),
                 ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
                 ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)
