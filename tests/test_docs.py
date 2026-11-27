@@ -2424,6 +2424,10 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/director.md", "For a ci task whose tests passed on main at Classify (`not_reproduced`, or `handed_off` where part of the "
                                       "task was not run), read its triage record: a change it holds as a candidate for the fix is named as "
                                       "one, and as not confirmed"),
+                # a confirmed fix of the part that was run is not lost where the rest of the task is handed over
+                ("roles/director.md", "A fix the record holds as confirmed is named too where the run handed the task over with a part not run: "
+                                      "the result has no `fixed_by` then"),
+                ("roles/director.md", "Name it as the fix of the tests and lanes that were run, and of nothing else"),
                 ("templates/ci_triage.md", "the fix that merged where the runs confirmed it: the job's commit and the change's parent fail on "
                                            "this image, the change passes; a change that only looks like the fix as a candidate, marked not "
                                            "confirmed"),

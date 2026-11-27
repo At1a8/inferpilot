@@ -427,7 +427,9 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   proposed, and where it is. For a ci task whose tests passed on main at Classify (`not_reproduced`,
   or `handed_off` where part of the task was not run), read its triage record: a change it holds
   as a candidate for the fix is named as one, and as not confirmed. The phases keep only the
-  start of Classify's evidence, where it may be missing.
+  start of Classify's evidence, where it may be missing. A fix the record holds as confirmed is
+  named too where the run handed the task over with a part not run: the result has no `fixed_by`
+  then. Name it as the fix of the tests and lanes that were run, and of nothing else.
 - Always list hand-offs with their status (`recorded`, `integrated`, `no_gain`, `failed`,
   `integration_failed`, `integration_held`, `rejected`, `not_integrated`) and package paths. An
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
