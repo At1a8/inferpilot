@@ -89,9 +89,12 @@ PR; its Motivation names that pull request and what it did not pass (`pr_playboo
    one sentence per changed file, HIP-only checked and said, GSM8K 1319 at the defaults, one speed
    scenario against the baseline, the way a person writes) and §Attribution (its line word for word,
    where that section puts it); title in the repository's convention
-   (sglang: `[Type] [Hardware] scope: title`). When the task was to push an existing PR (an issue
-   triaged `push_existing_pr`, a CI failure classified with `existing_prs`), write the verification
-   comment for that PR instead, at the same path, with no attribution line. It names the commit of
+   (sglang: `[Type] [Hardware] scope: title`). When the run verified someone else's pull request
+   (`existing_prs` in your inputs names it: the one the user named, for an issue or a CI failure),
+   write the verification comment for that PR instead, at the same path, with no attribution line.
+   Go by that input and by nothing else: without it the branch holds the run's own fix, whatever
+   the triage or the classification found open, and its pull request is yours to write, as any
+   other. With it, the comment is for that pull request and no other. It names the commit of
    the PR that was verified (the head the implementer fetched, in the ledger), and lists apart what
    the run added on top of it, commit by commit and why: the results are for that commit with those
    additions, and a PR that has moved since is not what was verified. A commit of the PR whose

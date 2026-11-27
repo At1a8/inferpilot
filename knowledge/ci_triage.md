@@ -128,9 +128,11 @@ What the user names is looked up like any other: the classification is given it 
 the run applies only a pull request found open, with the commit its branch is at. A word that names
 its repository (a URL, `<owner>/<repo>#<n>`) keeps it: it is a word for a pull request the
 classification places in that repository, and never for the framework's pull request of the same
-number. One that is closed, merged or not found is not applied, the triage record says why, and the
-run goes on to a fix of its own. One pull request is verified in a run: several applied together
-would show nothing of each, and the others are named in the triage record.
+number. Where the pull request of that number came back without its repository, the word is held
+neither for it nor against it: the run asks, and the number is the answer. One that is closed,
+merged or not found is not applied, the triage record says why, and the run goes on to a fix of its
+own. One pull request is verified in a run: several applied together would show nothing of each,
+and the others are named in the triage record.
 
 **A failure on a number is a performance problem,** whatever its class: the test measures a
 throughput, a latency or a speed threshold and fails because the number fell, not on an error (a

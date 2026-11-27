@@ -30,8 +30,8 @@ request names for the run to verify, or none).
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
    Where an open fix PR is what makes the problem P1 (§2: a default-configuration failure that
    already has one), return `priority_without_pr` as well, the priority it has when no usable fix
-   PR exists: the run takes it when that pull request does not pass verification and it goes on to
-   a fix of its own.
+   PR exists: the run takes it when that pull request does not pass verification, or is not open
+   after all, and it goes on to a fix of its own.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
    names that issue and what this report adds to it. A report with several problems is several tasks:
@@ -75,16 +75,19 @@ request names for the run to verify, or none).
    every problem. `existing_prs` lists the open fix PRs, the likeliest first, each as the CI
    guardian gives one (`ci_guardian.md`, PHASE=classify step 4): its number (`#<n>`), the
    repository it is in (`repo`), its author and the author's association with the repository as the
-   API gives them, its head commit and its `state` (`open`). Read each one's diff and run nothing
-   of it: its code is its author's, and runs on this machine only when the run applies it, which it
-   does on the user's word alone (`issue_triage.md` §4). Your `push_existing_pr` says that such a
-   pull request is open, not that the run may apply it, and the association is for the user to
-   read: it proves no right to put code on main. Look up each pull request in `named_prs` as well,
-   whether or not your own search found it, and return it with its `state` as the API gives it now
-   (`open`, `closed`, `merged` or `not_found`): the run applies one only where you return it open.
-   One of another repository goes under its full name (`<owner>/<repo>#<n>`), never as this
-   repository's `#<n>`. Every action that leads to a code change, `push_existing_pr` included, is
-   reproduced on main first; that reproduction is the gate the fix must pass.
+   API gives them, its head commit and its `state` (`open`). Always give the repository: a task can
+   name its pull request by a URL, which says where it is, and the run does not hold such a word
+   against a bare number, which may be another repository's: it asks the user again. Read each
+   one's diff and run nothing of it: its code is its author's, and runs on this machine only when
+   the run applies it, which it does on the user's word alone (`issue_triage.md` §4). Your
+   `push_existing_pr` says that such a pull request is open, not that the run may apply it, and the
+   association is for the user to read: it proves no right to put code on main. Look up each pull
+   request in `named_prs` as well, whether or not your own search found it, and return it with its
+   `state` as the API gives it now (`open`, `closed`, `merged` or `not_found`): the run applies one
+   only where you return it open. One of another repository goes under its full name
+   (`<owner>/<repo>#<n>`), never as this repository's `#<n>`. Every action that leads to a code
+   change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate
+   the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.

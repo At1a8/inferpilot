@@ -2094,7 +2094,11 @@ async function verifyLoop(extraGates, existing) {
       await refused();
       note('Verify', 'fail', `the failure is an accuracy problem, and the round was accepted without the score coming back `
         + `("${C.accuracy_claim}"): accuracy_claim is ${claimGate ? `"${claimGate}"` : 'not reported'}`);
-      return theirs('the accuracy claim is not met');
+      // A score that was measured and is short of the claim (`fail <score>`) is what a fix failed: someone else's
+      // pull request gets its comment for it. A gate that was left out, not run, or failed without a score was not
+      // measured, and shows nothing against a pull request: the run stops for a human.
+      return /^fail\s+\.?\d/i.test(claimGate) ? theirs('the accuracy claim is not met')
+        : { ok: false, reason: 'the accuracy claim was not measured' };
     }
     if (v.all_pass === true || (failures.length && !blocking.length)) {
       const missed = failures.filter((f) => f.blocking === false).map((f) => f.gate).join(', ');
@@ -2858,6 +2862,16 @@ async function runIssue() {
   };
   const stopAt = liveStopAfter();
   if (theirs && theirs.ask && stopAt !== 'now' && !BEFORE_A_FIX.issue.includes(stopAt)) return askWhich('Triage');
+  // The priority a problem has without a usable fix PR: a default-configuration failure was P1 only because one
+  // was open (issue_triage.md §2), and only a P0 gets a workaround here for a defect that is a component's. The
+  // run takes it where the pull request did not pass, or where none is open after all. Not where an open one was
+  // declined, or is another repository's: it is still open.
+  const withoutUsablePr = (before) => {
+    const without = String(tri.priority_without_pr || '').trim();
+    if (!without || without === C.priority) return;
+    note('Triage', 'priority', `${C.priority} while ${before}, ${without} without a usable one: the run goes on as ${without}`);
+    C.priority = R.priority = without;
+  };
 
   // Every path that changes code first reproduces on main: the reproduction is the issue_repro gate,
   // also for an existing fix PR.
@@ -2960,14 +2974,8 @@ async function runIssue() {
     const tried = await deliver([wp], gates, issueClaim, runPerf, prs);
     if (tried !== EXISTING_FAILED) return tried;
     // The existing fix did not pass: its comment is drafted, the task branch is back at the base, and the run goes
-    // on to a fix of its own from here, as for an issue nobody had opened a pull request for. Its priority is the
-    // one it has without a usable fix PR: a default-configuration failure was P1 only because one was open
-    // (issue_triage.md §2), and only a P0 gets a workaround here for a defect that is a component's.
-    const without = String(tri.priority_without_pr || '').trim();
-    if (without && without !== C.priority) {
-      note('Triage', 'priority', `${C.priority} while ${prs} was open, ${without} without a usable one: the run goes on as ${without}`);
-      C.priority = R.priority = without;
-    }
+    // on to a fix of its own from here, as for an issue nobody had opened a pull request for.
+    withoutUsablePr(`${prs} was open`);
   } else if (theirs && theirs.others.length) {
     // The user's word names none of the open pull requests, or says none: the run fixes the problem itself. A
     // pull request is still open for it, so its priority stays the one it has with one.
@@ -2976,6 +2984,11 @@ async function runIssue() {
   } else if (tri.action === 'push_existing_pr') {
     note('Reproduce', 'existing_fix', 'the triage found an open fix (push_existing_pr) and returned no open pull request of this '
       + 'repository to apply: the run fixes the problem itself');
+    // The triage set the priority as for a problem with an open fix. Where none is open after all (it returned
+    // none, or only one that is closed), the problem has the priority it has without one. A pull request that is
+    // open in another repository (a component's) is a fix under way all the same: the run cannot apply it, and the
+    // priority stays.
+    if (!theirs.foreign.some((p) => p.state === 'open')) withoutUsablePr('the triage took a fix PR for open');
   }
 
   enter('Diagnose');
@@ -3042,10 +3055,18 @@ function existingFix(found, needHead = true) {
   // The user's word decides when it names a pull request or says none, and one of the two only. Any other
   // answer ("not sure", a sentence) decides nothing: taken for "none", it would send the run to a fix of its own.
   const none = said.some((w) => /^"?none"?$/i.test(w));
-  const decided = none ? !byUser.length : byUser.length > 0;
+  // A word that names its repository (a URL) cannot be held against a pull request that came back without one (an
+  // issue's triage may give a number alone): the number may be another repository's. Taken for "not found", it
+  // would send the run to a fix of its own in place of the pull request the user asked for; matched by the number,
+  // it could run a pull request the user did not name. Such a word decides nothing, and the run asks.
+  const numberOf = (ref) => ref.slice(ref.lastIndexOf('#'));
+  const unplaced = byUser.filter((ref) => ref.lastIndexOf('#') > 0 && !usable.some((p) => samePr(ref, p))
+    && usable.some((p) => !p.repo && p.pr === numberOf(ref)));
+  const worded = none ? !byUser.length : byUser.length > 0; // the word names a pull request, or says none
+  const decided = worded && !unplaced.length;
   const apply = decided ? byUser.map((ref) => usable.find((p) => samePr(ref, p))).find(Boolean) || null : null;
   // What the task or the request names and the run cannot apply, each with why.
-  const refused = (byUser.length ? byUser : seems).filter((ref) => !usable.some((p) => samePr(ref, p))).map((ref) => {
+  const refused = (byUser.length ? byUser : seems).filter((ref) => !unplaced.includes(ref) && !usable.some((p) => samePr(ref, p))).map((ref) => {
     const p = here.find((x) => samePr(ref, x));
     return `${ref}: ${!p ? `the ${needHead ? 'classification' : 'triage'} did not find it as a pull request of this repository`
       : p.state !== 'open' ? `it is ${p.state || 'not said to be open'}` : 'the commit its branch is at is not known'}`;
@@ -3060,8 +3081,10 @@ function existingFix(found, needHead = true) {
     out.ask = { who, question: { field: 'apply_prs',
       question: `${who}: open, and said to fix this failure. Verifying a pull request runs its code and its tests on this machine, next `
         + 'to the keys the agents hold, so the run applies one only on your word. '
-        + `${said.length ? `${JSON.stringify(said.join(', '))} does not say which: it names no pull request, or one and "none" at once. ` : ''}`
+        + `${said.length && !worded ? `${JSON.stringify(said.join(', '))} does not say which: it names no pull request, or one and "none" at once. ` : ''}`
         + `${confirm.length ? `The request seems to name ${confirm.join(', ')}: say so here to confirm it. ` : ''}`
+        + `${unplaced.length ? `${unplaced.join(', ')} names a repository, and ${unplaced.map(numberOf).join(', ')} was found without one: `
+          + 'say the number here if that is the pull request you mean. ' : ''}`
         + 'Which one should the run verify? Its number, or "none" to have the run fix the failure itself.',
       why: "a pull request is someone else's code: it runs on this machine only on your word",
       options: [...candidates.map((p) => p.pr), 'none'] } };

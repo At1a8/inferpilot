@@ -81,9 +81,12 @@ no such word. A run that can reach the fix without it stops after Triage and ask
 or none, before anything is reproduced: asked later, the answer would cost the reproduction a second
 time. A run that stops before its fix applies nothing, and is not asked. With `none` the run fixes the
 problem itself, with a diagnosis, at the priority the problem has while a pull request is open for it.
-One pull request is verified in a run, the one the user names; the others are named in the run record.
-A pull request the task names is looked up whatever the triage's action: where the triage returns it
-open it is verified on that word, and where it does not, the record says why it was not.
+Where the triage took a fix for open and none is open after all (it returned none, or only one that is
+closed), the problem has the priority it has without one, as after a pull request that did not pass;
+one that is open in another repository keeps it, though the run cannot apply it. One pull request is
+verified in a run, the one the user names; the others are named in the run record. A pull request the
+task names is looked up whatever the triage's action: where the triage returns it open it is verified
+on that word, and where it does not, the record says why it was not.
 
 **An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
 it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for
@@ -96,11 +99,12 @@ one and says in one sentence what it did not pass. A failure the baseline shares
 request's (`validation_doctrine.md`, *Same-pattern baseline control*), and a measurement that could not
 be trusted decides nothing: the run stops for a human then, as for any fix.
 
-Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that
-fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's counts
-against it: a conflict, a gate it failed, a failure the investigator explains or one the controls
-attribute to it (the baseline ran to its end and passed), a trusted measurement that is slower on
-the task's client or on a guard workload. A comparison that decided nothing, a package blocked for
+Verified as it is means that no conflict is resolved and no fix round repairs a test of its own
+that fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's
+counts against it: a conflict, a gate it failed, a failure the investigator explains or one the
+controls attribute to it (the baseline ran to its end and passed), a trusted measurement that is
+slower on the task's client or on a guard workload, a score measured short of the one the fix must
+restore. A comparison that decided nothing, a score that was not measured, a package blocked for
 another reason and an answer that never came prove nothing: the run stops for a human, with no
 comment. Nothing is rolled back next to a call that may still be running (one that timed out, a
 gate that could not stop what it started): the comment is drafted, and the run stops. A stop named
