@@ -56,20 +56,27 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
 
 Then:
 
-- All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older than
-  the lane's newest, or a fix has merged since. `fixed_by` names that pull request or commit only
-  where you showed that it is the fix: the test fails on the change's parent and passes on the
-  change, on the lane's image, each run as the job ran it. The parent has to fail as the job
-  failed, with the same error or the same measurement short of its threshold: one that fails
-  another way (an import, a test that is not collected) shows nothing of that change. First show
-  that the job's own commit fails so on this image: the job and main ran different images, and
-  where that commit passes here, the image is what changed. No change of main is the fix then,
-  and a later regression that was repaired since would pass the parent's test in its place. Only
-  with that commit failing here does the fix lie between it and main, and that alone does not
-  say which change it is. A change that only looks like the fix is a candidate: name it in
-  `evidence` and in the triage record, marked as not confirmed (the run record keeps only the
-  start of `evidence`, the triage record all of it), and `fixed_by` stays empty. The run then
-  ends as not reproduced on main, which is all it showed, and names no fix it did not confirm.
+- All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older
+  than the lane's newest, or a fix has merged since. `fixed_by` names that pull request or commit
+  only where you showed that it is the fix, on the lane's image, each run as the job ran it. Four
+  things show it. First, the job's own commit fails here as the job failed: the same error, or the
+  same measurement short of its threshold. Where it passes here, the failure is not reproduced on
+  that commit, and nothing more: the job may have run another image than this one (compare the two,
+  as the job's log and this container name them), or the failure may be intermittent. No change of
+  main is shown to be the fix then. Second, that commit is an ancestor of the main you ran (`git
+  merge-base --is-ancestor <the job's commit> <main>`). A job of a pull request's branch failed on
+  code main may never have had: the two histories have no range for a fix to lie in, so say that
+  they diverge and claim none. Third, the change lies in that range, the test fails on the change's
+  parent as the job failed, and passes on the change. A parent that fails another way (an import, a
+  test that is not collected) shows nothing of that change. Fourth, the change addresses this
+  failure, the same error on the same path, as step 4 asks of an open pull request: a later
+  regression with the same error that another change repaired passes the parent's test too. Where
+  its diff does not show that, apply the change to the job's commit and run the test there, or
+  leave it a candidate. The first two show that a fix lies between the job's commit and main, not
+  which change it is. A change short of the four is a candidate: name it in `evidence` and in the
+  triage record, marked as not confirmed (the run record keeps only the start of `evidence`, the
+  triage record all of it), and `fixed_by` stays empty. The run then ends as not reproduced on
+  main, which is all it showed, and names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is

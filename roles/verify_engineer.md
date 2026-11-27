@@ -426,11 +426,18 @@ request is prepared.
      ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
      step that failed. A number reaches `claim` and a score `accuracy_claim`, as the run established
      them, not a threshold main has lowered since. `fixed_by` names the pull request or the commit
-     that fixed it only where you showed that it did: the gate fails on that change's parent as it
-     failed on the base, and passes on the change, in this check's environment and within its time.
-     The log of main since `<base>` shows candidates, not the fix. One you did not confirm is named
-     in `evidence` as a candidate, and `fixed_by` stays empty: the report then gives the range the
-     fix lies in, and names none.
+     that fixed it only where you showed that it did, within this check's time. `<base>` is an
+     ancestor of `main` (`git merge-base --is-ancestor`), and the change lies between the two. The
+     gate fails on that change's parent as it failed on the base, and passes on the change, each in
+     the environment its own files call for. Step 3's environment is main's: a parent run in it
+     would already have a dependency the change brought in, and would pass for that. And the change
+     addresses this failure, the same error on the same path: a later regression with the same
+     error that another change repaired passes the parent's test too. Where its diff does not show
+     that, apply the change to `<base>` and run the gate there, or leave it a candidate. The log of
+     main since `<base>` shows candidates, not the fix. One you did not confirm is named in
+     `evidence` as a candidate, and `fixed_by` stays empty: the report then gives the range the fix
+     lies in, and names none. Where `<base>` is no ancestor of `main` (a task that began on a
+     branch), there is no such range: say that the two diverge.
    - `inconclusive`: anything else. A run that fails another way (an import error, a server that
      stops for another reason); fewer runs than step 4 asks for, or some of them failing; a test
      main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
