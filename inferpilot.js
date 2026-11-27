@@ -1085,9 +1085,11 @@ const RESUMED = S({
 // What a resumed run must measure as the run it resumes did, the gates its task asked for (G3, G4) and the
 // test G3 runs among them; the machine, the task's wording and the operator settings may differ. GIVEN holds
 // them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
-// in C later.
+// in C later. The configuration the report puts an issue's problem on is among them (reported_on): Setup takes
+// the GPUs that configuration needs where the task gives none, and the launch script it wrote for the run's,
+// which a resume does not write again, would be started on the GPUs of another.
 const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness',
-  'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script'];
+  'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script', 'reported_on'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
 // What a run establishes before Verify that the phases after it go by, and that no phase's record holds as the
 // run had it: the pull request it verifies in place of a fix of its own (the PR phase writes a comment for it,

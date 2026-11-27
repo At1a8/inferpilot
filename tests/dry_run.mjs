@@ -999,9 +999,27 @@ const scenarios = [
       && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it (no goal)')), 'and the run says so');
     check(!('goal' in noGoal.result.task_def) && noGoal.result.task_def.task === 't',
       `nor does the result's task definition name the goal given now: ${JSON.stringify(noGoal.result.task_def.goal)}`);
+    // The configuration the report puts an issue's problem on is the run's too: Setup takes the GPUs it needs where
+    // the task gives none, and the run's launch script, which a resume does not write again, was written for it.
+    const TP8 = 'DeepSeek-V4.1, --tp-size 8';
+    const recordedOn = (was) => (ins) => ({ task_definition: { ...Object.fromEntries(Object.entries(ins.task_def)
+      .filter(([k]) => k !== 'reported_on')), ...(was ? { reported_on: was } : {}) } });
+    for (const [why, was, now] of [['another configuration than the run\'s', TP8, 'DeepSeek-V4.1, --tp-size 2'],
+      ['none where the run had one', TP8, ''], ['one where the run had none', '', TP8]]) {
+      const moved = await resumed('issue', recordedOn(was), now ? { reported_on: now } : {});
+      check(stoppedFor(moved, '(reported_on not as its run.json has them)'),
+        `a resume given ${why} would have Setup choose other GPUs: ${moved.result.status} at ${moved.result.stopped_at}`);
+    }
+    const sameOn = await resumed('issue', recordedOn(TP8), { reported_on: TP8 });
+    const setOn = sameOn.calls.find((c) => c.key === 'director:setup');
+    check(sameOn.result.status === 'ready_for_review' && setOn && setOn.ins.reported_on === TP8,
+      `the configuration the run had goes on, and Setup is given it: ${sameOn.result.status} at ${sameOn.result.stopped_at}`);
     const doc = phaseSection(readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8'), 'resume').replace(/\s+/g, ' ');
     check(doc.includes('A `run.json` without its `task` lost it, as every run has one: return the definition as it is there, never with the task '
       + 'you were given in its place, and the resume stops'), 'the director gives back a run.json without its task as it is');
+    check(doc.includes('A `reported_on` that is not the one `run.json` has (another configuration, one where the run had none, none where it had '
+      + 'one) stops the resume in the same way: Setup takes the GPUs that configuration needs where the task gives none'),
+      'the director is told that the configuration the report puts the problem on is held against run.json as well');
   }],
   ['setup: a run resumed from Verify stops without the records Verify and Reply read; no package left is a state of its own', async () => {
     const resumed = (mode, extra) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {

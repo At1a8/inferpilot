@@ -325,7 +325,11 @@ on the commit the run's last Verify round ran on. Change nothing.
    workload, the scripts, `output_script` among them, `harness`, `apply_prs`, `held_out`, `guards`,
    `sweep`, `tune`, and the gates
    the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
-   that would measure otherwise is a run of its own. A path, like any other string, is compared as
+   that would measure otherwise is a run of its own. A `reported_on` that is not the one `run.json`
+   has (another configuration, one where the run had none, none where it had one) stops the resume in
+   the same way: Setup takes the GPUs that configuration needs where the task gives none, and the
+   launch script written for the run's, which a resume does not write again, would start on the GPUs
+   of another. A path, like any other string, is compared as
    written, since the run uses it as given: a space at its end is part of a file's name; what the file
    at it holds, Setup held against the run's copy before its smoke (step 1 there). What a
    `workload` holds is compared as it is there, a number also where it is written as its digits:
