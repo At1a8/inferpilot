@@ -394,18 +394,20 @@ performance change the task's base, on which Setup measured it; for a fix the ba
 commit that served the configuration where the base cannot. For a feature or a performance change
 the baseline's numbers are Setup's, as `RUN_DIR/baseline.json` has them: give every set it has,
 each with the score recorded there, and measure no baseline of your own in its place. InferPilot
-was given the same record, and holds `base` to it. Each entry of `sets` is one data set, gsm8k
-first: `fix` and `base` are its scores as fractions of 1 (0.895, never 89.5), `questions` how many
-the set has, `answered` and `base_answered` how many of them each arm answered. With InferPilot's
-`accuracy.sh`, gsm8k is always among the sets, and each set has all its questions (gsm8k 1319,
-gpqa_diamond 198, simple_qa 4326): a run with `LIMIT` is a smoke test, not a result. A set where an
-arm left a question unanswered has no score: leave that arm's score out, give how many it answered,
-and report the failure. Where the harness ended without its report there is no count either: give
-the set by its name, and report the failure. A set reported under a gate of its own (an item of the
-acceptance matrix, `ACC-2`) names it in `gate`; without one the set is G2's. It is never another
-gate of the run's (G3, G4, the fix's own gates): a stability failure that does not block excuses no
-loss of accuracy. `budget` is how far below its baseline the task lets the set fall, as a fraction
-(0.02 for two points): give it only where the user named another budget than a point for that set
+was given the same record, and holds `base` to it. A set that misses is run again on the change's
+side (at most twice more, `validation_doctrine.md`): `fix` is then the median of the change's runs,
+and the baseline stays Setup's. Each entry of `sets` is one data set, gsm8k first: `fix` and `base`
+are its scores as fractions of 1 (0.895, never 89.5), `questions` how many the set has, `answered`
+and `base_answered` how many of them each arm answered. With InferPilot's `accuracy.sh`, gsm8k is
+always among the sets, and each set has all its questions (gsm8k 1319, gpqa_diamond 198, simple_qa
+4326): a run with `LIMIT` is a smoke test, not a result. A set where an arm left a question
+unanswered has no score: leave that arm's score out, give how many it answered, and report the
+failure. Where the harness ended without its report there is no count either: give the set by its
+name, and report the failure. A set reported under a gate of its own (an item of the acceptance
+matrix, `ACC-2`) names it in `gate`; without one the set is G2's. It is never another gate of the
+run's (G3, G4, the fix's own gates): a stability failure that does not block excuses no loss of
+accuracy. `budget` is how far below its baseline the task lets the set fall, as a fraction (0.02
+for two points): give it only where the user named another budget than a point for that set
 (`goal`, the acceptance matrix), never one of your own, and the run record says which set was
 judged on which. The change's scores are this round's, of this commit: an earlier round's, or
 another commit's, are not. The baseline's come from the ledger only for the commit they were

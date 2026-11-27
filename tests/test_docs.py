@@ -1114,6 +1114,8 @@ class G2NumbersTest(unittest.TestCase):
                                              "them: give every set it has, each with the score recorded there, and measure no baseline of your "
                                              "own in its place"),
                 ("roles/verify_engineer.md", "InferPilot was given the same record, and holds `base` to it"),
+                ("roles/verify_engineer.md", "A set that misses is run again on the change's side (at most twice more, `validation_doctrine.md`): "
+                                             "`fix` is then the median of the change's runs, and the baseline stays Setup's"),
                 ("roles/verify_engineer.md", "Where the harness ended without its report there is no count either: give the set by its name, and "
                                              "report the failure"),
                 ("roles/verify_engineer.md", "It is never another gate of the run's (G3, G4, the fix's own gates): a stability failure that does not "
