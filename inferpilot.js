@@ -1014,8 +1014,8 @@ const K_COLLECT = S({
 // one is a gain, never claimed on InferPilot's client; a feature that states none, and a fix of a problem
 // that is not one of performance, are judged as no slower, which is no claim to restore);
 // known_issues and handoffs as its report wrote them (Verify judges a failure the baseline shares by the
-// first, and reverts an integrated kernel by the second), null when the run directory lost them;
-// task_definition as its run.json recorded it.
+// first, and reverts an integrated kernel by the second), and run_state likewise (STATE), null when the run
+// directory lost them; task_definition as its run.json recorded it.
 const RESUMED = S({
   head_ok: bool,
   head: str,
@@ -1024,6 +1024,7 @@ const RESUMED = S({
   verified_work_packages: { type: ['array', 'null'], items: S({ wp: str, commit: str, evidence: str }, ['wp', 'commit']) },
   known_issues: { type: ['array', 'null'], items: obj },
   handoffs: { type: ['array', 'null'], items: obj },
+  run_state: { type: ['object', 'null'] },
   task_definition: { type: ['object', 'null'] },
   repro_cmd: str,        // issue: the issue_repro gate
   failing_test_cmd: str, // ci: the failing_test gate
@@ -1036,15 +1037,32 @@ const RESUMED = S({
   design_path: str,
   analysis_path: str,
   notes: str,
-}, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'task_definition', 'perf_required', 'perf_claim',
+}, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'run_state', 'task_definition', 'perf_required', 'perf_claim',
   'perf_cost', 'design_auto_approved']);
 // What a resumed run must measure as the run it resumes did, the gates its task asked for (G3, G4) and the
 // test G3 runs among them; the machine, the task's wording and the operator settings may differ. GIVEN holds
 // them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
 // in C later.
-const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'harness', 'apply_prs',
-  'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script'];
+const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness',
+  'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
+// What a run establishes before Verify that the phases after it go by, and that no phase's record holds as the
+// run had it: the pull request it verifies in place of a fix of its own (the PR phase writes a comment for it,
+// and no pull request), the score an accuracy problem in CI must restore (no round is accepted without it), the
+// AMD component its root cause is in (the reply, the report and the result name the draft), and the part of a
+// ci task it does not answer for. The report writes it down as given (run_state.json), and a run resumed from
+// Verify goes on with it. STATE says what each of them holds: one in another form is one the file lost, and so
+// is a pull request without the commit the run verified it at, or one that existing_prs does not name.
+const filled = (v) => typeof v === 'string' && !!v.trim();
+const STATE = {
+  existing_prs: (v) => Array.isArray(v) && v.length > 0 && v.every(filled),
+  existing_pr: (v, all) => !!v && typeof v === 'object' && !Array.isArray(v) && filled(v.pr) && filled(v.head)
+    && Array.isArray(all.existing_prs) && all.existing_prs.includes(v.pr),
+  accuracy_claim: filled,
+  component_issue: (v) => !!v && typeof v === 'object' && !Array.isArray(v) && COMPONENTS.includes(v.component) && filled(v.draft_path),
+  unchecked: filled,
+};
+const runState = () => pick(C, Object.keys(STATE));
 // One form for a setting however it was written down. JSON, given as an object or in a string, is compared as
 // JSON with its keys in order, which keeps the boundaries of every value: a comma or a colon in a path is not a
 // second setting. Its values stay what they are, a number also where it is written as its digits: what "false"
@@ -1233,7 +1251,7 @@ async function finish(status, at) {
     enter('Report');
     // A Dispatch that failed or timed out may have left a partial daily report: only a queued scan shares one.
     const rep = await call('director', 'report',
-      inputs({ status, stopped_at: at || '', phases: R.phases, handoffs: R.handoffs, attention: R.attention,
+      inputs({ status, stopped_at: at || '', phases: R.phases, handoffs: R.handoffs, run_state: runState(), attention: R.attention,
         spinoffs: R.spinoffs, ...(MODE === 'scan' ? { share_daily_report: status === 'queued' } : {}) }),
       MODE === 'scan' ? SCAN_REPORT : REPORT);
     if (rep) {
@@ -1338,11 +1356,17 @@ function nextSteps(status, at) {
     out.rerun_with = { apply_prs: '', answers: { apply_prs: null } };
   } else if (status === 'needs_input' && (R.questions || []).some((q) => FIX_NEEDS[q.field])) {
     const what = R.questions.map((q) => FIX_NEEDS[q.field]).filter(Boolean).join(' and ');
-    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over.${report}`;
+    // A run resumed from Verify is asked here when its Setup finds a model that answers no text questions and the
+    // task names no output comparison. With the answer the task measures otherwise than the run it resumes, which
+    // stops a resume: the answer starts the task over, and the arguments of the resume are cleared for it.
+    const over = RESUME === 'verify';
+    out.say = `The run stopped after ${at}, before any code changed: ${last}. Give ${what}, and run the task again: it starts over${
+      over ? ', as a run of its own: with the answer it measures otherwise than the run this one resumed' : ''}.${report}`;
     out.ask = R.questions;
     // A workload the task gave in part would win over the answer: it is cleared, so that the answer takes its place.
     const partial = R.questions.some((q) => q.field === 'workload') && A.workload ? { workload: '' } : {};
     out.rerun_with = { ...partial, answers: Object.fromEntries(R.questions.map((q) => [q.field, null])) };
+    if (over) Object.assign(out.rerun_with, { resume_from: '', run_dir: '' });
   }
   // The other problems of a report with several: each is offered as a run of its own, on this run's definition.
   if ((R.other_problems || []).length && !out.start) {
@@ -2167,6 +2191,9 @@ async function resumeVerify(claimOf) {
   const changed = saved ? MEASURED.filter((k) => canon(saved[k], k) !== canon(GIVEN[k], k)) : [];
   const restored = rs ? String(rs.perf_claim || '').trim() : '';
   const lost = rs ? ['known_issues', 'handoffs'].filter((k) => !Array.isArray(rs[k])) : [];
+  // What the run had established before Verify, as its report wrote it down: {} for a run that had none of it.
+  const state = rs && rs.run_state && typeof rs.run_state === 'object' && !Array.isArray(rs.run_state) ? rs.run_state : null;
+  const garbled = state ? Object.keys(STATE).filter((k) => state[k] != null && !STATE[k](state[k], state)) : [];
   const why = !rs ? ['the director restored nothing from the run directory'] : [
     rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
       + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
@@ -2190,6 +2217,9 @@ async function resumeVerify(claimOf) {
     rs.perf_required === true && !restored && 'the run was to measure a claim its run directory does not record',
     lost.length && `the run directory has no readable ${lost.map((k) => `${k}.json`).join(' or ')}: what Verify judges by `
       + 'and what a kernel regression reverts would be lost',
+    !state && 'the run directory has no readable run_state.json: a pull request the run verified in place of a fix of its own, '
+      + 'a score its fix was to restore, or a part of the task it left unchecked would be lost',
+    garbled.length && `run_state.json does not hold ${garbled.join(', ')} as the report was given ${garbled.length > 1 ? 'them' : 'it'}`,
   ].filter(Boolean);
   if (why.length) {
     note('Setup', 'fail', `resume_from verify: ${why.join('; ')}`);
@@ -2200,6 +2230,14 @@ async function resumeVerify(claimOf) {
   R.handoffs.push(...rs.handoffs.filter((h) => h && h.id));
   // The reply draft the run wrote stays for the triager; it is not this run's to offer until Reply rewrites it.
   Object.assign(C, pick(rs, ['triage_path', 'repro_cmd', 'failing_test_cmd', 'spec_path', 'design_path', 'analysis_path']));
+  // What the run had established goes on as it was: the roles after Verify read it in their inputs, the PR
+  // phase writes the comment for a pull request the run verified, a round is accepted only with the score an
+  // accuracy problem must restore, and the result names what a human files or runs elsewhere.
+  Object.assign(C, pick(state, Object.keys(STATE)));
+  for (const k of ['component_issue', 'unchecked']) if (C[k]) R[k] = C[k];
+  const had = [C.existing_prs && `${C.existing_prs.join(', ')}, the pull request it verified in place of a fix of its own`,
+    C.accuracy_claim && 'the score its fix must restore', C.component_issue && `its root cause in ${C.component_issue.component}`,
+    C.unchecked && 'the part of the task it does not answer for'].filter(Boolean);
   // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
   // Performance ran, and the task the issue or PR its triage, reproduction and reply are about. A goal
   // run.json does not have is the run's too: it had none, and this run's would add what it never measured.
@@ -2210,6 +2248,7 @@ async function resumeVerify(claimOf) {
     + `${own.length ? `; the ${own.join(' and the ')} it was given ${own.length > 1 ? 'are' : 'is'} not the run's, which `
       + `${own.length > 1 ? 'stay' : 'stays'} as run.json has ${own.length > 1 ? 'them' : 'it'}`
       + `${own.includes('goal') && !C.goal ? ' (no goal)' : ''}` : ''}`);
+  if (had.length) note('Setup', 'resumed', `the run goes on with what it had established (run_state.json): ${had.join('; ')}`);
   if (MODE === 'feature' && rs.design_auto_approved === true) {
     note('Design', 'auto_approved', 'restored from the run this one resumes: no human approved its design');
   }

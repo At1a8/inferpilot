@@ -49,9 +49,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    given measures what the one `run.json` recorded did, and the run directory still records the verified
    work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
    (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
-   was to judge, and `known_issues.json` and
-   `handoffs.json`. Check that every script the task brings from outside the run directory
-   (`server_script`, `client_script`, `accuracy_script`, `long_context_script`) is still, byte for
+   was to judge, and `known_issues.json`, `handoffs.json` and `run_state.json`. Check that every script
+   the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`,
+   `output_script`, `long_context_script`) is still, byte for
    byte, the copy the run's Setup put in `RUN_DIR/scripts/task/` (step 3; `cmp`): a path compares equal
    however the file at it was edited since, and an edited script would measure otherwise than the run
    did. A script with no copy there fails the check as well: nothing shows what the run ran. Check too
@@ -134,8 +134,9 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    `docker exec -e INFERPILOT_RUN_TAG <container> ...`, so the runner can stop them when the run is
    stopped, and check the worktree is visible there at the same path. Every server is started from the
    run's server script: the task's `server_script` (`task_definition.md` §1.1; copy the task's scripts,
-   its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, which a run resumed
-   from Verify holds them against, step 1), or InferPilot's template when the user answered
+   its `output_script` and its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the
+   record, which a run resumed from Verify holds them against, step 1), or InferPilot's template when
+   the user answered
    `template`. `PORT=<port> HIP_VISIBLE_DEVICES=<gpus> PYTHONPATH=<tree>/python EXTRA_ARGS='<the feature
    flags, empty for the baseline>' bash <server script>`, in the background, one log per launch,
    `RUN_DIR/logs/<tag>_<time>_XXXXXX.log` from `mktemp` with the same UTC time (`env_hygiene.md`,
@@ -301,13 +302,14 @@ on the commit the run's last Verify round ran on. Change nothing.
    may be a revert InferPilot made after Implement (Investigate, of an integrated kernel), but a branch
    that moved after the round started (a commit, an edit, a reset) is not what the run verified.
 2. The gate command of the mode, as the run gave it to Verify: `issue`, the reproduction (`repro_cmd`,
-   word for word from the *reproduction command* row of `issue_triage.md`; a record written before it
-   had that row gives it in its Reproduction table and the ledger's Reproduce section); `ci`, the
-   failing test (`failing_test_cmd`, word for word from the *failing test command* row of
-   `ci_triage.md`). Leave it empty when the run directory does not record it.
+   word for word from the *reproduction command* row of `issue_triage.md`); `ci`, the failing test
+   (`failing_test_cmd`, word for word from the *failing test command* row of `ci_triage.md`). Leave it
+   empty when the record has no such row, or the row holds no command, which stops the resume: a
+   command put together from the rest of the record is not the one Verify was given.
 3. `task_definition`: the task definition `RUN_DIR/run.json` recorded, as it is there (`null` when there
    is none). InferPilot holds it against `task_def` for what is measured (the mode, the model, the
-   workload, the scripts, `harness`, `apply_prs`, `held_out`, `guards`, `sweep`, `tune`, and the gates
+   workload, the scripts, `output_script` among them, `harness`, `apply_prs`, `held_out`, `guards`,
+   `sweep`, `tune`, and the gates
    the task asked for with the test G3 runs: `long_context`, `stability`, `long_context_script`): a run
    that would measure otherwise is a run of its own. A path, like any other string, is compared as
    written, since the run uses it as given: a space at its end is part of a file's name; what the file
@@ -326,9 +328,9 @@ on the commit the run's last Verify round ran on. Change nothing.
    `perf_claim`: that claim (for a performance problem, the number the fix must restore), word for
    word from the row its phase wrote it in: the *performance claim* row of `issue_triage.md`,
    `ci_triage.md` or `feature_spec.md`, the *claim* row of the Plan in `perf_analysis.md`. A row that
-   says `none` is no claim, and a record written before it had the row states the claim in its text
-   (the reproduction or the triage, the spec's G5 criterion, the plan): empty when there was none or
-   the run directory does not record it. `perf_cost` (`feature`): `true` when that claim is a cost the
+   says `none` is no claim: empty for it, and empty where the record has no such row, never the claim
+   as the rest of the record words it (a run that was to judge one then stops). `perf_cost`
+   (`feature`): `true` when that claim is a cost the
    user stated, as `RUN_DIR/feature_spec.md` has it (the row under its claim), which stays the claim on
    InferPilot's client, and `false`
    otherwise and in the other modes (always say which: a claim not said to be a cost is a gain, which
@@ -348,7 +350,14 @@ on the commit the run's last Verify round ran on. Change nothing.
 6. `known_issues` and `handoffs`, as the report wrote them to `RUN_DIR/known_issues.json` and
    `RUN_DIR/handoffs.json`: `[]` for a file that holds an empty list, `null` for one that is missing or
    does not parse, which stops the resume. Verify judges a failure the baseline shares by the first, and
-   an integrated kernel is reverted to its `commit` by the second.
+   an integrated kernel is reverted to its `commit` by the second. `run_state`, as the report wrote it
+   to `RUN_DIR/run_state.json`, in the same way: the object the file holds, as it is there (`{}` for an
+   empty one), and `null` for a file that is missing or does not parse. It is what the run had
+   established before Verify and the phases after it go by: the pull request it verified in place of
+   a fix of its own (`existing_prs`, `existing_pr`), for which the PR phase writes a comment; the
+   score an accuracy problem in CI must restore (`accuracy_claim`), without which no round is
+   accepted; the AMD component its root cause is in (`component_issue`); the part of a ci task it
+   does not answer for (`unchecked`). Take none of it from another record, and add nothing to it.
 7. `design_auto_approved` (`feature`): `true` when the run's Design went on to Implement without a
    human's approval (its report says so, its Design phase `auto_approved`); `false` otherwise and in
    the other modes.
@@ -359,7 +368,7 @@ Return:
 
 ```json
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
- "known_issues": [], "handoffs": [], "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
+ "known_issues": [], "handoffs": [], "run_state": {}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
  "perf_cost": false, "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
 ```
@@ -455,7 +464,7 @@ feature's own metric with no value to compare it with is reported, and is not a 
 
 ## PHASE=report (every mode, every outcome)
 
-Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a scan
+Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `run_state`, `attention`, for a scan
 `share_daily_report`, and every artifact path produced so far.
 
 - `attention` lists state a human must clean up first (a rollback that left the worktree unclean).
@@ -526,9 +535,11 @@ Inputs include `status`, `stopped_at`, `phases`, `handoffs`, `attention`, for a 
   `integration_held` hand-off's unit gate has no result: its integration commit (`commit`) is still on
   the branch, unverified. An empty `commit` is one not reported, not one not made: the implementer's call
   timed out, and may have committed or still be running, so say that the branch is to be inspected once
-  that call has stopped. Write `handoffs` and `known_issues` as given to `RUN_DIR/handoffs.json` and
-  `RUN_DIR/known_issues.json`, which a run resumed from Verify restores; a run that stopped at Setup
-  writes neither: it has none of its own, and a resumed one would empty those it was to restore. A
+  that call has stopped. Write `handoffs`, `known_issues` and `run_state` as given to
+  `RUN_DIR/handoffs.json`, `RUN_DIR/known_issues.json` and `RUN_DIR/run_state.json`, which a run
+  resumed from Verify restores: each whole and unchanged, and one you were not given as empty (`[]`
+  for the two lists, `{}` for `run_state`). A run that stopped at Setup
+  writes none of them: it has none of its own, and a resumed one would empty those it was to restore. A
   `not_integrated` hand-off's back end found a gain that the run, stopped by the control file, never
   integrated: give its speedup.
   For kernel hand-offs that were only recorded, give the arguments that would run them later

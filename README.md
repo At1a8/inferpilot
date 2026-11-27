@@ -477,7 +477,7 @@ the container with its status. A run directory holds:
 | `logs/` | one log per server or benchmark launch, `<tag>_<time>_XXXXXX.log` from `mktemp`, with its `.pid` and `.exit` |
 | `pr_body.md`, `patches/` | the PR description and the branch's commits as patches |
 | `reply_draft.md`, `reply_check.md` | an issue's reply draft, for you to post, and the reviewer's check of it against the run |
-| `handoffs.json`, `known_issues.json` | the kernel hand-offs and the failures the baseline shares, as the report had them, which a run resumed from Verify restores |
+| `handoffs.json`, `known_issues.json`, `run_state.json` | the kernel hand-offs, the failures the baseline shares, and what the run established before Verify (the pull request it verified in place of a fix of its own, the score an accuracy problem must restore, the component a root cause is in, the part of a ci task it does not answer for), as the report had them, which a run resumed from Verify restores |
 | `component_issue.md` | an issue drafted for the AMD component a root cause is in (aiter, MoRI, ROCm, the ROCm build of PyTorch), for you to file in its repository |
 | `knowledge_pr.md`, `knowledge.patch` | the description of the curator's pull request to InferPilot's repository, and its change, which `scripts/propose_knowledge.py --patch` proposes later from any checkout |
 | `daily_report.md`, `task_queue.md` | a scan's daily report, shared as an issue or for you to share (below); the ranked tasks with local detail, each with the definition that starts it, next to what each source found (`<source>.json`) |

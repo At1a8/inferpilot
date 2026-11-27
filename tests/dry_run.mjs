@@ -994,7 +994,8 @@ const scenarios = [
     const doc = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
     check(doc.includes('first check, reading only, everything the resume needs (PHASE=resume, steps 1 to 6)')
       && doc.includes('the verified work packages, each with its commit, the mode\'s gate command (`issue`, `ci`), its triage record (`issue`, `ci`), '
-        + 'its spec and design (`feature`), its analysis (`perf`), the claim its Performance was to judge, and `known_issues.json` and `handoffs.json`')
+        + 'its spec and design (`feature`), its analysis (`perf`), the claim its Performance was to judge, and `known_issues.json`, `handoffs.json` '
+        + 'and `run_state.json`')
       && doc.includes('run no smoke, so that nothing is measured'), 'Setup checks everything a resume needs before its smoke');
     // A fix's Setup measures no baseline, since its base may be the server that does not start: nor does its resume.
     check(doc.includes('An `issue` or a `ci` run whose Setup measured no baseline (step 4; the ledger\'s baseline section says so) runs no smoke on a resume either, '
@@ -1019,9 +1020,9 @@ const scenarios = [
     // A script edited in place keeps its path, so the settings compare equal: Setup holds each against the copy
     // the run kept, before its smoke, and renders nothing again from a harness file that may have changed too.
     check(doc.includes('Check that every script the task brings from outside the run directory (`server_script`, `client_script`, `accuracy_script`, '
-      + '`long_context_script`) is still, byte for byte, the copy the run\'s Setup put in `RUN_DIR/scripts/task/`')
+      + '`output_script`, `long_context_script`) is still, byte for byte, the copy the run\'s Setup put in `RUN_DIR/scripts/task/`')
       && doc.includes('A script with no copy there fails the check as well')
-      && doc.includes('copy the task\'s scripts, its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, '
+      && doc.includes('copy the task\'s scripts, its `output_script` and its `long_context_script` among them, to `RUN_DIR/scripts/task/` for the record, '
         + 'which a run resumed from Verify holds them against')
       && doc.includes('what the file at it holds, Setup held against the run\'s copy before its smoke'),
       'a script edited in place since the run is not the one the run measured with');
@@ -1214,6 +1215,122 @@ const scenarios = [
     check(/^\| performance problem: yes \/ no \|/m.test(template) && resume.includes('a `ci` failure that `ci_triage.md` gives as a performance problem')
       && resume.includes('a fix of a problem that is not one of performance, are judged all the same, as no slower than the baseline'),
       'and so is whether the failure is a performance problem, which a resume measures on its number');
+  }],
+  ['setup: a run resumed from Verify goes on with what the run established before Verify, as its report wrote it down', async () => {
+    const ended = (r) => `${r.result.status} at ${r.result.stopped_at}`;
+    const given = (r, key) => (r.calls.find((c) => c.key === key) || { ins: {} }).ins;
+    const resumedWith = (mode, state, more = {}) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: state }), ...more });
+    const stoppedFor = (r, what) => r.result.status === 'blocked' && r.result.stopped_at === 'Setup' && !r.keys.includes('verify_engineer:verify')
+      && r.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'fail' && p.summary.includes(what));
+    // A ci run verifies someone's pull request for a failure on a score, and could not run a part of the task.
+    // Its Verify returns nothing: the report is given what the run had established, to write down.
+    const score = 'GSM8K back to 0.93 on GLM-5.3-Flash in test_gsm8k (0.94 in the last green run)';
+    const theirs = { pr: '#50220', repo: 'sgl-project/sglang', author: 'alice', association: 'MEMBER', head: 'abc1234', state: 'open' };
+    const part = 'the two tests on rocm724';
+    const task = { mode: 'ci', task: 'c', apply_prs: ['#50220'] };
+    const first = await run(task, { 'verify_engineer:verify': () => null,
+      'ci_guardian:classify': () => ({ ...DEFAULTS['ci_guardian:classify'](), accuracy: true, accuracy_claim: score, unchecked: part, existing_prs: [theirs] }) });
+    const state = given(first, 'director:report').run_state;
+    check(first.result.stopped_at === 'Verify' && (first.result.next.rerun_with || {}).resume_from === 'verify'
+      && eqList(state, { existing_prs: ['#50220'], existing_pr: theirs, accuracy_claim: score, unchecked: part }),
+      `the report of a run whose Verify had no result is given what the run had established: ${JSON.stringify(state)}`);
+    // The run that goes on is given it back, and is the run it resumes: the score is a gate of its own again.
+    const again = (more = {}) => run({ ...task, ...first.result.next.rerun_with }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: state }), ...more });
+    const noScore = await again();
+    check(noScore.result.status === 'blocked' && noScore.result.stopped_at === 'Verify' && !noScore.keys.includes('reviewer:review')
+      && given(noScore, 'verify_engineer:verify').accuracy_claim === score && /without the score coming back/.test(JSON.stringify(noScore.result.phases)),
+      `a round without the score the fix must restore is not accepted in the resumed run either: ${ended(noScore)}`);
+    const met = await again({ 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](),
+      gates: { failing_test: 'pass', accuracy_claim: "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)" } }) });
+    const pe = given(met, 'pr_engineer:pr');
+    const n = met.result.next || {};
+    // The PR phase writes the comment for that pull request, and the result has nothing of the run's own to push.
+    check(met.result.status === 'ready_for_review' && eqList(pe.existing_prs, ['#50220']) && (pe.existing_pr || {}).head === 'abc1234'
+      && eqList((met.result.pr || {}).comment_for, ['#50220']) && /^#50220 is verified: the comment for it is drafted at /.test(n.say)
+      && (n.user || []).some((u) => u.startsWith('post the verification comment on #50220')) && !(n.user || []).some((u) => /git push|^push /.test(u)),
+      `the resumed run ends in the comment for the pull request the run verified, not in one of its own: ${ended(met)}, ${JSON.stringify(n.user)}`);
+    check(met.result.unchecked === part && given(met, 'verify_engineer:verify').unchecked === part && given(met, 'director:report').unchecked === part,
+      `Verify, the report and the result still name the part of the task the fix does not answer for: ${JSON.stringify(met.result.unchecked)}`);
+    check(met.result.phases.some((p) => p.phase === 'Setup' && p.verdict === 'resumed'
+      && p.summary.includes('#50220, the pull request it verified in place of a fix of its own') && p.summary.includes('the score its fix must restore')
+      && p.summary.includes('the part of the task it does not answer for')), 'and the run record says what it went on with');
+    check(!!state && eqList(given(met, 'director:report').run_state, state), 'its report is given the same to write down again, for a run that goes on from it');
+    // An issue whose existing fix PR the run verified; one whose root cause is in an AMD component (a P0, so a workaround was made).
+    const existing = await resumedWith('issue', { existing_prs: ['#40872'] });
+    check(existing.result.status === 'ready_for_review' && eqList(given(existing, 'pr_engineer:pr').existing_prs, ['#40872'])
+      && eqList((existing.result.pr || {}).comment_for, ['#40872'])
+      && (existing.result.next.user || []).some((u) => u.startsWith('post the verification comment on #40872')),
+      `an issue's too: ${ended(existing)}, ${JSON.stringify(existing.result.next.user)}`);
+    const draft = `${RUN}/component_issue.md`;
+    const cause = { component: 'aiter', draft_path: draft, summary: 'aiter 0.1.11 works meanwhile' };
+    const inAiter = await resumedWith('issue', { component_issue: cause });
+    check(eqList(inAiter.result.component_issue, cause) && eqList(given(inAiter, 'issue_triager:reply').component_issue, cause)
+      && eqList(given(inAiter, 'director:report').component_issue, cause)
+      && (inAiter.result.next.user || []).some((u) => u.includes("in aiter's repository") && u.includes(draft)),
+      `the reply, the report and the result still name the component the root cause is in, and the draft to file: ${JSON.stringify(inAiter.result.next.user)}`);
+    // A run that had none of it wrote an empty object: nothing is restored, and nothing is missing.
+    const none = await resumedWith('ci', {});
+    check(none.result.status === 'ready_for_review' && !(none.result.pr || {}).comment_for && !none.result.unchecked && !none.result.component_issue
+      && !given(none, 'verify_engineer:verify').accuracy_claim && eqList(given(none, 'director:report').run_state, {})
+      && !none.result.phases.some((p) => p.summary.includes('run_state.json')),
+      `a run that had established none of it goes on as a run of its own fix: ${ended(none)}`);
+    // What the file lost is not none: the run stops before anything is measured.
+    check(stoppedFor(await resumedWith('ci', null), 'no readable run_state.json'), 'a file that is missing or does not parse stops the resume');
+    for (const [what, lost] of [['existing_prs', { existing_prs: '#40872' }], ['existing_prs', { existing_prs: [] }], ['existing_pr', { existing_pr: '#50220' }],
+      // A pull request the list does not name, or without the commit the run verified it at, is not the one the run verified.
+      ['existing_pr', { existing_pr: theirs }], ['existing_pr', { existing_prs: ['#50221'], existing_pr: theirs }],
+      ['existing_pr', { existing_prs: ['#50220'], existing_pr: { ...theirs, head: '' } }],
+      ['accuracy_claim', { accuracy_claim: ' ' }], ['component_issue', { component_issue: { component: 'cuda', draft_path: draft } }],
+      ['component_issue', { component_issue: { component: 'aiter' } }], ['unchecked', { unchecked: ['test_a'] }]]) {
+      const garbled = await resumedWith('ci', lost);
+      check(stoppedFor(garbled, `run_state.json does not hold ${what} as the report was given it`),
+        `${JSON.stringify(lost)} is not what a report was given, and is not read as none: ${ended(garbled)}`);
+    }
+    // The script that compares the outputs of a model that answers no text questions is one the run measures with.
+    const outputs = (was, now, more = {}) => run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN, ...(now ? { output_script: now } : {}) }, {
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }),
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), task_definition: { ...ins.task_def, output_script: was } }), ...more });
+    const compared = { 'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](), text_model: false,
+      gates: { issue_repro: 'pass', G2: "pass: 16 images of 5d6e7f8 in RUN_DIR/outputs/fix-5d6e7f8 match the base's (output_script: PSNR >= 35 dB on each)" } }) };
+    const same = await outputs('/s/outputs.sh', '/s/outputs.sh', compared);
+    check(same.result.status === 'ready_for_review' && given(same, 'verify_engineer:verify').output_script === '/s/outputs.sh',
+      `the run's own output comparison is run again: ${ended(same)}`);
+    for (const [was, now] of [['/s/outputs.sh', '/s/outputs_v2.sh'], ['', '/s/outputs.sh']]) {
+      check(stoppedFor(await outputs(was, now, compared), '(output_script not as its run.json has them)'),
+        `a resume given ${now} where the run had ${was || 'none'} would compare otherwise, and measures nothing`);
+    }
+    // Setup finds such a model in a run that named no script, and asks. With the answer the task measures otherwise
+    // than the run this one resumes, so the answer starts it over: the arguments of the resume are cleared.
+    const asked = await outputs('', '');
+    const next = asked.result.next || {};
+    check(asked.result.status === 'needs_input' && asked.result.stopped_at === 'Setup' && !asked.keys.includes('director:resume')
+      && eqList((next.ask || []).map((q) => q.field), ['output_script']) && (next.rerun_with || {}).resume_from === '' && next.rerun_with.run_dir === ''
+      && /it starts over, as a run of its own: with the answer it measures otherwise than the run this one resumed/.test(next.say),
+      `a resumed run asked for the output comparison starts over with the answer: ${ended(asked)}, ${JSON.stringify(next.rerun_with)}`);
+    const over = await run({ mode: 'issue', task: 'i', resume_from: 'verify', run_dir: RUN, ...next.rerun_with, answers: { output_script: '/s/outputs.sh' } },
+      { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }), ...compared });
+    check(over.result.status === 'ready_for_review' && over.keys.includes('issue_triager:triage') && !over.keys.includes('director:resume')
+      && given(over, 'verify_engineer:verify').output_script === '/s/outputs.sh', `and with it the task runs from its start: ${ended(over)}`);
+    const fresh = await run({ mode: 'issue', task: 'i' }, { 'director:setup': () => ({ ...DEFAULTS['director:setup'](), text_model: false }) });
+    check(fresh.result.status === 'needs_input' && !('resume_from' in fresh.result.next.rerun_with) && !('run_dir' in fresh.result.next.rerun_with)
+      && /and run the task again: it starts over\.( The report: |$)/.test(fresh.result.next.say), `a run that is no resume is asked as before: ${fresh.result.next.say}`);
+    // The director is told what to write down, what to give back, and that neither is put together from other records.
+    const read = (...at) => readFileSync(path.join(INFERPILOT, ...at), 'utf8');
+    const said = (phase) => phaseSection(read('roles', 'director.md'), phase).replace(/\s+/g, ' ');
+    check(said('report').includes('Write `handoffs`, `known_issues` and `run_state` as given to `RUN_DIR/handoffs.json`, `RUN_DIR/known_issues.json` and '
+      + '`RUN_DIR/run_state.json`, which a run resumed from Verify restores: each whole and unchanged, and one you were not given as empty')
+      && said('report').includes('A run that stopped at Setup writes none of them'), 'the report writes the run\'s state down as it is given');
+    check(said('resume').includes('`run_state`, as the report wrote it to `RUN_DIR/run_state.json`, in the same way')
+      && said('resume').includes('`null` for a file that is missing or does not parse')
+      && said('resume').includes('Take none of it from another record, and add nothing to it')
+      && said('resume').includes('the scripts, `output_script` among them'), 'and the resume gives it back as the file holds it');
+    check(said('resume').includes('a command put together from the rest of the record is not the one Verify was given')
+      && said('resume').includes('empty where the record has no such row, never the claim as the rest of the record words it')
+      && !said('resume').includes('a record written before it had'), 'a gate or a claim whose row is missing is not put together from the rest of the record');
+    check(read('README.md').includes('| `handoffs.json`, `known_issues.json`, `run_state.json` |')
+      && read('README.zh-CN.md').includes('| `handoffs.json`、`known_issues.json`、`run_state.json` |'), 'both READMEs list the file among what a run directory holds');
   }],
   ['agents: a timed-out call is not retried and goes on the attention list', async () => {
     const r = await run({ mode: 'feature', task: 't', agent_retries: 3, agent_timeout_ms: 100 }, {
