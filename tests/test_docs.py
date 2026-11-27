@@ -2195,6 +2195,16 @@ class CiOnMainTest(unittest.TestCase):
                                          "fails on the change's parent and passes on the change, on the lane's image"),
                 ("roles/ci_guardian.md", "That the job's commit failed and main passes says that something between the two fixed it, not "
                                          "which change did"),
+                # the parent has to fail as the job failed: another failure shows nothing of the change
+                ("roles/ci_guardian.md", "The parent has to fail as the job failed, with the same error or the same measurement short of its "
+                                         "threshold"),
+                ("roles/ci_guardian.md", "one that fails another way (an import, a test that is not collected) shows nothing of that change"),
+                # the check on the latest main before the pull request names a fix on the same proof, for a ci task and an issue alike
+                ("roles/verify_engineer.md", "`fixed_by` names the pull request or the commit that fixed it only where you showed that it did: "
+                                             "the gate fails on that change's parent as it failed on the base, and passes on the change"),
+                ("roles/verify_engineer.md", "The log of main since `<base>` shows candidates, not the fix"),
+                ("roles/verify_engineer.md", '"fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main '
+                                             'passes because of it>"'),
                 ("roles/ci_guardian.md", "A change that only looks like the fix is named in `evidence` as a candidate, and `fixed_by` stays "
                                          "empty"),
                 ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: fails on its parent, passes on it>"'),

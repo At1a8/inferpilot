@@ -59,10 +59,13 @@ Then:
 - All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older than
   the lane's newest, or a fix has merged since. `fixed_by` names that pull request or commit only
   where you showed that it is the fix: the test fails on the change's parent and passes on the
-  change, on the lane's image, each run as the job ran it. That the job's commit failed and main
-  passes says that something between the two fixed it, not which change did. A change that only
-  looks like the fix is named in `evidence` as a candidate, and `fixed_by` stays empty: the run
-  then ends as not reproduced on main, which is all it showed, and names no fix it did not confirm.
+  change, on the lane's image, each run as the job ran it. The parent has to fail as the job
+  failed, with the same error or the same measurement short of its threshold: one that fails
+  another way (an import, a test that is not collected) shows nothing of that change. That the
+  job's commit failed and main passes says that something between the two fixed it, not which
+  change did. A change that only looks like the fix is named in `evidence` as a candidate, and
+  `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it showed, and
+  names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is

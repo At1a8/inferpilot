@@ -426,7 +426,11 @@ request is prepared.
      ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
      step that failed. A number reaches `claim` and a score `accuracy_claim`, as the run established
      them, not a threshold main has lowered since. `fixed_by` names the pull request or the commit
-     that fixed it, when the log of main since `<base>` shows one.
+     that fixed it only where you showed that it did: the gate fails on that change's parent as it
+     failed on the base, and passes on the change, in this check's environment and within its time.
+     The log of main since `<base>` shows candidates, not the fix. One you did not confirm is named
+     in `evidence` as a candidate, and `fixed_by` stays empty: the report then gives the range the
+     fix lies in, and names none.
    - `inconclusive`: anything else. A run that fails another way (an import error, a server that
      stops for another reason); fewer runs than step 4 asks for, or some of them failing; a test
      main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
@@ -455,7 +459,7 @@ Return:
 {"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>",
  "main_import": "/abs/RUN_DIR/recheck/python/sglang/__init__.py",
  "test_path": "/abs/RUN_DIR/recheck/test/registered/...py",
- "fixed_by": "<#n or sha, when main passes because of it>",
+ "fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main passes because of it>",
  "evidence": "<the runs and their counts, the logs, and what they show>",
  "left_running": ""}
 ```
