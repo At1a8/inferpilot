@@ -999,6 +999,57 @@ const scenarios = [
       && p.summary.includes('the goal it was given is not the run\'s, which stays as run.json has it (no goal)')), 'and the run says so');
     check(!('goal' in noGoal.result.task_def) && noGoal.result.task_def.task === 't',
       `nor does the result's task definition name the goal given now: ${JSON.stringify(noGoal.result.task_def.goal)}`);
+    // A resume that is turned down is about its run as well: its report is written into the run's own directory,
+    // and with the result it names the run's task and goal, not the ones this run was given. What is compared with
+    // run.json stays what this run was given.
+    const theirs = { task: 'sglang#1: wrong logprobs', goal: 'no accuracy loss: also gpqa_diamond' };
+    const asked = { task: 'sglang#2: a crash', goal: 'quick check' };
+    const told = (r) => (r.calls.find((c) => c.key === 'director:report') || { ins: {} }).ins;
+    const about = (r, id) => told(r).task === id.task && (told(r).goal || '') === (id.goal || '')
+      && r.result.task_def.task === id.task && (r.result.task_def.goal || '') === (id.goal || '');
+    const movedOn = await resumed('issue', (ins) => ({ ...saved(theirs)(ins), head_ok: false, head: 'c_later' }), asked);
+    check(stoppedFor(movedOn, 'the branch is no longer the commit') && about(movedOn, theirs),
+      `a resume that stops for a moved branch reports and returns the run's task and goal: ${JSON.stringify([told(movedOn).task, told(movedOn).goal, movedOn.result.task_def])}`);
+    const otherModel = await resumed('issue', saved({ ...theirs, model_path: '/models/other' }), asked);
+    check(stoppedFor(otherModel, '(model_path not as its run.json has them)') && about(otherModel, theirs) && told(otherModel).model_path === '/models/m'
+      && otherModel.calls.find((c) => c.key === 'director:resume').ins.task_def.task === asked.task,
+      `one that would measure otherwise is still held against what it was given, and is about its run: ${JSON.stringify([told(otherModel).task, told(otherModel).model_path])}`);
+    const ungoaled = await resumed('issue', (ins) => ({ task_definition: Object.fromEntries(Object.entries({ ...ins.task_def, task: theirs.task })
+      .filter(([k]) => k !== 'goal')), triage_path: '' }), asked);
+    check(stoppedFor(ungoaled, 'records no issue_triage.md') && about(ungoaled, { task: theirs.task }),
+      `a run that had no goal has none in the report of its resume either: ${JSON.stringify([told(ungoaled).goal, ungoaled.result.task_def])}`);
+    // Setup stops a resume before the director restores anything (what it checks before its smoke): it returns
+    // the task and the goal run.json has, and the run is about them from there.
+    const preflight = (more) => run({ mode: 'issue', resume_from: 'verify', run_dir: RUN, ...asked }, {
+      'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail', gpu_ids: '',
+        baseline: 'the checkout is not clean: python/sglang/srt/server.py', ...more }) });
+    const dirty = await preflight({ run_task: theirs.task, run_goal: theirs.goal });
+    check(stoppedFor(dirty, 'the checkout is not clean') && !dirty.keys.includes('director:resume') && about(dirty, theirs),
+      `a resume that Setup stops reports and returns the run's task and goal: ${JSON.stringify([told(dirty).task, told(dirty).goal, dirty.result.task_def])}`);
+    const dirtyBare = await preflight({ run_task: theirs.task, run_goal: '' });
+    check(stoppedFor(dirtyBare, 'the checkout is not clean') && about(dirtyBare, { task: theirs.task }),
+      `with no goal where the run had none: ${JSON.stringify([told(dirtyBare).goal, dirtyBare.result.task_def])}`);
+    // A Setup that does not say whose they are leaves them as given: there is nothing else to name.
+    const unread = await preflight({});
+    check(stoppedFor(unread, 'the checkout is not clean') && about(unread, asked),
+      `a Setup that read no task leaves the run with the one it was given: ${JSON.stringify([told(unread).task, unread.result.task_def.task])}`);
+    const halfSaid = await preflight({ run_task: theirs.task });
+    check(about(halfSaid, { task: theirs.task, goal: asked.goal }), `and a goal it does not speak of as given: ${JSON.stringify(told(halfSaid).goal)}`);
+    // Only a run resumed from Verify has a run to be about.
+    const fromStart = await run({ mode: 'issue', ...asked }, { 'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'fail',
+      gpu_ids: '', baseline: 'the checkout is not clean', run_task: theirs.task, run_goal: theirs.goal }) });
+    check(about(fromStart, asked), `a run of the task is about the task it was given: ${JSON.stringify(fromStart.result.task_def.task)}`);
+    // What the resume restores goes over Setup's word, where the two differ.
+    const corrected = await run({ mode: 'issue', resume_from: 'verify', run_dir: RUN, ...asked }, {
+      'director:setup': () => ({ ...DEFAULTS['director:setup'](), run_task: 'sglang#3: not this one', run_goal: 'nor this' }),
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), ...saved(theirs)(ins) }) });
+    check(corrected.result.status === 'ready_for_review' && about(corrected, theirs)
+      && corrected.calls.find((c) => c.key === 'verify_engineer:verify').ins.task === theirs.task,
+      `the definition the resume restores decides: ${JSON.stringify([told(corrected).task, told(corrected).goal])}`);
+    const setupDoc = readFileSync(path.join(INFERPILOT, 'roles', 'director.md'), 'utf8').replace(/\s+/g, ' ');
+    check(setupDoc.includes('Return the two as `run_task` and `run_goal`, as the file has them (an empty `run_goal` where it has none), also when a check above fails')
+      && setupDoc.includes('A run resumed from Verify adds `"run_task"` and `"run_goal"`, the task and the goal of the run it resumes (step 1)'),
+      'the director is told to return the task and the goal of the run a resume goes on with');
     // The configuration the report puts an issue's problem on is the run's too: Setup takes the GPUs it needs where
     // the task gives none, and the run's launch script, which a resume does not write again, was written for it.
     const TP8 = 'DeepSeek-V4.1, --tp-size 8';
@@ -1360,7 +1411,7 @@ const scenarios = [
     check(given(failed, 'investigator:investigate').verify_only === true && !failed.keys.includes('implementer:implement')
       && !failed.keys.includes('investigator:diagnose') && !failed.keys.includes('pr_engineer:pr'),
       `nothing is repaired on top of it (the investigator's FIX1 is not implemented), and no fix of the run's own is started: ${failed.keys}`);
-    check(eqList(fn.rerun_with, { resume_from: '', run_dir: '' })
+    check(fn.rerun_with && fn.rerun_with.resume_from === '' && fn.rerun_with.run_dir === '' && fn.rerun_with.task === 't' && !fn.rerun_with.answers
       && /^#40872 did not pass verification at Verify, and is off the task branch\. .* run the task again without resume_from: it starts over\./.test(fn.say)
       && (fn.user || []).some((u) => u.startsWith('post the comment on #40872')) && !(fn.user || []).some((u) => /git push|^push /.test(u)),
       `the result says that the task is run again from its start for a fix, and gives the comment to post: ${JSON.stringify(fn)}`);
@@ -1372,6 +1423,63 @@ const scenarios = [
     check(eqList(Object.keys(after), ['existing_pr_result', 'text_model']) && after.existing_pr_result.prs === '#40872'
       && eqList(failed.result.existing_pr_result, after.existing_pr_result) && !(failed.result.done || []).length,
       `its report is given that pull request as one that did not pass, and none as still under verification: ${JSON.stringify(after)}`);
+    // The task that is run again is the one the run was about, whole. A resume may be given another task and goal
+    // than its run's, and names the run to resume wherever the caller named it: the rerun has the run's own task
+    // and goal and nothing to resume, as a field, as an answer an earlier run was given, or in the request's words.
+    // The user's word for a pull request stays where the caller gave it. Merged as the runner merges it
+    // (runtime/run.mjs), it starts the task over.
+    const asRunner = (args, rr) => ({ ...args, ...rr, ...(rr.answers ? { answers: { ...(args.answers || {}), ...rr.answers } } : {}) });
+    const theRuns = { task: 'sglang#1', goal: 'the crash is gone at TP8' };
+    const failedAs = (args, was) => run(args, { 'verify_engineer:verify': () => failing, 'director:resume': (ins) => ({
+      ...DEFAULTS['director:resume'](ins), run_state: { text_model: true, existing_prs: ['#40872'] },
+      task_definition: Object.fromEntries(Object.entries({ ...ins.task_def, ...was }).filter(([, v]) => v !== '')) }) });
+    const named = { mode: 'issue', request: `go on from Verify with the run in ${RUN}`, task: 'sglang#2', goal: 'another goal',
+      apply_prs: ['#40872'], answers: { resume_from: 'verify', run_dir: RUN } };
+    const sent = await failedAs(named, theRuns);
+    const rr = (sent.result.next || {}).rerun_with || {};
+    check(sent.result.status === 'blocked' && sent.keys.includes('pr_engineer:comment') && rr.mode === 'issue' && rr.task === theRuns.task
+      && rr.goal === theRuns.goal && rr.resume_from === '' && rr.run_dir === '' && rr.request === ''
+      && eqList(rr.answers, { resume_from: null, run_dir: null }) && !('apply_prs' in rr),
+      `the rerun is the run's own task, with no run to resume in a field, an answer or the request, and takes no one's word for a pull request: ${
+        ended(sent)}, ${JSON.stringify(rr)}`);
+    const fresh = await run(asRunner(named, rr));
+    const begun = given(fresh, 'director:setup');
+    check(!fresh.keys.includes('intake:define') && !fresh.keys.includes('director:resume') && fresh.phases[1] === 'Triage'
+      && begun.task === theRuns.task && begun.goal === theRuns.goal && !begun.resume_from && eqList(fresh.result.task_def.apply_prs, ['#40872'])
+      && !('resume_from' in fresh.result.task_def) && !('run_dir' in fresh.result.task_def),
+      `run with it, the task the run was about starts over, and the other task is not started in its place: ${ended(fresh)}, ${fresh.phases}, ${
+        JSON.stringify(fresh.result.task_def)}`);
+    // A goal the run did not have is not the task's either, where an answer gave it too; answers given as a JSON
+    // string are carried whole, so that the others are not lost with the ones that are cleared.
+    const asText = { mode: 'issue', task: 'sglang#1', answers: JSON.stringify({ resume_from: 'verify', run_dir: RUN, goal: 'another goal', platform: 'MI355X' }) };
+    const ungoaled = await failedAs(asText, { goal: '' });
+    const br = (ungoaled.result.next || {}).rerun_with || {};
+    check(ungoaled.result.status === 'blocked' && br.goal === '' && br.platform === 'MI355X'
+      && eqList(br.answers, { resume_from: null, run_dir: null, goal: null, platform: 'MI355X' }),
+      `a goal the run did not have is cleared where the answer gave it, and the other answers stay: ${ended(ungoaled)}, ${JSON.stringify(br)}`);
+    const goalless = await run(asRunner(asText, br));
+    check(!goalless.keys.includes('director:resume') && goalless.phases[1] === 'Triage' && !('goal' in goalless.result.task_def)
+      && goalless.result.task_def.platform === 'MI355X', `and the run that starts over has none: ${JSON.stringify(goalless.result.task_def)}`);
+    // A stop named for the phase the pull request failed in holds, and the run ends stopped: its branch is back at
+    // the base all the same, and the run that goes on without the stop starts the task over too.
+    const halted = await failedAs({ mode: 'issue', task: 'sglang#1', resume_from: 'verify', run_dir: RUN, stop_after: 'Verify' }, {});
+    const hr = (halted.result.next || {}).rerun_with || {};
+    check(halted.result.status === 'stopped' && halted.result.stopped_at === 'Verify' && halted.keys.includes('pr_engineer:comment')
+      && hr.stop_after === '' && hr.resume_from === '' && hr.run_dir === '' && hr.request === '' && hr.task === 'sglang#1'
+      && halted.result.next.say.includes('run again without stop_after and without resume_from: the task starts over.'),
+      `a resumed run that stops where its pull request did not pass offers the task from its start, not the resume without the stop: ${
+        ended(halted)}, ${JSON.stringify(halted.result.next)}`);
+    const onward = await run(asRunner({ mode: 'issue', task: 'sglang#1', resume_from: 'verify', run_dir: RUN, stop_after: 'Verify' }, hr));
+    check(!onward.keys.includes('director:resume') && onward.phases[1] === 'Triage' && onward.result.status === 'ready_for_review'
+      && !('stop_after' in onward.result.task_def), `which then runs to its end: ${ended(onward)}, ${onward.phases}`);
+    // A run of the task that stops there has nothing to resume, and its rerun lifts the stop alone, as before.
+    const plain = await run({ mode: 'issue', task: 'i', stop_after: 'Verify' }, { 'verify_engineer:verify': () => failing,
+      'issue_triager:triage': () => ({ priority: 'P1', category: 'crash', action: 'push_existing_pr', existing_prs: ['#40872'],
+        triage_path: `${RUN}/t.md`, reply_draft_path: `${RUN}/reply.md` }) });
+    check(plain.result.status === 'stopped' && plain.result.stopped_at === 'Verify' && eqList(plain.result.next.rerun_with, { stop_after: '' })
+      && plain.result.next.say.includes('run again without stop_after: the task starts over.'),
+      `a run of the task that stops where its pull request did not pass is run again without the stop only: ${ended(plain)}, ${
+        JSON.stringify(plain.result.next.rerun_with)}`);
     // A ci run's pull request is not held to that, as in a run of the task: what it lacks is repaired on top of it.
     const mended = await resumedWith('ci', { existing_prs: ['#50220'], existing_pr: theirs }, {
       'verify_engineer:verify': (ins, n) => (n === 1 ? { ...failing, failures: [{ ...failing.failures[0], gate: 'failing_test' }] }
@@ -1442,6 +1550,28 @@ const scenarios = [
       check(stoppedFor(garbled, `run_state.json does not hold ${what} as the report was given it`),
         `${JSON.stringify(lost)} is not what a report was given, and is not read as none: ${ended(garbled)}`);
     }
+    // A key the file does not have says that the run had none of it. Of two things a ci run always has, another
+    // record says otherwise, and the file lost them: the score of a failure its triage record gives as an accuracy
+    // problem, without which a round would be accepted on the failing test alone, and, with the pull request it
+    // verified, that pull request as Classify returned it, with the commit it was verified at.
+    const classedAs = (mode, state, accuracy) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
+      'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), accuracy_required: accuracy, run_state: { text_model: true, ...state } }),
+      'verify_engineer:verify': () => ({ ...DEFAULTS['verify_engineer:verify'](),
+        gates: { failing_test: 'pass', issue_repro: 'pass', accuracy_claim: "pass 0.936, the claim is 0.93 (the test's GSM8K, 200 q)" } }) });
+    const lostScore = await classedAs('ci', {}, true);
+    check(stoppedFor(lostScore, 'run_state.json does not hold the score its fix must restore (accuracy_claim)'),
+      `the fix of an accuracy problem in CI whose score the file lost is not verified without it: ${ended(lostScore)}`);
+    const keptScore = await classedAs('ci', { accuracy_claim: score }, true);
+    check(keptScore.result.status === 'ready_for_review' && given(keptScore, 'verify_engineer:verify').accuracy_claim === score,
+      `with the score, it goes on and Verify is given it: ${ended(keptScore)}`);
+    check((await classedAs('ci', {}, false)).result.status === 'ready_for_review' && (await classedAs('issue', {}, true)).result.status === 'ready_for_review',
+      'a failure that is no accuracy problem has no score to lose, and an issue run keeps none there');
+    const headless = await classedAs('ci', { existing_prs: ['#50220'] }, false);
+    check(stoppedFor(headless, 'names the pull request the run verified (existing_prs) without the pull request as Classify returned it (existing_pr)'),
+      `a ci run's pull request without the commit it was verified at is not the one the run verified: ${ended(headless)}`);
+    check((await classedAs('ci', { existing_prs: ['#50220'], existing_pr: theirs }, false)).result.status === 'ready_for_review'
+      && (await classedAs('issue', { existing_prs: ['#40872'] }, false)).result.status === 'ready_for_review',
+      'with it the ci run goes on, and an issue run names its pull requests alone');
     // An issue or a ci run whose file does not say what its model is lost it; a feature has no such thing to say.
     const unsaid = (mode) => run({ mode, task: 't', resume_from: 'verify', run_dir: RUN }, {
       'director:resume': (ins) => ({ ...DEFAULTS['director:resume'](ins), run_state: {} }) });
@@ -1513,6 +1643,15 @@ const scenarios = [
       && read('README.md').includes('or the one an issue run verified first and that did not pass')
       && read('README.zh-CN.md').includes('或 issue 任务先验证而没有通过的那个 PR'),
       'the director and both READMEs name the pull request that did not pass among what the run established, and the report says how a resumed run ends on one');
+    check(said('resume').includes('`accuracy_required` (`ci`): `true` when `ci_triage.md` gives the failure as an accuracy problem (its *accuracy problem* '
+      + 'row says `yes`), `false` when it does not, and in the other modes')
+      && said('resume').includes('a `run_state.json` that no longer has it stops the resume, since a round would be accepted on the failing test alone')
+      && said('resume').includes('A `ci` run\'s file that names the pull request it verified (`existing_prs`) without that pull request as Classify '
+        + 'returned it, with the commit it was verified at (`existing_pr`), lost it, and the resume stops')
+      && read('roles', 'director.md').replace(/\s+/g, ' ').includes('and in `run_state.json` what a `ci` run always has there: the score a failure its triage '
+        + 'record gives as an accuracy problem must restore, and with the pull request it verified that pull request and the commit it was verified at')
+      && /^\| accuracy problem: yes \/ no \|/m.test(read('templates', 'ci_triage.md')),
+      'the director says whether a ci failure is an accuracy problem, from the row its triage record has for it, and Setup looks for both before its smoke');
     check(said('resume').includes('as the row under the claim in `RUN_DIR/feature_spec.md` says (*the claim is a cost the user stated*: `yes` or `no`)')
       && said('resume').includes('`null` when the spec has no such row, or the row says neither: never `false` for it'),
       'whether a claim is a cost is the spec\'s own yes or no, and no answer where the spec gives none');
@@ -5518,7 +5657,8 @@ const scenarios = [
           `${where}: a Verify without a result runs again from Verify, with no stop that is behind it: ${JSON.stringify(again)}`);
       } else if (r.status === 'blocked'
         && r.phases.some((p) => p.verdict === 'fail' && p.summary.includes('A run resumed from Verify starts no fix of its own'))) {
-        check(eqList(again, { resume_from: '', run_dir: '' }),
+        check(again && again.resume_from === '' && again.run_dir === '' && again.request === '' && again.task === r.task_def.task
+          && again.mode === r.mode && !('apply_prs' in again),
           `${where}: a pull request that did not pass in a resumed run leaves the fix to a run of the task from its start: ${JSON.stringify(again)}`);
       } else if (r.status === 'stopped') {
         check(again && again.stop_after === '', `${where}: runs again with ${JSON.stringify(again)}`);

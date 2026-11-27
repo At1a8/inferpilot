@@ -17,7 +17,7 @@ export const DEFAULTS = {
     design_auto_approved: false,
     repro_cmd: ins.mode === 'issue' ? 'bash repro.sh' : '', failing_test_cmd: ins.mode === 'ci' ? 'pytest test_x.py' : '',
     perf_required: ['feature', 'perf'].includes(ins.mode), perf_claim: ['feature', 'perf'].includes(ins.mode) ? '+20% output tok/s at equal HBM' : '',
-    perf_cost: false,
+    perf_cost: false, accuracy_required: false,
     ...(ins.mode === 'issue' ? { triage_path: `${RUN}/issue_triage.md` } : ins.mode === 'ci' ? { triage_path: `${RUN}/ci_triage.md` }
       : ins.mode === 'feature' ? { spec_path: `${RUN}/feature_spec.md`, design_path: `${RUN}/design.md` }
         : ins.mode === 'perf' ? { analysis_path: `${RUN}/perf_analysis.md` } : {}) }),

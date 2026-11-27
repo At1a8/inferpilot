@@ -775,6 +775,10 @@ const SETUP = S({
   // a fix (issue, ci): false when the model answers no text questions (a diffusion, speech or embedding model), so
   // that gsm8k cannot be put to it and G2 is the task's own output comparison; left out, it counts as one that does
   text_model: bool,
+  // resume_from=verify: the task and the goal RUN_DIR/run.json has (an empty goal: it has none), also where a
+  // check fails before the smoke: the run is about them, not about the ones it was given (asItsRun)
+  run_task: str,
+  run_goal: str,
   notes: str,
 }, ['lock', 'run_dir', 'baseline_status', 'gpu_ids']);
 // workload_gap: the task's client does not run the scenarios the source measured its gain on; the run asks.
@@ -1079,6 +1083,7 @@ const RESUMED = S({
   perf_required: bool,
   perf_claim: str,       // '' for none
   perf_cost: { type: ['boolean', 'null'] }, // feature: the claim is a cost the user stated, as its spec says; null: it does not say
+  accuracy_required: bool, // ci: its triage record gives the failure as an accuracy problem, whose score run_state holds
   design_auto_approved: bool, // feature: its Design went on to Implement with no human's approval
   triage_path: str,
   spec_path: str,
@@ -1086,7 +1091,7 @@ const RESUMED = S({
   analysis_path: str,
   notes: str,
 }, ['head_ok', 'verified_work_packages', 'known_issues', 'handoffs', 'run_state', 'task_definition', 'perf_required', 'perf_claim',
-  'perf_cost', 'design_auto_approved']);
+  'perf_cost', 'accuracy_required', 'design_auto_approved']);
 // What a resumed run must measure as the run it resumes did, the gates its task asked for (G3, G4) and the
 // test G3 runs among them; the machine, the task's wording and the operator settings may differ. GIVEN holds
 // them as Setup is given them and records them in run.json: Setup's rendered scripts replace a template's
@@ -1096,6 +1101,22 @@ const RESUMED = S({
 const MEASURED = ['mode', 'model_path', 'workload', 'server_script', 'client_script', 'accuracy_script', 'output_script', 'harness',
   'apply_prs', 'held_out', 'guards', 'sweep', 'tune', 'long_context', 'stability', 'long_context_script', 'reported_on'];
 const GIVEN = Object.fromEntries(MEASURED.map((k) => [k, k in C ? C[k] : A[k]]));
+// The task and the goal are no part of that: a run resumed from Verify goes on with the run's own, as run.json
+// has them, whatever it was given. The goal names data sets and guard workloads the run's Verify and Performance
+// ran, and the task the issue or PR its triage, reproduction and reply are about; a goal run.json does not have
+// is the run's too: it had none, and this run's would add what it never measured. Every role and the result
+// name them from the moment the run knows them, the report of a resume that is turned down among them, which is
+// written into the run's own directory: Setup gives them first (run_task, run_goal), so that a resume it stops
+// itself is about its run as well, and the definition the resume restores goes over Setup's word. What this run
+// was given stays what the settings above are compared with. Returns which of the two it was given otherwise.
+const ASKED = { task: C.task, goal: C.goal, def: R.task_def };
+function asItsRun(saved) {
+  const own = ['task', 'goal'].filter((k) => canon(saved[k]) !== canon(ASKED[k]));
+  const theirs = Object.fromEntries(own.map((k) => [k, typeof saved[k] === 'string' ? saved[k] : saved[k] ? JSON.stringify(saved[k]) : '']));
+  Object.assign(C, { task: ASKED.task, goal: ASKED.goal }, theirs);
+  R.task_def = pick({ ...ASKED.def, ...theirs }, TASK_KEYS);
+  return own;
+}
 // What a run establishes before Verify that the phases after it go by, and that no phase's record holds as the
 // run had it: the pull request it verifies in place of a fix of its own (the PR phase writes a comment for it,
 // and no pull request), an issue's pull request that did not pass, after which the fix on the branch is the
@@ -1393,6 +1414,27 @@ function afterMismatch(out, at, last, report) {
   }
 }
 
+// A run resumed from Verify whose pull request did not pass sends the task back to its start (existingFailed).
+// The rerun is that task whole, not a patch on this run's arguments, which name the run to resume wherever the
+// caller named it: the definition as it was validated, with the task and the goal of the run that was resumed
+// (run.json's: a resume may be given others, and the fix is for the task whose pull request failed), and with
+// nothing to resume. That is cleared as a field, as an answer an earlier run was given, which the next run
+// merges back in, and with the request, whose words would name the run again. So is a goal the run did not have.
+// Not apply_prs, as after a model mismatch (afterMismatch): the user's word stays where the caller gave it. The
+// answers are carried whole where the caller gave them as a JSON string, as for a stop (withoutAnsweredStop).
+function startOver(rerun) {
+  const resumed = ['resume_from', 'run_dir'];
+  const def = pick(R.task_def, TASK_KEYS.filter((k) => !resumed.includes(k) && k !== 'apply_prs' && !(k in rerun)));
+  Object.assign(rerun, def, { goal: def.goal || '', resume_from: '', run_dir: '', request: '' });
+  const earlier = asObject(RAW.answers);
+  const stale = ['goal', ...resumed].filter((k) => earlier[k] != null && !rerun[k]);
+  if (stale.length) {
+    rerun.answers = { ...(typeof RAW.answers === 'string' ? earlier : {}), ...(rerun.answers || {}),
+      ...Object.fromEntries(stale.map((k) => [k, null])) };
+  }
+  return rerun;
+}
+
 function nextSteps(status, at) {
   const report = R.report_path ? ` The report: ${R.report_path}.` : '';
   // Where the run ended, not what a closing phase (the reply check) recorded after it.
@@ -1426,9 +1468,11 @@ function nextSteps(status, at) {
       + `Implement in this run directory; to change it, say how and run the task again.${report}`;
     out.rerun_with = { resume_from: 'implement', run_dir: C.run_dir, stop_after: '' };
   } else if (status === 'stopped') {
+    // A run resumed from Verify that stopped where its pull request did not pass has that branch back at its base
+    // too: run again as it was, without the stop only, it would be resumed there (startOver).
     out.say = `Stopped after ${at}, as ${stopAfterNow !== STOP_AFTER ? 'the control file' : 'stop_after'} asked. To go on, run again `
-      + `without stop_after: the task starts over.${report}`;
-    out.rerun_with = { stop_after: '' };
+      + `without stop_after${noFixOfItsOwn ? ' and without resume_from' : ''}: the task starts over.${report}`;
+    out.rerun_with = noFixOfItsOwn ? startOver({ stop_after: '' }) : { stop_after: '' };
   } else if (status === 'blocked' && at === 'Verify' && verifyUnfinished) {
     out.say = `Verify ended without a result: ${last}. Nothing was measured against the change; to verify the same commit `
       + `again, run again from Verify in this run directory, once nothing the round started still runs (Setup checks the GPUs are idle).${report}`;
@@ -1443,7 +1487,7 @@ function nextSteps(status, at) {
     out.say = `${R.existing_pr_result.prs} did not pass verification at ${R.existing_pr_result.failed_at}, and is off the task branch. `
       + 'A run resumed from Verify makes no fix of its own, which starts at Diagnose. To have the failure fixed, run the task '
       + `again without resume_from: it starts over.${report}`;
-    out.rerun_with = { resume_from: '', run_dir: '' };
+    out.rerun_with = startOver({});
   } else if (status === 'busy') {
     out.say = `${last || 'Another InferPilot task holds this machine'}. Run again when it is free: python3 scripts/run_lock.py status `
       + 'names an InferPilot task that holds it, python3 scripts/gpu_status.py the processes holding its GPUs.';
@@ -1720,6 +1764,11 @@ async function setup(requireBaseline) {
   enter('Setup');
   const s = await call('director', 'setup', inputs({ require_baseline: requireBaseline, image: IMAGE_WANTED,
     image_ok: IMAGE_OK }), SETUP);
+  // A run resumed from Verify is about its run from here on, also where Setup stops it (asItsRun). A goal Setup
+  // does not speak of stays as given until the resume restores the definition.
+  if (RESUME === 'verify' && s && filled(s.run_task)) {
+    asItsRun({ task: s.run_task, goal: typeof s.run_goal === 'string' ? s.run_goal : ASKED.goal });
+  }
   if (s && s.lock === 'skipped') return { ask: s.image || {} };
   if (s && s.lock === 'busy') {
     note('Setup', 'busy', `the machine is not free${s.notes ? `: ${s.notes}` : ''}`);
@@ -2656,6 +2705,9 @@ async function existingFailed(prs, at, why) {
   for (let i = R.handoffs.length - 1; i >= 0; i--) if (R.handoffs[i].source === 'implement') R.handoffs.splice(i, 1);
   delete R.pr;
   Object.assign(C, { pr_body_path: '', pr_work_packages: [], leak_scan_findings: [] });
+  // From here a run resumed from Verify has nothing left to resume, whether it stops below or ends in
+  // resumeVerify: its result sends the task back to its start (startOver).
+  if (RESUME === 'verify') noFixOfItsOwn = true;
   // A stop named for the phase the pull request failed in holds: the comment is drafted and the branch is back
   // at the base, and no fix of the run's own starts past the phase the operator named.
   if (stopHere(at)) {
@@ -2772,6 +2824,10 @@ async function resumeVerify(claimOf) {
   const state = rs && rs.run_state && typeof rs.run_state === 'object' && !Array.isArray(rs.run_state) ? rs.run_state : null;
   const garbled = state ? Object.keys(STATE).filter((k) => k in state && !STATE[k](state[k], state)) : [];
   const unsaid = !!state && !!BEFORE_A_FIX[MODE] && !('text_model' in state);
+  // The task and the goal are the run's own from here on, before anything stops the resume: what is reported and
+  // returned of a resume that is turned down is about its run as well (asItsRun). A run.json that lost its task
+  // has none to go on with, and the resume stops below.
+  const own = saved && !untasked ? asItsRun(saved) : [];
   const why = !rs ? ['the director restored nothing from the run directory'] : [
     rs.head_ok !== true && `the branch is no longer the commit the run's last Verify round ran on${rs.head ? ` (its head: ${rs.head})` : ''}; `
       + `a changed branch is verified in a run of its own${rs.notes ? `; ${rs.notes}` : ''}`,
@@ -2807,6 +2863,16 @@ async function resumeVerify(claimOf) {
     garbled.length && `run_state.json does not hold ${garbled.join(', ')} as the report was given ${garbled.length > 1 ? 'them' : 'it'}`,
     unsaid && 'run_state.json does not say whether the model answers text questions (text_model), which the run\'s Setup said, '
       + 'or a Verify round after it: G2 of the fix would be judged by what this run\'s Setup says instead',
+    // A key the file does not have says that the run had none of it, and of two things a ci run always has the
+    // triage record or the file itself says otherwise: the score of a failure classified as an accuracy problem,
+    // which every such run past Classify has (runCi), and, with the pull request it verifies, the pull request
+    // as Classify returned it, with the commit it was verified at. An issue's pull requests are a list alone.
+    MODE === 'ci' && rs.accuracy_required === true && !!state && !('accuracy_claim' in state)
+      && 'ci_triage.md gives the failure as an accuracy problem, and run_state.json does not hold the score its fix must restore '
+      + '(accuracy_claim): a round would be accepted on the failing test alone, whatever became of the score',
+    MODE === 'ci' && !!state && STATE.existing_prs(state.existing_prs) && !('existing_pr' in state)
+      && 'run_state.json names the pull request the run verified (existing_prs) without the pull request as Classify returned it '
+      + '(existing_pr): the comment for it would not have the commit it was verified at',
   ].filter(Boolean);
   if (why.length) {
     note('Setup', 'fail', `resume_from verify: ${why.join('; ')}`);
@@ -2832,13 +2898,8 @@ async function resumeVerify(claimOf) {
     C.unchecked && 'the part of the task it does not answer for',
     BEFORE_A_FIX[MODE] && C.text_model !== setupSaid && `a model that ${C.text_model ? 'answers' : 'answers no'} text questions, as the run `
       + 'had it, whatever Setup says of it now'].filter(Boolean);
-  // The task and the goal are the run's own: the goal names data sets and guard workloads its Verify and
-  // Performance ran, and the task the issue or PR its triage, reproduction and reply are about. A goal
-  // run.json does not have is the run's too: it had none, and this run's would add what it never measured.
-  const own = ['task', 'goal'].filter((k) => canon(saved[k]) !== canon(C[k]));
-  for (const k of own) C[k] = typeof saved[k] === 'string' ? saved[k] : saved[k] ? JSON.stringify(saved[k]) : '';
-  // The result names them as well: the task definition it returns is the one the run worked on.
-  R.task_def = pick({ ...R.task_def, ...Object.fromEntries(own.map((k) => [k, C[k]])) }, TASK_KEYS);
+  // The task and the goal are the run's own (asItsRun, above), and the result names them as well: the task
+  // definition it returns is the one the run worked on.
   note('Setup', 'resumed', `Verify again on ${rs.head || 'the verified commit'}: `
     + `${done.map((d) => d.wp).join(', ') || 'no work package left, its kernel integration reverted'}`
     + `${own.length ? `; the ${own.join(' and the ')} it was given ${own.length > 1 ? 'are' : 'is'} not the run's, which `
@@ -2866,7 +2927,6 @@ async function resumeVerify(claimOf) {
   const out = await fromVerify([{ gate: 'issue_repro', cmd, expect: 'fixed' }], claim, when, theirs);
   if (out !== EXISTING_FAILED) return out;
   const at = R.existing_pr_result.failed_at;
-  noFixOfItsOwn = true;
   note(at, 'fail', `${theirs} is off the task branch, which is back at the task's base. A run resumed from Verify starts no fix of `
     + 'its own: that begins at Diagnose, in a run of the task from its start');
   return finish('blocked', at);

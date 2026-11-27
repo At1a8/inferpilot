@@ -51,7 +51,10 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    work packages, each with its commit, the mode's gate command (`issue`, `ci`), its triage record
    (`issue`, `ci`), its spec and design (`feature`), its analysis (`perf`), the claim its Performance
    was to judge (a `feature`'s with the spec's yes or no on whether it is a cost the user stated), and
-   `known_issues.json`, `handoffs.json` and `run_state.json`, every hand-off whole (step 6 there).
+   `known_issues.json`, `handoffs.json` and `run_state.json`, every hand-off whole (step 6 there), and
+   in `run_state.json` what a `ci` run always has there: the score a failure its triage record gives
+   as an accuracy problem must restore, and with the pull request it verified that pull request and
+   the commit it was verified at (steps 4 and 6 there).
    Check that every script
    the task names by its path (`server_script`, `client_script`, `accuracy_script`,
    `output_script`, `long_context_script`), one that lies in the run directory too (Spec's fallback
@@ -73,7 +76,11 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
    what differs, or what still runs, in `baseline`. A run resumed from Verify changes nothing in
    `RUN_DIR/run.json`, at this step or at a later one, and reads its `task` and its `goal` there: the
    file holds what the run it resumes was given, which PHASE=resume restores and holds this run's
-   inputs against, and inputs written there would be compared with themselves. Nor does it render or
+   inputs against, and inputs written there would be compared with themselves. Return the two as
+   `run_task` and `run_goal`, as the file has them (an empty `run_goal` where it has none), also when
+   a check above fails: the run is about its run from here on, and the report of a resume that stops
+   at Setup, which is written into this run directory, names that task and not the one this run was
+   given. Nor does it render or
    write again a script the run has (step 3): it goes on with those in `RUN_DIR/scripts/` as they are,
    the ones the run measured with, and a `harness` file, a cookbook page or a template changed since is
    not read for them.
@@ -294,7 +301,8 @@ Return:
  "accuracy_script": "/abs/RUN_DIR/scripts/accuracy.sh", "notes": "<pinned commit, image, versions>"}
 ```
 
-An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4).
+An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4). A run resumed
+from Verify adds `"run_task"` and `"run_goal"`, the task and the goal of the run it resumes (step 1).
 
 ## PHASE=resume (resume_from=verify, right after Setup)
 
@@ -361,7 +369,11 @@ on the commit the run's last Verify round ran on. Change nothing.
    that is not one of performance, are judged all the same, as no slower than the baseline
    (`validation_doctrine.md`, *G5 for a feature*, *G5 for a fix*; such a fix when it changes code the
    server runs, which this run's Verify says again): InferPilot gives that claim, and there is none to
-   restore.
+   restore. `accuracy_required` (`ci`): `true` when `ci_triage.md` gives the failure as an accuracy
+   problem (its *accuracy problem* row says `yes`), `false` when it does not, and in the other modes
+   (always say which). The score the fix of such a failure must restore is in `run_state` (step 6):
+   a `run_state.json` that no longer has it stops the resume, since a round would be accepted on the
+   failing test alone, whatever became of the score.
 5. The paths later phases read, those that exist: `triage_path` (`issue`: `issue_triage.md`, which holds
    the classification and what Reply answers; `ci`: `ci_triage.md`, which names the lanes the test failed
    on), `spec_path`, `design_path` (`feature`: the acceptance matrix and the test plan Verify reads),
@@ -390,7 +402,10 @@ on the commit the run's last Verify round ran on. Change nothing.
    does not answer for (`unchecked`); whether the model of an `issue` or a `ci` task answers text
    questions (`text_model`), as the run's Setup said or a Verify round found since, which goes before
    what this run's Setup says of it. Take none of it from another record, and add nothing to it: a
-   key the file does not have is left out, never given as `null`.
+   key the file does not have is left out, never given as `null`. A `ci` run's file that names the
+   pull request it verified (`existing_prs`) without that pull request as Classify returned it, with
+   the commit it was verified at (`existing_pr`), lost it, and the resume stops: the comment for the
+   pull request names that commit. An `issue` run's file names its pull requests alone.
 7. `design_auto_approved` (`feature`): `true` when the run's Design went on to Implement without a
    human's approval (its report says so, its Design phase `auto_approved`); `false` otherwise and in
    the other modes.
@@ -403,7 +418,8 @@ Return:
 {"head_ok": true, "head": "<sha>", "verified_work_packages": [{"wp": "WP1", "commit": "<sha>", "evidence": "/abs/RUN_DIR/logs/unit_WP1.log"}],
  "known_issues": [], "handoffs": [], "run_state": {"text_model": true}, "task_definition": {"mode": "issue", "task": "<as run.json has it>"},
  "repro_cmd": "bash RUN_DIR/repro.sh", "failing_test_cmd": "", "perf_required": false, "perf_claim": "",
- "perf_cost": false, "design_auto_approved": false, "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
+ "perf_cost": false, "accuracy_required": false, "design_auto_approved": false,
+ "triage_path": "/abs/RUN_DIR/issue_triage.md", "notes": ""}
 ```
 
 ## PHASE=spec (feature)
