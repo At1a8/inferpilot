@@ -1946,6 +1946,10 @@ class CiAccuracyProblemTest(unittest.TestCase):
                                                      "measurement"),
                 # a gate of the fix's own that still fails is the fix's failure, never the baseline's bug
                 ("roles/investigator.md", "Never for a gate of the fix's own, in an issue or a ci task: `issue_repro`, `failing_test`, `accuracy_claim`"),
+                # the gate of the fix's own that an integrated kernel breaks is still that kernel's
+                ("roles/investigator.md", "`kernel_regression` (below) stays the verdict for such a gate too, where it passes again with an "
+                                          "integrated kernel reverted"),
+                ("roles/investigator.md", "that kernel goes back to its back end, and you plan no repair in its place"),
                 ("roles/investigator.md", "Return `fix_needed` with the repair when you can explain what the fix misses, and `inconclusive` when you "
                                           "cannot"),
                 ("roles/investigator.md", "InferPilot stops the run on `baseline_bug` for such a gate, and records no known issue"),
