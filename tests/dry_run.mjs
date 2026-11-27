@@ -1542,6 +1542,12 @@ const scenarios = [
     check(kept.endsWith('END') && kept.length > 600 && longNote.summary.includes(rejected) && ciGoes.result.import_rejected === rejected,
       `the result keeps the rejection whole, and the Setup line names it first: ${kept.length} characters, ${
         longNote.summary.slice(0, 90)}`);
+    // The result has it also where Setup stops on something else: the rejection is still the diagnosis.
+    const noScript = await run({ mode: 'ci', task: 'c' }, { 'director:setup': () => ({ ...rejecting['director:setup'](), accuracy_script: '' }) });
+    check(noScript.result.status === 'blocked' && noScript.result.stopped_at === 'Setup' && noScript.result.import_rejected === rejected
+      && /no accuracy script/.test(JSON.stringify(noScript.result.phases)),
+      `a Setup that stops for want of a script still keeps what the worktree rejects: ${noScript.result.status} at ${
+        noScript.result.stopped_at}, ${JSON.stringify(noScript.result.import_rejected)}`);
     const plainRun = await run({ mode: 'ci', task: 'c' }, skip);
     const plain = plainRun.calls.find((c) => c.key === 'ci_guardian:classify');
     check(plain && !('import_rejected' in plain.ins) && !('import_rejected' in plainRun.result),

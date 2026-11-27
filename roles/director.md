@@ -166,24 +166,25 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      that names `root` or this host goes in `notes`, with the fix (`INFERPILOT_GIT_NAME` and
      `INFERPILOT_GIT_EMAIL` in `~/.inferpilot_env`, then the bootstrap); the PR phase resets the
      authors once one is set. Never set it yourself.
-   - An image too old for the worktree (sgl-kernel or aiter rejected at import or startup) fails the
-     baseline; `baseline` names the newer image to start a container from. That is said of an image
-     that is not the newest of its variant. Where it is the newest, there is no newer image to
-     name: the worktree and its newest image disagree. The newest is the image `python3
+   - An image too old for the worktree (sgl-kernel or aiter rejected at import or startup) fails
+     the baseline; `baseline` names the newer image to start a container from. That is said of an
+     image that is not the newest of its variant. Where it is the newest, there is no newer image
+     to name: the worktree and its newest image disagree. The newest is the image `python3
      <inferpilot_dir>/scripts/latest_image.py --variant <the image's variant>` prints, and this
-     container's has to be that very image, whether the task named it or left it to you:
-     `current` from `--compare` is not enough, since it goes by the date, and an older version
-     built the same day passes it. Where the script cannot say (Docker Hub is not readable, or
-     the image is no daily one), the image is not shown to be the newest: the baseline fails, and
-     `baseline` says that too. For a ci task on the newest image, the disagreement may be the
-     failure the task is about, or one the lane's own setup step repairs before its tests run.
-     Report `baseline_status: "skip"` there, and what was rejected and by which import in
-     `import_rejected`: the run goes on to Classify, which is given it, and a ci task blocked here
-     would never reach the classification that names a dependency's failure. Any other task
-     fails the baseline, and `baseline` says that the newest image does not run the worktree: an
-     issue's reproduction, a feature's or a perf task's baseline would not run in it, and a
-     server that does not start for this reason would read as a problem that is gone. The run
-     holds to that: with `import_rejected`, only a ci task goes on.
+     container's has to be that very image, whether the task named it or left it to you: `current`
+     from `--compare` is not enough, since it goes by the date, and an older version built the same
+     day passes it. Where the script cannot say (Docker Hub is not readable, or the image is no
+     daily one), the image is not shown to be the newest: the baseline fails, and `baseline` says
+     that too. On the newest image, return what was rejected and by which import in
+     `import_rejected`, whatever the task: the result keeps it whole, where a line of the record is
+     cut short. For a ci task the disagreement may be the failure the task is about, or one the
+     lane's own setup step repairs before its tests run: report `baseline_status: "skip"` there,
+     and the run goes on to Classify, which is given the field. A ci task blocked here would never
+     reach the classification that names a dependency's failure. Any other task fails the baseline,
+     and `baseline` says that the newest image does not run the worktree: an issue's reproduction,
+     a feature's or a perf task's baseline would not run in it, and a server that does not start
+     for this reason would read as a problem that is gone. The run holds to that: with
+     `import_rejected`, only a ci task goes on.
 4. **Baseline.**
    - First, one discarded warm-up per GPU set: a launch and a short run of the client, so the first
      launch in a fresh container, which compiles kernels and is slower, is not measured.
@@ -265,8 +266,9 @@ Return:
 ```
 
 An issue or a ci task with a `model_path` adds `"text_model": true | false` (step 4).
-A ci task on the newest image of its variant adds `"import_rejected"` where the worktree rejects a
-package of that image (step 3): the package and its version, and the import that fails.
+A task on the newest image of its variant adds `"import_rejected"` where the worktree rejects a
+package of that image (step 3), whatever its mode: the package and its version, and the import
+that fails.
 
 ## PHASE=spec (feature)
 
