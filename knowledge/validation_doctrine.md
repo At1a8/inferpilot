@@ -60,17 +60,20 @@ Notes per gate:
   wherever gsm8k is put to the change. The commit is the one the task branch is at, which the run
   follows through every package and rollback, and not the baseline's. The baseline of a feature or
   a performance change is the one Setup measured: on the task's base, every set Setup measured,
-  each with the score Setup returned. A Setup that returns neither stops such a task before the
-  work. With InferPilot's harness gsm8k is among the sets, and every set has all its questions: a
-  part of a set is a smoke test. Every question is answered on both arms. And no set is further
-  below its baseline than its budget, unless the round lists that set's gate among its failures
-  that do not block: G2, or an item of the acceptance matrix, never another gate of the run, whose
-  failure says nothing of accuracy. The budget is a point, or the one the user named for the set,
-  which the round gives and the run record repeats. A round that gives no numbers has shown
-  nothing, and the run stops there for a human. A blocking failure stands whatever the round says
-  of the whole: it is investigated, and the round is not accepted. Only a fix can be without a
-  baseline (the base does not start on this configuration, and no commit is known that served it):
-  the answer says why, and the score is reported and not judged.
+  each with the score Setup returned, which is the one the change is judged against. A Setup that
+  returns neither, or a record with an entry that is wrong, stops such a task before the work. With
+  InferPilot's harness gsm8k is among the sets, and every set has all its questions: a part of a
+  set is a smoke test. Every question is answered on both arms. And no set is further below its
+  baseline than its budget, unless the round lists that set's gate among its failures that do not
+  block: G2, or an accuracy item of the acceptance matrix (`ACC-<n>`), never another gate of the
+  run or item of the matrix, whose failure says nothing of accuracy. A report-only item listed so
+  is the round's own report, whatever became of its run, and stops nothing; gsm8k is never one. The
+  budget is a point, or the one the user named for the set, which the round gives and the run
+  record repeats. A round that gives no numbers has shown nothing, and the run stops there for a
+  human. A blocking failure stands whatever the round says of the whole: it is investigated, and
+  the round is not accepted. Only a fix can be without a baseline (the base does not start on this
+  configuration, and no commit is known that served it): the answer says why, and the score is
+  reported and not judged.
 - **G2 for a fix.** The fix of an issue or of a CI failure is measured as a feature is, whatever the
   report was about, when it changes anything but tests, documentation and CI files: gsm8k (1319) on
   the fix and on the base, each once, with the run's launch script and model, the fix at most 1 point

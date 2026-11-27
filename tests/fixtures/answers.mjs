@@ -41,8 +41,10 @@ export const DEFAULTS = {
   'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? { in_use: '', env_changed: '' } : { in_use: '' }),
   // Given the round's inputs, the answer has G2's numbers for the commit under verification. A scenario that takes
   // the answer without them (to change a part of it) gets none: the dry run adds them for the round it is given in.
-  'verify_engineer:verify': (ins) => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' }, failures: [],
-    ledger_path: `${RUN}/experiment_ledger.md`, ...(ins ? { g2: soundG2(ins) } : {}) }),
+  // `head`: the commit the branch is at, where the caller follows it (the dry run): after a rollback or a revert
+  // it is not the last package the round is given as verified.
+  'verify_engineer:verify': (ins, n, head) => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' }, failures: [],
+    ledger_path: `${RUN}/experiment_ledger.md`, ...(ins ? { g2: soundG2(ins, head) } : {}) }),
   'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'race in hook' }),
   'investigator:diagnose': () => ({ verdict: 'fix_needed', root_cause: 'stale import', work_packages: [WP('WP1')] }),
   'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: true, guards_ok: true, workload_unchanged: true, path_ok: true, results: [], summary: '+22%' }),

@@ -1024,14 +1024,26 @@ class G2NumbersTest(unittest.TestCase):
                  "a baseline Setup did not measure is compared with"),
                 ("const G2_SAME = 0.0005;", "a baseline score that is points off counts as Setup's"),
                 ("if (setup && Math.abs(s.base - setup.score) > G2_SAME) return", "the baseline's score need not be the one Setup measured"),
-                ("if (setup && setup.questions && setup.questions !== asked) return", "a set may be smaller than it was for the baseline"),
+                ("if (setup && setup.questions !== asked) return", "a set may be smaller than it was for the baseline"),
                 # a baseline without its commit or its accuracy stops a feature at Setup, before the work
-                ("? [!C.base_commit && 'the commit it is on (base_commit)', !C.baseline_accuracy.length && 'its accuracy, set by set (baseline_accuracy)']"
+                ("? [!C.base_commit && 'the commit it is on (base_commit)', flaw && `its accuracy, set by set (baseline_accuracy: ${flaw})`]"
                  ".filter(Boolean) : [];", "a feature goes on from a Setup that leaves G2 nothing to hold the change to"),
-                # a set is G2's or an item of the acceptance matrix's, never another gate of the run
-                ("const NOT_ACCURACY = /^(G[013-9]|G\\d\\d+|issue_repro|failing_test|accuracy_claim|(COR|PRF)-.*)$/i;",
-                 "a set can be reported under a gate that says nothing of accuracy"),
-                ("if (NOT_ACCURACY.test(gate)) return", "a stability failure that does not block excuses a loss of accuracy"),
+                # Setup's record is taken whole or not at all
+                ("const flaw = baselineFlaw(recorded);\n  C.baseline_accuracy = flaw ? [] :", "an entry of the baseline's record that is wrong is dropped, and the rest kept"),
+                ("if (!isFraction(b.score)) return `${set}: its score is no fraction between 0 and 1", "a percentage passes for a score of the baseline"),
+                ("if (!(Number.isInteger(b.questions) && b.questions > 0)) return", "a set of the baseline need not say how large it is"),
+                ("if (total && b.questions !== total) return `${set}: ${b.questions} questions, and the set has ${total}`;",
+                 "a part of a set of the harness passes for its baseline"),
+                ("return ourAccuracy && !seen.has('gsm8k') ? 'gsm8k is not among its sets' : '';", "a baseline of the harness without gsm8k"),
+                # a set is G2's or an accuracy item of the acceptance matrix's: by name, not by exclusion
+                ("const ACCURACY_GATE = /^(G2|ACC-[\\w.-]+)$/i;", "a set can be reported under a gate that says nothing of accuracy"),
+                ("if (!ACCURACY_GATE.test(gate)) {", "a stability failure that does not block excuses a loss of accuracy"),
+                # a report-only item listed as failed without blocking stops nothing; gsm8k and a set of G2's own are none
+                ("if (gate.toUpperCase() !== 'G2' && excused.has(gate) && !(ourAccuracy && name.toLowerCase() === 'gsm8k')) continue;",
+                 "a report-only item that left a question unanswered stops the run, or gsm8k is excused as one"),
+                # the change is judged against the score Setup measured, not the round's copy of it
+                ("const base = setup ? setup.score : s.base;\n    if (s.fix < base - budget - 1e-9 && !excused.has(gate)) {",
+                 "a baseline rounded down in the round's copy lets a loss past the budget through"),
                 ("if (!fix && noBase) return", "a feature is accepted without the baseline Setup measured"),
                 ("if (!fix) return `${name}: it gives no score of the baseline, which Setup measured`;", "a feature's set is accepted without a baseline score"),
                 ("if (s.base_answered != null) {", "a baseline that was cut short passes for a fix without one"),
@@ -1061,8 +1073,6 @@ class G2NumbersTest(unittest.TestCase):
                 ("if (Number(s.base_answered) !== asked) return", "a baseline that did not answer the set whole is compared with"),
                 ("if (!noBase) return `${name}: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)`;",
                  "a score without a baseline is accepted without the reason"),
-                ("if (s.fix < s.base - budget - 1e-9 && !excused.has(gate)) {",
-                 "a set below its budget is accepted although the round does not list it, or one it lists is refused"),
                 # where gsm8k is put to the change, and only for a round the run would accept
                 ("const g2Due = (!BEFORE_A_FIX[MODE] || C.server_code_changed) && C.text_model !== false;",
                  "a fix to tests alone or an output comparison is asked for scores, or a feature is not"),
@@ -1101,11 +1111,17 @@ class G2NumbersTest(unittest.TestCase):
                                                      "rollback, and not the baseline's"),
                 ("knowledge/validation_doctrine.md", "The baseline of a feature or a performance change is the one Setup measured: on the task's base, "
                                                      "every set Setup measured, each with the score Setup returned"),
-                ("knowledge/validation_doctrine.md", "A Setup that returns neither stops such a task before the work"),
-                ("knowledge/validation_doctrine.md", "G2, or an item of the acceptance matrix, never another gate of the run, whose failure says nothing "
-                                                     "of accuracy"),
-                ("roles/director.md", "Return the accuracy as well (`baseline_accuracy`: each set with its score as a fraction of 1, 0.901 and "
-                                      "never 90.1, and the number of questions it has), measured now or restored"),
+                ("knowledge/validation_doctrine.md", "each with the score Setup returned, which is the one the change is judged against"),
+                ("knowledge/validation_doctrine.md", "A Setup that returns neither, or a record with an entry that is wrong, stops such a task before "
+                                                     "the work"),
+                ("knowledge/validation_doctrine.md", "G2, or an accuracy item of the acceptance matrix (`ACC-<n>`), never another gate of the run or "
+                                                     "item of the matrix, whose failure says nothing of accuracy"),
+                ("knowledge/validation_doctrine.md", "A report-only item listed so is the round's own report, whatever became of its run, and stops "
+                                                     "nothing; gsm8k is never one"),
+                ("roles/director.md", "Return the accuracy as well (`baseline_accuracy`: each set once, with its score as a fraction of 1, 0.901 "
+                                      "and never 90.1, and the number of questions it has), measured now or restored"),
+                ("roles/director.md", "It takes the record whole or not at all: one entry that is not that stops the task, and so does a "
+                                      "baseline of InferPilot's harness without gsm8k, or with a part of a set"),
                 ("roles/director.md", "InferPilot holds what a Verify round says of the baseline to it, set by set, and stops a feature or a perf "
                                       "task here whose baseline comes back without it or without `base_commit`"),
                 ("roles/director.md", 'A feature or a perf task adds `"baseline_accuracy": [{"set": "gsm8k", "score": 0.901, "questions": 1319}]`, '
@@ -1113,13 +1129,17 @@ class G2NumbersTest(unittest.TestCase):
                 ("roles/verify_engineer.md", "For a feature or a performance change the baseline's numbers are Setup's, as `RUN_DIR/baseline.json` has "
                                              "them: give every set it has, each with the score recorded there, and measure no baseline of your "
                                              "own in its place"),
-                ("roles/verify_engineer.md", "InferPilot was given the same record, and holds `base` to it"),
+                ("roles/verify_engineer.md", "InferPilot was given the same record, holds `base` to it, and judges the change against the score "
+                                             "recorded there"),
                 ("roles/verify_engineer.md", "A set that misses is run again on the change's side (at most twice more, `validation_doctrine.md`): "
                                              "`fix` is then the median of the change's runs, and the baseline stays Setup's"),
                 ("roles/verify_engineer.md", "Where the harness ended without its report there is no count either: give the set by its name, and "
                                              "report the failure"),
-                ("roles/verify_engineer.md", "It is never another gate of the run's (G3, G4, the fix's own gates): a stability failure that does not "
-                                             "block excuses no loss of accuracy"),
+                ("roles/verify_engineer.md", "It is never another gate of the run's (G3, G4, the fix's own gates) nor another item of the matrix "
+                                             "(`STB-`, `PRF-`, `REQ-`): a stability failure that does not block excuses no loss of accuracy"),
+                ("roles/verify_engineer.md", "A report-only item that you list in `failures` as one that does not block is your own report, whatever "
+                                             "became of its run (a miss, a question unanswered, no report): give what you have of it, and "
+                                             "InferPilot holds it to nothing. gsm8k is never such an item"),
                 ("knowledge/validation_doctrine.md", "With InferPilot's harness gsm8k is among the sets, and every set has all its questions: a part of a "
                                                      "set is a smoke test"),
                 ("knowledge/validation_doctrine.md", "And no set is further below its baseline than its budget, unless the round lists that set's gate "

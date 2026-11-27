@@ -1691,9 +1691,11 @@ async function setup(requireBaseline) {
   // Without an accuracy script of the task's, the run measures with InferPilot's harness, whose sets and their
   // numbers of questions it knows (g2Unsound). A script the task brings measures what it measures.
   ourAccuracy = !own(C.accuracy_script);
-  C.baseline_accuracy = (Array.isArray(s.baseline_accuracy) ? s.baseline_accuracy : [])
-    .filter((b) => b && String(b.set || '').trim() && isFraction(b.score))
-    .map((b) => ({ set: String(b.set).trim().toLowerCase(), score: b.score, ...(Number(b.questions) > 0 ? { questions: Number(b.questions) } : {}) }));
+  // Setup's record of the baseline's accuracy is taken whole, or not at all (baselineFlaw): an entry dropped for
+  // what is wrong with it would leave a set of the baseline out of what a round is held to, or a size unchecked.
+  const recorded = Array.isArray(s.baseline_accuracy) ? s.baseline_accuracy : [];
+  const flaw = baselineFlaw(recorded);
+  C.baseline_accuracy = flaw ? [] : recorded.map((b) => ({ set: String(b.set).trim().toLowerCase(), score: b.score, questions: b.questions }));
   C.base_commit = String(s.base_commit || '').trim();
   Object.assign(C, { run_dir: s.run_dir, branch: s.branch || C.branch, worktree: s.worktree || C.worktree,
     gpu_ids: String(C.gpu_ids || s.gpu_ids || '').trim(),
@@ -1748,7 +1750,7 @@ async function setup(requireBaseline) {
   // set's score (g2Unsound). A baseline that comes back without them leaves a round nothing to be held to, so
   // the run stops here, before the work, and not at Verify after it.
   const unplaced = (MODE === 'feature' || MODE === 'perf') && s.baseline_status === 'pass'
-    ? [!C.base_commit && 'the commit it is on (base_commit)', !C.baseline_accuracy.length && 'its accuracy, set by set (baseline_accuracy)'].filter(Boolean) : [];
+    ? [!C.base_commit && 'the commit it is on (base_commit)', flaw && `its accuracy, set by set (baseline_accuracy: ${flaw})`].filter(Boolean) : [];
   if (unplaced.length) {
     note('Setup', 'fail', `Setup measured a baseline and did not return ${unplaced.join(', nor ')}: G2 would have nothing to hold the change to`);
     return false;
@@ -1978,9 +1980,28 @@ const G2_POINT = 0.01;
 const G2_TOTALS = { gsm8k: 1319, gpqa_diamond: 198, mmlu_pro: 12032, simple_qa: 4326, hle: 2158 };
 // How far a round's baseline score may be from the one Setup recorded: the two are one measurement, written twice.
 const G2_SAME = 0.0005;
-// Gates a set of G2's cannot be reported under: the run's other gates, the fix's own, and the acceptance matrix's
-// items of correctness and of performance.
-const NOT_ACCURACY = /^(G[013-9]|G\d\d+|issue_repro|failing_test|accuracy_claim|(COR|PRF)-.*)$/i;
+// The gates a set of G2's can be reported under: G2, or an accuracy item of the acceptance matrix (ACC-<n>). No
+// other gate of the run, and no other item of the matrix (COR-, PRF-, STB-, CMP-, ENG-, REQ-), says anything of
+// accuracy against the baseline: the failure of none of them excuses a loss.
+const ACCURACY_GATE = /^(G2|ACC-[\w.-]+)$/i;
+// What is wrong with Setup's record of the baseline's accuracy, '' when it is sound: every entry names its set
+// once, with a score that is a fraction of 1 and the number of questions the set has. With InferPilot's harness
+// the baseline is what a round has to be: gsm8k among the sets, and every set whole.
+function baselineFlaw(record) {
+  if (!record.length) return 'none returned';
+  const seen = new Set();
+  for (const b of record) {
+    const set = String((b && b.set) || '').trim().toLowerCase();
+    if (!set) return 'an entry names no set';
+    if (seen.has(set)) return `${set} is there twice`;
+    seen.add(set);
+    if (!isFraction(b.score)) return `${set}: its score is no fraction between 0 and 1 (${JSON.stringify(b.score)})`;
+    if (!(Number.isInteger(b.questions) && b.questions > 0)) return `${set}: it does not say how many questions the set has (${JSON.stringify(b.questions)})`;
+    const total = ourAccuracy && Object.keys(G2_TOTALS).includes(set) ? G2_TOTALS[set] : 0;
+    if (total && b.questions !== total) return `${set}: ${b.questions} questions, and the set has ${total}`;
+  }
+  return ourAccuracy && !seen.has('gsm8k') ? 'gsm8k is not among its sets' : '';
+}
 let ourAccuracy = false; // Setup: the task brought no accuracy script of its own
 const isFraction = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
 const g2Budget = (s) => (s && s.budget != null ? s.budget : G2_POINT);
@@ -2015,6 +2036,15 @@ function g2Unsound(g2, failures) {
   const excused = new Set((failures || []).filter((f) => f.blocking === false).map((f) => String(f.gate || '').trim()));
   for (const s of g2.sets) {
     const name = String((s && s.set) || '').trim() || 'a set without a name';
+    const gate = String((s && s.gate) || '').trim() || 'G2';
+    if (!ACCURACY_GATE.test(gate)) {
+      return `${name}: it is reported under ${gate}, which is no gate of accuracy: a set is G2's, or an accuracy item of the acceptance matrix's (ACC-<n>)`;
+    }
+    // A report-only item of the acceptance matrix that the round lists as failed without blocking stops nothing,
+    // whatever became of its run: a miss, a question unanswered, a harness that ended without its report. It is
+    // the round's own report, and its numbers are held to nothing. Not gsm8k, which every change answers for
+    // with InferPilot's harness, and no set of G2's own.
+    if (gate.toUpperCase() !== 'G2' && excused.has(gate) && !(ourAccuracy && name.toLowerCase() === 'gsm8k')) continue;
     const asked = Number(s && s.questions);
     if (!s || !(Number.isInteger(asked) && asked > 0)) return `${name}: it does not say how many questions the set has`;
     const known = Object.keys(G2_TOTALS).includes(name.toLowerCase());
@@ -2024,8 +2054,6 @@ function g2Unsound(g2, failures) {
       return `${name}: the change answered ${JSON.stringify(s.answered)} of ${asked} questions, and a set where a question got no answer has no score`;
     }
     if (!isFraction(s.fix)) return `${name}: the change's score is no fraction between 0 and 1 (${JSON.stringify(s.fix)})`;
-    const gate = String(s.gate || '').trim() || 'G2';
-    if (NOT_ACCURACY.test(gate)) return `${name}: it is reported under ${gate}, which is no gate of accuracy: a set is G2's, or an item of the acceptance matrix's`;
     if (s.base == null) {
       if (!fix) return `${name}: it gives no score of the baseline, which Setup measured`;
       if (!noBase) return `${name}: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)`;
@@ -2043,11 +2071,14 @@ function g2Unsound(g2, failures) {
     const setup = measured.find((b) => b.set === name.toLowerCase());
     if (!fix && !setup) return `${name}: Setup measured no baseline of it, and the round gives one (${s.base})`;
     if (setup && Math.abs(s.base - setup.score) > G2_SAME) return `${name}: it gives the baseline's score as ${s.base}, and Setup measured ${setup.score}`;
-    if (setup && setup.questions && setup.questions !== asked) return `${name}: ${asked} questions, and Setup's baseline has ${setup.questions}`;
+    if (setup && setup.questions !== asked) return `${name}: ${asked} questions, and Setup's baseline has ${setup.questions}`;
     const budget = g2Budget(s);
     if (!isFraction(budget) || budget >= 1) return `${name}: its budget is no fraction between 0 and 1 (${JSON.stringify(s.budget)})`;
-    if (s.fix < s.base - budget - 1e-9 && !excused.has(gate)) {
-      return `${name}: ${s.fix} is more than ${inPoints(budget)} below the baseline's ${s.base}, and ${gate} is not among the round's failures that do not block`;
+    // The change is judged against the score Setup measured, where there is one, not against the round's copy of
+    // it: a copy rounded down by less than G2_SAME would let a loss just past the budget through.
+    const base = setup ? setup.score : s.base;
+    if (s.fix < base - budget - 1e-9 && !excused.has(gate)) {
+      return `${name}: ${s.fix} is more than ${inPoints(budget)} below the baseline's ${base}, and ${gate} is not among the round's failures that do not block`;
     }
   }
   return '';

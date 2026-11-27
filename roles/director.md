@@ -228,10 +228,12 @@ asked for, the newest daily one or the resumed run's) and `verdict` (`mismatch`,
      when repeat runs agree within the recorded spread. Write `RUN_DIR/baseline.json`: each set's score
      (`accuracy`), the client's runs and their spread (`perf`: `runs`, `spread`), and how long each launch,
      set and client run took (`times`). The verify engineer's time limits come from it, and the baseline
-     cache keeps it. Return the accuracy as well (`baseline_accuracy`: each set with its score as a
-     fraction of 1, 0.901 and never 90.1, and the number of questions it has), measured now or
+     cache keeps it. Return the accuracy as well (`baseline_accuracy`: each set once, with its score as
+     a fraction of 1, 0.901 and never 90.1, and the number of questions it has), measured now or
      restored: InferPilot holds what a Verify round says of the baseline to it, set by set, and stops
      a feature or a perf task here whose baseline comes back without it or without `base_commit`.
+     It takes the record whole or not at all: one entry that is not that stops the task, and so does
+     a baseline of InferPilot's harness without gsm8k, or with a part of a set.
    - `perf`, and every feature: the run's `client_script`, with the task's `workload` when it gives
      one, is the fixed benchmark. Record them in `RUN_DIR/run.json` as given and, for a client without
      a `workload`, the scenarios it runs (its lengths and concurrencies, as its script and the
