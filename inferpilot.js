@@ -1713,15 +1713,18 @@ async function verifyLoop(extraGates) {
     // none (wordAgainstSetup), and the run asked for no output comparison on that word alone. A round is accepted
     // there only with the G2 that bears the word out: gsm8k was put to the model, and the round gives its scores
     // (verify_engineer.md). The fix's and the baseline's for a comparison ("pass 0.893 vs 0.895 (1319 q)"), or the
-    // fix's alone where it has no baseline ("0.893 (1319 q), no baseline: ..."). A word without a score is no
-    // result: not a bare "pass", not "no baseline: gsm8k could not start". And a comparison that failed is the
+    // fix's alone where it has no baseline, in the form the role documents: the score first, then the count of
+    // questions or a comma ("0.893 (1319 q), no baseline: ..."). A score stands alone: a number with a decimal
+    // point or a per cent sign that is no part of a longer one, so a version (v0.5.23) and a duration with its
+    // unit (12.5 min) are none, wherever they stand. A word without a score is no result either: not a bare
+    // "pass", not "no baseline: gsm8k could not start". And a comparison that failed is the
     // round's failure to list: it counts only where the round lists it as one that does not block, a known issue
     // of the baseline. Listed as blocking, the round is not accepted in the first place; not listed at all, the
     // round contradicts itself. Not on a G2 the round left out or did not run either: the fix would have neither
     // gsm8k nor a comparison behind it.
-    const SCORE = String.raw`(?:\d*\.\d+|\d+(?:\.\d+)?\s*%)`;
+    const SCORE = String.raw`(?<![\w.])(?:\d*\.\d+|\d+(?:\.\d+)?\s*%)(?!\w|\.\d)`;
     const versus = new RegExp(`^(pass|fail)\\b[^;]*?${SCORE}\\s+vs\\.?\\s+${SCORE}`, 'i').exec(compared);
-    const alone = !/^(pass|fail|not[ _-]?run|skip)/i.test(compared) && new RegExp(`${SCORE}[^;]*\\bno baseline\\b`, 'i').test(compared);
+    const alone = new RegExp(`^\\s*${SCORE}\\s*[(,][^;]*\\bno baseline\\b`, 'i').test(compared);
     const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);
     const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));
     if (C.server_code_changed && wordAgainstSetup && C.text_model !== false && (v.all_pass === true || (failures.length && !blocking.length))

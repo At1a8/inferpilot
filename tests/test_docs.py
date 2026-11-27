@@ -1309,11 +1309,12 @@ class ModelWordTest(unittest.TestCase):
                 # on the word alone no comparison was asked for: the round is accepted only with gsm8k's result
                 ("  wordAgainstSetup = !!BEFORE_A_FIX[MODE] && MODEL_WORD === true && !setupSays;", "the run does not know that the word stands against Setup's"),
                 # a result has its scores, and a comparison that failed is the round's failure to list
-                ("    const SCORE = String.raw`(?:\\d*\\.\\d+|\\d+(?:\\.\\d+)?\\s*%)`;", "a digit in a word counts as a score"),
+                ("    const SCORE = String.raw`(?<![\\w.])(?:\\d*\\.\\d+|\\d+(?:\\.\\d+)?\\s*%)(?!\\w|\\.\\d)`;",
+                 "a digit in a word, or a part of a version, counts as a score"),
                 ("    const versus = new RegExp(`^(pass|fail)\\\\b[^;]*?${SCORE}\\\\s+vs\\\\.?\\\\s+${SCORE}`, 'i').exec(compared);",
                  "a verdict without both scores counts as gsm8k's result"),
-                ("    const alone = !/^(pass|fail|not[ _-]?run|skip)/i.test(compared) && new RegExp(`${SCORE}[^;]*\\\\bno baseline\\\\b`, 'i').test(compared);",
-                 "a G2 that did not run counts as the fix's score without a baseline"),
+                ("    const alone = new RegExp(`^\\\\s*${SCORE}\\\\s*[(,][^;]*\\\\bno baseline\\\\b`, 'i').test(compared);",
+                 "a G2 that did not run, or a number that is no leading score, counts as the fix's score without a baseline"),
                 ("    const excused = failures.some((f) => String(f.gate || '').trim() === 'G2' && f.blocking === false);\n"
                  "    const scored = alone || (!!versus && (versus[1].toLowerCase() === 'pass' || excused));",
                  "a comparison that failed is accepted where the round lists no failure for it"),
@@ -1344,7 +1345,8 @@ class ModelWordTest(unittest.TestCase):
                 ("roles/intake.md", "With `text_model: true` in `given` or `answers`, ask for no `output_script`, whatever you make of the "
                                     "model's files"),
                 ("roles/verify_engineer.md", "InferPilot accepts a round there only with gsm8k's scores in `gates`. A `pass` with both, the fix's "
-                                             "and the baseline's (`pass 0.893 vs 0.895 (1319 q)`), or the fix's score with `no baseline`"),
+                                             "and the baseline's (`pass 0.893 vs 0.895 (1319 q)`), or the fix's score first with `no baseline` "
+                                             "after it, as written below (`0.893 (1319 q), no baseline: ...`)"),
                 ("roles/verify_engineer.md", "A `fail` with both scores counts only where `failures` lists G2 as one that does not block"),
                 ("roles/verify_engineer.md", "A verdict without its scores is no result"),
                 ("roles/verify_engineer.md", "Never leave G2 out or report it `not run` for a fix that changes code the server runs"),

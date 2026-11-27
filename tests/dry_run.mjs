@@ -1617,6 +1617,13 @@ const scenarios = [
       // a result has its scores: a word with a digit in it is none, nor is a verdict alone
       ['names no score where gsm8k did not start', { G2: 'no baseline: gsm8k could not start' }, {}],
       ['names a version where gsm8k did not start', { G2: 'no baseline: gsm8k could not start on the v0.5.23 image' }, {}],
+      // the score comes first and stands alone: a version or a duration before "no baseline" is none
+      ['names a version before the words', { G2: 'gsm8k could not start on the v0.5.23 image, no baseline' }, {}],
+      ['names a duration before the words', { G2: 'after 12.5 min gsm8k had not started, no baseline' }, {}],
+      ['begins with a duration', { G2: '12.5 min in, gsm8k had not started: no baseline' }, {}],
+      ['begins with a version', { G2: '0.5.23, the image, did not start gsm8k: no baseline' }, {}],
+      ['compares two versions', { G2: 'pass 0.5.23 vs 0.5.24 (the images)' }, {}],
+      ['gives a number that is not first', { G2: 'gsm8k stopped at a loss of 0.5, no baseline' }, {}],
       ['says pass and gives no score', { G2: 'pass' }, {}], ['says pass with one score', { G2: 'pass 0.893 (1319 q)' }, {}],
       ['counts the questions and gives no score', { G2: '1319 questions ran, no baseline: the base does not start' }, {}],
       ['says fail and gives no score, as a known issue', { G2: 'fail (KI-3)' }, known],
@@ -1632,6 +1639,8 @@ const scenarios = [
     for (const [said, gates, more] of [['a pass against the baseline', { G2: 'pass 0.893 vs 0.895 (1319 q)' }, {}],
       ['the score where the fix has no baseline', { G2: '0.893 (1319 q), no baseline: the base does not start on this configuration' }, {}],
       ['scores given in per cent', { G2: 'pass 89.3% vs 89.5% (1319 q)' }, {}],
+      ['the score in per cent where the fix has no baseline', { G2: '89.3% (1319 q), no baseline: the base does not start on this configuration' }, {}],
+      ['the score and a comma', { G2: '0.893, no baseline: the base does not start on this configuration' }, {}],
       ['a miss the baseline shares, listed as one that does not block', { G2: 'fail 0.851 vs 0.853 (1319 q), KI-3' }, known]]) {
       const scoredRun = await onWord(gates, more);
       check(scoredRun.result.status === 'ready_for_review', `with ${said} the word is borne out, and the round is judged as any other: ${
