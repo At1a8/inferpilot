@@ -1091,6 +1091,57 @@ class LongGatesTest(unittest.TestCase):
         self.assertIn("once in a run", EN)
         self.assertIn("一次运行里只跑一次", ZH)
 
+    def test_a_round_with_g4_gets_the_limit_it_asks_for(self):
+        # G4 and the control a failure needs are about 6 days, which no multiple of a 6-hour limit reaches. The
+        # task asked for G4, so the round gets the limit it asks for, up to 7 days, and the user sets no
+        # agent_timeout_ms to make stability work. A timeout the user did give stays the limit, and the run
+        # lock's idle window follows the longest call the run can make.
+        src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
+        for line, broken in (
+                ("const G4_ROUND_MS = 7 * 24 * 3600 * 1000;", "a round with G4 has another most than the documents say"),
+                # the seven days are the whole of it: a later round's limit is the days it was given, and twice that is no cap
+                ("const most = mostMs > 0 ? minutes(mostMs) : MAX_GRANT * limit;",
+                 "the limit a round with G4 may ask for is not used, or a later round may ask for twice the days it was given"),
+                # the days of G4 are the Verify round's alone: the role's other calls inherit at most an ordinary grant
+                ("const ordinary = MAX_GRANT * minutes(defaultTimeout(role, sub));\n    if (mostMs > 0 && grant > ordinary) {\n"
+                 "      GRANTED_MS[`${role}:${sub}`] = grant * 60000;\n"
+                 "      GRANTED_MS[grantKey] = Math.max(GRANTED_MS[grantKey] || 0, ordinary * 60000);\n    } else {\n"
+                 "      GRANTED_MS[grantKey] = grant * 60000;\n    }",
+                 "a GPU check or the check on the latest main gets the days of G4, or no longer has a round's ordinary grant"),
+                ("const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role] || defaultTimeout(role, sub);",
+                 "a call's own grant no longer comes before the role's"),
+                ("if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : "
+                 "'agent_timeout_ms' };", "a timeout the user gave no longer stays the limit, or more time is given twice"),
+                ("mostMs: STABILITY ? G4_ROUND_MS : 0,", "the Verify round does not get G4's days with stability on, or gets them without"),
+                ("const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : STABILITY ? G4_ROUND_MS : MAX_GRANT * 2 * AGENT_TIMEOUT_MS;",
+                 "the lock's idle window does not cover a round with G4, or no longer follows a timeout the user gave")):
+            self.assertIn(line, src, broken)
+        self.assertEqual(len(re.findall(r"^ +mostMs: ", src, re.M)), 1, "only the Verify round runs G4: a reproduction gets at most twice its limit")
+        for path, said in (
+                ("templates/task_definition.md", "With `stability` on, a Verify round asks for a limit of about 6 days"),
+                ("templates/task_definition.md", "It gets that limit, up to 7 days: the task asked for G4, and sets no `agent_timeout_ms` to "
+                                                 "have it"),
+                ("templates/task_definition.md", "another task then takes it over only after 14 days without a write in the run directory, in "
+                                                 "place of one day"),
+                # the 14 days are for a task that gave no timeout: one that did has twice that timeout
+                ("templates/task_definition.md", "A timeout the task does give stays the limit of every call, this round's too: a G4 that does not "
+                                                 "fit in it stops the run at Verify, and the machine is taken over after twice that timeout "
+                                                 "without a write, not after 14 days"),
+                ("roles/verify_engineer.md", "InferPilot gives the round that limit, up to 7 days: the task asked for G4"),
+                ("roles/verify_engineer.md", "A timeout the task gave is the exception: it stays the limit, and a round that does not fit in it "
+                                             "says what it needs all the same, and the run stops there for a human"),
+                ("roles/verify_engineer.md", "It gives at most twice the limit the round had, and up to 7 days to a round with `stability` on"),
+                ("README.md", "A Verify round with it asks for a limit of about 6 days and gets it, up to 7 days, with no `agent_timeout_ms` "
+                              "to set for it"),
+                ("README.md", "(with `stability` on, a Verify round gets up to 7 days, which G4 and its control need), unless "
+                              "`agent_timeout_ms` is given: a timeout the task gives stays the limit"),
+                ("README.md", "(24 h by default, 14 days with `stability` on; with `agent_timeout_ms` given, twice that timeout)"),
+                ("README.zh-CN.md", "带它的一轮 Verify 会申请约 6 天的时间上限并且拿得到（最多 7 天），不需要为此另外设置 `agent_timeout_ms`"),
+                ("README.zh-CN.md", "`stability` 打开时，Verify 一轮最多可到 7 天，这是 G4 及其对照所需的时间"),
+                ("README.zh-CN.md", "任务自己给的超时就是上限"),
+                ("README.zh-CN.md", "（默认 24 小时，`stability` 打开时为 14 天；给了 `agent_timeout_ms` 时为它的两倍）")):
+            self.assertIn(said, self.flat(path), "%s does not say it" % path)
+
     def test_g4s_load_is_the_runs_performance_client_and_the_task_brings_one(self):
         doctrine = self.flat("knowledge/validation_doctrine.md")
         self.assertIn("G4 is the task's performance test, run back to back for more than 48 hours", doctrine)

@@ -344,7 +344,9 @@ clock can start before your session does.
        G4. Only a G4 whose failure was the change's is run again, on the fix.
      - **A round with G4 says what it needs first** (`needs_min`, below): it does not fit the default
        limit, and its estimate counts G4 twice, its run and the control a failure would need, since no
-       later call has that time.
+       later call has that time. InferPilot gives the round that limit, up to 7 days: the task asked
+       for G4. A timeout the task gave is the exception: it stays the limit, and a round that does
+       not fit in it says what it needs all the same, and the run stops there for a human.
    - **Other data sets last, one after another, and only when `goal` or the acceptance matrix asks:**
      gpqa_diamond and simple_qa (through evalscope) when `goal` says the change may lose accuracy, and the
      sets the goal adds; each once per arm, at most 1 point below the baseline.
@@ -370,7 +372,9 @@ clock can start before your session does.
      round. When the rest does not fit, start nothing more and return `all_pass` false with `needs_min`:
      the limit, in minutes from the round's start, that the whole round needs (the estimate and half as
      much again, and the 30 minutes). InferPilot runs the round again with that limit, once; nobody is
-     asked to choose a time. A suite that stopped making progress is a hang, never a reason for more time.
+     asked to choose a time. It gives at most twice the limit the round had, and up to 7 days to a
+     round with `stability` on. A suite that stopped making progress is a hang, never a reason for
+     more time.
 3. Classify every failure with the failure taxonomy (collapse / mild deviation / empty output / crash or
    hang; `slow` for a suite past its limit) and count each class per run. Attach engagement evidence
    (feature counters, log lines).

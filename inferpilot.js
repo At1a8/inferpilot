@@ -79,8 +79,10 @@ const LONG_ROLES = new Set(['verify_engineer', 'perf_engineer', 'investigator'])
 const LONG_CALLS = new Set(['issue_triager:reproduce']);
 // A longer limit InferPilot gave a call that showed it needs one (callWithTime); never past a given timeout.
 const GRANTED_MS = {};
-const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role]
-  || (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`)) ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+// The limit a call has before anything is granted.
+const defaultTimeout = (role, sub) => (!TIMEOUT_GIVEN && (LONG_ROLES.has(role) || LONG_CALLS.has(`${role}:${sub}`))
+  ? 2 * AGENT_TIMEOUT_MS : AGENT_TIMEOUT_MS);
+const timeoutFor = (role, sub) => GRANTED_MS[`${role}:${sub}`] || GRANTED_MS[role] || defaultTimeout(role, sub);
 // What a role is told of its limit: 0 only when there is none.
 const minutes = (ms) => (ms > 0 ? Math.max(1, Math.floor(ms / 60000)) : 0);
 // The same to a hundredth of a minute, for a role that keeps a part of its limit in reserve: a limit
@@ -92,10 +94,11 @@ const exactMinutes = (ms) => (ms > 0 ? Math.max(0.01, Math.round(ms / 600) / 100
 const ONE_SESSION = { schemaRetries: 0 };
 // More time for a call (callWithTime) is at most this many times its limit.
 const MAX_GRANT = 2;
-// One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
-// its longest agent call, one given the most time it can get, has died, and its lock may be taken over.
-const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : MAX_GRANT * 2 * AGENT_TIMEOUT_MS;
-const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;
+// A Verify round with G4 is the exception. G4 is one test of more than 48 hours, and its estimate counts it
+// twice, the run and the control a failure would need (verify_engineer.md): about 6 days, which no multiple of
+// a 6-hour limit reaches. The task asked for G4 (stability), so the round gets the limit it asks for, up to
+// this much, and the user is not asked for a second switch (agent_timeout_ms) to make the first one work.
+const G4_ROUND_MS = 7 * 24 * 3600 * 1000;
 const ATTENTION = []; // state a human must clean up before anything else runs there (R.attention)
 const TIMED_OUT = { timedOut: true };
 const TIMED_OUT_CALLS = new Set(); // labels of calls that timed out: their agents may still be running
@@ -497,6 +500,11 @@ let wordAgainstSetup = false;
 // and G4 (stability: one throughput test of more than 48 hours, validation_doctrine.md).
 const LONG_CONTEXT = on(A.long_context);
 const STABILITY = on(A.stability);
+// One task per machine (scripts/run_lock.py): a run that wrote nothing in its run directory for twice
+// its longest agent call, one given the most time it can get, has died, and its lock may be taken over.
+// With stability on that call is a Verify round with G4, unless the user gave a timeout: that stays the limit.
+const MAX_CALL_MS = TIMEOUT_GIVEN ? AGENT_TIMEOUT_MS : STABILITY ? G4_ROUND_MS : MAX_GRANT * 2 * AGENT_TIMEOUT_MS;
+const LOCK_IDLE_HOURS = MAX_CALL_MS > 0 ? Math.ceil((2 * MAX_CALL_MS) / 3600000) : 24;
 // leads cost GPU time only when asked: by default Spinoff lists them and runs nothing
 const CONFIRM_LEADS = on(A.confirm_leads);
 const RESUME = String(A.resume_from || '').trim().toLowerCase();
@@ -747,8 +755,10 @@ async function call(role, sub, ins, schema, label, opts) {
 // to MAX_GRANT times its own (needs: its needs_min, 0 when it ended for any other reason); nobody is
 // asked to choose a time. A timeout the user gave stays the limit. ins(limit, earlier) builds the
 // inputs, earlier the answer of the call before more time; schemaAgain, when given, checks that call's
-// answer. Returns the answer, the earlier one, and with needs set, what it still needs.
-async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAgain, ins, needs: needsOf, opts }) {
+// answer. mostMs, when given, is the most the call may have, whatever its limit is: a Verify round with G4
+// (G4_ROUND_MS). It is the whole of it: a round that was given six days is not given twelve by the next one.
+// Returns the answer, the earlier one, and with needs set, what it still needs.
+async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAgain, ins, needs: needsOf, opts, mostMs = 0 }) {
   let earlier = null;
   for (let again = false; ; again = true) {
     const limit = minutes(timeoutFor(role, sub));
@@ -758,9 +768,22 @@ async function callWithTime({ role, sub, grantKey, what, label, schema, schemaAg
     if (!needs) return { r, earlier };
     if (again || TIMEOUT_GIVEN) return { r, earlier, needs, limit, short: again ? 'the limit it asked for' : 'agent_timeout_ms' };
     // past it, the run lock's idle window (MAX_CALL_MS) no longer covers the call: a human gives a timeout
-    if (needs > MAX_GRANT * limit) return { r, earlier, needs, limit, short: `more than ${MAX_GRANT} times its limit` };
+    const most = mostMs > 0 ? minutes(mostMs) : MAX_GRANT * limit;
+    if (needs > most) {
+      return { r, earlier, needs, limit, short: mostMs > 0 ? `more than the ${most} min a round with G4 can have`
+        : `more than ${MAX_GRANT} times its limit` };
+    }
     const grant = Math.max(needs, limit);
-    GRANTED_MS[grantKey] = grant * 60000;
+    // The role's other calls take a grant as theirs (grantKey: a GPU check, the check on the latest main, after a
+    // Verify round). What a call gets beyond any ordinary grant is that call's alone (mostMs: the days of G4): one
+    // of the others that stalls would hold the run for days, and none of them runs G4.
+    const ordinary = MAX_GRANT * minutes(defaultTimeout(role, sub));
+    if (mostMs > 0 && grant > ordinary) {
+      GRANTED_MS[`${role}:${sub}`] = grant * 60000;
+      GRANTED_MS[grantKey] = Math.max(GRANTED_MS[grantKey] || 0, ordinary * 60000);
+    } else {
+      GRANTED_MS[grantKey] = grant * 60000;
+    }
     note(PHASE, 'more_time', `${what} needs ${needs} min and had ${limit}: run again with a ${grant}-min limit`);
     earlier = r;
   }
@@ -1963,6 +1986,8 @@ async function verifyLoop(extraGates, existing) {
     const t = await callWithTime({
       role: 'verify_engineer', sub: 'verify', grantKey: 'verify_engineer', what: 'the round', label: `verify_engineer#${round}`,
       schema: VERIFY, opts: ONE_SESSION, ins: (limit) => inputs({ extra_gates: extraGates || [], round, time_limit_min: limit }),
+      // The task asked for G4 (stability): the round that runs it gets the days it asks for, with no timeout from the user.
+      mostMs: STABILITY ? G4_ROUND_MS : 0,
       // A round that could not stop what it started is not asked again with more time next to it: its answer
       // goes to the check below as it is. Nor is one that does not say: asked again, the round starts at once
       // on these GPUs, so what it left is stopped and checked first, and the round is held where that fails.

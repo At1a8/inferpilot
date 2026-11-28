@@ -129,6 +129,11 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
   once in a run: after a later change to the code, a review's for one, it is not run again, and the
   report says which commit it ran on. With `stability` on, a Verify round asks for a limit of about 6
   days, and uses it in full only when G4 fails and the baseline runs the same test as its control.
+  It gets that limit, up to 7 days: the task asked for G4, and sets no `agent_timeout_ms` to have
+  it. While the run holds the machine, another task then takes it over only after 14 days without
+  a write in the run directory, in place of one day. A timeout the task does give stays the limit
+  of every call, this round's too: a G4 that does not fit in it stops the run at Verify, and the
+  machine is taken over after twice that timeout without a write, not after 14 days.
 
 ```bash
 # server.sh
