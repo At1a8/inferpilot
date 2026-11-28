@@ -6,11 +6,26 @@ export const CMD = { kernel_backend: 'command', kernel_backend_command: 'my-kern
 
 export const WP = (id, extra) => ({ id, goal: `goal of ${id}`, kind: 'framework', files: ['x.py'], test: `test ${id}`, depends_on: [], ...(extra || {}) });
 
+// G2's numbers of a sound Verify round: gsm8k whole on both arms, the change within a point of the baseline,
+// measured on the commit the task branch is at. That is `head` where the caller follows the implementer's
+// answers, as the dry run does (headAfter); else the last package the round is given as verified, which is the
+// same commit until something is rolled back.
+export const soundG2 = (ins, head) => ({ commit: head || (((ins && ins.verified_work_packages) || []).at(-1) || {}).commit || 'c_head',
+  base_commit: 'base0f1e2d3c', sets: [{ set: 'gsm8k', fix: 0.893, base: 0.895, questions: 1319, answered: 1319, base_answered: 1319 }] });
+// The commit the task branch is at after an answer, as a verify engineer would read it in the worktree: the
+// implementer's commit, or where its rollback left the branch (a revert is a commit of its own).
+export const headAfter = (key, ans, head) => (key === 'implementer:rollback' ? String((ans && ans.reset_to) || '')
+  : key === 'implementer:implement' && ans && ans.commit ? String(ans.commit) : head);
+
+// What Setup returns of the baseline it measured for a feature or a perf task: the commit it is on, and its
+// accuracy set by set, which G2 holds a round's numbers to. soundG2 gives the same baseline.
+export const BASELINE = { base_commit: 'base0f1e2d3c', baseline_accuracy: [{ set: 'gsm8k', score: 0.895, questions: 1319 }] };
+
 // Answers every role gives unless a scenario overrides them.
 export const DEFAULTS = {
   'intake:define': (ins) => ({ status: 'ready', task_def: ins.given || {}, provenance: {}, assumptions: [], questions: [], summary: 'as given' }),
   'director:setup': () => ({ lock: 'acquired', run_dir: RUN, baseline_status: 'pass', baseline: '3/3 runs within spread', branch: 'inferpilot/task', worktree: `${RUN}/wt`, gpu_ids: '0,1',
-    base_commit: 'base0f1e2d3c',
+    ...BASELINE,
     server_script: `${RUN}/scripts/server.sh`, accuracy_script: `${RUN}/scripts/accuracy.sh` }),
   'director:spec': () => ({ spec_path: `${RUN}/feature_spec.md`, gates_measurable: true, perf_claim: '+20% output tok/s at equal HBM' }),
   'director:report': (ins) => ({ report_path: `${RUN}/run_report.md`, summary: 'done',
@@ -19,11 +34,17 @@ export const DEFAULTS = {
   'architect:design': () => ({ design_path: `${RUN}/design.md`, work_packages: [WP('WP1'), WP('WP2', { depends_on: ['WP1'] })], gate_ok: true, needs_human_review: false, perf_claim: '+20% output tok/s at equal HBM' }),
   'architect:perf_plan': () => ({ work_packages: [WP('WP1')], handoffs: [{ id: 'O2', owner: 'kernel_workflow', spec_path: `${RUN}/op_spec.md` }], perf_claim: '-5% TPOT', gate_ok: true }),
   'implementer:implement': (ins) => ({ wp: ins.work_package.id, status: 'done', commit: `c_${ins.work_package.id}`, unit_test_cmd: 'pytest -q t.py', files_changed: ['x.py'], kernel_handoff: null }),
-  'implementer:rollback': () => ({ wp: 'x', reset_to: 'base', clean: true }),
+  // a reset goes back to an earlier commit; a revert (of an integrated kernel) is a commit of its own on top
+  'implementer:rollback': (ins) => ({ wp: 'x', reset_to: ins && ins.revert ? `revert_of_${ins.revert}` : 'base', clean: true }),
   'test_engineer:unit': (ins) => ({ wp: ins.work_package.id, unit_pass: true, feature_off_unchanged: true, fails_without_change: 'parent', incomplete: '', evidence: 'ok' }),
   // the call after a check on the latest main that left no answer also says what it could not put back in the image
   'verify_engineer:gpus': (ins) => (ins.round === 'recheck' ? { in_use: '', env_changed: '' } : { in_use: '' }),
-  'verify_engineer:verify': () => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass' }, failures: [], ledger_path: `${RUN}/experiment_ledger.md` }),
+  // Given the round's inputs, the answer has G2's numbers for the commit under verification. A scenario that takes
+  // the answer without them (to change a part of it) gets none: the dry run adds them for the round it is given in.
+  // `head`: the commit the branch is at, where the caller follows it (the dry run): after a rollback or a revert
+  // it is not the last package the round is given as verified.
+  'verify_engineer:verify': (ins, n, head) => ({ all_pass: true, gates: { G0: 'pass', G2: 'pass 0.893 vs 0.895 (1319 q)' }, failures: [],
+    ledger_path: `${RUN}/experiment_ledger.md`, ...(ins ? { g2: soundG2(ins, head) } : {}) }),
   'investigator:investigate': () => ({ verdict: 'fix_needed', work_packages: [WP('FIX1')], summary: 'race in hook' }),
   'investigator:diagnose': () => ({ verdict: 'fix_needed', root_cause: 'stale import', work_packages: [WP('WP1')] }),
   'perf_engineer:perf_eval': () => ({ claim_reproduced: true, held_out_ok: true, guards_ok: true, workload_unchanged: true, path_ok: true, results: [], summary: '+22%' }),

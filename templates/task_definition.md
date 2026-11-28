@@ -71,7 +71,12 @@ the user, but for the server a fix is measured on (G2, G5) when the report or th
 - **`accuracy_script`**, optional, measures accuracy against the server at `API_URL`
   (`http://127.0.0.1:$PORT/v1`; `PORT` is set too) and writes its results under `RESULT_ROOT`, with
   `TAG` naming the arm. InferPilot runs it unchanged for every arm and compares its scores set by set,
-  each at most 1 point below the baseline.
+  each at most 1 point below the baseline. Its results give, for each set it measures, the score, how
+  many questions the set has and how many of them got an answer. InferPilot holds both arms to those
+  counts: a set where a question got no answer has no score, and a set is as large for the change as
+  for the baseline. A script whose results lack them is not measured with: nothing fills a count in
+  from elsewhere, and the baseline fails at Setup, which says what is missing, before any change is
+  made. Add them to the script's results, or leave the field out and take InferPilot's.
 - **Accuracy** needs no script of the user's: InferPilot's `scripts/eval_accuracy.sh` measures gsm8k
   through evalscope, once, and the change passes at most 1 point below the baseline. A change the user
   says may lose accuracy, said in `goal`, runs gpqa_diamond and simple_qa as well; other suites or more

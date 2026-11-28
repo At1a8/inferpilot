@@ -729,7 +729,21 @@ function takesLeads(role, sub) {
 const withLeads = (schema) => (schema && schema.type === 'object'
   ? { ...schema, properties: { ...schema.properties, leads: arr(LEAD) } } : schema);
 
+// The commit the task branch is at, as the implementer last said it: a package's commit, or where a rollback left
+// the branch. '' while that is not known (a rollback that gave no answer). G2's numbers are held to it
+// (g2Unsound), and not to the last package on the verified list: a kernel that was reverted is off that list,
+// and the branch is at its revert, a commit of its own.
+let branchTip = '';
+function branchMoved(sub, r) {
+  if (sub === 'rollback') branchTip = String((r && r.reset_to) || '').trim();
+  else if (sub === 'implement' && r && String(r.commit || '').trim()) branchTip = String(r.commit).trim();
+}
 async function call(role, sub, ins, schema, label, opts) {
+  const r = await callRole(role, sub, ins, schema, label, opts);
+  if (role === 'implementer') branchMoved(sub, r);
+  return r;
+}
+async function callRole(role, sub, ins, schema, label, opts) {
   const lbl = label || `${role}:${sub}`;
   const ms = timeoutFor(role, sub);
   const leads = takesLeads(role, sub);
@@ -818,6 +832,9 @@ const SETUP = S({
   run_dir: str,
   baseline_status: { type: 'string', enum: ['pass', 'fail', 'skip'] },
   baseline: str,
+  // a feature, a perf task: the accuracy of the baseline, set by set, as RUN_DIR/baseline.json has it: the score as
+  // a fraction of 1 and how many questions the set has. G2 holds a round's numbers of the baseline to it (g2Unsound)
+  baseline_accuracy: arr(S({ set: str, score: num, questions: num }, ['set', 'score'])),
   branch: str,
   worktree: str,
   base_commit: str, // the commit the task branch was made on: what a rollback of the whole task must come back to
@@ -1013,9 +1030,23 @@ const ROLLBACK = S({ wp: str, reset_to: str, clean: bool }, ['reset_to', 'clean'
 // The comment for an existing fix PR that did not pass verification: what a human may post on it.
 // branch_findings: what the leak scan found on the pull request's branch, which the comment does not clear.
 const PR_COMMENT = S({ comment_path: str, summary: str, branch_findings: str }, ['comment_path']);
+// G2 as numbers, one entry a data set (gsm8k first): the score on the change and on the baseline as fractions,
+// how many questions the set has and how many of them each arm answered, and the gate the set is reported under
+// where that is not G2 (an item of the acceptance matrix). base is left out where there is no baseline, and fix
+// where the change left a question unanswered: such a set has no score, and its round has a failure to report,
+// which a schema that asked for the score would turn away before the investigator saw it. So it is with the
+// counts: a harness that ended without its report leaves none to give. Only the set's name is asked of every
+// answer; the rest is asked of a round the run would accept (g2Unsound). budget: how far below the baseline the
+// task lets this set fall, as a fraction (0.02 for two points), where the user named another than a point.
+const G2_SET = S({ set: str, gate: str, fix: num, base: num, questions: num, answered: num, base_answered: num, budget: num },
+  ['set']);
 const VERIFY = S({
   all_pass: bool,
   gates: obj,
+  // G2's result as numbers, which the run holds an accepted round to (g2Unsound): the commit of the change that
+  // was measured, the baseline's, and each set. gates.G2 says the same in words, for the reader; no score is read
+  // out of those. no_baseline: why no baseline was measured (the base does not start on this configuration).
+  g2: S({ commit: str, base_commit: str, no_baseline: str, sets: arr(G2_SET) }, ['commit', 'sets']),
   // blocking false: a report-only item of the acceptance matrix, or a G4 failure the investigator found on the
   // baseline too (a known issue): reported, and not investigated (again)
   failures: arr(S({ gate: str, failure_class: str, counts: str, evidence: str, blocking: bool }, ['gate'])),
@@ -1703,6 +1734,14 @@ async function setup(requireBaseline) {
   if (rejected) R.import_rejected = rejected;
   // GPUs and scripts the user gave win; otherwise every later role uses the ones Setup pinned or rendered.
   const own = (v) => (isTemplate(v) ? '' : String(v || ''));
+  // Without an accuracy script of the task's, the run measures with InferPilot's harness, whose sets and their
+  // numbers of questions it knows (g2Unsound). A script the task brings measures what it measures.
+  ourAccuracy = !own(C.accuracy_script);
+  // Setup's record of the baseline's accuracy is taken whole, or not at all (baselineFlaw): an entry dropped for
+  // what is wrong with it would leave a set of the baseline out of what a round is held to, or a size unchecked.
+  const recorded = Array.isArray(s.baseline_accuracy) ? s.baseline_accuracy : [];
+  const flaw = baselineFlaw(recorded);
+  C.baseline_accuracy = flaw ? [] : recorded.map((b) => ({ set: String(b.set).trim().toLowerCase(), score: b.score, questions: b.questions }));
   C.base_commit = String(s.base_commit || '').trim();
   C.origin_repo = repoName(s.origin_repo);
   Object.assign(C, { run_dir: s.run_dir, branch: s.branch || C.branch, worktree: s.worktree || C.worktree,
@@ -1754,6 +1793,15 @@ async function setup(requireBaseline) {
     return false;
   }
   if (rejected) C.import_rejected = rejected;
+  // G2 holds a feature or a performance change to the baseline Setup measured: the commit it is on and each
+  // set's score (g2Unsound). A baseline that comes back without them leaves a round nothing to be held to, so
+  // the run stops here, before the work, and not at Verify after it.
+  const unplaced = (MODE === 'feature' || MODE === 'perf') && s.baseline_status === 'pass'
+    ? [!C.base_commit && 'the commit it is on (base_commit)', flaw && `its accuracy, set by set (baseline_accuracy: ${flaw})`].filter(Boolean) : [];
+  if (unplaced.length) {
+    note('Setup', 'fail', `Setup measured a baseline and did not return ${unplaced.join(', nor ')}: G2 would have nothing to hold the change to`);
+    return false;
+  }
   const ok = s.baseline_status === 'pass' || (!requireBaseline && s.baseline_status === 'skip');
   note('Setup', ok ? 'pass' : 'fail',
     `${rejected ? `the worktree rejects a package of the newest image, which Classify judges: ${rejected}; ` : ''}baseline ${
@@ -1955,6 +2003,147 @@ const ROUND_CLEANUP = S({ in_use: str, in_use_gpus: arr({ type: ['string', 'inte
 // numbers. One it names another way is not read, and excuses nothing after the round.
 const gpusNamed = (s) => [...new Set([...String(s || '').matchAll(/\bGPU\s+(\d+)\s*:/g)].map((m) => m[1]))];
 
+// G2 is judged on numbers the verify engineer returns apart from its words (g2), wherever gsm8k is put to the
+// change: always for a feature or a performance change, and for a fix that changes code the server runs on a
+// model that answers text questions. A round the run accepts has to show them sound:
+// - the commit of the change is the one the task branch is at (branchTip), which the run has to know, and not
+//   the baseline's;
+// - the baseline of a feature or a performance change is the one Setup measured: on the task's base, every set
+//   Setup measured, each with the score Setup recorded (C.baseline_accuracy). Only a fix may be compared with
+//   another commit (the last one that served the configuration), or have no baseline at all, with the reason:
+//   its base can be the server that does not start, and Setup measures none for it;
+// - with InferPilot's harness, gsm8k is among the sets, and every set the harness knows has all its questions
+//   (G2_TOTALS): a part of a set is a smoke test. A task's own accuracy script measures what it measures;
+// - every question is answered on both arms (a set where one got no answer has no score), and the scores are
+//   fractions of 1;
+// - no set is further below its baseline than its budget, unless the round lists that set's gate among its
+//   failures that do not block. The budget is a point, or what the round says the task names for the set. The
+//   gate is G2 or an item of the acceptance matrix, never another gate of the run: a stability failure that
+//   does not block excuses no loss of accuracy.
+// Returns what is wrong, '' when nothing is.
+const G2_POINT = 0.01;
+// The sets of scripts/eval_accuracy.sh that have a fixed number of questions (its dataset_profile). Not
+// longbench_v2, whose size the script takes from a local copy where one is given.
+const G2_TOTALS = { gsm8k: 1319, gpqa_diamond: 198, mmlu_pro: 12032, simple_qa: 4326, hle: 2158 };
+// How far a round's baseline score may be from the one Setup recorded: the two are one measurement, written twice.
+const G2_SAME = 0.0005;
+// The gates a set of G2's can be reported under: G2, or an accuracy item of the acceptance matrix (ACC-<n>). No
+// other gate of the run, and no other item of the matrix (COR-, PRF-, STB-, CMP-, ENG-, REQ-), says anything of
+// accuracy against the baseline: the failure of none of them excuses a loss.
+const ACCURACY_GATE = /^(G2|ACC-[\w.-]+)$/i;
+// What is wrong with Setup's record of the baseline's accuracy, '' when it is sound: every entry names its set
+// once, with a score that is a fraction of 1 and the number of questions the set has. With InferPilot's harness
+// the baseline is what a round has to be: gsm8k among the sets, and every set whole.
+function baselineFlaw(record) {
+  if (!record.length) return 'none returned';
+  const seen = new Set();
+  for (const b of record) {
+    const set = String((b && b.set) || '').trim().toLowerCase();
+    if (!set) return 'an entry names no set';
+    if (seen.has(set)) return `${set} is there twice`;
+    seen.add(set);
+    if (!isFraction(b.score)) return `${set}: its score is no fraction between 0 and 1 (${JSON.stringify(b.score)})`;
+    if (!(Number.isInteger(b.questions) && b.questions > 0)) {
+      return `${set}: it does not say how many questions the set has (${JSON.stringify(b.questions)})${
+        ourAccuracy ? '' : "; a task's own accuracy script has to give each set's size and answers in its results (templates/task_definition.md §1.1)"}`;
+    }
+    const total = ourAccuracy && Object.keys(G2_TOTALS).includes(set) ? G2_TOTALS[set] : 0;
+    if (total && b.questions !== total) return `${set}: ${b.questions} questions, and the set has ${total}`;
+  }
+  return ourAccuracy && !seen.has('gsm8k') ? 'gsm8k is not among its sets' : '';
+}
+let ourAccuracy = false; // Setup: the task brought no accuracy script of its own
+const isFraction = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 1;
+const g2Budget = (s) => (s && s.budget != null ? s.budget : G2_POINT);
+const inPoints = (b) => (Math.abs(b - G2_POINT) < 1e-12 ? 'a point' : `${+(b * 100).toFixed(4)} points`);
+// `judged`: filled with the sets that were compared with a baseline, each with the budget it was held to.
+function g2Unsound(g2, failures, judged = []) {
+  if (!g2 || typeof g2 !== 'object' || !Array.isArray(g2.sets) || !g2.sets.length) return 'it gives no scores (g2)';
+  const fix = !!BEFORE_A_FIX[MODE];
+  const commit = String(g2.commit || '').trim();
+  const baseCommit = String(g2.base_commit || '').trim();
+  const noBase = String(g2.no_baseline || '').trim();
+  const setupBase = String(C.base_commit || '').trim();
+  const measured = fix ? [] : (C.baseline_accuracy || []); // what Setup recorded of the baseline, set by set
+  if (!commit) return 'its scores name no commit of the change (g2.commit)';
+  // A rollback that named no commit leaves the branch somewhere the run does not know: no score can be placed.
+  if (!branchTip) return `the run does not know which commit the task branch is at (the implementer's last rollback named none), and cannot place the scores of ${commit}`;
+  if (!sameCommit(commit, branchTip)) return `its scores are of ${commit}, and the commit under verification is ${branchTip}`;
+  if (baseCommit && sameCommit(baseCommit, commit)) return `the baseline it names is the change's own commit (${commit})`;
+  if (!fix && !setupBase) return 'Setup returned no commit of the baseline it measured (base_commit), and the baseline the round names cannot be held to it';
+  if (!fix && baseCommit && !sameCommit(baseCommit, setupBase)) {
+    return `the baseline it names is ${baseCommit}, and the one Setup measured is the task's base, ${setupBase}`;
+  }
+  if (!fix && noBase) return `it says that there is no baseline (${noBase}), and Setup measured one: only a fix can be without`;
+  if (!fix && !measured.length) return 'Setup returned no accuracy of the baseline (baseline_accuracy), and the scores the round gives of it cannot be held to it';
+  const names = g2.sets.map((s) => String((s && s.set) || '').trim().toLowerCase());
+  // One entry for a set: two of them would be two results of one measurement, and the round held to either.
+  const twice = names.find((n, i) => n && names.indexOf(n) !== i);
+  if (twice) return `${twice} is among its sets twice`;
+  if (ourAccuracy && !names.includes('gsm8k')) {
+    return `gsm8k is not among its sets (${names.filter(Boolean).join(', ') || 'none named'}), and InferPilot's harness puts it to every change`;
+  }
+  const missing = measured.map((b) => b.set).filter((set) => !names.includes(set));
+  if (missing.length) return `Setup measured the baseline on ${missing.join(', ')} as well, and the round gives no numbers of ${missing.length > 1 ? 'them' : 'it'}`;
+  // Only a failure that does not block excuses a set below its budget. A blocking one makes no accepted round
+  // (verifyLoop reads all_pass by it), and excuses nothing here either.
+  const excused = new Set((failures || []).filter((f) => f.blocking === false).map((f) => String(f.gate || '').trim()));
+  let checked = 0; // the sets whose numbers the round is held to: every one but a report-only item listed as failed
+  for (const s of g2.sets) {
+    const name = String((s && s.set) || '').trim() || 'a set without a name';
+    const gate = String((s && s.gate) || '').trim() || 'G2';
+    if (!ACCURACY_GATE.test(gate)) {
+      return `${name}: it is reported under ${gate}, which is no gate of accuracy: a set is G2's, or an accuracy item of the acceptance matrix's (ACC-<n>)`;
+    }
+    // A report-only item of the acceptance matrix that the round lists as failed without blocking stops nothing,
+    // whatever became of its run: a miss, a question unanswered, a harness that ended without its report. It is
+    // the round's own report, and its numbers are held to nothing. Not gsm8k, which every change answers for
+    // with InferPilot's harness, and no set of G2's own.
+    if (gate.toUpperCase() !== 'G2' && excused.has(gate) && !(ourAccuracy && name.toLowerCase() === 'gsm8k')) continue;
+    checked += 1;
+    const asked = Number(s && s.questions);
+    if (!s || !(Number.isInteger(asked) && asked > 0)) return `${name}: it does not say how many questions the set has`;
+    const known = Object.keys(G2_TOTALS).includes(name.toLowerCase());
+    const total = ourAccuracy && known ? G2_TOTALS[name.toLowerCase()] : 0;
+    if (total && asked !== total) return `${name}: ${asked} questions, and the set has ${total}: a part of a set is a smoke test, not a result`;
+    if (Number(s.answered) !== asked) {
+      return `${name}: the change answered ${JSON.stringify(s.answered)} of ${asked} questions, and a set where a question got no answer has no score`;
+    }
+    if (!isFraction(s.fix)) return `${name}: the change's score is no fraction between 0 and 1 (${JSON.stringify(s.fix)})`;
+    if (s.base == null) {
+      if (!fix) return `${name}: it gives no score of the baseline, which Setup measured`;
+      if (!noBase) return `${name}: it gives no score of the baseline, and no reason why there is none (g2.no_baseline)`;
+      // A baseline that ran and left questions unanswered has no score either, and is not a fix without a baseline.
+      if (s.base_answered != null) {
+        return `${name}: the baseline answered ${JSON.stringify(s.base_answered)} of ${asked} questions and has no score: it ran, so the fix is not one without a baseline`;
+      }
+      continue;
+    }
+    if (noBase) return `${name}: it gives a score of the baseline, and says that there is none (${noBase})`;
+    if (!isFraction(s.base)) return `${name}: the baseline's score is no fraction between 0 and 1 (${JSON.stringify(s.base)})`;
+    if (!baseCommit) return `${name}: the baseline's score names no commit (g2.base_commit)`;
+    if (Number(s.base_answered) !== asked) return `${name}: the baseline answered ${JSON.stringify(s.base_answered)} of ${asked} questions`;
+    // A feature's baseline is Setup's measurement: the round copies it, and measures none of its own.
+    const setup = measured.find((b) => b.set === name.toLowerCase());
+    if (!fix && !setup) return `${name}: Setup measured no baseline of it, and the round gives one (${s.base})`;
+    if (setup && Math.abs(s.base - setup.score) > G2_SAME) return `${name}: it gives the baseline's score as ${s.base}, and Setup measured ${setup.score}`;
+    if (setup && setup.questions !== asked) return `${name}: ${asked} questions, and Setup's baseline has ${setup.questions}`;
+    const budget = g2Budget(s);
+    if (!isFraction(budget) || budget >= 1) return `${name}: its budget is no fraction between 0 and 1 (${JSON.stringify(s.budget)})`;
+    // The change is judged against the score Setup measured, where there is one, not against the round's copy of
+    // it: a copy rounded down by less than G2_SAME would let a loss just past the budget through.
+    const base = setup ? setup.score : s.base;
+    if (s.fix < base - budget - 1e-9 && !excused.has(gate)) {
+      return `${name}: ${s.fix} is more than ${inPoints(budget)} below the baseline's ${base}, and ${gate} is not among the round's failures that do not block`;
+    }
+    judged.push({ set: name, budget });
+  }
+  // A report-only item is an addition to what every change answers for. A round whose every set is one it lists
+  // as failed has put no number to the change (a task's own accuracy script names its sets as it likes).
+  if (!checked) return 'every set it gives is a report-only item that the round lists as failed: no number of the change is held to anything';
+  return '';
+}
+
 // Verify against the same-pattern baseline; a failure goes to the investigator,
 // whose verdict decides: fix work packages (implemented, then re-verified), a
 // baseline bug (recorded; the gate is re-judged on what remains) or a stop.
@@ -2034,6 +2223,15 @@ async function verifyLoop(extraGates, existing) {
       return { ok: false, reason: 'no verification result' };
     }
     if (v.ledger_path) C.ledger_path = v.ledger_path;
+    // A blocking failure is a failure whatever all_pass says. An answer that gives both is read by the failure,
+    // here, once: what is asked of a round that is not accepted, what its numbers are held to and where its
+    // failure goes are then decided alike, and no round is accepted over a gate it reports as failed.
+    const contradicted = v.all_pass === true ? (v.failures || []).filter((f) => f.blocking !== false).map((f) => f.gate) : [];
+    if (contradicted.length) {
+      note('Verify', 'warning', `round ${round} says that every gate passes (all_pass) and lists a blocking failure (${contradicted.join(', ')}): `
+        + 'the failure stands');
+      v.all_pass = false;
+    }
     // What the round started and could not stop still holds the GPUs or the worktree. A round that failed is
     // followed by an investigation, a repair or a rollback, which work there: none of them starts next to it.
     // One that passed goes on, and the measurement after it checks the GPUs itself.
@@ -2132,6 +2330,28 @@ async function verifyLoop(extraGates, existing) {
         + 'said the same and put gsm8k to it; where the model answers none after all, name its output comparison (output_script)';
       note('Verify', 'fail', why);
       return { ok: false, reason: why };
+    }
+    // G2 on its numbers (g2Unsound), wherever gsm8k is put to the change. The words of gates.G2 are the round's
+    // report; what the run accepts is what the numbers show, and a round that gives none has shown nothing.
+    const g2Due = (!BEFORE_A_FIX[MODE] || C.server_code_changed) && C.text_model !== false;
+    const held = g2Due && (v.all_pass === true || (failures.length > 0 && !blocking.length));
+    const judged = [];
+    const unsound = held ? g2Unsound(v.g2, failures, judged) : '';
+    if (unsound) {
+      await refused();
+      const why = `the round was accepted, and G2's numbers do not bear it out: ${unsound}. G2 is `
+        + `${compared ? `"${compared}"` : 'not reported'} in words; the run goes by the scores, the answers and the commits in g2`;
+      note('Verify', 'fail', why);
+      return { ok: false, reason: why };
+    }
+    // A budget other than a point is the user's to name (acceptance.md §1.1), and the round's word is all the run
+    // has that the task names it. The record says which set was judged on which, for the reviewer and the report:
+    // only of sets that were compared with a baseline, not of a fix's score that has none or of a report-only
+    // item that was held to nothing.
+    const budgets = judged.filter((j) => Math.abs(j.budget - G2_POINT) > 1e-12);
+    if (budgets.length) {
+      note('Verify', 'budget', `G2 judged ${budgets.map((j) => `${j.set} on a budget of ${inPoints(j.budget)}`).join(', ')}, which the round says `
+        + "the task names: a budget other than a point is the user's to give (goal), and no role's");
     }
     if (C.accuracy_claim && (v.all_pass === true || (failures.length && !blocking.length)) && !/^pass\b/i.test(claimGate)) {
       await refused();
