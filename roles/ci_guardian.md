@@ -23,11 +23,39 @@ has to show on it. `evidence` names the commits. The run counts only in the envi
 that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and its node count.
 
 - **Which image is the newest is established, not assumed.** It is the newest tag of the lane's
-  variant (rocm10, rocm720 or rocm724) in the registry, and no older than the one the lane's latest
-  run on main pulled, which its log names. The image the tests run in must be that image, read
-  where they run (`$INFERPILOT_IMAGE` in the container, or `docker inspect` from the host: `director.md`,
-  Setup): one that only matches the failed job's can be as old as it, and Setup may have taken an
-  older one (`image_ok`).
+  variant and release in the registry, and, where the lane's latest run on main had the same base,
+  no older than the one that run pulled, which its log names. A lane whose base has changed since
+  can take an image dated before that one. The variant is the ROCm and the GPU of the tag together
+  (`rocm720-mi35x`, `rocm724-mi30x`): the registry has a build of each ROCm for each GPU family,
+  and the newest tag of the ROCm alone can be the other family's, which this lane never ran.
+  `python3 <inferpilot_dir>/scripts/latest_image.py --variant <rocm>-<gpu>` names the newest of a
+  variant for a lane that runs the daily sglang image, by the date and whatever the release. The
+  lane goes by its base tag, the release with the ROCm and the GPU (`v0.5.23-rocm720-mi35x`): the
+  base its workflow passes, or the framework's newest release, and of that exact base the newest
+  date among the days it looks back (its start script, read in the tree under test: sglang's is
+  `<framework_dir>/scripts/ci/amd/amd_ci_start_container.sh`, which looks at today and the six days
+  before). An older release built on a later day, or a release and its `.post1` built on one day,
+  give the two different answers. So ask for the lane's own, with the base as the lane resolves it
+  now and the days its start script looks back: `latest_image.py --base <release>-<rocm>-<gpu>
+  --days 7`. The image of the lane's latest run on main shows the base that run had. Where that
+  base has no image of those days (a release cut since the last build, or a base last built before
+  them), an older image of the base is not the lane's: the lane's is what its start script falls
+  back to. sglang's falls back first to a build of the variant's newest date among those days,
+  whatever the release: `--variant <rocm>-<gpu> --days 7` names that date. Where more than one
+  release was built on it, the lane takes the one its start script's query lists first: ask the
+  registry as the script does, now, and do not go by the lane's log, which shows an earlier answer.
+  Where those days have no build of the variant either, the script goes on, to an image its runner
+  has cached and, for some variants, to a fixed tag: follow it to the branch that applies. An image
+  that only a runner's cache holds cannot be seen from here, and the lane's image is not
+  established then. A lane on another family of images has a newest tag of its own: the MILES
+  nightly runs `miles-<rocm>-<gpu>-<date>`, which `latest_image.py` skips, and resolves it in its
+  workflow. Take such a lane's image from its workflow and its latest run on main, never the sglang
+  image of the same ROCm and GPU: a failure of the lane's own environment would pass on the other
+  image, and read as not reproduced. Where you cannot establish a lane's image, its base included,
+  that lane was not run (below). The image the tests run in must be that image, read where they run
+  (`$INFERPILOT_IMAGE` in the container, or `docker inspect` from the host: `director.md`, Setup):
+  one that only matches the failed job's can be as old as it, and Setup may have taken an older one
+  (`image_ok`).
 - **Every test of the task, on every lane it failed on.** A tracker cluster holds several tests, and
   one that passes says nothing of the others. `scan_ci.py` lists ten tests and three job links of a
   cluster (`n_tests` says how many it has): take the rest from the tracker's own state and from the

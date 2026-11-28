@@ -54,7 +54,12 @@ fix PR or a handover within a week for anything else.
 commit. Run the failing tests on main (the commit `origin/main` names now, which the task's worktree
 is only when the task began there) in the environment of the lane that failed: that lane's newest
 image, its GPU model and its node count. The newest image is established, not assumed: the newest tag
-of the lane's variant in the registry, no older than the one the lane's latest run on main pulled.
+of the lane's variant in the registry (its ROCm and its GPU together, `rocm720-mi35x`: the other
+GPU family has a build of its own) and of the lane's base tag (its release too,
+`v0.5.23-rocm720-mi35x`: the lane takes the newest date of that one base among the days it looks
+back, and falls back to another release only where the base has none of them; an older release
+can have a later build), and no older than the one the lane's latest run on main pulled where
+that run had the same base.
 The answer is for every test of the task on every lane it failed on, and a pass has to hold: each
 test run as the job ran it, in the job's order, three times. One that fails some of those runs is
 `flaky`, not passing. So is one that passes all three here while the lane's own runs of that commit
