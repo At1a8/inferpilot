@@ -2544,6 +2544,98 @@ class CiOnMainTest(unittest.TestCase):
                 ("roles/ci_guardian.md", "**Main first, on the lane's own image.**"),
                 ("roles/ci_guardian.md", '`on_main: "passes"`'), ("roles/ci_guardian.md", '`on_main: "fails"`'),
                 ("roles/ci_guardian.md", '`on_main: "not_run"`'), ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit"),
+                # a fix is named on proof, as for an issue: a change that only looks like the fix is a candidate
+                ("roles/ci_guardian.md", "`fixed_by` names that pull request or commit only where you showed that it is the fix, on the lane's "
+                                         "image, each run as the job ran it. Four things show it, in this order"),
+                # ancestry comes first, before anything of the job's commit runs: a pull request's code runs only on the user's word
+                ("roles/ci_guardian.md", "First, the job's commit is an ancestor of the main you ran (`git merge-base --is-ancestor <the job's "
+                                         "commit> <main>`), and you check that before you run anything of it"),
+                ("roles/ci_guardian.md", "A job of a pull request's branch failed on code that is its author's, which runs on this machine only "
+                                         "on the user's word (`ci_triage.md` §2): run none of it"),
+                ("roles/ci_guardian.md", "The two histories have no range for a fix to lie in, so say that they diverge and name no fix; what "
+                                         "main showed stands"),
+                # the job's own commit has to fail on this image; a pass there is a failure not reproduced, and nothing more
+                ("roles/ci_guardian.md", "Second, that commit fails here as the job failed: the same error, or the same measurement short of its "
+                                         "threshold"),
+                ("roles/ci_guardian.md", "Where it passes here, the failure is not reproduced on that commit, and nothing more: the job may have "
+                                         "run another image than this one (compare the two, as the job's log and this container name them), or "
+                                         "the failure may be intermittent"),
+                ("roles/ci_guardian.md", "No change of main is shown to be the fix then"),
+                # the parent has to fail as the job failed: another failure shows nothing of the change
+                ("roles/ci_guardian.md", "Third, the change lies in that range, the test fails on the change's parent as the job failed, and passes "
+                                         "on the change"),
+                ("roles/ci_guardian.md", "A parent that fails another way (an import, a test that is not collected) shows nothing of that change"),
+                # the same error can have another cause: the change has to address this failure, or pass when replayed on the job's commit
+                ("roles/ci_guardian.md", "Fourth, the change is the fix of this failure, and the main you ran still has it"),
+                ("roles/ci_guardian.md", "It addresses this failure, the same error on the same path, as step 4 asks of an open pull request: a "
+                                         "later regression with the same error that another change repaired passes the parent's test too"),
+                # a change reverted since fixed an earlier main: it is not why this one passes
+                ("roles/ci_guardian.md", "And nothing since has reverted it or replaced what it changed: one that was reverted fixed an earlier "
+                                         "main, and is not why this one passes"),
+                ("roles/ci_guardian.md", "Where the tree does not show that, revert the change on main in a throwaway worktree and run the test: "
+                                         "it has to fail as the job failed"),
+                ("roles/ci_guardian.md", "Where its diff does not show that, apply the change to the job's commit and run the test there, or leave "
+                                         "it a candidate"),
+                ("roles/ci_guardian.md", "The first two show that a fix lies between the job's commit and main, not which change it is"),
+                # a cluster can have been fixed by several changes: a fix is named for the tests and lanes it was shown on
+                ("roles/ci_guardian.md", "The four are shown test by test and lane by lane, each against the commit of its own failing job"),
+                ("roles/ci_guardian.md", "a fix confirmed on one test of one lane is not thereby the fix of the rest"),
+                ("roles/ci_guardian.md", "`fixed_by` names a change only for what it was shown on: where that is not every test and lane you ran, "
+                                         "it says which (`#50231: test_a on rocm720; #50240: test_b`), and the triage record keeps each confirmed "
+                                         "fix with its tests and lanes"),
+                ("roles/director.md", "Name a confirmed fix, from the record or from `fixed_by`, as the fix of the tests and lanes it was "
+                                      "confirmed on, and of nothing else"),
+                # the check on the latest main before the pull request names a fix on the same proof, for a ci task and an issue alike
+                ("roles/verify_engineer.md", "`fixed_by` names the pull request or the commit that fixed it only where you showed that it did, "
+                                             "within this check's time"),
+                ("roles/verify_engineer.md", "`<base>` is an ancestor of `main` (`git merge-base --is-ancestor`), and the change lies between the "
+                                             "two"),
+                # each of the two runs in the environment its own files call for: main's would give the parent the change it is tested without
+                ("roles/verify_engineer.md", "The gate fails on that change's parent as it failed on the base, and passes on the change, each in the "
+                                             "environment its own files call for. Step 3's environment is main's: a parent run in it would "
+                                             "already have a dependency the change brought in, and would pass for that"),
+                ("roles/verify_engineer.md", "And the change addresses this failure, the same error on the same path"),
+                ("roles/verify_engineer.md", "Where its diff does not show that, apply the change to `<base>` and run the gate there, or leave it a "
+                                             "candidate"),
+                ("roles/verify_engineer.md", "And `main` still has it: nothing since has reverted it or replaced what it changed, or it fixed an "
+                                             "earlier main and is not why this one passes"),
+                ("roles/verify_engineer.md", "Where the tree does not show that, revert the change on the recheck worktree and run the gate: it has "
+                                             "to fail as it failed on the base"),
+                ("roles/verify_engineer.md", "The log of main since `<base>` shows candidates, not the fix"),
+                ("roles/verify_engineer.md", "Where `<base>` is no ancestor of `main` (a task that began on a branch), there is no such range: say "
+                                             "in `evidence` that the two diverge, in those words, and the report gives none"),
+                # the report gives a range only where there is one: histories that diverge have none
+                ("roles/director.md", "That range is there only where the first is an ancestor of the second"),
+                ("roles/director.md", "Where the check says that the two diverge (`recheck.evidence`), or a job's commit and main do (the triage "
+                                      "record), give no range and say that: the failure was a branch's, and main passing shows no fix of it"),
+                ("roles/verify_engineer.md", '"fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main '
+                                             'passes because of it>"'),
+                # a candidate is kept where it is not cut short: the run record keeps only the start of the evidence
+                ("roles/ci_guardian.md", "A change short of the four is a candidate: name it in `evidence` and in the triage record, marked as not "
+                                         "confirmed (the run record keeps only the start of `evidence`, the triage record all of it), and "
+                                         "keep it out of `fixed_by`, which names confirmed fixes alone"),
+                # a candidate for one test does not empty the field for the test whose fix is confirmed
+                ("roles/ci_guardian.md", "Where one test or lane has a confirmed fix and another only a candidate, `fixed_by` keeps the first with "
+                                         "what it was shown on, and `evidence` and the triage record say which tests and lanes have no "
+                                         "confirmed fix"),
+                ("roles/ci_guardian.md", "Where none has one, `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it "
+                                         "showed, and names no fix it did not confirm"),
+                # the report reads the triage record for every ending of a task that passed on main, a scoped fix included
+                ("roles/director.md", "For a ci task whose tests passed on main at Classify (`fixed_on_main` or `not_reproduced` there, or "
+                                      "`handed_off` where part of the task was not run), read its triage record: a change it holds as a "
+                                      "candidate for the fix is named as one, and as not confirmed"),
+                ("roles/director.md", "Where a fix is confirmed for some of them only (`fixed_on_main` with a `fixed_by` that says which), the "
+                                      "run's status speaks for those alone: list the tests and lanes that have no confirmed fix as well, "
+                                      "each with the candidate the record holds for it, or as passing on main with no change named"),
+                # a confirmed fix of the part that was run is not lost where the rest of the task is handed over
+                ("roles/director.md", "A fix the record holds as confirmed is named too where the run handed the task over with a part not run: "
+                                      "the result has no `fixed_by` then"),
+                ("templates/ci_triage.md", "the fix that merged where the runs confirmed it, with the tests and lanes it was confirmed on: the "
+                                           "job's commit and the change's parent fail on this image, the change passes; a change that only looks "
+                                           "like the fix as a candidate, marked not confirmed; the tests and lanes that have no "
+                                           "confirmed fix"),
+                ("roles/ci_guardian.md", '"fixed_by": "<the merged PR or commit you showed to be the fix: the job\'s commit and its parent fail '
+                                         'here, it passes; with its tests and lanes where it is not the fix of all that ran>"'),
                 ("roles/ci_guardian.md", "Never conclude from a run in another environment, in either direction"),
                 ("templates/ci_triage.md", "| on main, in the lane's own environment |")):
             self.assertIn(said, self.flat(path), "%s does not say it" % path)

@@ -468,7 +468,22 @@ request is prepared.
      ran, not skipped, deselected or marked as expected to fail, and the reproduction reached the
      step that failed. A number reaches `claim` and a score `accuracy_claim`, as the run established
      them, not a threshold main has lowered since. `fixed_by` names the pull request or the commit
-     that fixed it, when the log of main since `<base>` shows one.
+     that fixed it only where you showed that it did, within this check's time. `<base>` is an
+     ancestor of `main` (`git merge-base --is-ancestor`), and the change lies between the two. The
+     gate fails on that change's parent as it failed on the base, and passes on the change, each in
+     the environment its own files call for. Step 3's environment is main's: a parent run in it
+     would already have a dependency the change brought in, and would pass for that. And the change
+     addresses this failure, the same error on the same path: a later regression with the same
+     error that another change repaired passes the parent's test too. Where its diff does not show
+     that, apply the change to `<base>` and run the gate there, or leave it a candidate. And `main`
+     still has it: nothing since has reverted it or replaced what it changed, or it fixed an
+     earlier main and is not why this one passes. Where the tree does not show that, revert the
+     change on the recheck worktree and run the gate: it has to fail as it failed on the base. The
+     log of main since `<base>` shows candidates, not the fix. One you did not confirm is named in
+     `evidence` as a candidate, and `fixed_by` stays empty: the report then gives the range the fix
+     lies in, and names none. Where `<base>` is no ancestor of `main` (a task that began on a
+     branch), there is no such range: say in `evidence` that the two diverge, in those words, and
+     the report gives none.
    - `inconclusive`: anything else. A run that fails another way (an import error, a server that
      stops for another reason); fewer runs than step 4 asks for, or some of them failing; a test
      main now skips, or a threshold it has loosened, where the failure may be hidden and not fixed
@@ -497,7 +512,7 @@ Return:
 {"on_main": "fails | passes | inconclusive", "main": "<sha of the main it ran on>",
  "main_import": "/abs/RUN_DIR/recheck/python/sglang/__init__.py",
  "test_path": "/abs/RUN_DIR/recheck/test/registered/...py",
- "fixed_by": "<#n or sha, when main passes because of it>",
+ "fixed_by": "<#n or sha you showed to be the fix (fails on its parent, passes on it), when main passes because of it>",
  "evidence": "<the runs and their counts, the logs, and what they show>",
  "left_running": ""}
 ```

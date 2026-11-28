@@ -9,7 +9,7 @@
 | source | Failure Tracker #<n> / nightly run / CI issue #<n> |
 | tests affected | <count>, e.g. `test/registered/amd/...::Class.test` |
 | lanes | rocm720 / rocm724 / rocm10 / ... |
-| on main, in the lane's own environment | fails / passes (the image the job ran, the lane's newest and how it was found, each test's runs, the fix that merged; what of the task was not run) / not run here (what the lane needs) |
+| on main, in the lane's own environment | fails / passes (the image the job ran, the lane's newest and how it was found, each test's runs, the fix that merged where the runs confirmed it, with the tests and lanes it was confirmed on: the job's commit and the change's parent fail on this image, the change passes; a change that only looks like the fix as a candidate, marked not confirmed; the tests and lanes that have no confirmed fix; what of the task was not run) / not run here (what the lane needs) |
 | error signature | |
 | first red run / last green run | <run links and times> |
 | the lane's setup | none: the lane runs its image as it is / <the setup step that installs over the image, with each job's flags and overrides as the workflow runs it; `RUN_DIR/lane_env.sh`, which makes the lane's environment for a given tree (and job, where they differ); which tests go with which job; what it resolved for each tree that was run, also where that was nothing over the image> |

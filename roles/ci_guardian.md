@@ -130,8 +130,41 @@ that failed (`ci_triage.md` §2): that lane's newest image, its GPU model and it
 
 Then:
 
-- All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older than
-  the lane's newest, or a fix has merged since (then `fixed_by` names that pull request or commit).
+- All of it passes: `on_main: "passes"`. Nothing is wrong with main: the job ran an image older
+  than the lane's newest, or a fix has merged since. `fixed_by` names that pull request or commit
+  only where you showed that it is the fix, on the lane's image, each run as the job ran it. Four
+  things show it, in this order. First, the job's commit is an ancestor of the main you ran (`git
+  merge-base --is-ancestor <the job's commit> <main>`), and you check that before you run anything
+  of it. A job of a pull request's branch failed on code that is its author's, which runs on this
+  machine only on the user's word (`ci_triage.md` §2): run none of it. The two histories have no
+  range for a fix to lie in, so say that they diverge and name no fix; what main showed stands.
+  Second, that commit fails here as the job failed: the same error, or the same measurement short
+  of its threshold. Where it passes here, the failure is not reproduced on that commit, and nothing
+  more: the job may have run another image than this one (compare the two, as the job's log and
+  this container name them), or the failure may be intermittent. No change of main is shown to be
+  the fix then. Third, the change lies in that range, the test fails on the change's parent as the
+  job failed, and passes on the change. A parent that fails another way (an import, a test that is
+  not collected) shows nothing of that change. Fourth, the change is the fix of this failure, and
+  the main you ran still has it. It addresses this failure, the same error on the same path, as
+  step 4 asks of an open pull request: a later regression with the same error that another change
+  repaired passes the parent's test too. Where its diff does not show that, apply the change to the
+  job's commit and run the test there, or leave it a candidate. And nothing since has reverted it
+  or replaced what it changed: one that was reverted fixed an earlier main, and is not why this one
+  passes. Where the tree does not show that, revert the change on main in a throwaway worktree and
+  run the test: it has to fail as the job failed. The first two show that a fix lies between the
+  job's commit and main, not which change it is. The four are shown test by test and lane by lane,
+  each against the commit of its own failing job: a cluster can pass on main because one change
+  fixed one test and another change another, and a fix confirmed on one test of one lane is not
+  thereby the fix of the rest. `fixed_by` names a change only for what it was shown on: where that
+  is not every test and lane you ran, it says which (`#50231: test_a on rocm720; #50240: test_b`),
+  and the triage record keeps each confirmed fix with its tests and lanes. A change short of the
+  four is a candidate: name it in `evidence` and in the triage record, marked as not confirmed (the
+  run record keeps only the start of `evidence`, the triage record all of it), and keep it out of
+  `fixed_by`, which names confirmed fixes alone. Where one test or lane has a confirmed fix and
+  another only a candidate, `fixed_by` keeps the first with what it was shown on, and `evidence`
+  and the triage record say which tests and lanes have no confirmed fix. Where none has one,
+  `fixed_by` stays empty: the run then ends as not reproduced on main, which is all it showed, and
+  names no fix it did not confirm.
   `evidence` names the image the job ran and the one the tests pass on. The run ends here, with no
   fix and no reply. Fill the triage record all the same, and leave `failure_class` and
   `failing_test_cmd` out, unless the failure was the CI's own: then `failure_class` is
@@ -226,7 +259,7 @@ Return:
 
 ```json
 {"failure_class": "code_regression | dependency_bump | test_bug | flaky | infrastructure",
- "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit, when main passes because of it>",
+ "on_main": "fails | passes | not_run", "fixed_by": "<the merged PR or commit you showed to be the fix: the job's commit and its parent fail here, it passes; with its tests and lanes where it is not the fix of all that ran>",
  "unchecked": "<the tests or lanes of the task that were not run here, or that fail only now and then>",
  "failing_test_cmd": "cd /abs/wt && python3 -m pytest test/registered/amd/... -x",
  "existing_prs": [{"pr": "#<n>", "repo": "<owner>/<repo>", "author": "<login>",
