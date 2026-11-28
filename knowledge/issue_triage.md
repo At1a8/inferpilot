@@ -63,7 +63,7 @@ Judgement calls, decided once so they are applied the same way every time:
 | Action | When | Output |
 |---|---|---|
 | `reproduce` | no usable fix exists | reproduction on the reporter's configuration, then diagnosis and a fix PR |
-| `push_existing_pr` | an open fix PR exists | verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
+| `push_existing_pr` | an open fix PR exists | on the user's word (`apply_prs`): verify it on AMD hardware, rebase, add the missing test, report results on the PR; where it does not pass, the comment says so and the run fixes the failure itself |
 | `close_fixed` | the fix is merged and covers every point | verification on main and a closing comment draft |
 | `needs_info` | the report cannot be reproduced as written | a reply asking for the exact command, image and commit |
 | `not_amd` | the root cause is outside AMD code | a reply saying so, with the evidence |
@@ -72,6 +72,28 @@ Judgement calls, decided once so they are applied the same way every time:
 
 Every action ends with a **reply draft** for the issue (`templates/issue_triage.md`). Posting it is a
 human decision.
+
+**An existing fix is verified on the user's word.** Verifying a pull request runs its author's code and
+tests on this machine, next to the keys the agents hold. The run applies one only on the user's word,
+whoever wrote it, as for a CI failure (`ci_triage.md` §2, which says what counts as that word): the
+task names the pull request (`apply_prs`), or says `none`. The triage's action (`push_existing_pr`) is
+no such word. A run that can reach the fix without it stops after Triage and asks which one to verify,
+or none, before anything is reproduced: asked later, the answer would cost the reproduction a second
+time. A run that stops before its fix applies nothing, and is not asked. With `none` the run fixes the
+problem itself, with a diagnosis, at the priority the problem has while a pull request is open for it.
+The priority the triage gave holds while a pull request it lists as a fix is open and has not failed
+this run's verification: another one of this repository, which the run did not verify, or one in
+another repository (a component's), which the run cannot apply. Where none is left (none was open after
+all, or the one verified did not pass and no other is open), the problem has the priority it has
+without one. One the user declines is still open, and keeps it. A pull request the task names is looked
+up and returned whether or not it fixes the problem: one the triage does not itself find to fix it
+(`fixes: false`) keeps no priority, and the user is told what the triage found where the run asks which
+one to verify. One pull request is verified in a run, the one the user names; the others are named in
+the run record. A pull request the task names is looked up whatever the triage's action: where the
+triage returns it open it is verified on that word, and where it does not, the record says why it was
+not. The word covers the reproduction as well: a reporter's commit that is on no main and no release, a
+pull request's head or a fork's branch, is its author's code, and that arm runs only where the user's
+own word names that pull request, and does not say `none` as well.
 
 **An existing fix that does not pass is answered, then replaced.** The run verifies an open fix PR as
 it is: the reproduction is its gate, and its accuracy and speed are measured by what it changes, as for
@@ -84,19 +106,20 @@ one and says in one sentence what it did not pass. A failure the baseline shares
 request's (`validation_doctrine.md`, *Same-pattern baseline control*), and a measurement that could not
 be trusted decides nothing: the run stops for a human then, as for any fix.
 
-Verified as it is means that no conflict is resolved and no fix round repairs a test of its own that
-fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's counts
-against it: a conflict, a gate it failed, a failure the investigator explains or one the controls
-attribute to it (the baseline ran to its end and passed), a trusted measurement that is slower on
-the task's client or on a guard workload. A comparison that decided nothing, a package blocked for
-another reason and an answer that never came prove nothing: the run stops for a human, with no
-comment. Nothing is rolled back next to a call that may still be running (one that timed out, a
-gate that could not stop what it started): the comment is drafted, and the run stops. A stop named
-for the phase the pull request failed in holds as well: the comment is there, the branch is back at
-the base, and the run's own fix is not started. That fix has the priority the problem has without a
-usable fix PR (§2 makes a default-configuration failure P1 only while one is open), since only a P0
-gets a workaround here for a component's defect. The comment promises no fix: it is written before
-the run knows what becomes of its own.
+Verified as it is means that no conflict is resolved and no fix round repairs a test of its own
+that fails (`implementer.md`, `verify_only`). And only what is shown to be the pull request's
+counts against it: a conflict, a gate it failed, a failure the investigator explains or one the
+controls attribute to it (the baseline ran to its end and passed), a trusted measurement that is
+slower on the task's client or on a guard workload. A comparison that decided nothing, a round
+accepted without the score the fix must restore, a package blocked for another reason and an answer
+that never came prove nothing: the run stops for a human, with no comment. Nothing is rolled back
+next to a call that may still be running (one that timed out, a gate that could not stop what it
+started): the comment is drafted, and the run stops. A stop named for the phase the pull request
+failed in holds as well: the comment is there, the branch is back at the base, and the run's own
+fix is not started. That fix has the priority the problem has without a usable fix PR (§2 makes a
+default-configuration failure P1 only while one is open), unless another pull request the triage
+lists as a fix is still open, since only a P0 gets a workaround here for a component's defect. The
+comment promises no fix: it is written before the run knows what becomes of its own.
 
 What the run adds on top of the pull request is the run's own, and stays apart from it: a test where
 the pull request brought none, a change the review or the PR phase asked for. A failure there is
@@ -153,7 +176,9 @@ same ones.
 
 ## 5. Reproduction
 
-- Use the reporter's image, commit and command first; record them in the triage record.
+- Use the reporter's image, commit and command first; record them in the triage record. A commit that
+  is the repository's own (on main or a release) runs as it is. One that is only on a pull request's
+  branch or on a fork is its author's code, and runs only on the user's word (§4).
 - Pin what you change: one change at a time, each with its log.
 - Run the same-pattern baseline control from `validation_doctrine.md` before blaming a recent change;
   for long-running crashes (e.g. a segfault after about a million served tokens) define the soak test

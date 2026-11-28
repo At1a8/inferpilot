@@ -10,7 +10,8 @@ worktree.
 
 ## PHASE=triage
 
-Input: `task` (the issue URL or `<repo>#<n>`).
+Input: `task` (the issue URL or `<repo>#<n>`); `named_prs` (the pull requests the task or the
+request names for the run to verify, or none).
 
 1. Fetch the issue, its comments and labels, and the linked PRs:
    `python3 <inferpilot_dir>/scripts/scan_issues.py --issue <n> --with-comments --out RUN_DIR/issue.json`
@@ -29,8 +30,9 @@ Input: `task` (the issue URL or `<repo>#<n>`).
 3. Decide the priority with the rubric and the judgement calls of §2; quote the rule you applied.
    Where an open fix PR is what makes the problem P1 (§2: a default-configuration failure that
    already has one), return `priority_without_pr` as well, the priority it has when no usable fix
-   PR exists: the run takes it when that pull request does not pass verification and it goes on to
-   a fix of its own.
+   PR exists: the run takes it when no pull request you list as a fix is left open (none was open
+   after all, or the one it verified did not pass and no other is) and it goes on to a fix of its
+   own.
 4. Decide the action (§4): `reproduce`, `push_existing_pr`, `close_fixed`, `needs_info`, `not_amd`,
    `plan`, `duplicate`. For a `duplicate`, return `duplicate_of` (`#<n>`, the original); the reply
    names that issue and what this report adds to it. A report with several problems is several tasks:
@@ -71,9 +73,26 @@ Input: `task` (the issue URL or `<repo>#<n>`).
    have come from the caller and not from the report, and has nothing to read "the same" against.
    So it is with `model_mismatch`. The run's result offers them, and one with
    a `model` asks for its own model, scripts and GPUs instead of taking this run's. The reply covers
-   every problem. `existing_prs` lists the open fix PRs (`#<n>`). Every action that leads to a code
-   change, `push_existing_pr` included, is reproduced on main first; that reproduction is the gate the
-   fix must pass.
+   every problem. `existing_prs` lists the open fix PRs, the likeliest first, each as the CI
+   guardian gives one (`ci_guardian.md`, PHASE=classify step 4): its number (`#<n>`), the
+   repository it is in (`repo`), its author and the author's association with the repository as the
+   API gives them, its head commit and its `state` (`open`). Always give the repository: a task can
+   name its pull request by a URL, which says where it is. The run takes a bare number for a pull
+   request of the checkout's `origin`, from which it is fetched, and applies none you place in
+   another repository; where it does not know which repository `origin` is, it does not hold such a
+   word against a bare number, and asks the user again. Read each one's diff and run nothing of it:
+   its code is its author's, and runs on this machine only when the run applies it, which it does
+   on the user's word alone (`issue_triage.md` §4). Your `push_existing_pr` says that such a pull
+   request is open, not that the run may apply it, and the association is for the user to read: it
+   proves no right to put code on main. Look up each pull request in `named_prs` as well, whether
+   or not your own search found it, and return it with its `state` as the API gives it now (`open`,
+   `closed`, `merged` or `not_found`): the run applies one only where you return it open. One of
+   them that your reading of its diff does not find to fix this problem is returned all the same,
+   marked `"fixes": false`: the run tells the user what you found where it asks which one to
+   verify, still verifies it on the user's word, and does not count it as an open fix where it
+   decides the priority. One of another repository goes under its full name (`<owner>/<repo>#<n>`),
+   never as this repository's `#<n>`. Every action that leads to a code change, `push_existing_pr`
+   included, is reproduced on main first; that reproduction is the gate the fix must pass.
 5. `category`: exactly one of the values below. `performance` makes the reported number the claim G5
    judges the fix on, whatever the fix changes (`validation_doctrine.md`, *G5 for a fix*); the fix of
    any other issue is measured for speed when it changes code the server runs.
@@ -86,7 +105,10 @@ Return:
 {"priority": "P0 | P1 | P2", "category": "wrong result | crash | startup or build failure | performance | feature request | CI | tool",
  "priority_without_pr": "<with push_existing_pr: P0 | P1 | P2, the priority with no usable fix PR>",
  "action": "reproduce | push_existing_pr | close_fixed | needs_info | not_amd | plan | duplicate",
- "reason": "<the rule that decided the priority and the action>", "existing_prs": ["#40872"],
+ "reason": "<the rule that decided the priority and the action>",
+ "existing_prs": [{"pr": "#40872", "repo": "<owner>/<repo>", "author": "<login>",
+                   "association": "<author_association>", "head": "<sha>",
+                   "state": "open | closed | merged | not_found"}],
  "duplicate_of": "<with duplicate: #n, the original>",
  "other_problems": [{"problem": "<a few words>", "priority": "P1", "task": "<issue URL>: <the problem's name>",
                      "model": "<its model, launch flags and workload, whole, when not this run's>"}],
@@ -97,12 +119,19 @@ Return:
 ## PHASE=reproduce
 
 Inputs: the triage record, `expect_fixed` (true when the triage concluded the fix is merged),
+`approved_prs` (the pull requests the user's own word names for the run to apply, or none),
 `time_limit_min` (minutes from this call's start after which InferPilot stops waiting and never reads
 the answer; 0: no limit), `earlier_answer` (on a call with more time: what the call before it
 returned).
 
 1. Reproduce on the reporter's image, commit and command first (`issue_triage.md` §5); then on current
-   main. One change at a time, one log each.
+   main. One change at a time, one log each. The reporter's commit runs here only where it is the
+   repository's own: on main or on a release (`git merge-base --is-ancestor <commit> <main>`, or a
+   release tag or branch that contains it). One that is only on a pull request's branch or on a fork
+   is its author's code, which runs on this machine only on the user's word (`issue_triage.md` §4):
+   run that arm only where the commit is the head of a pull request in `approved_prs` (the ones the
+   user's own word names), else skip it, say so in `evidence`, and leave `reproduced_on_reporter`
+   out.
 2. For a long-running failure, define the soak test (duration, load) before starting and say so.
    - **The reproduction fits in `time_limit_min`, or says what it needs.** With `time_limit_min` above
      0, end 30 minutes before it, which leaves time for the ledger and the answer. Before each arm (a

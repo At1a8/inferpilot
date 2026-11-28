@@ -237,14 +237,18 @@ Then:
    its author, the author's association with the repository as the API gives it
    (`author_association`), its head commit and its `state` (`open`). The run verifies one of them on
    this machine in place of finding the culprit and fixing the failure a second time (`ci_triage.md`
-   §2), and no bisect follows. It does so only on the user's word, whoever the author is: the
+   §2), and no bisect follows where it passes. One that does not pass gets a comment with what the
+   run measured, and the run then bisects and fixes the failure itself. It applies one only on the
+   user's word, whoever the author is: the
    association is for the user to read, and proves no right to put code on main. One that has merged
    is not listed: main has its fix, and what still fails there it does not fix. One in another
    repository (a component's) is not listed either: name it in the triage record.
    The pull requests in `named_prs` are the ones the task or the request names for verification: look
    each of them up, whether or not your own search found it, and return it in `existing_prs` as well,
    with its `state` as the API gives it now (`open`, `closed`, `merged`, or `not_found`) and, for an
-   open one, its author, association and head commit. One that is a pull request of another
+   open one, its author, association and head commit. Where your reading of its diff does not find
+   it to fix this failure, mark it `"fixes": false`: the user is told so where the run asks which
+   one to verify. One that is a pull request of another
    repository goes under its full name (`<owner>/<repo>#<n>`), never as this repository's `#<n>`. A
    name that carries its repository (`<owner>/<repo>#<n>`, from a URL the user gave) is looked up in
    that repository, never by its number in the framework's: aiter's `#777` and the framework's `#777`
@@ -272,6 +276,12 @@ Return:
 ```
 
 ## PHASE=bisect
+
+With `existing_pr_result`, a pull request for this failure was verified first and did not pass (the
+pull request, where its verification failed and why; `ci_triage.md` §2). The task branch is back at
+the base, and the fix is the run's own to plan. What that pull request changed and what it failed
+is evidence of where the cause is and is not: use it, and plan from the culprit, not as a patch on
+that pull request.
 
 1. Read the diffs of the commits merged in the window that touch the failing test's import graph
    first; the common AMD breakages are listed in `ci_triage.md` §3.

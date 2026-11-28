@@ -16,8 +16,8 @@ Why it exists and how it maps onto the agreed design: [`docs/design.md`](docs/de
 | Mode | Task | Phases | Ends with |
 |---|---|---|---|
 | `feature` | an upstream PR or design to bring to AMD | Setup → Spec → Recon → Design → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | branch + PR body + validation report |
-| `issue` | an AMD user issue | Setup → Triage → Reproduce → Diagnose (skipped for an existing fix PR) → Implement → (Kernel) → Verify → Performance (skipped for a fix to tests, documentation or CI files alone) → Review → PR → (Spinoff) → Reply → Report | fix PR, or a conclusion (triaged, not reproduced, fixed on main, diagnosed); always a reply draft, rewritten from how the run ended |
-| `ci` | a red AMD CI job or Failure Tracker cluster | Setup → Classify → Bisect → Implement → (Kernel) → Verify → Performance (skipped as for an issue) → Review → PR → (Spinoff) → Report | fix PR; a handover for flaky/infrastructure failures, or for a lane this machine cannot be; nothing to fix when main passes on the lane's own image |
+| `issue` | an AMD user issue | Setup → Triage → Reproduce → Diagnose (skipped for an existing fix PR that passes) → Implement → (Kernel) → Verify → Performance (skipped for a fix to tests, documentation or CI files alone) → Review → PR → (Spinoff) → Reply → Report | fix PR, or a conclusion (triaged, not reproduced, fixed on main, diagnosed); always a reply draft, rewritten from how the run ended |
+| `ci` | a red AMD CI job or Failure Tracker cluster | Setup → Classify → Bisect (skipped for an existing fix PR that passes) → Implement → (Kernel) → Verify → Performance (skipped as for an issue) → Review → PR → (Spinoff) → Report | fix PR; a handover for flaky/infrastructure failures, or for a lane this machine cannot be; nothing to fix when main passes on the lane's own image |
 | `perf` | a system-level performance goal for a model and a fixed workload | Setup → Profile → Plan → Implement → (Kernel) → Verify → Performance → Review → PR → (Spinoff) → Report | PR with a measured win, or the change dropped; kernel-level items go to the kernel back end |
 | `scan` | none — the day's state of the framework: the AMD CI on main, open AMD user issues, upstream changes AMD needs to follow (platform gates and host-sync leads on request) | Collect → Dispatch → Report | the daily report, shared as an issue in InferPilot's repository (else a file for you to share), with the ranked tasks and the definition that starts each |
 
@@ -27,9 +27,11 @@ changes code the server runs (G5: no slower than the base); a fix to tests, docu
 alone skips it, unless the problem is itself one of performance (an issue triaged as `performance`,
 a CI failure on a number its test measures): its number must come back, whatever the fix changes. An
 issue whose reporter's code fails while main passes ends as *fixed on main*; with `bisect_fixed` a
-Bisect phase first finds the commit that fixed it. A CI failure that an open pull request already fixes
-skips Bisect: the run verifies that pull request and drafts a comment for it, as it does for an issue.
+Bisect phase first finds the commit that fixed it. An issue or a CI failure that an open pull request
+already fixes skips Diagnose or Bisect: the run verifies that pull request and drafts a comment for it.
 It runs that pull request's code only on your word (`apply_prs`), and asks when the task does not say.
+Where the pull request does not pass, the comment says so, and the run goes on to Diagnose or Bisect
+and fixes the failure itself.
 Spinoff runs when the run found problems that are not its own: a failure the base commit shows without
 the change, or a lead a role met on the way (a bug in code it read, a broken test or image). For each
 failure the base commit shows, it gives the upstream issue that tracks it, or an issue draft for you to
@@ -598,7 +600,7 @@ node runtime/run.mjs inferpilot.js --backend cursor \
 | `kernel_backend_dir` | `geak` back end: the GEAK checkout whose kernel lane runs as an outside program |
 | `kernel_backend_command` | `command` back end: shell command with `{task_dir}`, `{out_dir}`, `{gpu_ids}`, `{budget}`; for `geak` it replaces the default command |
 | `kernel_budget` | optimization rounds for the kernel back end (default 6), its `{budget}` |
-| `apply_prs` | `perf`: candidate PRs to apply and A/B. `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so the run applies one only when it is named here, whoever wrote it; without it the run asks |
+| `apply_prs` | `perf`: candidate PRs to apply and A/B. `issue`, `ci`: the open fix PR the run may verify (`#<n>`), or `none`: a pull request runs its author's code on this machine, so the run applies one only when it is named here, whoever wrote it; without it the run asks |
 | `sources`, `since` | `scan`: any of `ci`, `issues`, `upstream` (the default) and `hardware`, `perf`; the start of the window (default: the previous report) |
 | `image`, `image_ok` | the image a task must run on (default: the newest daily one of the container's ROCm and GPU; another one stops Setup to ask); `true` runs on the container's image anyway |
 | `rescan`, `upstream_repos` | `scan`: `true` scans again although a report from the last 24 hours exists; more repositories to follow upstream, as `[{"name": "vllm", "url": "https://github.com/vllm-project/vllm"}]` |
