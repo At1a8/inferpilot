@@ -2053,6 +2053,38 @@ class CiAccuracyProblemTest(unittest.TestCase):
     def flat(path):
         return " ".join((ROOT / path).read_text(encoding="utf-8").split())
 
+    def test_the_reports_row_for_the_claim_holds_a_base_score_that_counts(self):
+        # The row itself, cell by cell: a sentence elsewhere in the template would not make the column right. The
+        # same-pattern column holds the base's score as this run's verify engineer measured it, never "the score
+        # that fell", which reads as the failed job's: another commit's, on another machine.
+        lines = (ROOT / "templates/validation_report.md").read_text(encoding="utf-8").splitlines()
+        at = [i for i, line in enumerate(lines) if line.startswith("| accuracy claim (a CI failure on a score its test measures) |")]
+        self.assertEqual(len(at), 1, "one row for the accuracy claim")
+        # The row's own table is the run of table lines it stands in: a blank line above the row would start
+        # another table, without these headings. Its headings are read whole, so that each cell is under its own.
+        top = at[0]
+        while top > 0 and lines[top - 1].startswith("|"):
+            top -= 1
+        self.assertEqual(lines[top], "| Gate | Suite | Baseline (same pattern) | Feature | Verdict | Artifact |",
+                         "the claim's row stands in the table of the correctness gates, under these headings in this order")
+        self.assertEqual(lines[top + 1].replace(" ", ""), "|---|---|---|---|---|---|", "and that table has six columns")
+        self.assertGreater(at[0], top + 1, "the row comes after the headings")
+        cells = [c.strip() for c in lines[at[0]].strip().strip("|").split("|")]
+        self.assertEqual(len(cells), 6, "Gate | Suite | Baseline (same pattern) | Feature | Verdict | Artifact")
+        suite, baseline, feature = cells[1], cells[2], cells[3]
+        self.assertIn("the failing test's own measurement, as the test stood at the base", suite)
+        for said in ("the score on the base by that measurement, as the verify engineer measured it in this run on this machine "
+                     "(the commit, each run's score), or `not measured`",
+                     # the column holds a number that counts: Classify's runs are the reproduction, named apart
+                     "only the test, the verify and the performance engineer produce numbers that count (`guardrails.md` §3)",
+                     "Classify's runs reproduce the failure and are named apart as that, each with its commit: the task worktree is at "
+                     "the base, and main only where the task began on that commit",
+                     "Never the failed job's own score, which is another commit's on another machine: that one is named apart too, with "
+                     "its commit and its lane"):
+            self.assertIn(said, baseline, "the same-pattern cell does not say it")
+        self.assertNotIn("the score that fell", baseline)
+        self.assertEqual(feature, "the score restored, and the claim")
+
     def test_the_run_takes_the_score_from_classify_and_accepts_no_round_without_g2(self):
         src = (ROOT / "inferpilot.js").read_text(encoding="utf-8")
         body = re.search(r"\nconst CLASSIFY = S\(\{(.*?)\n\}, \[", src, re.S).group(1)
